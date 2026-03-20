@@ -1,4 +1,4 @@
-import { createMemoryGraph, TIERS } from '../../src/infra/memory.js'
+import { createMemoryGraph, MemoryGraph, InMemoryStore, LowdbStore, TIERS } from '../../src/infra/memory.js'
 import { existsSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
@@ -128,6 +128,91 @@ async function run() {
     const g = await createMemoryGraph()
     assert(g.recall('').length === 0, 'recall empty: returns []')
     assert(g.recall(null).length === 0, 'recall null: returns []')
+  }
+
+  // --- Class API tests ---
+
+  // 10. MemoryGraph.create() — 동기 생성 (in-memory)
+  {
+    const g = MemoryGraph.create()
+    assert(g instanceof MemoryGraph, 'MemoryGraph.create: returns MemoryGraph instance')
+    assert(g.store instanceof InMemoryStore, 'MemoryGraph.create: uses InMemoryStore')
+    g.addNode({ label: 'test' })
+    assert(g.allNodes().length === 1, 'MemoryGraph.create: operates normally')
+  }
+
+  // 11. MemoryGraph.fromFile() — async 생성 (lowdb)
+  {
+    const dbPath = join(tmpdir(), `presence-class-test-${Date.now()}`, 'graph.json')
+    const g = await MemoryGraph.fromFile(dbPath)
+    assert(g instanceof MemoryGraph, 'MemoryGraph.fromFile: returns MemoryGraph instance')
+    assert(g.store instanceof LowdbStore, 'MemoryGraph.fromFile: uses LowdbStore')
+
+    g.addNode({ label: 'persisted' })
+    await g.save()
+
+    // 같은 파일로 두 번째 인스턴스 — 데이터 복원
+    const g2 = await MemoryGraph.fromFile(dbPath)
+    assert(g2.allNodes()[0].label === 'persisted', 'MemoryGraph.fromFile: restores data')
+
+    rmSync(dirname(dbPath), { recursive: true, force: true })
+  }
+
+  // 12. Store 교체: 같은 MemoryGraph에 다른 store strategy
+  {
+    const store = new InMemoryStore()
+    store.data.nodes.push({ id: '1', label: 'preloaded', type: 'entity', data: {}, tier: 'semantic', createdAt: 0 })
+    const g = new MemoryGraph(store)
+    assert(g.findNode('1').label === 'preloaded', 'custom store: preloaded data accessible')
+    const n = g.addNode({ label: 'new' })
+    assert(Number(n.id) > 1, 'custom store: nextId continues from existing data')
+  }
+
+  // 13. 두 MemoryGraph 인스턴스가 독립적인 store를 가짐
+  {
+    const g1 = MemoryGraph.create()
+    const g2 = MemoryGraph.create()
+    g1.addNode({ label: 'only-in-g1' })
+    assert(g1.allNodes().length === 1, 'isolation: g1 has 1 node')
+    assert(g2.allNodes().length === 0, 'isolation: g2 has 0 nodes')
+  }
+
+  // 14. nodes/edges getters reflect mutations
+  {
+    const g = MemoryGraph.create()
+    assert(g.nodes.length === 0, 'getter: initially empty')
+    const n1 = g.addNode({ label: 'a' })
+    const n2 = g.addNode({ label: 'b' })
+    assert(g.nodes.length === 2, 'getter: reflects addNode')
+    g.addEdge(n1.id, n2.id, 'rel')
+    assert(g.edges.length === 1, 'getter: reflects addEdge')
+    g.removeNodesByTier(TIERS.EPISODIC)
+    assert(g.nodes.length === 0, 'getter: reflects removeNodesByTier')
+    assert(g.edges.length === 0, 'getter: dangling edges cleaned')
+  }
+
+  // 15. recall: 오염된 label (null, 숫자, undefined) → 예외 없이 스킵
+  {
+    const store = new InMemoryStore()
+    store.data.nodes.push(
+      { id: '1', label: null, type: 'entity', data: {}, tier: 'episodic', createdAt: 0 },
+      { id: '2', label: 42, type: 'entity', data: {}, tier: 'episodic', createdAt: 0 },
+      { id: '3', label: undefined, type: 'entity', data: {}, tier: 'episodic', createdAt: 0 },
+      { id: '4', label: 'valid node', type: 'entity', data: {}, tier: 'episodic', createdAt: 0 },
+    )
+    const g = new MemoryGraph(store)
+    const results = g.recall('valid')
+    assert(results.length === 1, 'recall dirty labels: only valid node matched')
+    assert(results[0].label === 'valid node', 'recall dirty labels: correct match')
+  }
+
+  // 16. recall: 숫자 label은 String 변환 후 매칭 가능
+  {
+    const g = MemoryGraph.create()
+    g.addNode({ label: 404 })
+    g.addNode({ label: 'error 404' })
+    const results = g.recall('404')
+    assert(results.length === 2, 'recall numeric label: matched via String coercion')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

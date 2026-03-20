@@ -4,38 +4,74 @@ import { dirname } from 'path'
 
 const TIERS = { WORKING: 'working', EPISODIC: 'episodic', SEMANTIC: 'semantic' }
 
-const createMemoryGraph = async (dbPath = null) => {
-  const defaultData = { nodes: [], edges: [] }
-  let db = null
+// --- Storage strategies ---
 
-  if (dbPath) {
+class InMemoryStore {
+  constructor() {
+    this.data = { nodes: [], edges: [] }
+  }
+  async save() {}
+}
+
+class LowdbStore {
+  constructor(db) {
+    this.data = db.data
+    this._db = db
+  }
+  async save() {
+    await this._db.write()
+  }
+  static async create(dbPath) {
     mkdirSync(dirname(dbPath), { recursive: true })
-    db = await JSONFilePreset(dbPath, defaultData)
-  } else {
-    // In-memory only (for tests)
-    db = { data: { ...defaultData }, write: async () => {}, read: async () => {} }
+    const db = await JSONFilePreset(dbPath, { nodes: [], edges: [] })
+    return new LowdbStore(db)
+  }
+}
+
+// --- MemoryGraph ---
+
+class MemoryGraph {
+  constructor(store) {
+    this.store = store
+    this._nextId = store.data.nodes.reduce(
+      (max, n) => Math.max(max, Number(n.id) || 0), 0
+    ) + 1
   }
 
-  let nextId = db.data.nodes.reduce((max, n) => Math.max(max, Number(n.id) || 0), 0) + 1
+  static create() {
+    return new MemoryGraph(new InMemoryStore())
+  }
 
-  const addNode = ({ label, type = 'entity', data = {}, tier = TIERS.EPISODIC }) => {
-    const id = String(nextId++)
+  static async fromFile(dbPath) {
+    const store = await LowdbStore.create(dbPath)
+    return new MemoryGraph(store)
+  }
+
+  get nodes() { return this.store.data.nodes }
+  get edges() { return this.store.data.edges }
+
+  addNode({ label, type = 'entity', data = {}, tier = TIERS.EPISODIC }) {
+    const id = String(this._nextId++)
     const node = { id, label, type, data, tier, createdAt: Date.now() }
-    db.data.nodes.push(node)
+    this.nodes.push(node)
     return node
   }
 
-  const addEdge = (fromId, toId, relation, data = {}) => {
+  addEdge(fromId, toId, relation, data = {}) {
     const edge = { from: fromId, to: toId, relation, data }
-    db.data.edges.push(edge)
+    this.edges.push(edge)
     return edge
   }
 
-  const findNode = (id) => db.data.nodes.find(n => n.id === id) || null
+  findNode(id) {
+    return this.nodes.find(n => n.id === id) || null
+  }
 
-  const findNodesByLabel = (label) => db.data.nodes.filter(n => n.label === label)
+  findNodesByLabel(label) {
+    return this.nodes.filter(n => n.label === label)
+  }
 
-  const query = ({ from, relation, depth = 1 }) => {
+  query({ from, relation, depth = 1 }) {
     const results = new Set()
     const visited = new Set()
     const queue = [{ nodeId: from, currentDepth: 0 }]
@@ -46,13 +82,11 @@ const createMemoryGraph = async (dbPath = null) => {
       if (visited.has(`${nodeId}-${currentDepth}`)) continue
       visited.add(`${nodeId}-${currentDepth}`)
 
-      const matching = db.data.edges.filter(e => {
-        if (e.from !== nodeId) return false
-        return relation ? e.relation === relation : true
-      })
+      for (const edge of this.edges) {
+        if (edge.from !== nodeId) continue
+        if (relation && edge.relation !== relation) continue
 
-      for (const edge of matching) {
-        const target = findNode(edge.to)
+        const target = this.findNode(edge.to)
         if (target) {
           results.add(target)
           if (currentDepth + 1 < depth) {
@@ -65,52 +99,52 @@ const createMemoryGraph = async (dbPath = null) => {
     return [...results]
   }
 
-  const recall = (text) => {
+  recall(text) {
     if (!text) return []
     const keywords = text.toLowerCase().split(/\s+/)
-    const matched = db.data.nodes.filter(n =>
-      keywords.some(k => n.label.toLowerCase().includes(k))
-    )
+    const matched = this.nodes.filter(n => {
+      if (n.label == null) return false
+      const label = String(n.label).toLowerCase()
+      return keywords.some(k => label.includes(k))
+    })
 
-    // Also include connected nodes (1 hop)
     const related = new Set()
     for (const node of matched) {
       related.add(node)
-      const connected = query({ from: node.id, depth: 1 })
-      connected.forEach(n => related.add(n))
+      for (const n of this.query({ from: node.id, depth: 1 })) {
+        related.add(n)
+      }
     }
 
     return [...related]
   }
 
-  const save = async () => {
-    if (db.write) await db.write()
+  async save() {
+    await this.store.save()
   }
 
-  const getNodesByTier = (tier) => db.data.nodes.filter(n => n.tier === tier)
-
-  const removeNodesByTier = (tier) => {
-    db.data.nodes = db.data.nodes.filter(n => n.tier !== tier)
-    // Also remove edges referencing removed nodes
-    const nodeIds = new Set(db.data.nodes.map(n => n.id))
-    db.data.edges = db.data.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+  getNodesByTier(tier) {
+    return this.nodes.filter(n => n.tier === tier)
   }
 
-  const promoteNode = (nodeId, newTier) => {
-    const node = findNode(nodeId)
+  removeNodesByTier(tier) {
+    this.store.data.nodes = this.nodes.filter(n => n.tier !== tier)
+    const nodeIds = new Set(this.nodes.map(n => n.id))
+    this.store.data.edges = this.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+  }
+
+  promoteNode(nodeId, newTier) {
+    const node = this.findNode(nodeId)
     if (node) node.tier = newTier
   }
 
-  const allNodes = () => [...db.data.nodes]
-  const allEdges = () => [...db.data.edges]
-
-  return {
-    addNode, addEdge, findNode, findNodesByLabel,
-    query, recall, save,
-    getNodesByTier, removeNodesByTier, promoteNode,
-    allNodes, allEdges,
-    TIERS,
-  }
+  allNodes() { return [...this.nodes] }
+  allEdges() { return [...this.edges] }
 }
 
-export { createMemoryGraph, TIERS }
+// --- 하위 호환: createMemoryGraph 팩토리 ---
+const createMemoryGraph = async (dbPath = null) => {
+  return dbPath ? MemoryGraph.fromFile(dbPath) : MemoryGraph.create()
+}
+
+export { MemoryGraph, InMemoryStore, LowdbStore, createMemoryGraph, TIERS }
