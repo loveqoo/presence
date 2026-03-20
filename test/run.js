@@ -24,6 +24,13 @@ const tests = [
   'test/infra/memory-hook.test.js',
   'test/infra/persona.test.js',
   'test/ui/app.test.js',
+  // Phase 2
+  'test/infra/llm.test.js',
+  'test/interpreter/prod.test.js',
+  'test/interpreter/traced.test.js',
+  'test/interpreter/dryrun.test.js',
+  'test/infra/input.test.js',
+  'test/core/repl.test.js',
 ]
 
 let allPassed = true
