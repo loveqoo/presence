@@ -36,25 +36,59 @@ const safeJsonParse = (str) =>
     Either.catch(() => typeof str === 'string' ? JSON.parse(str) : str),
   )
 
-// EXEC step의 tool_args를 도구 스키마 required와 대조
+// --- step 검증 (Either 기반) ---
+
+// EXEC: tool_args 필수 인자 확인
 const validateExecArgs = (step, tools) => {
-  if (step.op !== 'EXEC' || !tools || tools.length === 0) return null
+  if (step.op !== 'EXEC' || !tools || tools.length === 0) return Either.Right(true)
   const a = step.args || {}
   const toolDef = tools.find(t => t.name === a.tool)
-  if (!toolDef) return null // 도구 미등록은 실행 시 처리
+  if (!toolDef) return Either.Right(true) // 도구 미등록은 실행 시 처리
 
   const required = toolDef.parameters?.required || []
-  if (required.length === 0) return null
+  if (required.length === 0) return Either.Right(true)
 
-  // tool_args가 없으면 args에서 tool 제외한 나머지를 확인 (EXEC fallback과 동일 로직)
   const provided = Object.keys(a.tool_args || (() => {
     const { tool, ...rest } = a
     return rest
   })())
   const missing = required.filter(r => !provided.includes(r))
-  return missing.length > 0
-    ? `EXEC ${a.tool}: missing required args: ${missing.join(', ')}`
-    : null
+  return missing.length === 0
+    ? Either.Right(true)
+    : Either.Left(ErrorInfo(`EXEC ${a.tool}: missing required args: ${missing.join(', ')}`, ERROR_KIND.PLANNER_SHAPE))
+}
+
+// RESPOND/ASK_LLM: ref/ctx 범위 확인
+const validateRefRange = (step, index) => {
+  const a = step.args || {}
+  if (step.op === 'RESPOND' && a.ref != null && a.ref > index) {
+    return Either.Left(ErrorInfo(
+      `RESPOND ref=${a.ref} exceeds available steps (${index}). ref must be <= ${index}.`,
+      ERROR_KIND.PLANNER_SHAPE))
+  }
+  if (step.op === 'ASK_LLM' && Array.isArray(a.ctx)) {
+    const invalid = a.ctx.find(c => c > index)
+    if (invalid != null) {
+      return Either.Left(ErrorInfo(
+        `ASK_LLM ctx=[${a.ctx}] references step ${invalid} but only ${index} steps precede it.`,
+        ERROR_KIND.PLANNER_SHAPE))
+    }
+  }
+  return Either.Right(true)
+}
+
+// 단일 step 전체 검증 (구조 + args + range) → Either Kleisli 합성
+const validateStepFull = (step, index, tools) => {
+  const pipeline = Either.pipeK(
+    () => Either.fold(
+      err => Either.Left(ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE)),
+      () => Either.Right(step),
+      validateStep(step),
+    ),
+    () => validateExecArgs(step, tools),
+    () => validateRefRange(step, index),
+  )
+  return pipeline(null)
 }
 
 const validatePlan = (plan, { tools = [] } = {}) => {
@@ -71,34 +105,11 @@ const validatePlan = (plan, { tools = [] } = {}) => {
     if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
       return Either.Left(ErrorInfo('plan에 비어있지 않은 steps 배열이 필요합니다.', ERROR_KIND.PLANNER_SHAPE))
     }
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i]
-      const result = validateStep(step)
-      if (Either.isLeft(result)) {
-        return Either.Left(ErrorInfo(result.value, ERROR_KIND.PLANNER_SHAPE))
-      }
-      // EXEC: tool_args 필수 인자 검증
-      const execError = validateExecArgs(step, tools)
-      if (execError) {
-        return Either.Left(ErrorInfo(execError, ERROR_KIND.PLANNER_SHAPE))
-      }
-      // RESPOND/ASK_LLM: ref/ctx 범위 검증 (실행 전 정적 검증)
-      const a = step.args || {}
-      if (step.op === 'RESPOND' && a.ref != null && a.ref > i) {
-        return Either.Left(ErrorInfo(
-          `RESPOND ref=${a.ref} exceeds available steps (${i}). ref must be <= ${i}.`,
-          ERROR_KIND.PLANNER_SHAPE))
-      }
-      if (step.op === 'ASK_LLM' && Array.isArray(a.ctx)) {
-        const invalid = a.ctx.find(c => c > i)
-        if (invalid != null) {
-          return Either.Left(ErrorInfo(
-            `ASK_LLM ctx=[${a.ctx}] references step ${invalid} but only ${i} steps precede it.`,
-            ERROR_KIND.PLANNER_SHAPE))
-        }
-      }
-    }
-    return Either.Right(plan)
+    // reduce + Either chain: 첫 번째 Left에서 short-circuit
+    return plan.steps.reduce(
+      (acc, step, i) => acc.chain(() => validateStepFull(step, i, tools)),
+      Either.Right(true),
+    ).chain(() => Either.Right(plan))
   }
   return Either.Left(ErrorInfo(
     `플래너 응답 형식이 잘못되었습니다 (type: ${plan.type ?? 'undefined'}). `
@@ -127,6 +138,17 @@ const respondAndFail = (input, error) =>
     .chain(msg => finishFailure(input, error, msg))
 
 // --- 플랜 실행 ---
+
+// formatter 파이프라인: results → askLLM → respond → finishSuccess
+const formatAndFinish = (input, results) => {
+  const formatterPrompt = buildFormatterPrompt(input, results)
+  return Free.pipeK(
+    () => askLLM({ messages: formatterPrompt.messages }),
+    response => respond(response),
+    msg => finishSuccess(input, msg),
+  )(null)
+}
+
 const executePlan = (input, plan) => {
   if (plan.type === 'direct_response') {
     return respond(plan.message).chain(msg => finishSuccess(input, msg))
@@ -134,12 +156,7 @@ const executePlan = (input, plan) => {
   return parsePlan(plan)
     .chain(either => Either.fold(
       err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE)),
-      results => {
-        const formatterPrompt = buildFormatterPrompt(input, results)
-        return askLLM({ messages: formatterPrompt.messages })
-          .chain(response => respond(response))
-          .chain(msg => finishSuccess(input, msg))
-      },
+      results => formatAndFinish(input, results),
       either,
     ))
 }
@@ -158,7 +175,8 @@ const createAgentTurn = ({ tools = [], agents = [], persona = {}, responseFormat
             messages: currentPrompt.messages,
             responseFormat: currentPrompt.response_format,
           }).chain(planJson => {
-            const parsed = safeJsonParse(planJson).chain(p => validatePlan(p, { tools }))
+            const parseThenValidate = Either.pipeK(safeJsonParse, p => validatePlan(p, { tools }))
+            const parsed = parseThenValidate(planJson)
 
             return Either.fold(
               error => {
@@ -213,7 +231,7 @@ const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, ma
 }
 
 export {
-  createAgentTurn, safeRunTurn, createAgent, validatePlan, validateExecArgs, safeJsonParse,
+  createAgentTurn, safeRunTurn, createAgent, validatePlan, validateExecArgs, validateRefRange, validateStepFull, safeJsonParse,
   beginTurn, finishSuccess, finishFailure, respondAndFail,
   recoverFromFailure, applyRecovery,
   PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo,

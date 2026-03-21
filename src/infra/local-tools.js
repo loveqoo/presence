@@ -2,6 +2,9 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from '
 import { execSync } from 'child_process'
 import { resolve, join } from 'path'
 import { t } from '../i18n/index.js'
+import fp from '../lib/fun-fp.js'
+
+const { Maybe } = fp
 
 // --- 경로 검증 (순수) ---
 
@@ -15,16 +18,19 @@ const isPathAllowed = (path, allowedDirs) => {
 }
 
 // --- 경로 정규화 ---
+// 후보 경로를 순서대로 시도, 첫 번째 유효한 것을 사용.
 
 const normalizePath = (path, allowedDirs) => {
   const resolved = resolve(path)
-  if (isPathAllowed(resolved, allowedDirs)) return resolved
-  if (allowedDirs.length > 0 && path.startsWith('/')) {
-    const stripped = path.replace(/^\/+/, '')
-    const candidate = resolve(allowedDirs[0], stripped)
-    if (isPathAllowed(candidate, allowedDirs) && existsSync(candidate)) return candidate
-  }
-  return resolved
+  const candidates = [
+    resolved,
+    // 잘못된 절대경로 → 허용 디렉토리 기준 상대 재해석
+    ...(allowedDirs.length > 0 && path.startsWith('/')
+      ? [resolve(allowedDirs[0], path.replace(/^\/+/, ''))]
+      : []),
+  ]
+  return candidates.find(c => isPathAllowed(c, allowedDirs) && (c === resolved || existsSync(c)))
+    || resolved
 }
 
 // --- 도구 정의 ---

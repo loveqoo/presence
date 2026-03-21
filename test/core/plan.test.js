@@ -53,6 +53,20 @@ async function run() {
   assert(Either.isLeft(validateStep({ op: 'APPROVE', args: {} })), 'validateStep: APPROVE without desc → Left')
   assert(Either.isLeft(validateStep({ op: 'DELEGATE', args: { target: 'x' } })), 'validateStep: DELEGATE missing task → Left')
 
+  // RESPOND.ref 타입 검증
+  assert(Either.isLeft(validateStep({ op: 'RESPOND', args: { ref: 0 } })), 'validateStep: RESPOND ref=0 → Left')
+  assert(Either.isLeft(validateStep({ op: 'RESPOND', args: { ref: -1 } })), 'validateStep: RESPOND ref=-1 → Left')
+  assert(Either.isLeft(validateStep({ op: 'RESPOND', args: { ref: 'abc' } })), 'validateStep: RESPOND ref=string → Left')
+  assert(Either.isLeft(validateStep({ op: 'RESPOND', args: { ref: 1.5 } })), 'validateStep: RESPOND ref=float → Left')
+
+  // ASK_LLM.ctx 타입 검증
+  assert(Either.isRight(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: [1, 2] } })), 'validateStep: ASK_LLM valid ctx → Right')
+  assert(Either.isRight(validateStep({ op: 'ASK_LLM', args: { prompt: 'q' } })), 'validateStep: ASK_LLM no ctx → Right')
+  assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: '1' } })), 'validateStep: ASK_LLM ctx=string → Left')
+  assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: [0] } })), 'validateStep: ASK_LLM ctx=[0] → Left')
+  assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: [-1] } })), 'validateStep: ASK_LLM ctx=[-1] → Left')
+  assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: [1.5] } })), 'validateStep: ASK_LLM ctx=[1.5] → Left')
+
   // argValidators 단위
   assert(Either.isRight(argValidators.EXEC({ tool: 'gh' })), 'argValidators.EXEC: valid')
   assert(Either.isLeft(argValidators.EXEC({})), 'argValidators.EXEC: missing tool')

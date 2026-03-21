@@ -43,6 +43,10 @@ const tests = [
   'test/core/repl.test.js',
   // Phase 5 integration
   'test/integration/phase5.test.js',
+  // Regression
+  'test/regression/llm-output.test.js',
+  'test/regression/tool-defense.test.js',
+  'test/regression/plan-fuzz.test.js',
 ]
 
 let allPassed = true

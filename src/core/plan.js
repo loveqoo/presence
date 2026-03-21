@@ -39,19 +39,37 @@ const resolveToolArgs = (args, results) => {
 
 // --- Step validation (Either) ---
 
+// --- 공통 검증 헬퍼 ---
+
+const isPositiveInt = (v) => Number.isInteger(v) && v >= 1
+
+const isPositiveIntArray = (v) =>
+  Array.isArray(v) && v.every(isPositiveInt)
+
 const argValidators = {
   LOOKUP_MEMORY: (a) => (a.query == null || typeof a.query === 'string')
     ? Either.Right(true)
     : Either.Left('LOOKUP_MEMORY: query는 string이거나 생략해야 합니다.'),
-  ASK_LLM: (a) => typeof a.prompt === 'string'
-    ? Either.Right(true)
-    : Either.Left('ASK_LLM: prompt(string)가 필요합니다.'),
+  ASK_LLM: (a) => {
+    if (typeof a.prompt !== 'string') return Either.Left('ASK_LLM: prompt(string)가 필요합니다.')
+    if (a.ctx != null && !isPositiveIntArray(a.ctx)) {
+      return Either.Left('ASK_LLM: ctx는 양의 정수 배열이어야 합니다.')
+    }
+    return Either.Right(true)
+  },
   EXEC: (a) => typeof a.tool === 'string'
     ? Either.Right(true)
     : Either.Left('EXEC: tool(string)이 필요합니다.'),
-  RESPOND: (a) => (a.ref != null || typeof a.message === 'string')
-    ? Either.Right(true)
-    : Either.Left('RESPOND: ref(number) 또는 message(string)가 필요합니다.'),
+  RESPOND: (a) => {
+    if (a.ref != null) {
+      return isPositiveInt(a.ref)
+        ? Either.Right(true)
+        : Either.Left('RESPOND: ref는 양의 정수(1-based)여야 합니다.')
+    }
+    return typeof a.message === 'string'
+      ? Either.Right(true)
+      : Either.Left('RESPOND: ref(positive integer) 또는 message(string)가 필요합니다.')
+  },
   APPROVE: (a) => typeof a.description === 'string'
     ? Either.Right(true)
     : Either.Left('APPROVE: description(string)이 필요합니다.'),
@@ -161,4 +179,4 @@ const parsePlan = (plan) => {
   )
 }
 
-export { parsePlan, stepToOp, opHandlers, validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs, safeLookup }
+export { parsePlan, stepToOp, opHandlers, validateStep, argValidators, isPositiveInt, isPositiveIntArray, resolveRefs, resolveStringRefs, resolveToolArgs, safeLookup }
