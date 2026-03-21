@@ -1,6 +1,10 @@
 import { JSONFilePreset } from 'lowdb/node'
 import { mkdirSync } from 'fs'
 import { dirname } from 'path'
+import fp from '../lib/fun-fp.js'
+import { dotSimilarity, topK, toEmbeddingText, textHash, mergeSearchResults } from './embedding.js'
+
+const { Maybe } = fp
 
 const TIERS = { WORKING: 'working', EPISODIC: 'episodic', SEMANTIC: 'semantic' }
 
@@ -52,7 +56,15 @@ class MemoryGraph {
 
   addNode({ label, type = 'entity', data = {}, tier = TIERS.EPISODIC }) {
     const id = String(this._nextId++)
-    const node = { id, label, type, data, tier, createdAt: Date.now() }
+    const node = {
+      id, label, type, data, tier, createdAt: Date.now(),
+      // 임베딩 필드 (저장 후 비동기 보강)
+      vector: null,
+      embeddingModel: null,
+      embeddingDimensions: null,
+      embeddedAt: null,
+      embeddingTextHash: null,
+    }
     this.nodes.push(node)
     return node
   }
@@ -64,7 +76,7 @@ class MemoryGraph {
   }
 
   findNode(id) {
-    return this.nodes.find(n => n.id === id) || null
+    return Maybe.fromNullable(this.nodes.find(n => n.id === id))
   }
 
   findNodesByLabel(label) {
@@ -86,37 +98,106 @@ class MemoryGraph {
         if (edge.from !== nodeId) continue
         if (relation && edge.relation !== relation) continue
 
-        const target = this.findNode(edge.to)
-        if (target) {
-          results.add(target)
-          if (currentDepth + 1 < depth) {
-            queue.push({ nodeId: edge.to, currentDepth: currentDepth + 1 })
-          }
-        }
+        Maybe.fold(
+          () => {},
+          target => {
+            results.add(target)
+            if (currentDepth + 1 < depth) {
+              queue.push({ nodeId: edge.to, currentDepth: currentDepth + 1 })
+            }
+          },
+          this.findNode(edge.to),
+        )
       }
     }
 
     return [...results]
   }
 
-  recall(text) {
-    if (!text) return []
+  // --- 키워드 검색 (score 1.0 for match) ---
+  _keywordSearch(text) {
     const keywords = text.toLowerCase().split(/\s+/)
-    const matched = this.nodes.filter(n => {
-      if (n.label == null) return false
-      const label = String(n.label).toLowerCase()
-      return keywords.some(k => label.includes(k))
-    })
+    return this.nodes
+      .filter(n => {
+        if (n.label == null) return false
+        const label = String(n.label).toLowerCase()
+        return keywords.some(k => label.includes(k))
+      })
+      .map(node => ({ node, score: 1.0 }))
+  }
 
-    const related = new Set()
-    for (const node of matched) {
-      related.add(node)
-      for (const n of this.query({ from: node.id, depth: 1 })) {
-        related.add(n)
+  // --- 벡터 검색 (dot similarity) ---
+  // 차원 불일치 노드는 제외 (모델/차원 변경 시 NaN 방지)
+  _vectorSearch(queryVec, k) {
+    const dim = queryVec.length
+    const compatible = this.nodes.filter(n =>
+      Array.isArray(n.vector) && n.vector.length === dim
+    )
+    if (compatible.length === 0) return []
+    const scored = compatible.map(node => ({ node, score: dotSimilarity(queryVec, node.vector) }))
+    return topK(scored, k)
+  }
+
+  // --- 하이브리드 recall ---
+  // 벡터 + 키워드 병합, 연결 노드 확장
+  async recall(text, { embedder, topK: k = 10, logger } = {}) {
+    if (!text) return []
+
+    const keywordResults = this._keywordSearch(text)
+
+    let vectorResults = []
+    if (embedder) {
+      try {
+        const queryVec = await embedder.embed(text)
+        vectorResults = this._vectorSearch(queryVec, k)
+      } catch (e) {
+        if (logger) logger.warn('Embedding recall failed, using keyword only', { error: e.message })
       }
     }
 
-    return [...related]
+    const merged = mergeSearchResults(keywordResults, vectorResults)
+    const topNodes = merged.slice(0, k).map(({ node }) => node)
+
+    // 연결 노드 확장
+    const expanded = new Set(
+      topNodes.flatMap(node => [node, ...this.query({ from: node.id, depth: 1 })])
+    )
+
+    return [...expanded]
+  }
+
+  // --- 미임베딩 노드 보강 ---
+  async embedPending(embedder, { logger } = {}) {
+    if (!embedder) return 0
+
+    const needsEmbedding = (n) => {
+      if (n.vector == null) return true
+      // 모델 또는 차원 변경 → 재임베딩
+      if (n.embeddingModel !== embedder.model) return true
+      if (embedder.dimensions && n.embeddingDimensions !== embedder.dimensions) return true
+      // 텍스트 변경 → 재임베딩
+      return n.embeddingTextHash !== textHash(toEmbeddingText(n))
+    }
+
+    const pending = this.nodes.filter(needsEmbedding)
+
+    let count = 0
+    for (const node of pending) {
+      const text = toEmbeddingText(node)
+      try {
+        node.vector = await embedder.embed(text)
+        node.embeddingModel = embedder.model
+        node.embeddingDimensions = embedder.dimensions
+        node.embeddedAt = Date.now()
+        node.embeddingTextHash = textHash(text)
+        count++
+      } catch (e) {
+        if (logger) logger.warn('Embedding failed for node', { nodeId: node.id, error: e.message })
+      }
+    }
+
+    if (count > 0) await this.save()
+    return count
   }
 
   async save() {
@@ -134,17 +215,24 @@ class MemoryGraph {
   }
 
   promoteNode(nodeId, newTier) {
-    const node = this.findNode(nodeId)
-    if (node) node.tier = newTier
+    Maybe.fold(
+      () => {},
+      node => { node.tier = newTier },
+      this.findNode(nodeId),
+    )
   }
 
   allNodes() { return [...this.nodes] }
   allEdges() { return [...this.edges] }
 }
 
-// --- 하위 호환: createMemoryGraph 팩토리 ---
 const createMemoryGraph = async (dbPath = null) => {
   return dbPath ? MemoryGraph.fromFile(dbPath) : MemoryGraph.create()
 }
 
-export { MemoryGraph, InMemoryStore, LowdbStore, createMemoryGraph, TIERS }
+const defaultMemoryPath = () => {
+  const home = process.env.HOME || process.env.USERPROFILE || '.'
+  return `${home}/.presence/memory/graph.json`
+}
+
+export { MemoryGraph, InMemoryStore, LowdbStore, createMemoryGraph, TIERS, defaultMemoryPath }

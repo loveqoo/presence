@@ -50,66 +50,94 @@ const planSchema = {
 }
 
 // --- Prompt text constants ---
-const ROLE_DEFINITION = `당신은 업무 대리 에이전트의 계획 설계자입니다.
-사용자의 요청을 분석하고, JSON 형식으로 실행 계획을 작성하세요.
+const ROLE_DEFINITION = `You are a planner for a task-delegation agent.
+Analyze the user's request and respond with ONLY valid JSON. No explanation text, ONLY JSON.
 
-- 도구 호출, 정보 조회 등이 필요하면 type: "plan"으로 steps를 작성하세요.
-- 단순 대화 (인사, 간단한 질문 등)에는 type: "direct_response"로 바로 답하세요.`
+## Response Format
 
-const OP_REFERENCE = `사용 가능한 op:
+Simple conversation (greetings, Q&A):
+{"type": "direct_response", "message": "your response here"}
 
-LOOKUP_MEMORY: 메모리에서 관련 정보를 조회
-  args: { query: "검색어" }
+When tool execution is needed:
+{"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "tool_name", "tool_args": {}}}, {"op": "RESPOND", "args": {"ref": 1}}]}
 
-ASK_LLM: LLM에게 질문 (이전 단계 결과 참조 가능)
-  args: { prompt: "질문", ctx: [1, 2] }
-  ctx의 숫자는 이전 step의 1-based 인덱스
+## Examples
 
-EXEC: 도구 실행
-  args: { tool: "도구이름", tool_args: { ... } }
+User: "hello"
+→ {"type": "direct_response", "message": "Hello! How can I help you?"}
 
-RESPOND: 사용자에게 응답 (이전 단계 결과 참조)
-  args: { ref: 3 }
-  반드시 계획의 마지막에 포함
+User: "what time is it?" (get_time tool available)
+→ {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "get_time", "tool_args": {}}}, {"op": "RESPOND", "args": {"ref": 1}}]}
 
-APPROVE: 사용자 승인 요청
-  args: { description: "승인 요청 설명" }
+User: "calculate 123 * 456" (calculate tool available)
+→ {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "calculate", "tool_args": {"expression": "123 * 456"}}}, {"op": "RESPOND", "args": {"ref": 1}}]}
 
-DELEGATE: 다른 에이전트에게 위임
-  args: { target: "에이전트id", task: "작업 내용" }`
+IMPORTANT:
+- All string values MUST be double-quoted (including op values)
+- Use "message" field (NOT "content")
+- RESPOND ref must reference a PREVIOUS step index (1-based). With 2 steps, ref can only be 1.
+- Respond in the user's language.`
 
-const APPROVE_RULES = `다음 행동 전에는 반드시 APPROVE를 넣으세요:
-- 외부에 데이터를 쓰는 행동 (메시지 발송, 이슈 생성 등)
-- 되돌리기 어려운 행동 (삭제, 상태 변경 등)
-읽기 전용 행동에는 APPROVE가 필요 없습니다.`
+const OP_REFERENCE = `Available ops:
 
-const PLAN_RULES = `규칙:
-1. plan의 마지막 step은 반드시 RESPOND여야 합니다.
-2. 사용 가능한 도구와 에이전트만 사용하세요.
-3. ctx와 ref의 숫자는 해당 step보다 앞선 step의 인덱스(1-based)여야 합니다.
-4. EXEC의 tool_args 안에서 이전 결과를 참조할 때는 "$N" 문자열을 사용합니다.`
+LOOKUP_MEMORY: Search memory for relevant information
+  args: { "query": "search term" }
+
+ASK_LLM: Ask LLM a question (can reference previous step results)
+  args: { "prompt": "question", "ctx": [1, 2] }
+  ctx numbers are 1-based indices of previous steps
+
+EXEC: Execute a tool
+  args: { "tool": "tool_name", "tool_args": { ... } }
+
+RESPOND: Send response to user (reference a previous step result)
+  args: { "ref": 1 }
+  Must be the last step in a plan
+
+APPROVE: Request user approval
+  args: { "description": "what needs approval" }
+
+DELEGATE: Delegate to another agent
+  args: { "target": "agent_id", "task": "task description" }`
+
+const APPROVE_RULES = `Add APPROVE before any:
+- file_write (creating/overwriting files)
+- shell_exec (executing shell commands)
+- Write operations (sending messages, creating issues)
+- Irreversible actions (deletions, state changes)
+Read-only actions (file_read, file_list, web_fetch) do NOT need APPROVE.`
+
+const PLAN_RULES = `Rules:
+1. The last step in a plan MUST be {"op": "RESPOND", "args": {"ref": N}}.
+2. Only use available tools and agents.
+3. ref and ctx numbers must reference EARLIER steps only (1-based). Cannot reference self or later steps.
+4. Use "$N" strings in tool_args to reference previous step results.
+5. For general questions that don't need tools, use direct_response instead of plan.
+6. ALWAYS use tools for real-time data. When user asks to read/show/list files, execute commands, or fetch URLs, ALWAYS use the appropriate tool. NEVER answer from memory for these requests — file contents and system state can change.
+7. Every EXEC tool_args MUST include all required parameters. Check each tool's required fields.
+8. To explore files, start with file_list to get the listing, then use ASK_LLM with ctx to analyze the results.`
 
 // --- Formatters ---
 const formatToolList = (tools) => {
   if (!tools || tools.length === 0) {
-    return '사용 가능한 도구:\n\n사용 가능한 도구 없음'
+    return 'Available tools:\n\nNo tools available'
   }
   const lines = tools.map(t => {
     const params = t.parameters?.properties || {}
     const required = t.parameters?.required || []
     const paramLines = Object.entries(params).map(([k, v]) => {
-      const req = required.includes(k) ? ', 필수' : ''
+      const req = required.includes(k) ? ', required' : ''
       return `  - ${k} (${v.type}${req}): ${v.description || ''}`
     }).join('\n')
     return `${t.name}: ${t.description || ''}\n${paramLines}`
   })
-  return `사용 가능한 도구:\n\n${lines.join('\n\n')}`
+  return `Available tools:\n\n${lines.join('\n\n')}`
 }
 
 const formatAgentList = (agents) => {
   if (!agents || agents.length === 0) return ''
-  const lines = agents.map(a => `${a.id}: ${a.description || ''}`)
-  return `위임 가능한 에이전트:\n\n${lines.join('\n')}`
+  const lines = agents.map(a => `${a.name || a.id}: ${a.description || ''}`)
+  return `Available agents for delegation:\n\n${lines.join('\n')}`
 }
 
 const formatMemories = (memories) => {
@@ -117,36 +145,51 @@ const formatMemories = (memories) => {
   return memories.map((m, i) => `[${i + 1}] ${typeof m === 'string' ? m : JSON.stringify(m)}`).join('\n')
 }
 
+// 공통 메모리 프롬프트 (Plan, ReAct 양쪽에서 사용)
+const buildMemoryPrompt = (memories) => {
+  if (!memories || memories.length === 0) return ''
+  return `Relevant memories:\n${formatMemories(memories)}`
+}
+
 // --- Prompt builders ---
-const buildPlannerPrompt = ({ tools = [], agents = [], memories = [], input, persona = {} }) => {
+// responseFormat 모드: 'json_schema' | 'json_object' | 'none'
+const buildResponseFormat = (mode) => {
+  if (mode === 'json_schema') return { type: 'json_schema', json_schema: planSchema }
+  if (mode === 'json_object') return { type: 'json_object' }
+  return undefined
+}
+
+const buildPlannerPrompt = ({ tools = [], agents = [], memories = [], input, persona = {}, responseFormatMode = 'json_object' }) => {
   const sections = [
     persona.systemPrompt || ROLE_DEFINITION,
     OP_REFERENCE,
     formatToolList(tools),
-  ]
-
-  const agentSection = formatAgentList(agents)
-  if (agentSection) sections.push(agentSection)
-
-  if (persona.rules && persona.rules.length > 0) {
-    sections.push('사용자 규칙:\n' + persona.rules.map(r => `- ${r}`).join('\n'))
-  }
-
-  sections.push(APPROVE_RULES)
-  sections.push(PLAN_RULES)
-
-  if (memories.length > 0) {
-    sections.push(`관련 기억:\n${formatMemories(memories)}`)
-  }
+    formatAgentList(agents),
+    persona.rules && persona.rules.length > 0
+      ? 'User rules:\n' + persona.rules.map(r => `- ${r}`).join('\n')
+      : '',
+    APPROVE_RULES,
+    PLAN_RULES,
+    buildMemoryPrompt(memories),
+  ].filter(Boolean)
 
   return {
     messages: [
       { role: 'system', content: sections.join('\n\n') },
       { role: 'user', content: input },
     ],
-    response_format: { type: 'json_schema', json_schema: planSchema },
+    response_format: buildResponseFormat(responseFormatMode),
   }
 }
+
+const buildRetryPrompt = (originalPrompt, errorMessage) => ({
+  messages: [
+    ...originalPrompt.messages,
+    { role: 'assistant', content: '(invalid JSON)' },
+    { role: 'user', content: `Your previous response was not valid JSON. Error: ${errorMessage}\nPlease respond with ONLY valid JSON. No explanation, no markdown, ONLY the JSON object.` },
+  ],
+  response_format: originalPrompt.response_format,
+})
 
 const buildFormatterPrompt = (input, results) => {
   const resultText = Array.isArray(results)
@@ -165,9 +208,12 @@ export {
   planSchema,
   buildPlannerPrompt,
   buildFormatterPrompt,
+  buildResponseFormat,
+  buildRetryPrompt,
   formatToolList,
   formatAgentList,
   formatMemories,
+  buildMemoryPrompt,
   ROLE_DEFINITION,
   OP_REFERENCE,
   APPROVE_RULES,

@@ -16,14 +16,24 @@ const tests = [
   'test/core/plan.test.js',
   'test/core/prompt.test.js',
   'test/infra/tools.test.js',
+  'test/core/react.test.js',
   'test/core/agent.test.js',
   // Phase 1 infra
   'test/infra/logger.test.js',
   'test/infra/persistence.test.js',
   'test/infra/memory.test.js',
+  'test/infra/embedding.test.js',
+  'test/infra/mcp.test.js',
   'test/infra/memory-hook.test.js',
+  'test/infra/agent-registry.test.js',
+  'test/infra/a2a-client.test.js',
+  'test/infra/events.test.js',
+  'test/infra/heartbeat.test.js',
+  'test/infra/local-tools.test.js',
+  'test/infra/config.test.js',
   'test/infra/persona.test.js',
   'test/ui/app.test.js',
+  'test/ui/interactive.test.js',
   // Phase 2
   'test/infra/llm.test.js',
   'test/interpreter/prod.test.js',
@@ -31,6 +41,8 @@ const tests = [
   'test/interpreter/dryrun.test.js',
   'test/infra/input.test.js',
   'test/core/repl.test.js',
+  // Phase 5 integration
+  'test/integration/phase5.test.js',
 ]
 
 let allPassed = true

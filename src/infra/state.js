@@ -4,15 +4,11 @@ const deepClone = obj => JSON.parse(JSON.stringify(obj))
 // --- Path utilities ---
 const parsePath = path => path.split('.')
 
-const getByPath = (obj, path) => {
-  const keys = parsePath(path)
-  let current = obj
-  for (const key of keys) {
-    if (current == null || typeof current !== 'object') return undefined
-    current = current[key]
-  }
-  return current
-}
+const getByPath = (obj, path) =>
+  parsePath(path).reduce(
+    (cur, key) => (cur != null && typeof cur === 'object') ? cur[key] : undefined,
+    obj,
+  )
 
 const setByPath = (obj, path, value) => {
   const keys = parsePath(path)

@@ -1,7 +1,7 @@
-import { parsePlan, resolveRefs, resolveStringRefs, resolveToolArgs } from '../../src/core/plan.js'
+import { parsePlan, validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs } from '../../src/core/plan.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createState } from '../../src/infra/state.js'
-import { Free } from '../../src/core/op.js'
+import { Free, Either } from '../../src/core/op.js'
 
 let passed = 0
 let failed = 0
@@ -36,18 +36,42 @@ async function run() {
     { msg: 'hello', count: 5 }
   ), 'resolveToolArgs: replaces string refs, keeps numbers')
 
+  // validateStep — op + args 검증
+  assert(Either.isRight(validateStep({ op: 'EXEC', args: { tool: 'gh' } })), 'validateStep: valid EXEC → Right')
+  assert(Either.isRight(validateStep({ op: 'RESPOND', args: { ref: 1 } })), 'validateStep: RESPOND ref → Right')
+  assert(Either.isRight(validateStep({ op: 'RESPOND', args: { message: 'hi' } })), 'validateStep: RESPOND msg → Right')
+  assert(Either.isRight(validateStep({ op: 'LOOKUP_MEMORY', args: {} })), 'validateStep: LOOKUP no args → Right')
+  assert(Either.isRight(validateStep({ op: 'LOOKUP_MEMORY', args: { query: '회의' } })), 'validateStep: LOOKUP string query → Right')
+  assert(Either.isLeft(validateStep({ op: 'LOOKUP_MEMORY', args: { query: 42 } })), 'validateStep: LOOKUP numeric query → Left')
+  assert(Either.isLeft(validateStep({ op: 'LOOKUP_MEMORY', args: { query: {} } })), 'validateStep: LOOKUP object query → Left')
+  assert(Either.isLeft(validateStep(null)), 'validateStep: null → Left')
+  assert(Either.isLeft(validateStep({ op: 'UNKNOWN' })), 'validateStep: unknown op → Left')
+  assert(Either.isLeft(validateStep({})), 'validateStep: no op → Left')
+  assert(Either.isLeft(validateStep({ op: 'EXEC', args: {} })), 'validateStep: EXEC without tool → Left')
+  assert(Either.isLeft(validateStep({ op: 'RESPOND', args: {} })), 'validateStep: RESPOND without ref/msg → Left')
+  assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: {} })), 'validateStep: ASK_LLM without prompt → Left')
+  assert(Either.isLeft(validateStep({ op: 'APPROVE', args: {} })), 'validateStep: APPROVE without desc → Left')
+  assert(Either.isLeft(validateStep({ op: 'DELEGATE', args: { target: 'x' } })), 'validateStep: DELEGATE missing task → Left')
+
+  // argValidators 단위
+  assert(Either.isRight(argValidators.EXEC({ tool: 'gh' })), 'argValidators.EXEC: valid')
+  assert(Either.isLeft(argValidators.EXEC({})), 'argValidators.EXEC: missing tool')
+  assert(Either.isRight(argValidators.DELEGATE({ target: 'a', task: 'b' })), 'argValidators.DELEGATE: valid')
+  assert(Either.isLeft(argValidators.DELEGATE({ target: 'a' })), 'argValidators.DELEGATE: missing task')
+
   // --- parsePlan tests ---
 
-  // 1. direct_response
+  // 1. direct_response → Either.Right
   {
     const { interpreter, log } = createTestInterpreter()
     const plan = { type: 'direct_response', message: 'hi there' }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result === 'hi there', 'direct_response: returns message')
+    assert(Either.isRight(result), 'direct_response: Right')
+    assert(result.value === 'hi there', 'direct_response: returns message')
     assert(log[0].tag === 'Respond', 'direct_response: uses Respond op')
   }
 
-  // 2. Single EXEC step
+  // 2. Single EXEC step → Either.Right
   {
     const { interpreter, log } = createTestInterpreter()
     const plan = {
@@ -55,17 +79,16 @@ async function run() {
       steps: [{ op: 'EXEC', args: { tool: 'test_tool', tool_args: { x: 1 } } }]
     }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    assert(Either.isRight(result), 'single EXEC: Right')
     assert(log[0].tag === 'ExecuteTool', 'single EXEC: ExecuteTool op')
-    assert(Array.isArray(result), 'single EXEC: returns array of results')
-    assert(result.length === 1, 'single EXEC: 1 result')
+    assert(result.value.length === 1, 'single EXEC: 1 result')
   }
 
-  // 3. Multi-step with ctx references: EXEC → ASK_LLM(ctx=$1) → RESPOND($2)
+  // 3. Multi-step with ctx references
   {
     const { interpreter, log } = createTestInterpreter({
       ExecuteTool: (op) => `tool-result-for-${op.name}`,
       AskLLM: (op) => {
-        // Fix 4: AskLLM now receives { messages, context } — consistent shape
         assert(Array.isArray(op.messages), 'ASK_LLM step: messages is array')
         assert(op.messages[0].role === 'user', 'ASK_LLM step: messages has user role')
         return `llm-said-${op.context[0]}`
@@ -80,14 +103,12 @@ async function run() {
       ]
     }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    assert(Either.isRight(result), 'multi-step: Right')
     assert(log.length === 3, 'multi-step: 3 ops executed')
-    assert(log[0].tag === 'ExecuteTool', 'multi-step: first is EXEC')
-    assert(log[1].tag === 'AskLLM', 'multi-step: second is ASK_LLM')
-    assert(log[2].tag === 'Respond', 'multi-step: third is RESPOND')
-    assert(result[2] === 'llm-said-tool-result-for-github', 'multi-step: ctx reference works')
+    assert(result.value[2] === 'llm-said-tool-result-for-github', 'multi-step: ctx reference works')
   }
 
-  // 4. Unknown op → ignored, rest continues
+  // 4. Unknown op → Either.Left, short-circuits (EXEC 실행 안 됨)
   {
     const { interpreter, log } = createTestInterpreter()
     const plan = {
@@ -98,23 +119,23 @@ async function run() {
       ]
     }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result[0] === null, 'unknown op: returns null')
-    assert(result.length === 2, 'unknown op: both steps produce results')
-    assert(log[0].tag === 'ExecuteTool', 'unknown op: EXEC still runs')
+    assert(Either.isLeft(result), 'unknown op: Left')
+    assert(result.value.includes('UNKNOWN_OP'), 'unknown op: error mentions op name')
+    assert(log.filter(l => l.tag === 'ExecuteTool').length === 0, 'unknown op: EXEC not executed')
   }
 
-  // 5. Empty steps → Free.of([])
+  // 5. Empty steps → Either.Right([])
   {
     const { interpreter, log } = createTestInterpreter()
     const plan = { type: 'plan', steps: [] }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(Array.isArray(result) && result.length === 0, 'empty steps: returns []')
+    assert(Either.isRight(result), 'empty steps: Right')
+    assert(result.value.length === 0, 'empty steps: empty array')
     assert(log.length === 0, 'empty steps: no ops executed')
   }
 
   // 6. APPROVE step
   {
-    // Approved
     const { interpreter: i1, log: l1 } = createTestInterpreter({ Approve: () => true })
     const plan = {
       type: 'plan',
@@ -124,7 +145,8 @@ async function run() {
       ]
     }
     const r1 = await Free.runWithTask(i1)(parsePlan(plan))
-    assert(r1[0] === true, 'APPROVE: returns true when approved')
+    assert(Either.isRight(r1), 'APPROVE: Right')
+    assert(r1.value[0] === true, 'APPROVE: returns true when approved')
     assert(l1[0].tag === 'Approve', 'APPROVE: logged as Approve')
   }
 
@@ -137,9 +159,9 @@ async function run() {
       steps: [{ op: 'LOOKUP_MEMORY', args: { query: '회의' } }]
     }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result[0].length === 2, 'LOOKUP_MEMORY: filters by query (2 of 3 match)')
-    assert(result[0].includes('회의 안건'), 'LOOKUP_MEMORY: includes matching memory')
-    assert(!result[0].includes('PR 현황'), 'LOOKUP_MEMORY: excludes non-matching')
+    assert(result.value[0].length === 2, 'LOOKUP_MEMORY: filters by query (2 of 3 match)')
+    assert(result.value[0].includes('회의 안건'), 'LOOKUP_MEMORY: includes matching memory')
+    assert(!result.value[0].includes('PR 현황'), 'LOOKUP_MEMORY: excludes non-matching')
   }
 
   // 7b. LOOKUP_MEMORY without query → returns all
@@ -151,7 +173,7 @@ async function run() {
       steps: [{ op: 'LOOKUP_MEMORY', args: {} }]
     }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result[0].length === 2, 'LOOKUP_MEMORY no query: returns all')
+    assert(result.value[0].length === 2, 'LOOKUP_MEMORY no query: returns all')
   }
 
   // 8. EXEC with $N in tool_args
@@ -168,53 +190,51 @@ async function run() {
       ]
     }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result[1] === 'sent: formatted-message', 'EXEC $N: tool_args reference resolved')
+    assert(result.value[1] === 'sent: formatted-message', 'EXEC $N: tool_args reference resolved')
   }
 
-  // --- LOOKUP_MEMORY edge cases (Fix 3) ---
+  // --- LOOKUP_MEMORY edge cases ---
 
-  // 9. LOOKUP_MEMORY: case-insensitive matching
+  // 9. case-insensitive
   {
     const state = createState({ context: { memories: ['Hello World', 'foo bar'] } })
     const { interpreter } = createTestInterpreter({}, state)
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'HELLO' } }] }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result[0].length === 1 && result[0][0] === 'Hello World', 'LOOKUP_MEMORY: case-insensitive')
+    assert(result.value[0].length === 1 && result.value[0][0] === 'Hello World', 'LOOKUP_MEMORY: case-insensitive')
   }
 
-  // 10. LOOKUP_MEMORY: memories is null/undefined in state → empty array
+  // 10. memories undefined → empty
   {
-    const state = createState({ context: {} }) // no memories key
+    const state = createState({ context: {} })
     const { interpreter } = createTestInterpreter({}, state)
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'x' } }] }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(Array.isArray(result[0]) && result[0].length === 0, 'LOOKUP_MEMORY: undefined memories → []')
+    assert(result.value[0].length === 0, 'LOOKUP_MEMORY: undefined memories → []')
   }
 
-  // 11. LOOKUP_MEMORY: non-string memories don't crash, String() used for comparison
+  // 11. non-string memories
   {
     const state = createState({ context: { memories: [{ text: 'meeting' }, 42, null, 'meeting room'] } })
     const { interpreter } = createTestInterpreter({}, state)
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'meeting' } }] }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    // String({text:'meeting'}) = '[object Object]' → no match; String(42) = '42' → no match
-    // Only 'meeting room' matches
-    assert(result[0].length === 1, 'LOOKUP_MEMORY: non-string memories handled (1 string match)')
-    assert(result[0][0] === 'meeting room', 'LOOKUP_MEMORY: only string memory matched')
+    assert(result.value[0].length === 1, 'LOOKUP_MEMORY: non-string memories handled')
+    assert(result.value[0][0] === 'meeting room', 'LOOKUP_MEMORY: only string memory matched')
   }
 
-  // 12. LOOKUP_MEMORY: query matches nothing → empty array (not full dump)
+  // 12. query matches nothing
   {
     const state = createState({ context: { memories: ['a', 'b', 'c'] } })
     const { interpreter } = createTestInterpreter({}, state)
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'zzz' } }] }
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
-    assert(result[0].length === 0, 'LOOKUP_MEMORY: no match → empty, not full dump')
+    assert(result.value[0].length === 0, 'LOOKUP_MEMORY: no match → empty')
   }
 
-  // --- ASK_LLM payload shape edge cases (Fix 4) ---
+  // --- ASK_LLM payload edge cases ---
 
-  // 13. ASK_LLM without ctx field → context is undefined
+  // 13. without ctx → context undefined
   {
     let capturedOp = null
     const { interpreter } = createTestInterpreter({
@@ -226,7 +246,7 @@ async function run() {
     assert(capturedOp.messages[0].content === 'hello', 'ASK_LLM no ctx: prompt in messages')
   }
 
-  // 14. ASK_LLM with empty ctx → context is undefined
+  // 14. empty ctx → context undefined
   {
     let capturedOp = null
     const { interpreter } = createTestInterpreter({
@@ -237,7 +257,7 @@ async function run() {
     assert(capturedOp.context === undefined, 'ASK_LLM empty ctx: context is undefined')
   }
 
-  // 15. ASK_LLM with out-of-range ctx → context is undefined (filtered to empty)
+  // 15. out-of-range ctx
   {
     let capturedOp = null
     const { interpreter } = createTestInterpreter({
@@ -248,14 +268,14 @@ async function run() {
       type: 'plan',
       steps: [
         { op: 'EXEC', args: { tool: 'a', tool_args: {} } },
-        { op: 'ASK_LLM', args: { prompt: 'summarize', ctx: [99] } }, // out of range
+        { op: 'ASK_LLM', args: { prompt: 'summarize', ctx: [99] } },
       ]
     }
     await Free.runWithTask(interpreter)(parsePlan(plan))
     assert(capturedOp.context === undefined, 'ASK_LLM out-of-range ctx: context undefined')
   }
 
-  // 16. Plan with mixed ASK_LLM: one with context, one without
+  // 16. mixed ASK_LLM
   {
     const captured = []
     const { interpreter } = createTestInterpreter({
@@ -275,6 +295,50 @@ async function run() {
       'mixed ASK_LLM: first has context')
     assert(captured[1].context === undefined,
       'mixed ASK_LLM: second has no context')
+  }
+
+  // --- malformed step args → plan fails ---
+
+  // 17. EXEC without tool → Left (PLANNER_SHAPE, not INTERPRETER)
+  {
+    const { interpreter, log } = createTestInterpreter()
+    const plan = {
+      type: 'plan',
+      steps: [{ op: 'EXEC', args: { tool_args: { x: 1 } } }]
+    }
+    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    assert(Either.isLeft(result), 'EXEC no tool: Left')
+    assert(result.value.includes('EXEC'), 'EXEC no tool: error mentions EXEC')
+    assert(log.filter(l => l.tag === 'ExecuteTool').length === 0, 'EXEC no tool: not dispatched')
+  }
+
+  // 18. RESPOND without ref or message → Left
+  {
+    const { interpreter } = createTestInterpreter()
+    const plan = {
+      type: 'plan',
+      steps: [{ op: 'RESPOND', args: {} }]
+    }
+    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    assert(Either.isLeft(result), 'RESPOND no args: Left')
+    assert(result.value.includes('RESPOND'), 'RESPOND no args: error mentions RESPOND')
+  }
+
+  // 19. RESPOND with out-of-range ref → Either.Left
+  {
+    const { interpreter } = createTestInterpreter({
+      ExecuteTool: () => 'result',
+    })
+    const plan = {
+      type: 'plan',
+      steps: [
+        { op: 'EXEC', args: { tool: 'a', tool_args: {} } },
+        { op: 'RESPOND', args: { ref: 99 } },
+      ]
+    }
+    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    assert(Either.isLeft(result), 'RESPOND bad ref: Left')
+    assert(result.value.includes('99'), 'RESPOND bad ref: error mentions index')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

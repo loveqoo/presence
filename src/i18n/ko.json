@@ -1,0 +1,45 @@
+{
+  "error": {
+    "access_denied": "접근 거부: {{path}}는 허용된 디렉토리 [{{dirs}}] 밖에 있습니다. ~/.presence/config.json의 tools.allowedDirs에 해당 디렉토리를 추가하세요.",
+    "file_not_found": "파일을 찾을 수 없습니다: {{path}}",
+    "dir_not_found": "디렉토리를 찾을 수 없습니다: {{path}}",
+    "arg_required": "{{tool}}: {{arg}}은(는) 필수입니다.",
+    "http_error": "HTTP {{status}} 오류",
+    "command_failed": "명령 실행 실패: {{message}}",
+    "agent_error": "오류가 발생했습니다: {{message}}",
+    "turn_failed": "턴 실패",
+    "memory_recall_failed": "메모리 조회 실패",
+    "memory_save_failed": "메모리 저장/임베딩 실패",
+    "state_restore_failed": "상태 복원 실패, 새로 시작합니다",
+    "event_processing_failed": "이벤트 처리 실패",
+    "heartbeat_failed": "Heartbeat emit 실패",
+    "mcp_connect_failed": "MCP 연결 실패: {{server}}",
+    "config_parse_error": "{{path}} JSON 파싱 에러: {{message}}. 기본값을 사용합니다.",
+    "approve_rejected_bg": "APPROVE 자동 거부 (백그라운드 턴)"
+  },
+  "approve": {
+    "prompt": "\n⚠ 승인 필요: {{description}}\n  계속하시겠습니까? (y/n) > "
+  },
+  "status": {
+    "thinking": "thinking...",
+    "retry": "retry {{attempt}}/{{max}}...",
+    "retry_notice": "\n⟳ JSON 파싱 실패, 재시도 중... ({{attempt}}/{{max}})"
+  },
+  "startup": {
+    "ready": "[{{name}}] 준비 완료. /quit으로 종료합니다.",
+    "memory_loaded": "메모리 로드 완료: {{path}} ({{count}}개 노드)",
+    "state_restored": "상태 복원 (turn: {{turn}})",
+    "mcp_connected": "MCP 연결: {{server}} ({{count}}개 도구)"
+  },
+  "repl": {
+    "no_tools": "등록된 도구가 없습니다.",
+    "no_agents": "등록된 에이전트가 없습니다.",
+    "no_memories": "메모리가 없습니다.",
+    "no_todos": "TODO가 없습니다.",
+    "memory_unavailable": "메모리를 사용할 수 없습니다."
+  },
+  "config": {
+    "warn_no_api_key": "llm.apiKey가 설정되지 않았습니다 — LLM 호출이 실패합니다",
+    "warn_no_base_url": "llm.baseUrl이 설정되지 않았습니다"
+  }
+}

@@ -13,15 +13,18 @@ const defaultHandlers = {
   Spawn:        (op) => undefined,
 }
 
+// log 축적은 관찰 전용 부수효과.
+// 도메인 상태는 UpdateState/GetState + Hook 경로로만 변경한다.
+const appendLog = (log, entry) => { log.push(entry); return entry }
+
 const createTestInterpreter = (handlers = {}, state = null) => {
   const log = []
   const merged = { ...defaultHandlers, ...handlers }
 
   const interpreter = (functor) => {
     const { tag } = functor
-    log.push({ tag, data: { ...functor, next: undefined, map: undefined } })
+    appendLog(log, { tag, data: { ...functor, next: undefined, map: undefined } })
 
-    // UpdateState and GetState use the provided state object
     if (tag === 'UpdateState' && state) {
       state.set(functor.path, functor.value)
       return Task.of(functor.next(state.snapshot()))

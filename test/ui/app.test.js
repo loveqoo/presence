@@ -3,6 +3,9 @@ import { renderToString, Box, Text } from 'ink'
 import { StatusBar } from '../../src/ui/components/StatusBar.js'
 import { ChatArea } from '../../src/ui/components/ChatArea.js'
 import { SidePanel } from '../../src/ui/components/SidePanel.js'
+import { deriveStatus, deriveMemoryCount } from '../../src/ui/App.js'
+import { createReactiveState } from '../../src/infra/state.js'
+import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
 
 let passed = 0
 let failed = 0
@@ -31,7 +34,7 @@ console.log('UI component tests (renderToString)')
     React.createElement(StatusBar, { status: 'working', turn: 1, memoryCount: 0, agentName: 'TestBot' })
   )
   assert(output.includes('TestBot'), 'StatusBar: custom agent name')
-  assert(output.includes('working'), 'StatusBar: shows working status')
+  assert(output.includes('thinking'), 'StatusBar: shows working activity')
 }
 
 // 3. ChatArea renders messages
@@ -77,14 +80,78 @@ console.log('UI component tests (renderToString)')
   assert(output.includes('0'), 'StatusBar defaults: turn 0')
 }
 
-// 7. SidePanel with agents
+// --- deriveStatus selector ---
+
+// 7. turnState=working → 'working'
+{
+  const state = createReactiveState({ turnState: Phase.working('test'), lastTurn: null })
+  assert(deriveStatus(state) === 'working', 'deriveStatus: working when turnState=working')
+}
+
+// 8. turnState=idle, lastTurn=failure → 'error'
+{
+  const state = createReactiveState({
+    turnState: Phase.idle(),
+    lastTurn: TurnResult.failure('q', ErrorInfo('err', ERROR_KIND.PLANNER_PARSE), 'msg'),
+  })
+  assert(deriveStatus(state) === 'error', 'deriveStatus: error when lastTurn=failure')
+}
+
+// 9. turnState=idle, lastTurn=success → 'idle'
+{
+  const state = createReactiveState({
+    turnState: Phase.idle(),
+    lastTurn: TurnResult.success('q', 'ok'),
+  })
+  assert(deriveStatus(state) === 'idle', 'deriveStatus: idle when lastTurn=success')
+}
+
+// 10. turnState=idle, lastTurn=null → 'idle'
+{
+  const state = createReactiveState({ turnState: Phase.idle(), lastTurn: null })
+  assert(deriveStatus(state) === 'idle', 'deriveStatus: idle when lastTurn=null')
+}
+
+// --- deriveMemoryCount selector ---
+
+// 11. context.memories가 배열이면 길이 반환
+{
+  const state = createReactiveState({ context: { memories: ['a', 'b', 'c'] } })
+  assert(deriveMemoryCount(state) === 3, 'deriveMemoryCount: returns array length')
+}
+
+// 12. context.memories가 없으면 0
+{
+  const state = createReactiveState({ context: {} })
+  assert(deriveMemoryCount(state) === 0, 'deriveMemoryCount: 0 when no memories')
+}
+
+// 13. context.memories가 배열이 아니면 0
+{
+  const state = createReactiveState({ context: { memories: 'not-array' } })
+  assert(deriveMemoryCount(state) === 0, 'deriveMemoryCount: 0 when not array')
+}
+
+// --- StatusBar error rendering ---
+
+// 14. StatusBar renders error status in red
+{
+  const output = renderToString(
+    React.createElement(StatusBar, { status: 'error', turn: 3, memoryCount: 0 })
+  )
+  assert(output.includes('error'), 'StatusBar: shows error status')
+}
+
+// --- SidePanel ---
+
+// 15. SidePanel with agents
 {
   const agents = [
     { name: 'backend', status: 'idle' },
     { name: 'heartbeat', status: 'working' },
   ]
   const output = renderToString(
-    React.createElement(SidePanel, { agents, stateSnapshot: { status: 'working', turn: 3 } })
+    React.createElement(SidePanel, { agents, stateSnapshot: { turnState: { tag: 'working', input: 'test' }, turn: 3 } })
   )
   assert(output.includes('backend'), 'SidePanel: shows agent name')
   assert(output.includes('idle'), 'SidePanel: shows agent status')

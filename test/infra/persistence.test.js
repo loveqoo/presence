@@ -25,12 +25,12 @@ async function run() {
     const p = createPersistence({ cwd, debounceMs: 0 })
     p.clear()
 
-    const state = createReactiveState({ status: 'idle', turn: 5 })
+    const state = createReactiveState({ turnState: { tag: 'idle' }, turn: 5 })
     p.saveImmediate(state)
 
     const restored = p.restore()
     assert(restored !== null, 'save → restore: data exists')
-    assert(restored.status === 'idle', 'save → restore: status preserved')
+    assert(restored.turnState.tag === 'idle', 'save → restore: turnState preserved')
     assert(restored.turn === 5, 'save → restore: turn preserved')
     p.clear()
   }
@@ -72,15 +72,15 @@ async function run() {
     const p = createPersistence({ cwd, debounceMs: 10 })
     p.clear()
 
-    const state = createReactiveState({ status: 'idle', turn: 0 })
+    const state = createReactiveState({ turnState: { tag: 'idle' }, turn: 0 })
     p.connectToState(state)
 
-    state.set('status', 'working')
+    state.set('turnState', { tag: 'working', input: 'test' })
     await new Promise(r => setTimeout(r, 100))
 
     const restored = p.restore()
     assert(restored !== null, 'connectToState: auto-saved')
-    assert(restored.status === 'working', 'connectToState: saved correct state')
+    assert(restored.turnState.tag === 'working', 'connectToState: saved correct state')
     p.clear()
   }
 

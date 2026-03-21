@@ -17,7 +17,7 @@ console.log('Prompt builder tests')
 // 1. formatToolList: 0 tools
 {
   const result = formatToolList([])
-  assert(result.includes('사용 가능한 도구 없음'), 'formatToolList: 0 tools shows "없음"')
+  assert(result.includes('No tools available'), 'formatToolList: 0 tools shows empty')
 }
 
 // 2. formatToolList: 2 tools
@@ -35,7 +35,7 @@ console.log('Prompt builder tests')
   const result = formatToolList(tools)
   assert(result.includes('github_list_prs'), 'formatToolList: includes first tool')
   assert(result.includes('slack_send'), 'formatToolList: includes second tool')
-  assert(result.includes('필수'), 'formatToolList: marks required params')
+  assert(result.includes('required'), 'formatToolList: marks required params')
 }
 
 // 3. formatMemories: 0 memories
@@ -70,20 +70,20 @@ console.log('Prompt builder tests')
   assert(prompt.messages[0].role === 'system', 'plannerPrompt: first is system')
   assert(prompt.messages[1].role === 'user', 'plannerPrompt: second is user')
   assert(prompt.messages[1].content === '안녕', 'plannerPrompt: user content is input')
-  assert(prompt.response_format.json_schema === planSchema, 'plannerPrompt: includes planSchema')
+  assert(prompt.response_format.type === 'json_object', 'plannerPrompt: response_format is json_object')
 }
 
 // 8. buildPlannerPrompt: with memories
 {
   const prompt = buildPlannerPrompt({ tools: [], memories: ['past event'], input: 'test' })
-  assert(prompt.messages[0].content.includes('관련 기억'), 'plannerPrompt: includes memory section')
+  assert(prompt.messages[0].content.includes('Relevant memories'), 'plannerPrompt: includes memory section')
   assert(prompt.messages[0].content.includes('past event'), 'plannerPrompt: includes memory content')
 }
 
 // 9. buildPlannerPrompt: without memories, no memory section
 {
   const prompt = buildPlannerPrompt({ tools: [], memories: [], input: 'test' })
-  assert(!prompt.messages[0].content.includes('관련 기억'), 'plannerPrompt: no memory section when empty')
+  assert(!prompt.messages[0].content.includes('Relevant memories'), 'plannerPrompt: no memory section when empty')
 }
 
 // 10. buildPlannerPrompt: persona support

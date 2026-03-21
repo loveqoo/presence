@@ -26,7 +26,7 @@ const SidePanel = ({ agents = [], stateSnapshot = {} }) => {
     h(Text, null, ''),
     h(Text, { bold: true, color: 'cyan' }, 'State'),
     ...Object.entries(stateSnapshot).filter(([k]) =>
-      ['status', 'turn', 'currentInput'].includes(k)
+      ['turnState', 'turn', 'lastTurn'].includes(k)
     ).map(([k, v], i) =>
       h(Text, { key: `s-${i}` }, `  ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
     ),

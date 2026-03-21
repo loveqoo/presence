@@ -1,28 +1,126 @@
-import { Free, respond, updateState, getState } from './op.js'
+import { t } from '../i18n/index.js'
 
-// REPL을 Free 프로그램으로 표현
-// Read → Exec → Write 루프. 각 Op는 인터프리터가 처리.
-// REPL 자체의 Op (Read/Write/Exec)는 별도 정의하지 않고,
-// 콜백 기반으로 구현하여 ink UI나 readline 등과 쉽게 연결.
+// REPL — 콜백 기반. 슬래시 명령어는 agent를 거치지 않고 직접 처리.
 
-const createRepl = ({ agent, onOutput, onError }) => {
+const COMMANDS = {
+  '/help': {
+    description: 'Show available commands',
+    handler: ({ onOutput }) => {
+      const lines = Object.entries(COMMANDS)
+        .map(([cmd, { description }]) => `  ${cmd.padEnd(12)} ${description}`)
+        .join('\n')
+      onOutput(`Available commands:\n${lines}`)
+    },
+  },
+
+  '/status': {
+    description: 'Show agent status',
+    handler: ({ state, onOutput, turnCount }) => {
+      const ts = state.get('turnState')
+      const lt = state.get('lastTurn')
+      const lines = [
+        `turnState: ${ts?.tag || 'unknown'}`,
+        `turn: ${state.get('turn') || 0} (session: ${turnCount})`,
+        `lastTurn: ${lt ? `${lt.tag}${lt.tag === 'failure' ? ` (${lt.error?.kind})` : ''}` : 'none'}`,
+        `events queue: ${(state.get('events.queue') || []).length}`,
+        `delegates pending: ${(state.get('delegates.pending') || []).length}`,
+        `todos: ${(state.get('todos') || []).length}`,
+      ]
+      onOutput(lines.join('\n'))
+    },
+  },
+
+  '/tools': {
+    description: 'List registered tools',
+    handler: ({ toolRegistry, onOutput }) => {
+      const tools = toolRegistry ? toolRegistry.list() : []
+      if (tools.length === 0) { onOutput(t('repl.no_tools')); return }
+      const lines = tools.map(t => `  ${t.name.padEnd(20)} ${t.description || ''}`)
+      onOutput(`Tools (${tools.length}):\n${lines.join('\n')}`)
+    },
+  },
+
+  '/agents': {
+    description: 'List registered agents',
+    handler: ({ agentRegistry, onOutput }) => {
+      const agents = agentRegistry ? agentRegistry.list() : []
+      if (agents.length === 0) { onOutput(t('repl.no_agents')); return }
+      const lines = agents.map(a => `  ${a.name.padEnd(20)} [${a.type}] ${a.description || ''}`)
+      onOutput(`Agents (${agents.length}):\n${lines.join('\n')}`)
+    },
+  },
+
+  '/memory': {
+    description: 'Show recent memories',
+    handler: ({ memory, onOutput }) => {
+      if (!memory) { onOutput(t('repl.memory_unavailable')); return }
+      const nodes = memory.allNodes().slice(-10)
+      if (nodes.length === 0) { onOutput(t('repl.no_memories')); return }
+      const lines = nodes.map(n =>
+        `  [${n.tier}] ${n.label}${n.vector ? ' 🔢' : ''}`
+      )
+      onOutput(`Recent memories (${nodes.length}):\n${lines.join('\n')}`)
+    },
+  },
+
+  '/todos': {
+    description: 'Show TODO list',
+    handler: ({ state, onOutput }) => {
+      const todos = state.get('todos') || []
+      if (todos.length === 0) { onOutput(t('repl.no_todos')); return }
+      const lines = todos.map(t =>
+        `  ${t.done ? '✓' : '○'} [${t.type}] ${t.title}`
+      )
+      onOutput(`TODOs (${todos.length}):\n${lines.join('\n')}`)
+    },
+  },
+
+  '/events': {
+    description: 'Show event queue and dead letters',
+    handler: ({ state, onOutput }) => {
+      const queue = state.get('events.queue') || []
+      const dl = state.get('events.deadLetter') || []
+      const inFlight = state.get('events.inFlight')
+      const lines = [
+        `queue: ${queue.length} event(s)`,
+        ...queue.slice(0, 5).map(e => `  [${e.type}] ${e.id?.slice(0, 8) || '?'}`),
+        `in-flight: ${inFlight ? `[${inFlight.type}]` : 'none'}`,
+        `dead letters: ${dl.length}`,
+        ...dl.slice(-3).map(e => `  [${e.type}] ${e.error?.slice(0, 50) || '?'}`),
+      ]
+      onOutput(lines.join('\n'))
+    },
+  },
+
+  '/quit': {
+    description: 'Exit the agent',
+    handler: ({ stop }) => stop(),
+  },
+
+  '/exit': {
+    description: 'Exit the agent',
+    handler: ({ stop }) => stop(),
+  },
+}
+
+const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegistry, memory }) => {
   let running = true
   let turnCount = 0
 
+  const ctx = () => ({
+    state, toolRegistry, agentRegistry, memory,
+    onOutput, turnCount,
+    stop: () => { running = false },
+  })
+
   const handleInput = async (input) => {
-    if (input === '/quit' || input === '/exit') {
-      running = false
+    const cmd = COMMANDS[input.split(/\s/)[0]]
+    if (cmd) {
+      cmd.handler(ctx())
       return null
     }
 
-    if (input === '/status') {
-      const program = getState(null) // 전체 state
-      // status는 agent.program을 거치지 않고 직접 반환
-      return { type: 'status' }
-    }
-
     turnCount++
-
     try {
       const result = await agent.run(input)
       if (onOutput) onOutput(result)
@@ -41,4 +139,4 @@ const createRepl = ({ agent, onOutput, onError }) => {
   }
 }
 
-export { createRepl }
+export { createRepl, COMMANDS }

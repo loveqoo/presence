@@ -1,0 +1,35 @@
+{
+  "llm": {
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-4o",
+    "apiKey": null,
+    "responseFormat": "json_schema"
+  },
+  "embed": {
+    "provider": "openai",
+    "apiKey": null,
+    "model": null,
+    "dimensions": 256
+  },
+  "strategy": "plan",
+  "memory": {
+    "path": null
+  },
+  "mcp": [
+    {
+      "serverName": "github",
+      "enabled": false,
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "" }
+    }
+  ],
+  "heartbeat": {
+    "enabled": true,
+    "intervalMs": 300000,
+    "prompt": "정기 점검: 현황 확인"
+  },
+  "delegatePolling": {
+    "intervalMs": 10000
+  }
+}

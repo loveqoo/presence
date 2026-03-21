@@ -2,14 +2,18 @@ import fp from '../lib/fun-fp.js'
 
 const { Task } = fp
 
+// trace 축적은 관찰 전용 부수효과.
+// 도메인 상태는 UpdateState/GetState + Hook 경로로만 변경한다.
+// trace shape 변경은 이 헬퍼를 통해서만 수행.
+const appendTrace = (trace, entry) => { trace.push(entry); return entry }
+
 const createTracedInterpreter = (inner, { logger, onOp } = {}) => {
   const trace = []
 
   return {
     interpreter: (functor) => {
       const { tag } = functor
-      const entry = { tag, timestamp: Date.now() }
-      trace.push(entry)
+      const entry = appendTrace(trace, { tag, timestamp: Date.now() })
 
       if (logger) logger.debug(`[op:start] ${tag}`, { tag })
       if (onOp) onOp('start', entry)

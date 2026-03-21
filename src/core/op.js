@@ -1,6 +1,6 @@
 import fp from '../lib/fun-fp.js'
 
-const { Free, identity } = fp
+const { Free, Either, Task, identity, once, pipe } = fp
 const FUNCTOR = Symbol.for('fun-fp-js/Functor')
 
 // --- makeOp factory ---
@@ -40,7 +40,7 @@ const parallel     = (programs)        => Free.liftF(Parallel({ programs }))
 const spawn        = (programs)        => Free.liftF(Spawn({ programs }))
 
 export {
-  makeOp, FUNCTOR, Free, identity,
+  makeOp, FUNCTOR, Free, Either, Task, identity, once, pipe,
   AskLLM, ExecuteTool, Respond, Approve, Delegate,
   Observe, UpdateState, GetState, Parallel, Spawn,
   askLLM, executeTool, respond, approve, delegate,

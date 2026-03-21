@@ -1,0 +1,45 @@
+{
+  "error": {
+    "access_denied": "Access denied: {{path}} is outside allowed directories [{{dirs}}]. Add the directory to tools.allowedDirs in ~/.presence/config.json",
+    "file_not_found": "File not found: {{path}}",
+    "dir_not_found": "Directory not found: {{path}}",
+    "arg_required": "{{tool}}: {{arg}} is required",
+    "http_error": "HTTP {{status}} error",
+    "command_failed": "Command failed: {{message}}",
+    "agent_error": "An error occurred: {{message}}",
+    "turn_failed": "Turn failed",
+    "memory_recall_failed": "Memory recall failed",
+    "memory_save_failed": "Memory save/embed failed",
+    "state_restore_failed": "State restore failed, starting fresh",
+    "event_processing_failed": "Event processing failed",
+    "heartbeat_failed": "Heartbeat emit failed",
+    "mcp_connect_failed": "MCP connection failed: {{server}}",
+    "config_parse_error": "{{path}} JSON parse error: {{message}}. Using defaults.",
+    "approve_rejected_bg": "APPROVE auto-rejected (background turn)"
+  },
+  "approve": {
+    "prompt": "\n⚠ Approval required: {{description}}\n  Continue? (y/n) > "
+  },
+  "status": {
+    "thinking": "thinking...",
+    "retry": "retry {{attempt}}/{{max}}...",
+    "retry_notice": "\n⟳ JSON parse failed, retrying... ({{attempt}}/{{max}})"
+  },
+  "startup": {
+    "ready": "[{{name}}] Ready. Type /quit to exit.",
+    "memory_loaded": "Memory loaded from {{path}} ({{count}} nodes)",
+    "state_restored": "State restored (turn: {{turn}})",
+    "mcp_connected": "MCP connected: {{server}} ({{count}} tools)"
+  },
+  "repl": {
+    "no_tools": "No tools registered.",
+    "no_agents": "No agents registered.",
+    "no_memories": "No memories.",
+    "no_todos": "No TODOs.",
+    "memory_unavailable": "Memory not available."
+  },
+  "config": {
+    "warn_no_api_key": "llm.apiKey is not set — LLM calls will fail",
+    "warn_no_base_url": "llm.baseUrl is not set"
+  }
+}

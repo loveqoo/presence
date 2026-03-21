@@ -30,13 +30,13 @@ const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } =
   const connectToState = (reactiveState) => {
     // Save on any top-level state change by hooking into common paths
     const hookSave = () => save(reactiveState)
-    reactiveState.hooks.on('status', hookSave)
+    reactiveState.hooks.on('turnState', hookSave)
     reactiveState.hooks.on('turn', hookSave)
-    reactiveState.hooks.on('lastResult', hookSave)
+    reactiveState.hooks.on('lastTurn', hookSave)
     return { unhook: () => {
-      reactiveState.hooks.off('status', hookSave)
+      reactiveState.hooks.off('turnState', hookSave)
       reactiveState.hooks.off('turn', hookSave)
-      reactiveState.hooks.off('lastResult', hookSave)
+      reactiveState.hooks.off('lastTurn', hookSave)
     }}
   }
 
