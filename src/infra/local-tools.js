@@ -48,23 +48,28 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
   return [
     {
       name: 'file_read',
-      description: 'Read a text file. Use relative paths like "package.json" or "src/core/agent.js". Use maxLines to read only the first N lines.',
+      description: 'Read a text file. Use relative paths like "package.json" or "src/core/agent.js". Use maxLines to read the first N lines, or tailLines to read the last N lines.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Relative file path (e.g. "package.json")' },
-          maxLines: { type: 'integer', description: 'Maximum number of lines to read from the beginning of the file' },
+          maxLines: { type: 'integer', description: 'Read only the first N lines' },
+          tailLines: { type: 'integer', description: 'Read only the last N lines' },
         },
         required: ['path'],
       },
-      handler: ({ path, maxLines } = {}) => {
+      handler: ({ path, maxLines, tailLines } = {}) => {
         if (!path) throw new Error(t('error.arg_required', { tool: 'file_read', arg: 'path' }))
         const resolved = resolvePath(path)
         checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path }))
         const content = readFileSync(resolved, 'utf-8')
+        const lines = content.split('\n')
+        if (tailLines != null && Number.isInteger(tailLines) && tailLines > 0) {
+          return lines.slice(-tailLines).join('\n')
+        }
         if (maxLines != null && Number.isInteger(maxLines) && maxLines > 0) {
-          return content.split('\n').slice(0, maxLines).join('\n')
+          return lines.slice(0, maxLines).join('\n')
         }
         return content
       },

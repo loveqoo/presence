@@ -84,6 +84,10 @@ async function run() {
     assert(first5.startsWith('line 1\n'), 'file_read maxLines: starts from line 1')
     const noLimit = byName.file_read.handler({ path: join(testDir, 'multi.txt'), maxLines: 0 })
     assert(noLimit.split('\n').length === 20, 'file_read maxLines 0: returns all')
+    const last3 = byName.file_read.handler({ path: join(testDir, 'multi.txt'), tailLines: 3 })
+    assert(last3.split('\n').length === 3, 'file_read tailLines: returns 3 lines')
+    assert(last3.endsWith('line 20'), 'file_read tailLines: ends with last line')
+    assert(last3.startsWith('line 18'), 'file_read tailLines: starts from correct offset')
   }
 
   // --- file_write ---
