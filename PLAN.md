@@ -854,7 +854,7 @@ presence/
 
 - **2-Track 비동기 큐**: 현재 Hook의 비동기 작업(메모리 저장, 임베딩, 히스토리 압축)이 fire-and-forget으로 순서 보장 없음. 모든 비동기 처리를 큐 기반으로 통합하되, 크리티컬 경로(recall → 프롬프트 → LLM → 실행)와 백그라운드(임베딩, 압축)를 분리하는 2-track 큐 구조 도입. 느린 백그라운드 작업이 다음 턴을 차단하지 않으면서도, 크리티컬 경로 내 순서는 보장.
 
-- **StateT 기반 인터프리터 리팩토링**: 현재 인터프리터가 `state.set()`을 명령형으로 호출하여 상태를 변경함. fun-fp-js에 `StateT(M)` 트랜스포머가 추가되면, 인터프리터의 상태 관리를 `StateT(Task)`로 전환. Free Monad의 `UpdateState`/`GetState` Op을 제거하고, 상태 전이는 `StateT`가 순수하게 보장. Hook 발동은 `StateT` 체인의 최종 결과에서 이전/새 상태를 비교하여 처리. 선행: fun-fp-js에 범용 `StateT(M)` 구현.
+- **StateT 기반 인터프리터 리팩토링**: 현재 인터프리터가 `state.set()`을 명령형으로 호출하여 상태를 변경함. 상태 관리를 순수 전이로 전환하고, `UpdateState`/`GetState` Op을 제거. Hook 발동은 전이 결과에서 이전/새 상태를 비교하여 처리. → Effect-TS 도입 시 `Ref`로 해결.
 
 - **레이어 의존성 정리**: `core/prompt.js`가 `infra/tokenizer.js`를 import하여 core → infra 의존성 역전 발생. 원칙은 infra → core 단방향. tokenizer를 core로 이동하거나, prompt.js에 토큰 측정 함수를 주입하는 구조로 변경. 다른 레이어 경계 위반도 함께 점검.
 
@@ -876,7 +876,7 @@ presence/
 
 - **SQLite 기반 메모리 저장소**: lowdb(JSON 파일) → SQLite 전환으로 검색 인덱스, TTL, 트랜잭션, 벡터 검색을 단일 저장소에서 해결. 서버 프로세스 없이 단일 파일 — `npm start`만으로 실행 원칙 유지. 라이브러리: [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) + [sqlite-vec](https://github.com/asg017/sqlite-vec) (벡터 검색 확장).
 
-- **구조적 동시성 / 이펙트 시스템 검토**: 이 프로젝트가 향하는 방향(StateT, 인터프리터 합성, 비동기 큐, 이펙트 분리)은 대수적 이펙트 시스템과 수렴. [Effect-TS](https://effect.website/)가 이펙트 시스템, 구조적 동시성(Fiber), DI(Layer/Context), 스키마 검증, 트레이싱을 모두 제공. 전면 도입보다는 설계 참고 대상으로 검토하고, fun-fp-js와의 관계(보완 vs 대체)를 판단.
+- **Effect-TS 도입 + TypeScript 전환 + fun-fp-js 제거**: Effect-TS를 실행 인프라로 도입하고, 그 위에 Free Monad을 구현(`runWithEffect`). Either→`Either`, Maybe→`Option`, Task→`Effect`, pipe→`pipe`로 전환. fun-fp-js의 역할이 전부 대체되므로 의존성 제거. 이로써 StateT, 2-Track 큐, 인터프리터 합성, 에러 통일, DI, 경계 스키마 검증 등 다수 TODO가 Effect-TS 기능으로 해결됨. 전체 src/를 TypeScript로 전환 필요. 실행 순서: (1) Effect-TS 위 Free Monad 구현 + `runWithEffect` (2) TypeScript 전환 (3) 인터프리터를 Effect 기반으로 재작성 (4) fun-fp-js 제거.
 
 ## 운영 결정
 
