@@ -856,6 +856,12 @@ presence/
 
 - **StateT 기반 인터프리터 리팩토링**: 현재 인터프리터가 `state.set()`을 명령형으로 호출하여 상태를 변경함. fun-fp-js에 `StateT(M)` 트랜스포머가 추가되면, 인터프리터의 상태 관리를 `StateT(Task)`로 전환. Free Monad의 `UpdateState`/`GetState` Op을 제거하고, 상태 전이는 `StateT`가 순수하게 보장. Hook 발동은 `StateT` 체인의 최종 결과에서 이전/새 상태를 비교하여 처리. 선행: fun-fp-js에 범용 `StateT(M)` 구현.
 
+- **레이어 의존성 정리**: `core/prompt.js`가 `infra/tokenizer.js`를 import하여 core → infra 의존성 역전 발생. 원칙은 infra → core 단방향. tokenizer를 core로 이동하거나, prompt.js에 토큰 측정 함수를 주입하는 구조로 변경. 다른 레이어 경계 위반도 함께 점검.
+
+- **인터프리터 합성 구조**: 현재 `prod.js`가 모든 Op 핸들러(LLM, 도구, 상태, 위임, 승인)를 단일 dispatch 객체로 관리. 관심사별 인터프리터를 분리하고 합성하는 미들웨어 패턴 도입. 개별 인터프리터의 독립 테스트가 가능해지고, StateT 전환 시 상태 관련 핸들러만 교체 가능. 예: `composInterpreters(llmInterpreter, toolInterpreter, stateInterpreter, delegateInterpreter)`.
+
+- **Plan 정규화 파이프라인**: 현재 `normalizeStep`이 EXEC→DELEGATE 한 패턴만 ad-hoc으로 처리. 로컬 LLM의 혼동 패턴은 계속 증가할 것. validation 전에 정규화 파이프라인을 두고, rewrite 규칙을 선언적으로 등록/관리하는 구조 도입. 예: `[normalizeDelegate, normalizeApprove, ...]` 규칙 배열을 순차 적용.
+
 ## 운영 결정
 
 | 결정 | 내용 | 이유 |
