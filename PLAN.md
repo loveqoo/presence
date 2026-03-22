@@ -876,7 +876,10 @@ presence/
 
 - **SQLite 기반 메모리 저장소**: lowdb(JSON 파일) → SQLite 전환으로 검색 인덱스, TTL, 트랜잭션, 벡터 검색을 단일 저장소에서 해결. 서버 프로세스 없이 단일 파일 — `npm start`만으로 실행 원칙 유지. 라이브러리: [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) + [sqlite-vec](https://github.com/asg017/sqlite-vec) (벡터 검색 확장).
 
-- **Effect-TS 도입 + TypeScript 전환 + fun-fp-js 제거**: Effect-TS를 실행 인프라로 도입하고, 그 위에 Free Monad을 구현(`runWithEffect`). Either→`Either`, Maybe→`Option`, Task→`Effect`, pipe→`pipe`로 전환. fun-fp-js의 역할이 전부 대체되므로 의존성 제거. 이로써 StateT, 2-Track 큐, 인터프리터 합성, 에러 통일, DI, 경계 스키마 검증 등 다수 TODO가 Effect-TS 기능으로 해결됨. 전체 src/를 TypeScript로 전환 필요. 실행 순서: (1) Effect-TS 위 Free Monad 구현 + `runWithEffect` (2) TypeScript 전환 (3) 인터프리터를 Effect 기반으로 재작성 (4) fun-fp-js 제거.
+- **실행 인프라 방향 (미결정, 두 경로 검토 중)**:
+  - **경로 A — fun-fp-js 자체 확장**: fun-fp-js에 StateT(M), Fiber(fork/cancel/join), 스케줄러, 구조적 동시성을 직접 구현. JavaScript 유지. Effect-TS는 설계 레퍼런스로 참고. presence가 fun-fp-js의 실전 검증 무대가 되고, 프로젝트에 필요한 만큼만 구현하여 무게 조절 가능. 라이브러리에 대한 완전한 이해와 소유권 확보.
+  - **경로 B — Effect-TS 도입 + TypeScript 전환**: Effect-TS를 실행 인프라로 도입하고, 그 위에 Free Monad 구현(`runWithEffect`). Either→`Either`, Maybe→`Option`, Task→`Effect` 전환. fun-fp-js 제거. StateT, 큐, 인터프리터 합성, 에러 통일, DI, 스키마 검증 등 다수 TODO가 해결됨. 단, TypeScript 전환 필요, Effect-TS 프레임워크 종속.
+  - **공통**: 어느 경로든 Free Monad은 프로그램 표현 계층으로 유지. AST 검사/변환(dry-run, traced, test)은 보존.
 
 ## 운영 결정
 
