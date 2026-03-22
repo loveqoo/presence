@@ -132,10 +132,10 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
   const [showTranscript, setShowTranscript] = useState(false)
   const [statusItems, setStatusItems] = useState([...DEFAULT_ITEMS])
   const [toolExpanded, setToolExpanded] = useState(false)
+  const inputHistoryRef = useRef([])
 
   // App-level key handlers (overlay가 열려있지 않을 때만)
   useInput((input, key) => {
-    if (showTranscript) return
     if (key.escape && agentState.status === 'working' && onCancel) {
       onCancel()
     }
@@ -149,7 +149,7 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
     if (key.ctrl && input === 'o') {
       setToolExpanded(prev => !prev)
     }
-  })
+  }, { isActive: !showTranscript })
 
   const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg])
@@ -418,7 +418,7 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
-    h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve }),
+    h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve, isActive: !showTranscript, historyRef: inputHistoryRef }),
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),

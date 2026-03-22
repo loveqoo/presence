@@ -5,10 +5,11 @@ const h = React.createElement
 
 const MAX_HISTORY = 50
 
-const InputBar = ({ onSubmit = () => {}, disabled = false }) => {
+const InputBar = ({ onSubmit = () => {}, disabled = false, isActive = true, historyRef: externalHistoryRef }) => {
   const [value, setValue] = useState('')
   const [cursor, setCursor] = useState(0)
-  const historyRef = useRef([])
+  const internalHistoryRef = useRef([])
+  const historyRef = externalHistoryRef || internalHistoryRef
   const indexRef = useRef(-1)
   const draftRef = useRef('')
 
@@ -95,7 +96,7 @@ const InputBar = ({ onSubmit = () => {}, disabled = false }) => {
       setValue(v => v.slice(0, cursor) + input + v.slice(cursor))
       setCursor(c => c + input.length)
     }
-  })
+  }, { isActive: isActive && !disabled })
 
   const promptColor = disabled ? 'gray' : 'cyan'
   const before = value.slice(0, cursor)
