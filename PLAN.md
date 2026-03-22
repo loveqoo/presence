@@ -862,6 +862,12 @@ presence/
 
 - **Plan 정규화 파이프라인**: 현재 `normalizeStep`이 EXEC→DELEGATE 한 패턴만 ad-hoc으로 처리. 로컬 LLM의 혼동 패턴은 계속 증가할 것. validation 전에 정규화 파이프라인을 두고, rewrite 규칙을 선언적으로 등록/관리하는 구조 도입. 예: `[normalizeDelegate, normalizeApprove, ...]` 규칙 배열을 순차 적용.
 
+- **메모리 임베딩 관심사 분리**: `MemoryGraph.embedPending(embedder)`가 저장소 클래스 안에서 임베딩까지 수행. 저장과 벡터화는 다른 관심사. `MemoryEmbedder` 서비스로 분리하여 MemoryGraph는 노드/엣지 CRUD + 검색만 담당, 임베딩은 외부에서 수행 후 벡터를 돌려주는 구조로 변경.
+
+- **메모리 검색 인덱스**: 현재 키워드/벡터 검색이 전부 `nodes.filter()` 선형 스캔. 단계적 개선: (1) 키워드 역인덱스(term → nodeId set) 추가로 키워드 검색 O(1) 근접화 — 외부 의존 없이 즉시 가능. (2) 노드 수천 건 이상 시 SQLite + vector extension으로 저장소 전략 교체. (3) 멀티 인스턴스/서버 환경(Phase 7 이후) 시 전용 벡터 DB 검토.
+
+- **메모리 무효화**: 사실 기반 메모리가 오래되면 LLM을 오도함. 현재는 시간 기반 수동 삭제만 가능. 단계적 해결: (1) 노드에 `expiresAt` 필드 추가 + recall 시 필터 — 즉시 적용 가능, 외부 의존 없음. (2) 출처 연결(도구명 + 인자 기록) — 같은 도구+인자로 새 결과가 들어오면 이전 메모리 자동 갱신, 구조적으로 가장 견고. (3) 저장소가 SQLite/Redis로 전환되면 TTL을 미들웨어에 위임.
+
 ## 운영 결정
 
 | 결정 | 내용 | 이유 |
