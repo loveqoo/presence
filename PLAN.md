@@ -31,30 +31,33 @@
 
 ## 아키텍처
 
-### 핵심 파이프라인
+### 핵심 파이프라인: Incremental Planning
 
 ```
 User
-  → ① AskLLM: 계획 생성 (string)
-    → ② Parser: Free Monad 프로그램으로 변환
-      → ③ Interpreter: 실행 (도구 호출, 서브 에이전트 위임 등)
-        → ④ AskLLM: 실행 결과를 사람 말로 가공
-          → User
+  → loop {
+      ① AskLLM: 계획 조각 생성 (JSON, rolling context 포함)
+      → ② Parser + Validator: 구조 검증 → Free Monad 프로그램 변환
+        → ③ Interpreter: 실행 (도구 호출, 서브 에이전트 위임 등)
+          → ④ 종료 판단:
+              direct_response → 사용자에게 응답 → 끝
+              plan + RESPOND  → step 결과 직접 전달 → 끝
+              plan - RESPOND  → 결과 관찰 → ①로 (다음 iteration)
+    } maxIterations 초과 → 실패
 ```
 
-**LLM은 두 번 호출된다:**
-1. **입구** — 뭘 할지 계획 (텍스트 DSL 생성)
-2. **출구** — 실행 결과를 사용자에게 전달할 형태로 가공
-
-**그 사이는 기계적 실행.** LLM의 판단 없이 Free Monad 프로그램이 돌아간다.
+**Plan-Validate-Execute-Observe-Repeat.** 한 턴의 엔진은 항상 같은 구조를 따른다.
+- 전통적 plan = 초기에 여러 step을 한 번에 내는 경우
+- 전통적 react = 매 iteration마다 1 step만 내는 경우
+- 둘은 별도 모드가 아니라 **같은 엔진의 다른 사용 패턴**.
 
 ### 3계층 대응
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │ Model Layer     │ LLM                                   │
-│                 │   ①계획 생성 (system prompt + DSL)     │
-│                 │   ④결과 가공 (실행 결과 → 자연어)      │
+│                 │   매 iteration: 계획 조각 생성         │
+│                 │   최종: direct_response로 자연어 응답  │
 ├──────────────────────────────────────────────────────────┤
 │ Orchestration   │ Free Monad                             │
 │                 │   ②파서 (텍스트 → Free 프로그램)       │
@@ -103,7 +106,7 @@ User: "오늘 PR 현황이랑 회의 안건 정리해서 팀 슬랙에 보내줘
 
 ```
 v1: 입력 → LLM이 프로그램 선택 → 고정 체인 실행 → 끝
-v2: 입력 → LLM이 계획 작성(string) → 파서(Free) → 실행 → LLM이 결과 가공 → 응답
+v2: 입력 → loop { LLM 계획 → validate → 실행 → 관찰 → 종료? } → 응답
 ```
 
 ## 반응형 State + Hook
@@ -368,9 +371,9 @@ ASK_LLM: LLM에게 질문 (이전 단계 결과 참조 가능)
 EXEC: 도구 실행
   args: { tool: "도구이름", tool_args: { ... } }
 
-RESPOND: 사용자에게 응답 (이전 단계 결과 참조)
+RESPOND: 사용자에게 응답 (이전 단계 결과 참조, 선택적 빠른 종료)
   args: { ref: 3 }
-  반드시 계획의 마지막에 포함
+  포함 시 반드시 마지막 step. 없으면 중간 결과로 다음 iteration 진행
 
 APPROVE: 사용자 승인 요청
   args: { description: "승인 요청 설명" }
@@ -418,33 +421,45 @@ backend-team: 백엔드 팀 에이전트 (API 리뷰, 장애 분석)
 
 ```
 규칙:
-1. plan의 마지막 step은 반드시 RESPOND여야 합니다.
-2. 사용 가능한 도구와 에이전트만 사용하세요.
-3. ctx와 ref의 숫자는 해당 step보다 앞선 step의 인덱스(1-based)여야 합니다.
-4. EXEC의 tool_args 안에서 이전 결과를 참조할 때는 "$N" 문자열을 사용합니다.
+1. 충분한 정보가 있으면 direct_response를 사용. 이것이 기본 종료 방식.
+2. 추가 정보가 필요하면 RESPOND 없이 plan을 반환. 실행 후 결과를 다음 iteration에서 확인 가능.
+3. RESPOND는 선택적 — step 결과를 사용자에게 직접 전달하는 빠른 종료. 포함 시 마지막 step.
+4. 사용 가능한 도구와 에이전트만 사용하세요.
+5. ctx와 ref의 숫자는 해당 step보다 앞선 step의 인덱스(1-based)여야 합니다.
+6. EXEC의 tool_args 안에서 이전 결과를 참조할 때는 "$N" 문자열을 사용합니다.
 ```
 
-### 전체 턴 흐름
+### 전체 턴 흐름 (Incremental Planning)
 
 ```js
-const agentTurn = (input) =>
-  updateState('status', 'working')
-    .chain(() => updateState('currentInput', input))
-    // ① LLM에게 계획 생성 요청 (JSON Schema 강제)
+const createAgentTurn = ({ tools, maxRetries, maxIterations }) => (input) =>
+  beginTurn(input)
     .chain(() => getState('context.memories'))
-    .chain(memories => askLLM(buildPlannerPrompt({ tools, agents, memories, input })))
-    // ② JSON 파싱 → Free Monad 프로그램
-    .chain(planJson => {
-      const plan = JSON.parse(planJson)
-      return parsePlan(plan)
+    .chain(memories => {
+      const iterate = (context, n) => {
+        if (n >= maxIterations) return respondAndFail(input, ErrorInfo('Max iterations exceeded'))
+
+        return askLLM(buildIterationPrompt(context))
+          .chain(planJson => {
+            const parsed = Either.pipeK(safeJsonParse, validatePlan)(planJson)
+            return Either.fold(
+              error => retriesLeft > 0 ? retry : respondAndFail(input, error),
+              plan => {
+                if (plan.type === 'direct_response')
+                  return respond(plan.message).chain(msg => finishSuccess(input, msg))
+
+                const hasRespond = plan.steps.some(s => s.op === 'RESPOND')
+                return parsePlan(plan).chain(either => Either.fold(
+                  err => respondAndFail(input, err),
+                  results => hasRespond
+                    ? finishSuccess(input, results[results.length - 1])
+                    : iterate({ ...context, previousPlan: plan, previousResults: summarizeResults(results) }, n + 1),
+                  either))
+              }, parsed)
+          })
+      }
+      return iterate(baseContext, 0)
     })
-    // ③ 실행 결과를 LLM에게 전달하여 가공
-    .chain(results => askLLM(buildFormatterPrompt(input, results)))
-    .chain(response => respond(response))
-    .chain(response =>
-      updateState('lastResult', response)
-        .chain(() => updateState('status', 'idle'))
-        .chain(() => Free.of(response)))
 ```
 
 ## Op 설계
@@ -722,39 +737,54 @@ hooks.on('heartbeat.results', async (results, state) => {
 ```
 presence/
 ├── package.json
-├── PLAN.md
-├── CLAUDE.md
-├── config.example.js
-├── docs/
-│   └── ai-agent-trends-2025-2026.md
+├── PLAN.md / CLAUDE.md
+├── config.example.json
 ├── src/
 │   ├── lib/fun-fp.js                ← fun-fp-js dist
 │   ├── core/
-│   │   ├── op.js                    ← Agent Op ADT + DSL (8개)
-│   │   ├── plan.js                  ← 계획 DSL 파서 (텍스트 → Free)
-│   │   ├── react.js                 ← ReAct 루프 (Free 프로그램)
-│   │   ├── repl.js                  ← REPL (Free 프로그램)
-│   │   └── agent.js                 ← 에이전트 턴 관리
+│   │   ├── op.js                    ← Agent Op ADT + DSL (10개)
+│   │   ├── plan.js                  ← Plan parser (JSON → Free) + step validation
+│   │   ├── prompt.js                ← LLM 프롬프트 (iteration, retry, summarize)
+│   │   ├── repl.js                  ← REPL + slash commands
+│   │   └── agent.js                 ← Incremental Planning Engine + 상태 ADT
 │   ├── interpreter/
-│   │   ├── prod.js                  ← 프로덕션 인터프리터 (State + Hook 처리)
+│   │   ├── prod.js                  ← 프로덕션 인터프리터
 │   │   ├── test.js                  ← Mock 인터프리터
 │   │   ├── traced.js                ← 트레이싱 래퍼
-│   │   └── dryrun.js                ← Dry-run 인터프리터 (계획 검증용)
+│   │   └── dryrun.js                ← Dry-run 인터프리터
 │   ├── infra/
-│   │   ├── llm.js                   ← LLM 클라이언트 (function calling)
-│   │   ├── tools.js                 ← 도구 레지스트리 + MCP 스키마
-│   │   ├── state.js                 ← 공유 State 객체 + Hook 시스템
-│   │   ├── memory.js                ← 메모리 관리 (Hook에서 호출)
+│   │   ├── llm.js                   ← LLM 클라이언트 (timeoutMs 지원)
+│   │   ├── tools.js                 ← 도구 레지스트리
+│   │   ├── local-tools.js           ← 로컬 도구 6개 (file, shell, web, calc)
+│   │   ├── state.js                 ← 공유 State + Hook 시스템
+│   │   ├── memory.js                ← 그래프 메모리 + 벡터 검색
+│   │   ├── embedding.js             ← 임베딩 (openai, cohere)
+│   │   ├── persistence.js           ← 상태 영속화
+│   │   ├── mcp.js                   ← MCP 클라이언트 어댑터
+│   │   ├── a2a-client.js            ← A2A JSON-RPC 클라이언트
+│   │   ├── agent-registry.js        ← 에이전트 레지스트리 + DelegateResult
+│   │   ├── events.js                ← 이벤트 큐 + Hook 연결
+│   │   ├── heartbeat.js             ← 주기적 heartbeat
+│   │   ├── config.js                ← 설정 (file + env override)
+│   │   ├── persona.js               ← 페르소나 설정
+│   │   ├── logger.js                ← Winston 로거
 │   │   └── input.js                 ← 터미널 입력 (Bracketed Paste)
-│   └── main.js                      ← 조립 (State 생성, Hook 등록, 인터프리터 구성)
-└── test/
-    ├── core/
-    │   ├── op.test.js
-    │   ├── plan.test.js             ← 계획 파서 테스트
-    │   ├── react.test.js            ← ReAct 루프 테스트
-    │   └── agent.test.js
-    ├── infra/
-    │   └── state.test.js            ← State + Hook 테스트
+│   ├── i18n/
+│   │   ├── index.js                 ← i18next 초기화
+│   │   ├── ko.json                  ← 한국어
+│   │   └── en.json                  ← 영어
+│   ├── ui/
+│   │   ├── App.js                   ← Ink 최상위 앱
+│   │   └── components/              ← StatusBar, ChatArea, InputBar, SidePanel 등
+│   └── main.js                      ← 조립 (Config → State → Hook → Agent → REPL)
+└── test/                            ← 40개 파일, 1432+ assertions
+    ├── core/                        ← op, plan, prompt, agent, repl, assembly
+    ├── infra/                       ← state, config, memory, mcp, events, ...
+    ├── interpreter/                 ← prod, traced, dryrun
+    ├── ui/                          ← app, interactive
+    ├── integration/                 ← phase5 E2E
+    ├── regression/                  ← llm-output, tool-defense, plan-fuzz, e2e-scenario
+    ├── manual/                      ← live-llm (실제 LLM 테스트)
     └── run.js
 ```
 
@@ -762,77 +792,98 @@ presence/
 
 각 Step은 **조사 → 설계 → 구현 → 테스트** 순서.
 
-### Phase 1: 코어 (외부 의존성 없이 검증)
+### Phase 1~5: ✅ 완료
 
-| Step | 파일 | 내용 | 선행 조사 |
-|------|------|------|----------|
-| **1** | `package.json`, `src/lib/fun-fp.js` | 프로젝트 초기화 | — |
-| **2** | `src/core/op.js` | Op ADT 8개 + DSL | v1 코드 재활용 |
-| **3** | `src/infra/state.js` | 공유 State 객체 + Hook 시스템 | — |
-| **4** | `test/infra/state.test.js` | State + Hook 테스트 | — |
-| **5** | `src/interpreter/test.js` | Mock 인터프리터 (State+Hook 포함) | — |
-| **6** | `src/infra/tools.js` | 도구 레지스트리 + MCP 스키마 | MCP 스펙 조사 |
-| **7** | `src/core/plan.js` | 계획 DSL 파서 (텍스트 → Free) | — |
-| **8** | `test/core/plan.test.js` | 파서 테스트 (텍스트 → Free → mock 실행) | — |
-| **9** | `src/core/react.js` | ReAct 루프 (Free 프로그램) | ReAct 논문, function calling 스펙 |
-| **10** | `test/core/react.test.js` | ReAct 테스트 (mock 도구) | — |
-| **11** | `src/core/agent.js` | 에이전트 턴 (State + Plan/ReAct 통합) | — |
-| **12** | `test/core/agent.test.js` | 에이전트 턴 테스트 | — |
+| Phase | Steps | 내용 | 상태 |
+|-------|-------|------|------|
+| **Phase 1** | 1-12 | 코어 (Op, State, Plan, Agent) | ✅ |
+| **Phase 2** | 13-19 | 실제 연동 (LLM, Interpreter, REPL) | ✅ |
+| **Phase 3** | 20-23 | MCP + 도구 (MCP, 메모리, 임베딩) | ✅ |
+| **Phase 4** | 24-26 | Heartbeat + 이벤트 | ✅ |
+| **Phase 5** | 27-29 | Multi-Agent + A2A | ✅ |
 
-### Phase 2: 실제 연동
+**Phase 1-5 이후 추가 구현:**
+- 상태 전이 ADT (Phase/TurnResult/ErrorInfo)
+- Incremental Planning Engine (plan/react 통합, formatter 제거)
+- Config 시스템 (파일 + env override + maxRetries/timeoutMs)
+- i18n (ko/en)
+- 로컬 도구 6개 (file_read/write/list, web_fetch, shell_exec, calculate)
+- 다층 검증 (safeJsonParse → validatePlan → validateExecArgs → validateRefRange → RESPOND 위치)
+- 회귀 테스트 4종 + Live LLM 테스트
+- 1578 assertions, 40 test files
 
-| Step | 파일 | 내용 | 선행 조사 |
-|------|------|------|----------|
-| **13** | `src/infra/llm.js` | LLM 클라이언트 (function calling) | OpenAI function calling 스펙 |
-| **14** | `src/interpreter/prod.js` | 프로덕션 인터프리터 | — |
-| **15** | `src/interpreter/traced.js` | 트레이싱 래퍼 | v1 코드 재활용 |
-| **16** | `src/interpreter/dryrun.js` | Dry-run 인터프리터 | — |
-| **17** | `src/infra/input.js` | 터미널 입력 | Bracketed Paste Mode 스펙 조사 |
-| **18** | `src/infra/memory.js` | 로컬 메모리 (Hook에서 호출) | — |
-| **19** | `src/core/repl.js` + `src/main.js` | REPL + 조립 + Hook 등록 | v1 코드 재활용 |
+### Phase 6: 터미널 UI (Ink) — ✅ 완료
 
-### Phase 3: MCP + 도구 확장
+| Step | 파일 | 내용 |
+|------|------|------|
+| **31** | `src/ui/hooks/useAgentState.js` | State → UI 바인딩 React Hook |
+| **32** | `src/ui/components/StatusBar.js` | 상단 status bar 개선 (iteration, retry 표시) |
+| **33** | `src/ui/components/PlanView.js` | iteration/step 인라인 시각화 (핵심 신규) |
+| **34** | `src/ui/components/ChatArea.js` | 대화 영역 개선 (PlanView 인라인 통합) |
+| **35** | `src/ui/components/InputBar.js` | 입력 바 개선 |
+| **36** | `src/ui/components/SidePanel.js` | 컨텍스트 패널 (agents, tools, memory, todos, events) |
+| **37** | `src/ui/components/ApprovePrompt.js` | APPROVE 인라인 프롬프트 |
+| **38** | `src/ui/App.js` | 레이아웃 매니저 + 사이드 패널 토글 |
+| **39** | `src/main.js` | readline → Ink 앱 전환, Hook → UI 연결 |
 
-| Step | 내용 | 선행 조사 |
-|------|------|----------|
-| **20** | MCP 클라이언트 구현 | MCP JS SDK 조사 |
-| **21** | GitHub 도구 연동 | GitHub MCP 서버 조사 |
-| **22** | 메모리 영속화 (파일 기반) | — |
-| **23** | 임베딩 기반 메모리 검색 | 사용 가능한 임베딩 모델 조사 |
+**Phase 6 이후 추가 구현:**
+- Prompt Assembly + Budget fitting (단계적 fitting: system → history → memories)
+- Conversation History (rolling window max 20턴, source filtering, truncation)
+- Iteration context compaction (이전 plan/results 요약하여 rolling context)
+- TranscriptOverlay 디버그 (assembly metadata: budget/used/dropped)
+- Config: prompt budget 설정 (`prompt.maxContextChars`, `prompt.reservedOutputChars`)
+- config.js: `Either.catch()` 패턴 적용 (agent.js `safeJsonParse`와 일관성)
+- 코드 품질 리팩터링: 정책 상수 통합(`src/core/policies.js`), MemoryGraph encapsulation(`removeNodes`), 에러 경계 정리(`persistence.js` try-catch, `memory-maintenance.js` 무음 삼킴 수정)
+- 1578 assertions, 40 test files
 
-### Phase 4: Heartbeat + 이벤트 소스
-
-| Step | 내용 | 선행 조사 |
-|------|------|----------|
-| **24** | 이벤트 수신 인프라 (webhook 서버 또는 polling) | — |
-| **25** | Heartbeat 에이전트 (주기적 계획 실행) | — |
-| **26** | TODO 관리 (이벤트 → State → Hook → 목록 관리) | — |
-
-### Phase 5: Multi-Agent + A2A
+### Phase 7: 웹 UI (React + Vite)
 
 | Step | 내용 | 선행 조사 |
 |------|------|----------|
-| **27** | Delegate op 구현 | A2A 프로토콜 스펙 조사 |
-| **28** | 에이전트 레지스트리 | — |
-| **29** | Heartbeat ↔ 메인 에이전트 A2A 통신 | — |
-| **30** | 계층적 에이전트 (Supervisor 패턴) | Google ADK 아키텍처 조사 |
+| **40** | API 서버 (Express/Fastify + WebSocket) | — |
+| **41** | WebSocket Hook 연결 (State → 브라우저 실시간 push) | — |
+| **42** | 웹 프론트엔드 (React + Vite, 터미널 UI 컴포넌트 재활용) | — |
+
+### Phase 8: 계층적 에이전트
+
+| Step | 내용 | 선행 조사 |
+|------|------|----------|
+| **43** | 계층적 에이전트 (Supervisor 패턴) | Google ADK 아키텍처 조사 |
+
+## 운영 결정
+
+| 결정 | 내용 | 이유 |
+|------|------|------|
+| history source 필터링 | `conversationHistory`는 `source === 'user'` 성공 턴만 저장 | heartbeat/event 턴이 대화 맥락을 오염시키지 않도록 |
+| prompt assembly budget | budget 기반 단계적 fitting (system → history → memories) | 고정 크기 컨텍스트 안에서 최신 대화를 우선 보존 |
+| embedder null 처리 | embedder 없으면 memory recall 빈 배열 반환 | 키워드 단독 검색은 noise가 많아 오히려 해로움 |
+| history rolling window | 상한 20턴 + budget fitting으로 추가 축소 | LLM 컨텍스트 효율성, 오래된 대화는 가치 감소 |
+| tools/agents compaction | name-only compaction은 v1 범위 밖, v2에서 추가 | 안정화 단계에서 불필요한 변경 회피 |
+
+### FP 라이브러리 활용 판단
+
+| 항목 | 판단 | 이유 |
+|------|------|------|
+| `Either.catch()` (config.js) | **적용** | agent.js `safeJsonParse`와 일관된 패턴 |
+| prompt.js `pipe()` | 보류 | 안정화 단계에서 불필요한 변경 |
+| state.js `Maybe` 체인 | 유지 | hot path, 성능 우선 |
+| `Writer` monad (tracing) | 보류 | fun-fp-js WriterT 필요 |
+| `Reader` monad (DI) | 유지 | 현재 클로저 기반이 더 직관적 |
+| `Validation` monad | 유지 | short-circuit이 현재 검증에 적합 |
+| `curry`/`compose` | 유지 | point-free 스타일은 프로젝트 성격 불일치 |
 
 ## 검증 방법
 
 ```bash
-# Phase 1: 코어 테스트 (LLM 없이)
-node test/infra/state.test.js    # State + Hook
-node test/core/op.test.js        # Op ADT
-node test/core/plan.test.js      # 계획 파서
-node test/core/react.test.js     # ReAct 루프
-node test/core/agent.test.js     # 에이전트 턴
-node test/run.js                 # 전체
+# 전체 테스트 (mock 기반, LLM 불필요)
+node test/run.js                    # 1578 assertions
 
-# Phase 2: 실제 LLM 연동
+# 실제 LLM 테스트
+node test/manual/live-llm.test.js   # 로컬 MLX 서버 필요
+
+# 앱 실행
 node src/main.js
 ```
-
-**Phase 1 (Step 1~12)은 외부 의존성 없이 테스트 가능.**
 
 ## 핵심 제약
 

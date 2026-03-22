@@ -1,6 +1,6 @@
 # Presence 테스트 시나리오
 
-994 tests, 33 test files.
+1578 tests, 39 test files.
 
 ```bash
 npm test              # 전체 실행
@@ -18,7 +18,7 @@ node test/core/agent.test.js   # 개별 파일 실행
 - askLLM: messages 배열 필수, 비배열 → TypeError
 - 모든 Op: Free.liftF로 리프트, responseFormat/context 보존
 
-### State + Hook (`test/infra/state.test.js`, `test/infra/hook.test.js`, `test/infra/reactiveState.test.js`) — 27 tests
+### State + Hook (`test/infra/state.test.js`, `test/infra/hook.test.js`, `test/infra/reactiveState.test.js`) — 30 tests
 
 - createState: get/set/snapshot, 경로 기반 접근 (dot notation), deepClone 독립성
 - createHooks: on/off/fire, 와일드카드 매칭, 재귀 방지 (MAX_DEPTH)
@@ -37,7 +37,7 @@ node test/core/agent.test.js   # 개별 파일 실행
 - chain 합성, runWithTask로 실행
 - updateState → getState 라운드트립
 
-### Plan 파서 (`test/core/plan.test.js`) — 69 tests
+### Plan 파서 (`test/core/plan.test.js`) — 79 tests
 
 **유틸리티:**
 - resolveRefs: 1-based 인덱스, null → 빈 배열, 범위 초과 → 필터
@@ -67,35 +67,24 @@ node test/core/agent.test.js   # 개별 파일 실행
 - context 있으면 전달, 없으면 undefined
 - 빈 ctx → undefined, 범위 초과 → undefined
 
-### Prompt 빌더 (`test/core/prompt.test.js`) — 27 tests
+### Prompt 빌더 (`test/core/prompt.test.js`) — 39 tests
 
 - planSchema: type enum (plan, direct_response), 6개 op type
 - formatToolList: 도구 목록 포맷, 빈 목록, required 표시
 - buildPlannerPrompt: system + user 메시지, response_format, 메모리 섹션
-- buildFormatterPrompt: 결과 포맷
+- formatMemories, buildMemoryPrompt: 메모리 포맷팅
 
-### ReAct 루프 (`test/core/react.test.js`) — 63 tests
+### Assembly + Budget + History (`test/core/assembly.test.js`) — 108 tests
 
-**순수 함수:**
-- appendToolRound: assistant + tool 메시지 추가, tool_call_id, JSON 직렬화
-- classifyResponse: string → Right, tool_call → null, multi-tool → Left, empty → Left
-- buildInitialMessages: 메모리 → system 메시지, 빈 메모리 → user만
+- measureMessages: 메시지 배열 토큰 측정
+- flattenHistory: 턴 → user/assistant 메시지 변환
+- fitHistory: 토큰 예산 내 이력 fitting (최신 우선)
+- fitMemories: 남은 예산으로 메모리 fitting
+- buildIterationBlock: iteration context 조립 (full/summarized)
+- assemblePrompt 통합: budget 기반 단계적 fitting, assembly metadata
+- Conversation history: rolling window, source filtering, truncation
 
-**루프 실행:**
-- 도구 없이 직접 답변 → 1회 LLM 호출
-- 단일 도구 → 2회 LLM (요청 + 답변)
-- 다중 iteration → 반복 도구 호출
-- maxSteps 초과 → Either.Left(REACT_MAX_STEPS)
-- toolCalls 2개 이상 → Either.Left(REACT_MULTI_TOOL)
-
-**턴 상태:**
-- 성공 → turnState=idle, lastTurn=success
-- maxSteps 실패 → turnState=idle, lastTurn=failure
-- multi-tool 실패 → lastTurn=failure
-- tool/LLM 실패 → safeRunTurn catch → INTERPRETER error kind
-- 메모리 context.memories → LLM 첫 호출에 system 메시지로 포함
-
-### 에이전트 턴 (`test/core/agent.test.js`) — 127 tests
+### 에이전트 턴 (`test/core/agent.test.js`) — 154 tests
 
 **상태 전이 ADT:**
 - beginTurn → turnState=working(input)
@@ -109,10 +98,10 @@ node test/core/agent.test.js   # 개별 파일 실행
 - chain: safeJsonParse.chain(validatePlan) — parse 실패 시 short-circuit
 
 **구조 검증:**
-- settleError/turnTransitions/applyViaFree 완전 제거
 - Either.catch, Either.fold 사용
-- createAgentTurn 내부 try/catch 없음 (Either로 대체)
-- finishSuccess/finishFailure 상호 독립
+- validateExecArgs: required 필드 검증
+- validateRefRange: RESPOND ref, ASK_LLM ctx 범위 검사
+- validateStepFull: Either Kleisli 합성
 
 **Invalid plan shapes (12종):**
 - tool_calls, unknown type, plan without steps, empty steps, empty object, 관계없는 객체
@@ -120,13 +109,12 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 **통합:**
 - direct_response: 정상 응답, turnState idle, lastResult 저장
-- plan 실행: planner + formatter 2회 LLM, ExecuteTool 호출
-- turnState hook: working → idle 전이
+- plan 실행: Incremental Planning, iteration 반복
+- Conversation history: source=user만 저장, truncation 적용
 - responseFormat: json_object
 - JSON 파싱 실패 → finishFailure, parse error detail
-- safeRunTurn: null state 안전, formatter 실패 복구
-- bare runWithTask: 안전망 없이 turnState stays working
-- createAgent: buildTurn 주입 (Plan/ReAct 전략 교체), 기본값 fallback
+- safeRunTurn: null state 안전, 상태 복구
+- createAgent: buildTurn 주입, 기본값 fallback
 
 ---
 
@@ -195,6 +183,11 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 ## Phase 3: MCP + 도구 확장
 
+### Tool Registry (`test/infra/tools.test.js`) — 9 tests
+
+- register/get/list: 도구 등록, 이름으로 조회, 전체 목록
+- 파라미터 스키마 검증
+
 ### MCP Integration (`test/infra/mcp.test.js`) — 40 tests
 
 **extractContent:**
@@ -228,11 +221,12 @@ node test/core/agent.test.js   # 개별 파일 실행
 - API 에러: 상태 코드 포함
 - unknown provider → throw
 
-### Memory Graph (`test/infra/memory.test.js`) — 70 tests
+### Memory Graph (`test/infra/memory.test.js`) — 82 tests
 
 - addNode, findNode (Maybe), addEdge, query (depth 1/2)
 - recall: 키워드 매칭, 연결 노드 확장
 - tier 관리: getByTier, removeByTier, promoteNode
+- removeNodes(predicate): 노드 제거 + 고아 엣지 정리
 - 영속화: lowdb 저장/복원, MemoryGraph.fromFile
 
 **임베딩 통합:**
@@ -242,12 +236,16 @@ node test/core/agent.test.js   # 개별 파일 실행
 - 모델/차원 변경 → 재임베딩, 모두 동일 → 건너뜀
 - 차원 불일치 벡터 → 검색에서 제외 (NaN 방지)
 - 하이브리드 recall: 벡터 + 키워드 병합
-- recall without embedder → 키워드만
-- embedPending null → no-op
+- recall without embedder → 빈 배열
 - 영속화 라운드트립: episodic 추가 → save → reload → recall
-- findNode Nothing
 
-### Memory Hook Integration (`test/infra/memory-hook.test.js`) — 16 tests
+**중복 방지:**
+- conversation: 같은 label hash → 기존 노드 갱신
+- entity: label + data hash → 기존 반환
+- working tier: 중복 허용
+- cross-tier: semantic 기존 노드에 episodic 추가 시 기존 반환
+
+### Memory Hook Integration (`test/infra/memory-hook.test.js`) — 18 tests
 
 - 턴 시작 → 메모리 recall → context.memories 주입
 - 턴 종료 → working memory 정리
@@ -335,7 +333,7 @@ node test/core/agent.test.js   # 개별 파일 실행
 - 주기적 타이머: 첫 tick working → 두 번째 tick completed → emit
 - polling 가드: 동시 실행 방지
 
-### Local Tools (`test/infra/local-tools.test.js`) — 23 tests
+### Local Tools (`test/infra/local-tools.test.js`) — 26 tests
 
 **경로 검증:**
 - isPathAllowed: 빈 목록 → 허용, 내부 → 허용, 외부 → 거부
@@ -348,10 +346,46 @@ node test/core/agent.test.js   # 개별 파일 실행
 - file_list: 파일/디렉토리 구분, 없는 경로
 - web_fetch: handler 존재, url 필수
 - shell_exec: stdout 캡처, 실패 명령 → 에러
+- calculate: 수식 평가
 
 **메타데이터:**
-- 5개 도구 등록, 필수 필드 존재
+- 6개 도구 등록, 필수 필드 존재
 - file_write, shell_exec description에 APPROVE 명시
+
+---
+
+## Phase 6: 터미널 UI (Ink)
+
+### UI Components (`test/ui/app.test.js`) — 143 tests
+
+- StatusBar: status/turn/memoryCount 렌더링, error 상태
+- ChatArea: user/agent 메시지, tag, 빈 목록
+- SidePanel: 에이전트 목록, 상태 표시
+- MarkdownText: 마크다운 렌더링
+- PlanView: 계획 단계 시각화
+- ToolResultView: 도구 결과 표시
+- deriveStatus selector: working/error/idle 판정
+- deriveMemoryCount selector: 배열 길이, 없으면 0
+
+### Interactive UI (`test/ui/interactive.test.js`) — 29 tests
+
+- StatusBar: idle/working 상태 렌더링, 활동 텍스트, 가시성 플래그
+- ChatArea: 메시지 표시
+- App 컴포넌트: 전체 앱 렌더링 + 상태 통합
+
+### History Compaction (`test/core/compaction.test.js`) — 91 tests
+
+**순수 함수:**
+- extractForCompaction: threshold/keep 기반 분리, 경계 조건
+- buildCompactionPrompt: 이전 요약 포함/미포함, 시스템 메시지 분기
+- createSummaryEntry: summary marker, 타임스탬프, 랜덤 suffix
+- migrateHistoryIds: 레거시 항목 ID 부여
+
+**통합:**
+- placeholder 삽입 → 비동기 요약 → 교체
+- epoch 기반 /clear 충돌 방지
+- rolling window: MAX_HISTORY 상한 유지
+- 요약 실패 시 placeholder 제거, remaining 유지
 
 ---
 
@@ -359,11 +393,11 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 ### Phase 5 Integration (`test/integration/phase5.test.js`) — 23 tests
 
-**Step 29 — Heartbeat → Event → Agent:**
+**Heartbeat → Event → Agent:**
 - heartbeat emit → event hook → agent.run 호출, 올바른 prompt
 - working 중 이벤트 큐잉 → idle 후 처리
 
-**Step 30 — Plan DELEGATE → Registry → Local Agent:**
+**Plan DELEGATE → Registry → Local Agent:**
 - planner DELEGATE step → registry 조회 → local run → 결과
 - 실패 delegate → plan 결과에 포함
 
@@ -380,18 +414,20 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 ## 인프라
 
-### Config (`test/infra/config.test.js`) — 22 tests
+### Config (`test/infra/config.test.js`) — 27 tests
 
 - mergeConfig: 중첩 병합, 배열 교체, 빈 override → 기본값
 - readConfigFile: 없는 파일 → {}, 유효 JSON → 파싱, 무효 JSON → {} + 경고
 - loadConfig: 파일 없으면 기본값, 파일 있으면 병합, 기본값 shape 검증
+- validateConfig: 누락 설정 경고
 
-### Persistence (`test/infra/persistence.test.js`) — 8 tests
+### Persistence (`test/infra/persistence.test.js`) — 15 tests
 
 - save → restore: 데이터 보존
 - 빈 restore → null
 - debounce: 마지막 값만 저장
 - connectToState: 상태 변경 시 자동 저장
+- try-catch 래핑: I/O 실패 시 크래시 방지
 
 ### Persona (`test/infra/persona.test.js`) — 13 tests
 
@@ -401,10 +437,28 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 - info/warn/error 레벨, 설정 변경
 
-### UI Components (`test/ui/app.test.js`) — 28 tests
+---
 
-- StatusBar: status/turn/memoryCount 렌더링, error 상태
-- ChatArea: user/agent 메시지, tag, 빈 목록
-- SidePanel: 에이전트 목록, 상태 표시
-- deriveStatus selector: working/error/idle 판정
-- deriveMemoryCount selector: 배열 길이, 없으면 0
+## 회귀 테스트
+
+### LLM Malformed Output (`test/regression/llm-output.test.js`) — 70 tests
+
+- 잘못된 JSON: trailing text, 구조 오류, 불완전 JSON
+- 에이전트가 malformed 응답을 graceful하게 처리 (크래시 없음)
+- extractJson: `<think>` 태그 등 JSON 앞 텍스트 제거
+
+### Tool Handler Defense (`test/regression/tool-defense.test.js`) — 34 tests
+
+- 모든 도구 핸들러에 null, undefined, 빈 문자열, 잘못된 타입 입력
+- 에러 throw (크래시 아님) 확인
+
+### Plan Fuzz (`test/regression/plan-fuzz.test.js`) — 57 tests
+
+- validatePlan: 랜덤 plan 구조 → 항상 Either 반환 (throw 금지)
+- safeJsonParse: 모든 입력 → Either 반환 (throw 금지)
+
+### E2E Scenario (`test/regression/e2e-scenario.test.js`) — 62 tests
+
+- 경로 정규화: 절대경로 → 허용 디렉토리 상대경로
+- 전체 에이전트 파이프라인: planner → parse → validate → (retry) → execute → finish
+- 다양한 시나리오: 파일 읽기, 셸 명령, 멀티스텝, 승인, 위임
