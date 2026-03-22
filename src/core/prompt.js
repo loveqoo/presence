@@ -84,6 +84,15 @@ User: "what files are in src?"
 
 User: "read package.json"
 → {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "file_read", "tool_args": {"path": "package.json"}}}, {"op": "RESPOND", "args": {"ref": 1}}]}
+RESPOND is used here because the user wants the raw file content — no processing needed.
+
+User: "read package.json and tell me the project name and version"
+→ {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "file_read", "tool_args": {"path": "package.json"}}}]}
+(After receiving results) → {"type": "direct_response", "message": "Project: presence, version: 0.1.0"}
+Do NOT use RESPOND here. The user wants a summary, not raw content. Return a plan WITHOUT RESPOND, then use direct_response after seeing the results.
+
+User: "show the first 10 lines of src/main.js"
+→ {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "file_read", "tool_args": {"path": "src/main.js", "maxLines": 10}}}, {"op": "RESPOND", "args": {"ref": 1}}]}
 
 IMPORTANT:
 - All string values MUST be double-quoted (including op values)
