@@ -97,8 +97,8 @@ async function run() {
   {
     const result = byName.file_list.handler({ path: testDir })
     assert(result.includes('hello.txt'), 'file_list: includes file')
-    assert(result.includes('[dir]') && result.includes('subdir'), 'file_list: marks directories')
-    assert(result.includes('[file]'), 'file_list: marks files')
+    assert(result.includes('subdir/'), 'file_list: marks directories with trailing /')
+    assert(result.includes('├──') || result.includes('└──'), 'file_list: tree connectors')
   }
 
   {

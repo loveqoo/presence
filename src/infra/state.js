@@ -59,14 +59,18 @@ const createHooks = () => {
     if (idx !== -1) cbs.splice(idx, 1)
   }
 
-  const fire = async (path, value, state) => {
+  const fire = (path, value, state) => {
     if (fireDepth >= MAX_DEPTH) return
     fireDepth++
     try {
       // Exact match
       const cbs = hooks.get(path) || []
       for (const cb of [...cbs]) {
-        try { await cb(value, state) }
+        try {
+          const result = cb(value, state)
+          // async callback의 rejection을 조용히 처리 (fire-and-forget)
+          if (result && typeof result.catch === 'function') result.catch(() => {})
+        }
         catch (_) { /* error isolation */ }
       }
       // Wildcard match: 'events.*' matches 'events.github'
@@ -75,7 +79,10 @@ const createHooks = () => {
         const regex = new RegExp('^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '[^.]+') + '$')
         if (regex.test(path)) {
           for (const cb of [...wcbs]) {
-            try { await cb(value, state) }
+            try {
+              const result = cb(value, state)
+              if (result && typeof result.catch === 'function') result.catch(() => {})
+            }
             catch (_) { /* error isolation */ }
           }
         }

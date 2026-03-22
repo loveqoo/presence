@@ -16,8 +16,8 @@ const tests = [
   'test/core/plan.test.js',
   'test/core/prompt.test.js',
   'test/infra/tools.test.js',
-  'test/core/react.test.js',
   'test/core/agent.test.js',
+  'test/core/assembly.test.js',
   // Phase 1 infra
   'test/infra/logger.test.js',
   'test/infra/persistence.test.js',
@@ -34,6 +34,8 @@ const tests = [
   'test/infra/persona.test.js',
   'test/ui/app.test.js',
   'test/ui/interactive.test.js',
+  // History compaction
+  'test/core/compaction.test.js',
   // Phase 2
   'test/infra/llm.test.js',
   'test/interpreter/prod.test.js',
@@ -47,6 +49,7 @@ const tests = [
   'test/regression/llm-output.test.js',
   'test/regression/tool-defense.test.js',
   'test/regression/plan-fuzz.test.js',
+  'test/regression/e2e-scenario.test.js',
 ]
 
 let allPassed = true

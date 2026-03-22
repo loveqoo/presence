@@ -1,7 +1,14 @@
 import { Free, Either, askLLM, respond, updateState, getState, pipe } from './op.js'
 import { parsePlan, validateStep } from './plan.js'
-import { buildPlannerPrompt, buildFormatterPrompt, buildRetryPrompt } from './prompt.js'
+import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
+import { HISTORY } from './policies.js'
 import { t } from '../i18n/index.js'
+
+// history id: restore 후에도 충돌 없도록 timestamp + counter 조합
+let _historyCounter = 0
+const nextHistoryId = () => `h-${Date.now()}-${++_historyCounter}`
+const truncate = (text, max) =>
+  text.length > max ? text.slice(0, max) + '...(truncated)' : text
 
 // --- 상태 ADT ---
 
@@ -11,8 +18,7 @@ const ERROR_KIND = Object.freeze({
   PLANNER_PARSE:   'planner_parse',
   PLANNER_SHAPE:   'planner_shape',
   INTERPRETER:     'interpreter',
-  REACT_MAX_STEPS: 'react_max_steps',
-  REACT_MULTI_TOOL:'react_multi_tool',
+  MAX_ITERATIONS:  'max_iterations',
 })
 
 const Phase = {
@@ -29,11 +35,19 @@ const ErrorInfo = (message, kind) => ({ message, kind })
 
 // --- 순수 파싱/검증 (Either) ---
 
+// LLM 응답에서 JSON 부분만 추출 (Qwen 등 <think> 태그 포함 모델 대응)
+const extractJson = (str) => {
+  if (typeof str !== 'string') return str
+  const idx = str.indexOf('{')
+  if (idx <= 0) return str
+  return str.slice(idx)
+}
+
 const safeJsonParse = (str) =>
   Either.fold(
     e => Either.Left(ErrorInfo(e.message || String(e), ERROR_KIND.PLANNER_PARSE)),
     parsed => Either.Right(parsed),
-    Either.catch(() => typeof str === 'string' ? JSON.parse(str) : str),
+    Either.catch(() => typeof str === 'string' ? JSON.parse(extractJson(str)) : str),
   )
 
 // --- step 검증 (Either 기반) ---
@@ -48,11 +62,11 @@ const validateExecArgs = (step, tools) => {
   const required = toolDef.parameters?.required || []
   if (required.length === 0) return Either.Right(true)
 
-  const provided = Object.keys(a.tool_args || (() => {
+  const resolvedArgs = a.tool_args || (() => {
     const { tool, ...rest } = a
     return rest
-  })())
-  const missing = required.filter(r => !provided.includes(r))
+  })()
+  const missing = required.filter(r => resolvedArgs[r] == null && resolvedArgs[r] !== 0 && resolvedArgs[r] !== false)
   return missing.length === 0
     ? Either.Right(true)
     : Either.Left(ErrorInfo(`EXEC ${a.tool}: missing required args: ${missing.join(', ')}`, ERROR_KIND.PLANNER_SHAPE))
@@ -105,6 +119,13 @@ const validatePlan = (plan, { tools = [] } = {}) => {
     if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
       return Either.Left(ErrorInfo('plan에 비어있지 않은 steps 배열이 필요합니다.', ERROR_KIND.PLANNER_SHAPE))
     }
+    // RESPOND는 포함 시 반드시 마지막 step
+    const respondIndex = plan.steps.findIndex(s => s?.op === 'RESPOND')
+    if (respondIndex !== -1 && respondIndex !== plan.steps.length - 1) {
+      return Either.Left(ErrorInfo(
+        `RESPOND must be the last step in a plan (found at index ${respondIndex} of ${plan.steps.length}).`,
+        ERROR_KIND.PLANNER_SHAPE))
+    }
     // reduce + Either chain: 첫 번째 Left에서 short-circuit
     return plan.steps.reduce(
       (acc, step, i) => acc.chain(() => validateStepFull(step, i, tools)),
@@ -122,13 +143,33 @@ const validatePlan = (plan, { tools = [] } = {}) => {
 const beginTurn = (input) =>
   updateState('turnState', Phase.working(input))
 
-const finishSuccess = (input, result) =>
-  updateState('lastTurn', TurnResult.success(input, result))
+const finishSuccess = (input, result, { source } = {}) =>
+  updateState('_streaming', null)
+    .chain(() => {
+      if (source === 'user') {
+        return getState('context.conversationHistory').chain(history => {
+          const entry = {
+            id: nextHistoryId(),
+            input: truncate(String(input), HISTORY.MAX_INPUT_CHARS),
+            output: truncate(String(result), HISTORY.MAX_OUTPUT_CHARS),
+            ts: Date.now(),
+          }
+          const updated = [...(history || []), entry]
+          const trimmed = updated.length > HISTORY.MAX_CONVERSATION
+            ? updated.slice(-HISTORY.MAX_CONVERSATION)
+            : updated
+          return updateState('context.conversationHistory', trimmed)
+        })
+      }
+      return Free.of(null)
+    })
+    .chain(() => updateState('lastTurn', TurnResult.success(input, result)))
     .chain(() => updateState('turnState', Phase.idle()))
     .chain(() => Free.of(result))
 
 const finishFailure = (input, error, response) =>
-  updateState('lastTurn', TurnResult.failure(input, error, response))
+  updateState('_streaming', null)
+    .chain(() => updateState('lastTurn', TurnResult.failure(input, error, response)))
     .chain(() => updateState('turnState', Phase.idle()))
     .chain(() => Free.of(response))
 
@@ -137,70 +178,129 @@ const respondAndFail = (input, error) =>
   respond(t('error.agent_error', { message: error.message }))
     .chain(msg => finishFailure(input, error, msg))
 
-// --- 플랜 실행 ---
+// --- Incremental Planning Engine ---
+// Plan-Validate-Execute-Observe-Repeat
+//
+// 매 iteration마다:
+//   direct_response     → respond → finishSuccess
+//   plan + RESPOND      → execute → finishSuccess (RESPOND이 빠른 종료)
+//   plan - RESPOND      → execute → 결과를 rolling context에 추가 → 다음 iteration
 
-// formatter 파이프라인: results → askLLM → respond → finishSuccess
-const formatAndFinish = (input, results) => {
-  const formatterPrompt = buildFormatterPrompt(input, results)
-  return Free.pipeK(
-    () => askLLM({ messages: formatterPrompt.messages }),
-    response => respond(response),
-    msg => finishSuccess(input, msg),
-  )(null)
-}
-
-const executePlan = (input, plan) => {
-  if (plan.type === 'direct_response') {
-    return respond(plan.message).chain(msg => finishSuccess(input, msg))
-  }
-  return parsePlan(plan)
-    .chain(either => Either.fold(
-      err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE)),
-      results => formatAndFinish(input, results),
-      either,
-    ))
-}
-
-const createAgentTurn = ({ tools = [], agents = [], persona = {}, responseFormatMode, maxRetries = 0 } = {}) => {
-  return (input) =>
+const createAgentTurn = ({ tools = [], agents = [], persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget } = {}) => {
+  return (input, { source } = {}) =>
     beginTurn(input)
       .chain(() => getState('context.memories'))
-      .chain(memories => {
-        const prompt = buildPlannerPrompt({
+      .chain(memories => getState('context.conversationHistory').chain(history => {
+        const conversationHistory = history || []
+        const baseContext = {
           tools, agents, memories: memories || [], input, persona, responseFormatMode,
-        })
+          previousPlan: null, previousResults: null,
+        }
 
-        const attemptPlan = (currentPrompt, retriesLeft) =>
-          askLLM({
-            messages: currentPrompt.messages,
-            responseFormat: currentPrompt.response_format,
-          }).chain(planJson => {
-            const parseThenValidate = Either.pipeK(safeJsonParse, p => validatePlan(p, { tools }))
-            const parsed = parseThenValidate(planJson)
+        const iterate = (context, n) => {
+          if (n >= maxIterations) {
+            return respondAndFail(input, ErrorInfo(
+              `Max iterations (${maxIterations}) exceeded`,
+              ERROR_KIND.MAX_ITERATIONS,
+            ))
+          }
 
-            return Either.fold(
-              error => {
-                if (retriesLeft <= 0) return respondAndFail(input, error)
-                // 재시도: 상태로 진행 알림 → 수정 프롬프트로 재호출
-                return updateState('_retry', {
-                  attempt: maxRetries - retriesLeft + 1,
-                  maxRetries,
-                  error: error.message,
-                }).chain(() =>
-                  attemptPlan(buildRetryPrompt(currentPrompt, error.message), retriesLeft - 1)
-                )
-              },
-              plan => executePlan(input, plan),
-              parsed,
-            )
+          const iterationContext = context.previousPlan
+            ? { previousPlan: context.previousPlan, previousResults: context.previousResults }
+            : null
+
+          const assembled = assemblePrompt({
+            persona: context.persona,
+            tools: context.tools,
+            agents: context.agents,
+            memories: context.memories,
+            history: conversationHistory,
+            input: context.input,
+            iterationContext,
+            budget,
+            responseFormatMode: context.responseFormatMode,
           })
 
-        return attemptPlan(prompt, maxRetries)
-      })
+          const attemptPlan = (currentPrompt, retriesLeft) =>
+            askLLM({
+              messages: currentPrompt.messages,
+              responseFormat: currentPrompt.response_format,
+            }).chain(planJson => {
+              const parseThenValidate = Either.pipeK(safeJsonParse, p => validatePlan(p, { tools }))
+              const parsed = parseThenValidate(planJson)
+
+              // Debug: 턴 디버깅 정보 캡처
+              const rawResponse = typeof planJson === 'string' ? planJson : JSON.stringify(planJson)
+              const debugInfo = {
+                input,
+                iteration: n,
+                memories: (context.memories || []).slice(0, 20),
+                prompt: {
+                  systemLength: currentPrompt.messages[0]?.content?.length || 0,
+                  messageCount: currentPrompt.messages.length,
+                  hasRollingContext: context.previousPlan != null,
+                },
+                llmResponseLength: rawResponse.length,
+                parsedType: Either.fold(() => null, p => p.type, parsed),
+                stepCount: Either.fold(() => null, p => p.steps?.length || 0, parsed),
+                error: Either.fold(e => e.message, () => null, parsed),
+                assembly: assembled._assembly,
+                timestamp: Date.now(),
+              }
+
+              return updateState('_debug.lastTurn', debugInfo)
+                .chain(() => updateState('_debug.lastPrompt', currentPrompt.messages))
+                .chain(() => updateState('_debug.lastResponse', rawResponse))
+                .chain(() => Either.fold(
+                error => {
+                  if (retriesLeft <= 0) return respondAndFail(input, error)
+                  return updateState('_retry', {
+                    attempt: maxRetries - retriesLeft + 1,
+                    maxRetries,
+                    error: error.message,
+                  }).chain(() =>
+                    attemptPlan(buildRetryPrompt(currentPrompt, error.message), retriesLeft - 1)
+                  )
+                },
+                plan => {
+                  if (plan.type === 'direct_response') {
+                    return respond(plan.message).chain(msg => finishSuccess(input, msg, { source }))
+                  }
+                  // plan.type === 'plan'
+                  const hasRespond = plan.steps.some(s => s.op === 'RESPOND')
+
+                  return parsePlan(plan).chain(either => Either.fold(
+                    err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE)),
+                    results => {
+                      if (hasRespond) {
+                        // RESPOND가 이미 respond() op을 실행함 → 바로 종료
+                        const lastResult = results[results.length - 1]
+                        return finishSuccess(input, lastResult, { source })
+                      }
+                      // 중간 결과 → rolling context로 다음 iteration
+                      return iterate({
+                        ...context,
+                        previousPlan: plan,
+                        previousResults: summarizeResults(results),
+                      }, n + 1)
+                    },
+                    either,
+                  ))
+                },
+                parsed,
+              ))
+            })
+
+          return attemptPlan(assembled, maxRetries)
+        }
+
+        return iterate(baseContext, 0)
+      }))
 }
 
 // 인터프리터 예외 시 상태 복구 (순수 전이 함수)
 const recoverFromFailure = (input, err) => ({
+  _streaming: null,
   lastTurn: TurnResult.failure(input, ErrorInfo(err.message || String(err), ERROR_KIND.INTERPRETER), null),
   turnState: Phase.idle(),
 })
@@ -220,18 +320,18 @@ const safeRunTurn = (interpreter, state) => async (program, input) => {
 }
 
 // --- 조립된 에이전트 ---
-const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, maxRetries, interpreter, state }) => {
-  const turnBuilder = buildTurn || createAgentTurn({ tools, agents, persona, responseFormatMode, maxRetries })
+const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, maxRetries, maxIterations, interpreter, state, budget }) => {
+  const turnBuilder = buildTurn || createAgentTurn({ tools, agents, persona, responseFormatMode, maxRetries, maxIterations, budget })
   const execute = safeRunTurn(interpreter, state)
 
-  const run = (input) => execute(turnBuilder(input), input)
-  const program = (input) => turnBuilder(input)
+  const run = (input, opts) => execute(turnBuilder(input, opts), input)
+  const program = (input, opts) => turnBuilder(input, opts)
 
   return { run, program }
 }
 
 export {
-  createAgentTurn, safeRunTurn, createAgent, validatePlan, validateExecArgs, validateRefRange, validateStepFull, safeJsonParse,
+  createAgentTurn, safeRunTurn, createAgent, validatePlan, validateExecArgs, validateRefRange, validateStepFull, safeJsonParse, extractJson,
   beginTurn, finishSuccess, finishFailure, respondAndFail,
   recoverFromFailure, applyRecovery,
   PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo,

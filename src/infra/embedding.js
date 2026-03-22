@@ -63,15 +63,16 @@ const providers = {
     const _model = model || 'text-embedding-3-small'
     const _baseUrl = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
 
+    const _key = apiKey || process.env.OPENAI_API_KEY || null
+
     return async (text) => {
       const body = { input: text, model: _model }
       if (dimensions) body.dimensions = dimensions
+      const headers = { 'Content-Type': 'application/json' }
+      if (_key) headers['Authorization'] = `Bearer ${_key}`
       const res = await fetchWithTimeout(_fetch, `${_baseUrl}/embeddings`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey || process.env.OPENAI_API_KEY}`,
-        },
+        headers,
         body: JSON.stringify(body),
       }, timeoutMs)
       if (!res.ok) {
@@ -89,12 +90,11 @@ const providers = {
     const _baseUrl = (baseUrl || 'https://api.cohere.com/v2').replace(/\/+$/, '')
 
     return async (text) => {
+      const headers = { 'Content-Type': 'application/json' }
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
       const res = await fetchWithTimeout(_fetch, `${_baseUrl}/embed`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
           texts: [text],
           model: _model,

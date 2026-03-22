@@ -388,8 +388,8 @@ async function run() {
     const turn = createAgentTurn({ tools: [], agents: agentReg.list() })
     const result = await Free.runWithTask(interp)(turn('보고서 요약해줘'))
 
-    // DELEGATE 결과가 DelegateResult shape이고, RESPOND가 이를 참조
-    assert(typeof result === 'string', 'full delegate path: returns string result')
+    // RESPOND가 DelegateResult를 직접 전달 (formatter 없음)
+    assert(result != null && result.status === 'completed', 'full delegate path: returns DelegateResult')
   }
 
   // --- context 전달 ---

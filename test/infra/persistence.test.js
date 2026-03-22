@@ -84,6 +84,47 @@ async function run() {
     p.clear()
   }
 
+  // 5. _접두사 키는 persistence에서 제외
+  {
+    const cwd = join(testDir, 'test5')
+    mkdirSync(cwd, { recursive: true })
+    const p = createPersistence({ cwd, debounceMs: 0 })
+    p.clear()
+
+    const state = createReactiveState({
+      turnState: { tag: 'idle' },
+      turn: 3,
+      _toolResults: [{ tool: 'file_list', args: {}, result: 'data' }],
+      _streaming: { content: 'hello' },
+      _debug: { lastTurn: { input: 'test' } },
+    })
+    p.saveImmediate(state)
+
+    const restored = p.restore()
+    assert(restored.turn === 3, 'transient exclusion: turn preserved')
+    assert(restored.turnState.tag === 'idle', 'transient exclusion: turnState preserved')
+    assert(restored._toolResults === undefined, 'transient exclusion: _toolResults excluded')
+    assert(restored._streaming === undefined, 'transient exclusion: _streaming excluded')
+    assert(restored._debug === undefined, 'transient exclusion: _debug excluded')
+    p.clear()
+  }
+
+  // 6. debounce save도 _접두사 제외
+  {
+    const cwd = join(testDir, 'test6')
+    mkdirSync(cwd, { recursive: true })
+    const p = createPersistence({ cwd, debounceMs: 10 })
+    p.clear()
+
+    p.save({ snapshot: () => ({ turn: 1, _toolResults: [1, 2, 3] }) })
+    await new Promise(r => setTimeout(r, 50))
+
+    const restored = p.restore()
+    assert(restored.turn === 1, 'debounce transient: turn saved')
+    assert(restored._toolResults === undefined, 'debounce transient: _toolResults excluded')
+    p.clear()
+  }
+
   // Cleanup
   rmSync(testDir, { recursive: true, force: true })
 

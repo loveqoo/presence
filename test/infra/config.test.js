@@ -34,7 +34,7 @@ async function run() {
   {
     const result = mergeConfig(DEFAULTS, {})
     assert(result.llm.model === 'gpt-4o', 'mergeConfig: empty override → defaults')
-    assert(result.strategy === 'plan', 'mergeConfig: default strategy')
+    assert(result.maxIterations === 10, 'mergeConfig: default maxIterations')
   }
 
   // --- readConfigFile ---
@@ -72,7 +72,7 @@ async function run() {
   {
     const config = loadConfig('/nonexistent/config.json')
     assert(config.llm.model === DEFAULTS.llm.model, 'loadConfig no file: uses defaults')
-    assert(config.strategy === 'plan', 'loadConfig no file: default strategy')
+    assert(config.maxIterations === 10, 'loadConfig no file: default maxIterations')
     assert(config.heartbeat.enabled === true, 'loadConfig no file: heartbeat enabled')
   }
 
@@ -82,14 +82,14 @@ async function run() {
     const path = join(dir, 'config.json')
     writeFileSync(path, JSON.stringify({
       llm: { baseUrl: 'http://localhost:8045/v1', model: 'qwen3.5-35b', responseFormat: 'json_object' },
-      strategy: 'react',
+      maxIterations: 5,
     }))
 
     const config = loadConfig(path)
     assert(config.llm.baseUrl === 'http://localhost:8045/v1', 'loadConfig file: llm.baseUrl')
     assert(config.llm.model === 'qwen3.5-35b', 'loadConfig file: llm.model')
     assert(config.llm.responseFormat === 'json_object', 'loadConfig file: responseFormat')
-    assert(config.strategy === 'react', 'loadConfig file: strategy')
+    assert(config.maxIterations === 5, 'loadConfig file: maxIterations')
     assert(config.heartbeat.enabled === true, 'loadConfig file: defaults still apply')
     rmSync(dir, { recursive: true, force: true })
   }
@@ -98,8 +98,31 @@ async function run() {
 
   {
     assert(DEFAULTS.llm.responseFormat === 'json_schema', 'DEFAULTS: responseFormat is json_schema')
+    assert(DEFAULTS.llm.maxRetries === 2, 'DEFAULTS: maxRetries is 2')
+    assert(DEFAULTS.llm.timeoutMs === 120_000, 'DEFAULTS: timeoutMs is 120000')
     assert(DEFAULTS.embed.dimensions === 256, 'DEFAULTS: embed dimensions')
     assert(Array.isArray(DEFAULTS.mcp), 'DEFAULTS: mcp is array')
+  }
+
+  // --- env override: maxRetries, timeoutMs ---
+
+  {
+    const orig = { ...process.env }
+    process.env.PRESENCE_MAX_RETRIES = '5'
+    process.env.PRESENCE_TIMEOUT_MS = '30000'
+    const config = loadConfig('/nonexistent/config.json')
+    assert(config.llm.maxRetries === 5, 'env override: PRESENCE_MAX_RETRIES')
+    assert(config.llm.timeoutMs === 30000, 'env override: PRESENCE_TIMEOUT_MS')
+    delete process.env.PRESENCE_MAX_RETRIES
+    delete process.env.PRESENCE_TIMEOUT_MS
+    // restore won't affect other tests since they use explicit paths
+  }
+
+  {
+    process.env.PRESENCE_MAX_RETRIES = 'abc'
+    const config = loadConfig('/nonexistent/config.json')
+    assert(config.llm.maxRetries === DEFAULTS.llm.maxRetries, 'env override: non-numeric MAX_RETRIES ignored')
+    delete process.env.PRESENCE_MAX_RETRIES
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

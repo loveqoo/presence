@@ -59,6 +59,13 @@ async function run() {
   await expectThrow('file_write({content only})', () => byName.file_write.handler({ content: 'hi' }))
   await expectThrow('file_write outside allowed', () => byName.file_write.handler({ path: '/etc/x', content: 'x' }))
 
+  // 빈 문자열 content는 허용 (파일 비우기)
+  {
+    const emptyPath = join(testDir, 'empty.txt')
+    const result = byName.file_write.handler({ path: emptyPath, content: '' })
+    assert(result.includes('0 chars'), 'file_write empty content: allowed')
+  }
+
   // === file_list 방어 ===
 
   await expectThrow('file_list(undefined)', () => byName.file_list.handler(undefined))

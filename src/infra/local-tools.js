@@ -77,7 +77,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         required: ['path', 'content'],
       },
       handler: ({ path, content } = {}) => {
-        if (!path || !content) throw new Error(t('error.arg_required', { tool: 'file_write', arg: 'path, content' }))
+        if (!path || content == null) throw new Error(t('error.arg_required', { tool: 'file_write', arg: 'path, content' }))
         const resolved = resolvePath(path)
         checkAccess(resolved)
         writeFileSync(resolved, content, 'utf-8')
@@ -100,15 +100,22 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         const resolved = resolvePath(dirPath)
         checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.dir_not_found', { path: dirPath }))
-        const entries = readdirSync(resolved).map(name => {
+        const items = readdirSync(resolved).map(name => {
           try {
             const stat = statSync(join(resolved, name))
-            return `${stat.isDirectory() ? '[dir]' : '[file]'} ${name}`
+            return { name, isDir: stat.isDirectory() }
           } catch (_) {
-            return `[?] ${name}`
+            return { name, isDir: false }
           }
         })
-        return entries.join('\n')
+        // 디렉토리 먼저, 파일 후에 (각각 알파벳 순)
+        items.sort((a, b) => a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1)
+        const lines = items.map((it, i) => {
+          const isLast = i === items.length - 1
+          const connector = isLast ? '└── ' : '├── '
+          return `${connector}${it.name}${it.isDir ? '/' : ''}`
+        })
+        return lines.join('\n')
       },
     },
 

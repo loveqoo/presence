@@ -1,4 +1,4 @@
-import { parsePlan, validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs } from '../../src/core/plan.js'
+import { parsePlan, normalizeStep, validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs } from '../../src/core/plan.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createState } from '../../src/infra/state.js'
 import { Free, Either } from '../../src/core/op.js'
@@ -353,6 +353,58 @@ async function run() {
     const result = await Free.runWithTask(interpreter)(parsePlan(plan))
     assert(Either.isLeft(result), 'RESPOND bad ref: Left')
     assert(result.value.includes('99'), 'RESPOND bad ref: error mentions index')
+  }
+
+  // --- normalizeStep ---
+
+  // EXEC {tool: "delegate", target, task} → DELEGATE
+  {
+    const step = { op: 'EXEC', args: { tool: 'delegate', target: 'summarizer', task: 'summarize this' } }
+    const n = normalizeStep(step)
+    assert(n.op === 'DELEGATE', 'normalizeStep: EXEC delegate → DELEGATE op')
+    assert(n.args.target === 'summarizer', 'normalizeStep: target preserved')
+    assert(n.args.task === 'summarize this', 'normalizeStep: task preserved')
+  }
+
+  // EXEC {tool: "delegate", tool_args: {target, task}} → DELEGATE (tool_args fallback)
+  {
+    const step = { op: 'EXEC', args: { tool: 'delegate', tool_args: { target: 'agent1', task: 'do it' } } }
+    const n = normalizeStep(step)
+    assert(n.op === 'DELEGATE', 'normalizeStep: tool_args fallback → DELEGATE')
+    assert(n.args.target === 'agent1', 'normalizeStep: tool_args target')
+    assert(n.args.task === 'do it', 'normalizeStep: tool_args task')
+  }
+
+  // EXEC {tool: "delegate"} without target → no normalization (falls through)
+  {
+    const step = { op: 'EXEC', args: { tool: 'delegate' } }
+    const n = normalizeStep(step)
+    assert(n.op === 'EXEC', 'normalizeStep: no target → stays EXEC')
+  }
+
+  // non-EXEC → passthrough
+  {
+    const step = { op: 'DELEGATE', args: { target: 'x', task: 'y' } }
+    assert(normalizeStep(step) === step, 'normalizeStep: DELEGATE unchanged')
+    assert(normalizeStep(null) === null, 'normalizeStep: null passthrough')
+  }
+
+  // 통합: EXEC delegate가 parsePlan에서 DELEGATE로 실행됨
+  {
+    const delegateResults = []
+    const { interpreter } = createTestInterpreter({
+      Delegate: (op) => { delegateResults.push(op); return 'delegated-result' },
+    })
+    const plan = {
+      type: 'plan',
+      steps: [
+        { op: 'EXEC', args: { tool: 'delegate', target: 'summarizer', task: 'summarize this' } },
+      ],
+    }
+    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    assert(Either.isRight(result), 'normalizeStep integration: Right')
+    assert(delegateResults.length === 1, 'normalizeStep integration: delegate called')
+    assert(delegateResults[0].target === 'summarizer', 'normalizeStep integration: correct target')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

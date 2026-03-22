@@ -12,16 +12,18 @@ const DEFAULTS = {
     model: 'gpt-4o',
     apiKey: null,
     responseFormat: 'json_schema',
-    maxRetries: 1,
+    maxRetries: 2,
+    timeoutMs: 120_000,
   },
   embed: {
     provider: 'openai',
+    baseUrl: null,
     apiKey: null,
     model: null,
     dimensions: 256,
   },
   locale: 'ko',
-  strategy: 'plan',
+  maxIterations: 10,
   memory: {
     path: null,
   },
@@ -33,6 +35,13 @@ const DEFAULTS = {
   },
   delegatePolling: {
     intervalMs: 10_000,
+  },
+  prompt: {
+    maxContextTokens: 8000,
+    reservedOutputTokens: 1000,
+    // 하위 호환: chars 키가 설정되면 자동 변환
+    maxContextChars: null,
+    reservedOutputChars: null,
   },
 }
 
@@ -68,9 +77,22 @@ const envOverrides = () => {
     overrides.llm.responseFormat = env.PRESENCE_RESPONSE_FORMAT
   }
 
-  if (env.PRESENCE_EMBED_PROVIDER || env.PRESENCE_EMBED_API_KEY || env.PRESENCE_EMBED_MODEL || env.PRESENCE_EMBED_DIMENSIONS) {
+  if (env.PRESENCE_MAX_RETRIES) {
+    overrides.llm = overrides.llm || {}
+    const n = Number(env.PRESENCE_MAX_RETRIES)
+    if (!isNaN(n)) overrides.llm.maxRetries = n
+  }
+
+  if (env.PRESENCE_TIMEOUT_MS) {
+    overrides.llm = overrides.llm || {}
+    const n = Number(env.PRESENCE_TIMEOUT_MS)
+    if (!isNaN(n)) overrides.llm.timeoutMs = n
+  }
+
+  if (env.PRESENCE_EMBED_PROVIDER || env.PRESENCE_EMBED_BASE_URL || env.PRESENCE_EMBED_API_KEY || env.PRESENCE_EMBED_MODEL || env.PRESENCE_EMBED_DIMENSIONS) {
     overrides.embed = {}
     if (env.PRESENCE_EMBED_PROVIDER) overrides.embed.provider = env.PRESENCE_EMBED_PROVIDER
+    if (env.PRESENCE_EMBED_BASE_URL) overrides.embed.baseUrl = env.PRESENCE_EMBED_BASE_URL
     if (env.PRESENCE_EMBED_API_KEY) overrides.embed.apiKey = env.PRESENCE_EMBED_API_KEY
     if (env.PRESENCE_EMBED_MODEL) overrides.embed.model = env.PRESENCE_EMBED_MODEL
     if (env.PRESENCE_EMBED_DIMENSIONS) {
@@ -79,7 +101,10 @@ const envOverrides = () => {
     }
   }
 
-  if (env.PRESENCE_STRATEGY) overrides.strategy = env.PRESENCE_STRATEGY
+  if (env.PRESENCE_MAX_ITERATIONS) {
+    const n = Number(env.PRESENCE_MAX_ITERATIONS)
+    if (!isNaN(n)) overrides.maxIterations = n
+  }
   if (env.PRESENCE_MEMORY_PATH) overrides.memory = { path: env.PRESENCE_MEMORY_PATH }
   if (env.PRESENCE_HEARTBEAT_MS) {
     const ms = Number(env.PRESENCE_HEARTBEAT_MS)
@@ -95,16 +120,18 @@ const envOverrides = () => {
 const readConfigFile = (filePath, t) =>
   Either.fold(
     _ => ({}),
-    content => {
-      try { return JSON.parse(content) }
-      catch (e) {
-        const msg = t
-          ? t('error.config_parse_error', { path: filePath, message: e.message })
-          : `${filePath} JSON parse error: ${e.message}. Using defaults.`
-        console.warn(`[config] ${msg}`)
-        return {}
-      }
-    },
+    content =>
+      Either.fold(
+        e => {
+          const msg = t
+            ? t('error.config_parse_error', { path: filePath, message: e.message })
+            : `${filePath} JSON parse error: ${e.message}. Using defaults.`
+          console.warn(`[config] ${msg}`)
+          return {}
+        },
+        parsed => parsed,
+        Either.catch(() => JSON.parse(content)),
+      ),
     existsSync(filePath)
       ? Either.Right(readFileSync(filePath, 'utf-8'))
       : Either.Left(null),

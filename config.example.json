@@ -3,15 +3,18 @@
     "baseUrl": "https://api.openai.com/v1",
     "model": "gpt-4o",
     "apiKey": null,
-    "responseFormat": "json_schema"
+    "responseFormat": "json_schema",
+    "maxRetries": 2,
+    "timeoutMs": 120000
   },
   "embed": {
     "provider": "openai",
+    "baseUrl": null,
     "apiKey": null,
     "model": null,
     "dimensions": 256
   },
-  "strategy": "plan",
+  "maxIterations": 10,
   "memory": {
     "path": null
   },

@@ -69,16 +69,15 @@ const wirePromotionHook = (state, memory) => {
 async function run() {
   console.log('Memory hook integration tests')
 
-  // 1. Turn start → memories injected into state
+  // 1. Turn start without embedder → no memories recalled
   {
     const state = createReactiveState({
       turnState: Phase.idle(), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
-    const n1 = memory.addNode({ label: '회의' })
-    const n2 = memory.addNode({ label: '팀미팅' })
-    memory.addEdge(n1.id, n2.id, '관련')
+    memory.addNode({ label: '회의' })
+    memory.addNode({ label: '팀미팅' })
 
     wireMemoryHooks(state, memory)
 
@@ -86,9 +85,8 @@ async function run() {
     await new Promise(r => setTimeout(r, 50))
 
     const mems = state.get('context.memories')
-    assert(Array.isArray(mems), 'turn start: memories injected')
-    assert(mems.includes('회의'), 'turn start: includes matched node')
-    assert(mems.includes('팀미팅'), 'turn start: includes connected node')
+    assert(Array.isArray(mems), 'turn start: memories array set')
+    assert(mems.length === 0, 'turn start: no recall without embedder')
   }
 
   // 2. Turn end → working memory cleaned
@@ -196,6 +194,59 @@ async function run() {
 
     state.set('turnState', Phase.working('React hooks'))
     assert(memory.findNode(node.id).value.tier === TIERS.SEMANTIC, 'after 3rd: promoted to semantic')
+  }
+
+  // 7. 동일 턴 반복 → episodic 중복 없음
+  {
+    const state = createReactiveState({
+      turnState: Phase.idle(), lastTurn: null, context: {}
+    })
+    const memory = await createMemoryGraph()
+
+    wireMemoryHooks(state, memory)
+
+    // Turn 1
+    state.set('turnState', Phase.working('PR 현황'))
+    await new Promise(r => setTimeout(r, 20))
+    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
+    state.set('turnState', Phase.idle())
+    await new Promise(r => setTimeout(r, 20))
+
+    // Turn 2 — 동일 입력/출력
+    state.set('turnState', Phase.working('PR 현황'))
+    await new Promise(r => setTimeout(r, 20))
+    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
+    state.set('turnState', Phase.idle())
+    await new Promise(r => setTimeout(r, 20))
+
+    const episodic = memory.getNodesByTier(TIERS.EPISODIC)
+    assert(episodic.length === 1, 'dedup hook: identical turns → 1 node only')
+  }
+
+  // 8. 같은 질문, 다른 응답 → 최신으로 갱신 (1개 유지)
+  {
+    const state = createReactiveState({
+      turnState: Phase.idle(), lastTurn: null, context: {}
+    })
+    const memory = await createMemoryGraph()
+
+    wireMemoryHooks(state, memory)
+
+    state.set('turnState', Phase.working('PR 현황'))
+    await new Promise(r => setTimeout(r, 20))
+    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
+    state.set('turnState', Phase.idle())
+    await new Promise(r => setTimeout(r, 20))
+
+    state.set('turnState', Phase.working('PR 현황'))
+    await new Promise(r => setTimeout(r, 20))
+    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 5건'))
+    state.set('turnState', Phase.idle())
+    await new Promise(r => setTimeout(r, 20))
+
+    const episodic = memory.getNodesByTier(TIERS.EPISODIC)
+    assert(episodic.length === 1, 'dedup hook: same question → 1 node')
+    assert(episodic[0].data.output === 'PR 5건', 'dedup hook: output updated to latest')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

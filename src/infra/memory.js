@@ -55,6 +55,38 @@ class MemoryGraph {
   get edges() { return this.store.data.edges }
 
   addNode({ label, type = 'entity', data = {}, tier = TIERS.EPISODIC }) {
+    // 중복 방지: working 이외 티어에서 기존 노드 매칭
+    if (tier !== TIERS.WORKING) {
+      let existing
+      const candidateHash = type === 'conversation'
+        ? textHash(String(label))
+        : textHash(String(label) + JSON.stringify(data))
+
+      if (type === 'conversation') {
+        // 대화: 같은 입력(label) 해시면 동일 기억 → 최신 응답으로 갱신
+        existing = this.nodes.find(n =>
+          n.type === type && n.tier !== TIERS.WORKING &&
+          textHash(String(n.label)) === candidateHash
+        )
+      } else {
+        // 그 외: label + 전체 data 해시 비교
+        existing = this.nodes.find(n =>
+          n.type === type &&
+          n.tier !== TIERS.WORKING &&
+          textHash(String(n.label) + JSON.stringify(n.data)) === candidateHash
+        )
+      }
+      if (existing) {
+        existing.createdAt = Date.now()
+        if (type === 'conversation') {
+          existing.data = data
+          existing.vector = null
+          existing.embeddingTextHash = null
+        }
+        return existing
+      }
+    }
+
     const id = String(this._nextId++)
     const node = {
       id, label, type, data, tier, createdAt: Date.now(),
@@ -114,9 +146,10 @@ class MemoryGraph {
     return [...results]
   }
 
-  // --- 키워드 검색 (score 1.0 for match) ---
+  // --- 키워드 검색 (벡터 검색 보조용) ---
   _keywordSearch(text) {
-    const keywords = text.toLowerCase().split(/\s+/)
+    const keywords = text.toLowerCase().split(/\s+/).filter(k => k.length >= 2)
+    if (keywords.length === 0) return []
     return this.nodes
       .filter(n => {
         if (n.label == null) return false
@@ -138,23 +171,23 @@ class MemoryGraph {
     return topK(scored, k)
   }
 
-  // --- 하이브리드 recall ---
-  // 벡터 + 키워드 병합, 연결 노드 확장
+  // --- recall ---
+  // embedder 없으면 recall 비활성 (키워드 단독 검색은 오히려 해로움)
   async recall(text, { embedder, topK: k = 10, logger } = {}) {
     if (!text) return []
-
-    const keywordResults = this._keywordSearch(text)
+    if (!embedder) return []
 
     let vectorResults = []
-    if (embedder) {
-      try {
-        const queryVec = await embedder.embed(text)
-        vectorResults = this._vectorSearch(queryVec, k)
-      } catch (e) {
-        if (logger) logger.warn('Embedding recall failed, using keyword only', { error: e.message })
-      }
+    try {
+      const queryVec = await embedder.embed(text)
+      vectorResults = this._vectorSearch(queryVec, k)
+    } catch (e) {
+      if (logger) logger.warn('Embedding recall failed', { error: e.message })
+      return []
     }
 
+    // 벡터 결과를 키워드로 보강 (벡터가 있을 때만)
+    const keywordResults = this._keywordSearch(text)
     const merged = mergeSearchResults(keywordResults, vectorResults)
     const topNodes = merged.slice(0, k).map(({ node }) => node)
 
@@ -214,12 +247,57 @@ class MemoryGraph {
     this.store.data.edges = this.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
   }
 
+  /** @param {(node) => boolean} predicate - true인 노드를 제거 */
+  removeNodes(predicate) {
+    const before = this.nodes.length
+    this.store.data.nodes = this.nodes.filter(n => !predicate(n))
+    const nodeIds = new Set(this.nodes.map(n => n.id))
+    this.store.data.edges = this.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+    return before - this.nodes.length
+  }
+
   promoteNode(nodeId, newTier) {
     Maybe.fold(
       () => {},
       node => { node.tier = newTier },
       this.findNode(nodeId),
     )
+  }
+
+  // age 기반 삭제: maxAgeMs보다 오래된 노드 제거. tier 필터 선택적.
+  removeOlderThan(maxAgeMs, { tier } = {}) {
+    const cutoff = Date.now() - maxAgeMs
+    const before = this.nodes.length
+    this.store.data.nodes = this.nodes.filter(n => {
+      if (tier && n.tier !== tier) return true
+      return (n.createdAt || 0) >= cutoff
+    })
+    // 고아 엣지 정리
+    const nodeIds = new Set(this.nodes.map(n => n.id))
+    this.store.data.edges = this.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+    return before - this.nodes.length
+  }
+
+  // tier별 노드 수 제한: maxCount 초과 시 오래된 것부터 제거
+  pruneByTier(tier, maxCount) {
+    const tierNodes = this.nodes
+      .filter(n => n.tier === tier)
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+    if (tierNodes.length <= maxCount) return 0
+    const toRemove = new Set(tierNodes.slice(0, tierNodes.length - maxCount).map(n => n.id))
+    const before = this.nodes.length
+    this.store.data.nodes = this.nodes.filter(n => !toRemove.has(n.id))
+    const nodeIds = new Set(this.nodes.map(n => n.id))
+    this.store.data.edges = this.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
+    return before - this.nodes.length
+  }
+
+  // 전체 삭제 (working 제외)
+  clearAll() {
+    const before = this.nodes.length
+    this.store.data.nodes = this.nodes.filter(n => n.tier === TIERS.WORKING)
+    this.store.data.edges = []
+    return before - this.nodes.length
   }
 
   allNodes() { return [...this.nodes] }

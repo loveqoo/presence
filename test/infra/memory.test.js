@@ -61,17 +61,14 @@ async function run() {
     assert(labels.includes('서울 강남'), 'depth=2: includes 서울 강남')
   }
 
-  // 4. recall by text
+  // 4. recall without embedder → empty (키워드 단독 검색 비활성)
   {
     const g = await createMemoryGraph()
-    const house = g.addNode({ label: '우리집' })
-    const restaurantA = g.addNode({ label: 'A식당' })
-    g.addEdge(house.id, restaurantA.id, '주변맛집')
+    g.addNode({ label: '우리집' })
+    g.addNode({ label: 'A식당' })
 
     const results = await g.recall('우리집 맛집')
-    const labels = results.map(n => n.label)
-    assert(labels.includes('우리집'), 'recall: includes 우리집')
-    assert(labels.includes('A식당'), 'recall: includes connected A식당')
+    assert(results.length === 0, 'recall no embedder: returns empty')
   }
 
   // 5. Tier management
@@ -203,17 +200,16 @@ async function run() {
     )
     const g = new MemoryGraph(store)
     const results = await g.recall('valid')
-    assert(results.length === 1, 'recall dirty labels: only valid node matched')
-    assert(results[0].label === 'valid node', 'recall dirty labels: correct match')
+    assert(results.length === 0, 'recall dirty labels: no embedder → empty')
   }
 
-  // 16. recall: 숫자 label은 String 변환 후 매칭 가능
+  // 16. recall without embedder → empty
   {
     const g = MemoryGraph.create()
     g.addNode({ label: 404 })
     g.addNode({ label: 'error 404' })
     const results = await g.recall('404')
-    assert(results.length === 2, 'recall numeric label: matched via String coercion')
+    assert(results.length === 0, 'recall no embedder: returns empty')
   }
 
   // 17. 영속화 라운드트립: episodic 추가 → save → 재로드 → recall
@@ -235,8 +231,10 @@ async function run() {
     assert(g2.getNodesByTier(TIERS.WORKING).length === 0, 'roundtrip: working nodes not persisted')
 
     const recalled = await g2.recall('PR')
-    assert(recalled.length === 1, 'roundtrip: recall works after reload')
-    assert(recalled[0].data.output === 'PR 3건', 'roundtrip: data intact')
+    assert(recalled.length === 0, 'roundtrip: no recall without embedder')
+    // data 무결성은 allNodes로 직접 확인
+    const prNode = g2.allNodes().find(n => n.label === 'PR 현황')
+    assert(prNode && prNode.data.output === 'PR 3건', 'roundtrip: data intact')
 
     rmSync(dirname(dbPath), { recursive: true, force: true })
   }
@@ -336,7 +334,7 @@ async function run() {
     const g = MemoryGraph.create()
     g.addNode({ label: 'keyword match' })
     const results = await g.recall('keyword')
-    assert(results.length === 1, 'recall no embedder: keyword fallback works')
+    assert(results.length === 0, 'recall no embedder: returns empty')
   }
 
   // 24. embedPending with null embedder → no-op
@@ -419,6 +417,85 @@ async function run() {
     await g.embedPending(embedder)
 
     assert(!called, 'no change: embed not called')
+  }
+
+  // --- 중복 방지 (dedup) ---
+
+  // 29. 동일 내용 addNode → 새 노드 생성 안 함, 기존 노드 반환
+  {
+    const g = MemoryGraph.create()
+    const n1 = g.addNode({ label: 'PR 현황', type: 'conversation', tier: TIERS.EPISODIC,
+      data: { input: 'PR 현황', output: 'PR 3건' } })
+    const before = n1.createdAt
+
+    await new Promise(r => setTimeout(r, 10))
+
+    const n2 = g.addNode({ label: 'PR 현황', type: 'conversation', tier: TIERS.EPISODIC,
+      data: { input: 'PR 현황', output: 'PR 3건' } })
+
+    assert(g.allNodes().length === 1, 'dedup: no duplicate node created')
+    assert(n2.id === n1.id, 'dedup: returns same node')
+    assert(n2.createdAt > before, 'dedup: timestamp updated')
+  }
+
+  // 30. conversation: 같은 label, 다른 output → 최신 응답으로 갱신 (1개 유지)
+  {
+    const g = MemoryGraph.create()
+    g.addNode({ label: 'PR 현황', type: 'conversation', tier: TIERS.EPISODIC,
+      data: { input: 'PR 현황', output: 'PR 3건' } })
+    const n2 = g.addNode({ label: 'PR 현황', type: 'conversation', tier: TIERS.EPISODIC,
+      data: { input: 'PR 현황', output: 'PR 5건' } })
+
+    assert(g.allNodes().length === 1, 'conversation dedup: same label → 1 node')
+    assert(n2.data.output === 'PR 5건', 'conversation dedup: output updated to latest')
+  }
+
+  // 30b. entity: 같은 label, 다른 data → 별도 노드 유지
+  {
+    const g = MemoryGraph.create()
+    g.addNode({ label: 'React', type: 'entity', tier: TIERS.EPISODIC,
+      data: { description: 'library' } })
+    g.addNode({ label: 'React', type: 'entity', tier: TIERS.EPISODIC,
+      data: { description: 'framework' } })
+
+    assert(g.allNodes().length === 2, 'entity dedup: different data → separate nodes')
+  }
+
+  // 31. working 티어는 중복 방지 안 함
+  {
+    const g = MemoryGraph.create()
+    g.addNode({ label: 'temp', tier: TIERS.WORKING })
+    g.addNode({ label: 'temp', tier: TIERS.WORKING })
+
+    assert(g.allNodes().length === 2, 'dedup: working tier allows duplicates')
+  }
+
+  // 32. 승격된 semantic 노드와 동일 내용 episodic 추가 → 기존 semantic 반환
+  {
+    const g = MemoryGraph.create()
+    const n1 = g.addNode({ label: 'React', type: 'entity', tier: TIERS.SEMANTIC })
+    const n2 = g.addNode({ label: 'React', type: 'entity', tier: TIERS.EPISODIC })
+
+    assert(g.allNodes().length === 1, 'dedup cross-tier: no new node')
+    assert(n2.id === n1.id, 'dedup cross-tier: returns existing semantic node')
+  }
+
+  // 33. removeNodes(predicate): 노드 제거 + 고아 엣지 정리
+  {
+    const g = MemoryGraph.create()
+    const a = g.addNode({ label: 'A', tier: TIERS.EPISODIC })
+    const b = g.addNode({ label: 'B', tier: TIERS.EPISODIC })
+    const c = g.addNode({ label: 'C', tier: TIERS.SEMANTIC })
+    g.addEdge(a.id, b.id, 'related')
+    g.addEdge(b.id, c.id, 'related')
+    g.addEdge(a.id, c.id, 'related')
+
+    const removed = g.removeNodes(n => n.label === 'B')
+    assert(removed === 1, 'removeNodes: returns removed count')
+    assert(g.nodes.length === 2, 'removeNodes: node removed')
+    assert(!g.nodes.find(n => n.label === 'B'), 'removeNodes: correct node removed')
+    assert(g.edges.length === 1, 'removeNodes: orphan edges cleaned')
+    assert(g.edges[0].from === a.id && g.edges[0].to === c.id, 'removeNodes: surviving edge correct')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

@@ -1,5 +1,5 @@
 import { createPersona, DEFAULT_PERSONA } from '../../src/infra/persona.js'
-import { buildPlannerPrompt } from '../../src/core/prompt.js'
+import { buildIterationPrompt } from '../../src/core/prompt.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -42,7 +42,7 @@ function run() {
     const p = persona.get()
     assert(p.systemPrompt === '나는 개인 비서다.', 'custom: systemPrompt set')
 
-    const prompt = buildPlannerPrompt({
+    const prompt = buildIterationPrompt({
       tools: [], memories: [], input: 'test',
       persona: p
     })
@@ -55,7 +55,7 @@ function run() {
     persona.set({ rules: ['항상 한국어로 답해', '보안 우선'] })
     const p = persona.get()
 
-    const prompt = buildPlannerPrompt({
+    const prompt = buildIterationPrompt({
       tools: [], memories: [], input: 'test',
       persona: p
     })

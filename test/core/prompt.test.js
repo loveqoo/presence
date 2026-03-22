@@ -1,6 +1,7 @@
 import {
-  buildPlannerPrompt, buildFormatterPrompt,
+  buildIterationPrompt,
   formatToolList, formatAgentList, formatMemories,
+  summarizeResults,
   planSchema,
 } from '../../src/core/prompt.js'
 
@@ -63,51 +64,63 @@ console.log('Prompt builder tests')
   assert(result.includes('backend'), 'formatAgentList: includes agent id')
 }
 
-// 7. buildPlannerPrompt: basic structure
+// 7. buildIterationPrompt: basic structure
 {
-  const prompt = buildPlannerPrompt({ tools: [], agents: [], memories: [], input: '안녕' })
-  assert(prompt.messages.length === 2, 'plannerPrompt: 2 messages (system + user)')
-  assert(prompt.messages[0].role === 'system', 'plannerPrompt: first is system')
-  assert(prompt.messages[1].role === 'user', 'plannerPrompt: second is user')
-  assert(prompt.messages[1].content === '안녕', 'plannerPrompt: user content is input')
-  assert(prompt.response_format.type === 'json_object', 'plannerPrompt: response_format is json_object')
+  const prompt = buildIterationPrompt({ tools: [], agents: [], memories: [], input: '안녕' })
+  assert(prompt.messages.length === 2, 'iterationPrompt: 2 messages (system + user)')
+  assert(prompt.messages[0].role === 'system', 'iterationPrompt: first is system')
+  assert(prompt.messages[1].role === 'user', 'iterationPrompt: second is user')
+  assert(prompt.messages[1].content === '안녕', 'iterationPrompt: user content is input')
+  assert(prompt.response_format.type === 'json_object', 'iterationPrompt: response_format is json_object')
 }
 
-// 8. buildPlannerPrompt: with memories
+// 8. buildIterationPrompt: with memories
 {
-  const prompt = buildPlannerPrompt({ tools: [], memories: ['past event'], input: 'test' })
-  assert(prompt.messages[0].content.includes('Relevant memories'), 'plannerPrompt: includes memory section')
-  assert(prompt.messages[0].content.includes('past event'), 'plannerPrompt: includes memory content')
+  const prompt = buildIterationPrompt({ tools: [], memories: ['past event'], input: 'test' })
+  assert(prompt.messages[0].content.includes('Relevant memories'), 'iterationPrompt: includes memory section')
+  assert(prompt.messages[0].content.includes('past event'), 'iterationPrompt: includes memory content')
 }
 
-// 9. buildPlannerPrompt: without memories, no memory section
+// 9. buildIterationPrompt: without memories, no memory section
 {
-  const prompt = buildPlannerPrompt({ tools: [], memories: [], input: 'test' })
-  assert(!prompt.messages[0].content.includes('Relevant memories'), 'plannerPrompt: no memory section when empty')
+  const prompt = buildIterationPrompt({ tools: [], memories: [], input: 'test' })
+  assert(!prompt.messages[0].content.includes('Relevant memories'), 'iterationPrompt: no memory section when empty')
 }
 
-// 10. buildPlannerPrompt: persona support
+// 10. buildIterationPrompt: persona support
 {
-  const prompt = buildPlannerPrompt({
+  const prompt = buildIterationPrompt({
     tools: [], memories: [], input: 'test',
     persona: {
       systemPrompt: '나는 커스텀 에이전트다.',
       rules: ['한국어로 답해', '보안 우선'],
     }
   })
-  assert(prompt.messages[0].content.includes('나는 커스텀 에이전트다'), 'plannerPrompt: custom systemPrompt')
-  assert(prompt.messages[0].content.includes('한국어로 답해'), 'plannerPrompt: persona rules included')
+  assert(prompt.messages[0].content.includes('나는 커스텀 에이전트다'), 'iterationPrompt: custom systemPrompt')
+  assert(prompt.messages[0].content.includes('한국어로 답해'), 'iterationPrompt: persona rules included')
 }
 
-// 11. buildFormatterPrompt
+// 11. buildIterationPrompt: rolling context
 {
-  const prompt = buildFormatterPrompt('PR 알려줘', ['PR 3건', '이슈 2건'])
-  assert(prompt.messages.length === 2, 'formatterPrompt: 2 messages')
-  assert(prompt.messages[1].content.includes('PR 알려줘'), 'formatterPrompt: includes original input')
-  assert(prompt.messages[1].content.includes('[Step 1]'), 'formatterPrompt: includes step results')
+  const prompt = buildIterationPrompt({
+    tools: [], memories: [], input: 'test',
+    previousPlan: { type: 'plan', steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: {} } }] },
+    previousResults: '[Step 1] some result',
+  })
+  assert(prompt.messages.length === 4, 'iterationPrompt rolling: 4 messages (system + user + assistant + user)')
+  assert(prompt.messages[2].role === 'assistant', 'iterationPrompt rolling: assistant has previous plan')
+  assert(prompt.messages[3].role === 'user', 'iterationPrompt rolling: user has step results')
+  assert(prompt.messages[3].content.includes('Step results'), 'iterationPrompt rolling: includes step results')
+  assert(prompt.messages[3].content.includes('some result'), 'iterationPrompt rolling: includes actual result')
 }
 
-// 12. planSchema has correct structure
+// 12. buildIterationPrompt: no rolling context when previousPlan is null
+{
+  const prompt = buildIterationPrompt({ tools: [], memories: [], input: 'test', previousPlan: null, previousResults: null })
+  assert(prompt.messages.length === 2, 'iterationPrompt no rolling: only 2 messages')
+}
+
+// 13. planSchema has correct structure
 {
   assert(planSchema.name === 'agent_plan', 'planSchema: name is agent_plan')
   assert(planSchema.strict === true, 'planSchema: strict mode')
@@ -115,6 +128,42 @@ console.log('Prompt builder tests')
   assert(props.type.enum.includes('plan'), 'planSchema: type enum has plan')
   assert(props.type.enum.includes('direct_response'), 'planSchema: type enum has direct_response')
   assert(props.steps.items.properties.op.enum.length === 6, 'planSchema: 6 op types')
+}
+
+// 14. summarizeResults: basic
+{
+  const result = summarizeResults(['hello', 'world'])
+  assert(result.includes('[Step 1] hello'), 'summarizeResults: step 1')
+  assert(result.includes('[Step 2] world'), 'summarizeResults: step 2')
+}
+
+// 15. summarizeResults: truncation
+{
+  const longText = 'x'.repeat(1000)
+  const result = summarizeResults([longText])
+  assert(result.includes('...(truncated)'), 'summarizeResults: long text truncated')
+  assert(result.length < 1000, 'summarizeResults: result is shorter than input')
+}
+
+// 16. summarizeResults: object values
+{
+  const result = summarizeResults([{ key: 'value' }])
+  assert(result.includes('{"key":"value"}'), 'summarizeResults: objects stringified')
+}
+
+// 17. summarizeResults: single non-array value
+{
+  const result = summarizeResults('single')
+  assert(result.includes('[Step 1] single'), 'summarizeResults: single value wrapped')
+}
+
+// 18. prompt includes iteration guidance
+{
+  const prompt = buildIterationPrompt({ tools: [], memories: [], input: 'test' })
+  const system = prompt.messages[0].content
+  assert(system.includes('Iteration'), 'prompt: includes iteration section')
+  assert(system.includes('direct_response'), 'prompt: mentions direct_response')
+  assert(system.includes('without RESPOND'), 'prompt: mentions plan without RESPOND')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

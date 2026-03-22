@@ -137,7 +137,7 @@ async function run() {
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 E2E: turnState idle')
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'Step 30 E2E: success')
-    assert(typeof result === 'string', 'Step 30 E2E: result is string')
+    assert(result != null && result.status === 'completed', 'Step 30 E2E: result is DelegateResult')
   }
 
   // Delegate 실패 → plan이 실패로 닫힘

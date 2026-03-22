@@ -3,10 +3,9 @@ initI18n('ko')
 import {
   createAgentTurn, safeRunTurn, createAgent,
   beginTurn, finishSuccess, finishFailure,
-  safeJsonParse, validatePlan,
+  safeJsonParse, extractJson, validatePlan,
   PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo,
 } from '../../src/core/agent.js'
-import { createReactTurn } from '../../src/core/react.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { Free, Either } from '../../src/core/op.js'
@@ -116,6 +115,21 @@ async function run() {
     const r3 = safeJsonParse(obj)
     assert(Either.isRight(r3), 'safeJsonParse: object passthrough → Right')
     assert(r3.value === obj, 'safeJsonParse: same reference')
+  }
+
+  // T5b. extractJson — <think> 태그 및 비-JSON 접두사 제거
+  {
+    assert(extractJson('{"type":"plan"}') === '{"type":"plan"}', 'extractJson: clean JSON unchanged')
+    assert(extractJson('<think>reasoning</think>\n{"type":"plan"}') === '{"type":"plan"}', 'extractJson: strips <think> prefix')
+    assert(extractJson('some text\n\n{"type":"plan"}') === '{"type":"plan"}', 'extractJson: strips arbitrary prefix')
+    assert(extractJson('no json here') === 'no json here', 'extractJson: no { returns as-is')
+    assert(extractJson({ a: 1 }) !== undefined, 'extractJson: non-string passthrough')
+
+    // safeJsonParse with <think> prefix
+    const r4 = safeJsonParse('<think>\n사용자 인사\n</think>\n{"type":"direct_response","message":"안녕"}')
+    assert(Either.isRight(r4), 'safeJsonParse: <think> prefix → Right')
+    assert(r4.value.type === 'direct_response', 'safeJsonParse: <think> parsed type')
+    assert(r4.value.message === '안녕', 'safeJsonParse: <think> parsed message')
   }
 
   // T6. validatePlan — Either로 검증
@@ -286,9 +300,33 @@ async function run() {
     assert(log.some(l => l.tag === 'Respond'), 'direct_response: Respond op called')
   }
 
-  // plan execution
+  // plan with RESPOND (fast exit — no formatter)
   {
     const state = initState({ context: { memories: ['past context'] } })
+    const { interpreter, log } = createTestInterpreter({
+      AskLLM: () => JSON.stringify({
+        type: 'plan',
+        steps: [
+          { op: 'EXEC', args: { tool: 'github', tool_args: { repo: 'test' } } },
+          { op: 'RESPOND', args: { ref: 1 } },
+        ]
+      }),
+      ExecuteTool: (op) => `${op.name}: 3 PRs found`
+    }, state)
+
+    const turn = createAgentTurn({ tools: [{ name: 'github', description: 'GH' }] })
+    const result = await Free.runWithTask(interpreter)(turn('PR 현황'))
+
+    assert(result === 'github: 3 PRs found', 'plan+RESPOND: tool result passed through')
+    assert(state.get('turnState').tag === PHASE.IDLE, 'plan+RESPOND: turnState idle')
+    assert(log.filter(l => l.tag === 'AskLLM').length === 1, 'plan+RESPOND: AskLLM once (no formatter)')
+    assert(log.some(l => l.tag === 'ExecuteTool'), 'plan+RESPOND: ExecuteTool called')
+    assert(log.some(l => l.tag === 'Respond'), 'plan+RESPOND: Respond op called')
+  }
+
+  // plan without RESPOND (iteration)
+  {
+    const state = initState()
     let n = 0
     const { interpreter, log } = createTestInterpreter({
       AskLLM: () => {
@@ -297,23 +335,22 @@ async function run() {
           return JSON.stringify({
             type: 'plan',
             steps: [
-              { op: 'EXEC', args: { tool: 'github', tool_args: { repo: 'test' } } },
-              { op: 'RESPOND', args: { ref: 1 } },
+              { op: 'EXEC', args: { tool: 'file_list', tool_args: { path: '.' } } },
             ]
           })
         }
-        return 'PR 3건이 있습니다.'
+        // iteration 2: direct_response로 종료
+        return JSON.stringify({ type: 'direct_response', message: 'src와 test 디렉토리가 있습니다.' })
       },
-      ExecuteTool: (op) => `${op.name}: 3 PRs found`
+      ExecuteTool: () => '[dir] src\n[dir] test'
     }, state)
 
-    const turn = createAgentTurn({ tools: [{ name: 'github', description: 'GH' }] })
-    const result = await Free.runWithTask(interpreter)(turn('PR 현황'))
+    const turn = createAgentTurn()
+    const result = await Free.runWithTask(interpreter)(turn('파일 목록 보여줘'))
 
-    assert(result === 'PR 3건이 있습니다.', 'plan: formatted response')
-    assert(state.get('turnState').tag === PHASE.IDLE, 'plan: turnState idle')
-    assert(log.filter(l => l.tag === 'AskLLM').length === 2, 'plan: AskLLM called twice')
-    assert(log.some(l => l.tag === 'ExecuteTool'), 'plan: ExecuteTool called')
+    assert(n === 2, 'iteration: 2 planner calls')
+    assert(result === 'src와 test 디렉토리가 있습니다.', 'iteration: direct_response result')
+    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'iteration: success')
   }
 
   // turnState 훅: working → idle 전이
@@ -385,7 +422,7 @@ async function run() {
     assert(typeof result === 'string' && result.includes('오류'), 'parse failure: error response')
   }
 
-  // AskLLM payload consistent between planner and formatter
+  // Iteration: rolling context in 2nd planner call
   {
     const state = initState()
     const capturedOps = []
@@ -398,17 +435,22 @@ async function run() {
             steps: [{ op: 'EXEC', args: { tool: 'test', tool_args: {} } }]
           })
         }
-        return 'formatted result'
-      }
+        return JSON.stringify({ type: 'direct_response', message: 'done' })
+      },
+      ExecuteTool: () => 'tool result'
     }, state)
 
     const turn = createAgentTurn()
     await Free.runWithTask(interpreter)(turn('test'))
 
-    assert(Array.isArray(capturedOps[0].messages), 'contract: planner has messages')
-    assert(Array.isArray(capturedOps[1].messages), 'contract: formatter has messages')
-    assert(capturedOps[0].responseFormat !== undefined, 'contract: planner has responseFormat')
-    assert(capturedOps[1].responseFormat === undefined, 'contract: formatter has no responseFormat')
+    assert(Array.isArray(capturedOps[0].messages), 'iteration contract: 1st planner has messages')
+    assert(Array.isArray(capturedOps[1].messages), 'iteration contract: 2nd planner has messages')
+    assert(capturedOps[0].responseFormat !== undefined, 'iteration contract: 1st has responseFormat')
+    assert(capturedOps[1].responseFormat !== undefined, 'iteration contract: 2nd also has responseFormat')
+    // 2nd call includes rolling context (previous results)
+    assert(capturedOps[1].messages.length > capturedOps[0].messages.length, 'iteration contract: 2nd has rolling context')
+    const lastMsg = capturedOps[1].messages[capturedOps[1].messages.length - 1]
+    assert(lastMsg.content.includes('Step results'), 'iteration contract: rolling context has results')
   }
 
   // safeRunTurn with null state → still throws, no crash
@@ -428,7 +470,7 @@ async function run() {
     }
   }
 
-  // Formatter failure → safeRunTurn recovery
+  // Iteration LLM failure → safeRunTurn recovery
   {
     const state = initState()
     let n = 0
@@ -441,17 +483,17 @@ async function run() {
             steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: {} } }]
           })
         }
-        throw new Error('formatter exploded')
+        throw new Error('iteration LLM exploded')
       }
     }, state)
 
     const safe = safeRunTurn(interpreter, state)
     try {
       await safe(createAgentTurn()('test'), 'test')
-      assert(false, 'formatter failure: should throw')
+      assert(false, 'iteration LLM failure: should throw')
     } catch (e) {
-      assert(state.get('turnState').tag === PHASE.IDLE, 'formatter failure: turnState idle')
-      assert(state.get('lastTurn').error.message === 'formatter exploded', 'formatter failure: error stored')
+      assert(state.get('turnState').tag === PHASE.IDLE, 'iteration LLM failure: turnState idle')
+      assert(state.get('lastTurn').error.message === 'iteration LLM exploded', 'iteration LLM failure: error stored')
     }
   }
 
@@ -597,24 +639,27 @@ async function run() {
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'valid plan (plan+steps): success')
   }
 
-  // createAgent with buildTurn (전략 주입)
+  // createAgent with buildTurn (커스텀 전략 주입)
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
-      AskLLM: () => 'ReAct 답변입니다.'
-    }, state)
+    const { interpreter } = createTestInterpreter({}, state)
+
+    const customTurn = (input) =>
+      beginTurn(input)
+        .chain(() => Free.of('커스텀 결과'))
+        .chain(msg => finishSuccess(input, msg))
 
     const agent = createAgent({
-      buildTurn: createReactTurn({ tools: [], maxSteps: 5 }),
+      buildTurn: customTurn,
       interpreter,
       state,
     })
     const result = await agent.run('test')
-    assert(result === 'ReAct 답변입니다.', 'createAgent+react: returns result')
-    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'createAgent+react: lastTurn success')
+    assert(result === '커스텀 결과', 'createAgent+custom: returns result')
+    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'createAgent+custom: lastTurn success')
   }
 
-  // createAgent without buildTurn → defaults to Plan-then-Execute
+  // createAgent without buildTurn → defaults to incremental planning
   {
     const state = initState()
     const { interpreter } = createTestInterpreter({
@@ -624,6 +669,95 @@ async function run() {
     const agent = createAgent({ interpreter, state })
     const result = await agent.run('test')
     assert(result === 'plan 답변', 'createAgent default: Plan-then-Execute')
+  }
+
+  // ===========================================
+  // Incremental Planning 테스트
+  // ===========================================
+
+  // maxIterations 초과 → failure
+  {
+    const state = initState()
+    let callCount = 0
+    const { interpreter } = createTestInterpreter({
+      AskLLM: () => {
+        callCount++
+        // 매번 RESPOND 없는 plan → 무한 iteration
+        return JSON.stringify({
+          type: 'plan',
+          steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: {} } }]
+        })
+      }
+    }, state)
+
+    const turn = createAgentTurn({ maxIterations: 3 })
+    await Free.runWithTask(interpreter)(turn('infinite'))
+
+    assert(callCount === 3, 'maxIterations: exactly 3 calls')
+    assert(state.get('lastTurn').tag === RESULT.FAILURE, 'maxIterations: failure')
+    assert(state.get('lastTurn').error.kind === ERROR_KIND.MAX_ITERATIONS, 'maxIterations: error kind')
+  }
+
+  // 다단계 iteration: plan → plan → direct_response
+  {
+    const state = initState()
+    let n = 0
+    const { interpreter } = createTestInterpreter({
+      AskLLM: () => {
+        n++
+        if (n === 1) return JSON.stringify({
+          type: 'plan',
+          steps: [{ op: 'EXEC', args: { tool: 'list', tool_args: {} } }]
+        })
+        if (n === 2) return JSON.stringify({
+          type: 'plan',
+          steps: [{ op: 'EXEC', args: { tool: 'read', tool_args: {} } }]
+        })
+        return JSON.stringify({ type: 'direct_response', message: '3단계 완료' })
+      },
+      ExecuteTool: (op) => `${op.name} result`
+    }, state)
+
+    const turn = createAgentTurn()
+    const result = await Free.runWithTask(interpreter)(turn('deep'))
+
+    assert(n === 3, 'multi-iteration: 3 planner calls')
+    assert(result === '3단계 완료', 'multi-iteration: final direct_response')
+    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'multi-iteration: success')
+  }
+
+  // malformed intermediate plan → same validation (not silently passed)
+  {
+    const state = initState()
+    let n = 0
+    const { interpreter } = createTestInterpreter({
+      AskLLM: () => {
+        n++
+        if (n === 1) return JSON.stringify({
+          type: 'plan',
+          steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: {} } }]
+        })
+        // iteration 2: malformed response
+        return '<<<invalid json>>>'
+      }
+    }, state)
+
+    const safe = safeRunTurn(interpreter, state)
+    try {
+      await safe(createAgentTurn()('test'), 'test')
+    } catch (_) {}
+
+    assert(state.get('lastTurn').tag === RESULT.FAILURE, 'malformed iteration: failure')
+  }
+
+  // ERROR_KIND 구조 검증: REACT_* 제거, MAX_ITERATIONS 추가
+  {
+    assert(ERROR_KIND.MAX_ITERATIONS === 'max_iterations', 'ERROR_KIND: MAX_ITERATIONS exists')
+    assert(ERROR_KIND.PLANNER_PARSE === 'planner_parse', 'ERROR_KIND: PLANNER_PARSE exists')
+    assert(ERROR_KIND.PLANNER_SHAPE === 'planner_shape', 'ERROR_KIND: PLANNER_SHAPE exists')
+    assert(ERROR_KIND.INTERPRETER === 'interpreter', 'ERROR_KIND: INTERPRETER exists')
+    assert(!('REACT_MAX_STEPS' in ERROR_KIND), 'ERROR_KIND: REACT_MAX_STEPS removed')
+    assert(!('REACT_MULTI_TOOL' in ERROR_KIND), 'ERROR_KIND: REACT_MULTI_TOOL removed')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

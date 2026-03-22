@@ -133,6 +133,18 @@ const opHandlers = {
     delegate(a.target, a.task),
 }
 
+// LLM이 DELEGATE op 대신 EXEC {tool: "delegate"} 를 생성하는 패턴 보정
+const normalizeStep = (step) => {
+  if (!step || step.op !== 'EXEC') return step
+  const a = step.args || {}
+  if (a.tool === 'delegate') {
+    const target = a.target || a.tool_args?.target
+    const task = a.task || a.tool_args?.task
+    if (target) return { op: 'DELEGATE', args: { target, task } }
+  }
+  return step
+}
+
 const stepToOp = (step, results) =>
   Either.fold(
     err => Free.of(Either.Left(err)),
@@ -147,7 +159,7 @@ const stepToOp = (step, results) =>
       return opHandlers[validStep.op](a, results)
         .chain(value => Free.of(Either.Right(value)))
     },
-    validateStep(step),
+    validateStep(normalizeStep(step)),
   )
 
 // --- parsePlan ---
@@ -179,4 +191,4 @@ const parsePlan = (plan) => {
   )
 }
 
-export { parsePlan, stepToOp, opHandlers, validateStep, argValidators, isPositiveInt, isPositiveIntArray, resolveRefs, resolveStringRefs, resolveToolArgs, safeLookup }
+export { parsePlan, stepToOp, normalizeStep, opHandlers, validateStep, argValidators, isPositiveInt, isPositiveIntArray, resolveRefs, resolveStringRefs, resolveToolArgs, safeLookup }

@@ -95,6 +95,16 @@ function run() {
     ['deeply nested', { type: 'plan', steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: { a: { b: { c: 1 } } } } }] }],
     ['extra fields', { type: 'plan', steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: {} } }], extra: true, foo: 'bar' }],
     ['prototype pollution attempt', JSON.parse('{"type":"plan","steps":[{"op":"EXEC","args":{"tool":"x","tool_args":{}}}],"__proto__":{"polluted":true}}')],
+    // RESPOND가 마지막이 아닌 경우
+    ['RESPOND not last', { type: 'plan', steps: [
+      { op: 'RESPOND', args: { message: 'hi' } },
+      { op: 'EXEC', args: { tool: 'x', tool_args: {} } },
+    ]}],
+    ['RESPOND first of three', { type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'a', tool_args: {} } },
+      { op: 'RESPOND', args: { ref: 1 } },
+      { op: 'EXEC', args: { tool: 'b', tool_args: {} } },
+    ]}],
 
     // 유효한 plan (Right여야 함)
     ['valid direct_response', { type: 'direct_response', message: 'hi' }],
@@ -131,6 +141,26 @@ function run() {
 
     const r2 = validatePlan({ type: 'plan', steps: [{ op: 'RESPOND', args: { ref: 0 } }] })
     assert(Either.isLeft(r2), 'ref=0: Left')
+
+    // RESPOND가 마지막이 아닌 경우 Left
+    const r3 = validatePlan({ type: 'plan', steps: [
+      { op: 'RESPOND', args: { message: 'mid' } },
+      { op: 'EXEC', args: { tool: 'x', tool_args: {} } },
+    ]})
+    assert(Either.isLeft(r3), 'RESPOND not last: Left')
+
+    // RESPOND가 마지막이면 Right
+    const r4 = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'x', tool_args: {} } },
+      { op: 'RESPOND', args: { ref: 1 } },
+    ]})
+    assert(Either.isRight(r4), 'RESPOND last: Right')
+
+    // RESPOND 없는 plan도 Right (intermediate)
+    const r5 = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'x', tool_args: {} } },
+    ]})
+    assert(Either.isRight(r5), 'no RESPOND: Right (intermediate plan)')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)
