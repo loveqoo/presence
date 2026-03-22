@@ -49,7 +49,7 @@
   "transcript": {
     "header": "── Transcript ",
     "controls": " [←→ tab  ↑↓ scroll  ^O detail  ESC close]",
-    "tab_op_chain": "Op Chain",
+    "tab_op_chain": "Operation Flow",
     "tab_turn": "Turn",
     "tab_prompt": "Prompt",
     "tab_response": "Response",

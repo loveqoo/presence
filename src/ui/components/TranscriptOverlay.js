@@ -113,7 +113,14 @@ const formatOpLabel = (e) => {
   if (tag === 'ExecuteTool') return `Run ${detail || 'tool'}`
   if (tag === 'Respond') return detail ? `Reply ("${detail}")` : 'Reply'
   if (tag === 'Approve') return `Ask Approval: ${detail || '?'}`
-  if (tag === 'Delegate') return `Delegate to ${detail || '?'}`
+  if (tag === 'Delegate') {
+    const label = `Delegate to ${detail || '?'}`
+    if (!e.result) return label
+    if (e.result.status === 'completed') return `${label} → completed`
+    if (e.result.status === 'failed') return `${label} → failed: ${e.result.error || '?'}`
+    if (e.result.status === 'submitted') return `${label} → submitted`
+    return label
+  }
   if (tag === 'UpdateState') {
     if (detail === 'turnState') return 'Set Idle'
     if (detail === '_streaming') return 'Clear Streaming'
@@ -187,6 +194,13 @@ function buildOpChainLines(opTrace = []) {
     } else {
       add(lines, `${connector}─ ${label} (${dur})`)
     }
+    // Delegate completed: output 미리보기
+    if (e.result?.status === 'completed' && e.result.output) {
+      const guide = isLast ? ' ' : '│'
+      const out = typeof e.result.output === 'string' ? e.result.output : JSON.stringify(e.result.output)
+      const preview = out.length > 70 ? out.slice(0, 67) + '...' : out
+      add(lines, `${guide}    ↳ ${preview}`, 'gray')
+    }
   }
 
   // finish 합산
@@ -205,7 +219,20 @@ const formatSummaryLabel = (e) => {
   if (tag === 'ExecuteTool') return `Execute Tool — ${detail || '?'}`
   if (tag === 'Respond') return 'Send Response'
   if (tag === 'Approve') return `Await Approval: ${detail || '?'}`
-  if (tag === 'Delegate') return `Delegate to ${detail || '?'}`
+  if (tag === 'Delegate') {
+    const label = `Delegate to ${detail || '?'}`
+    if (!e.result) return label
+    if (e.result.status === 'completed') {
+      const out = e.result.output || ''
+      const preview = typeof out === 'string'
+        ? (out.length > 40 ? out.slice(0, 37) + '...' : out)
+        : JSON.stringify(out).slice(0, 40)
+      return `${label} → ${preview}`
+    }
+    if (e.result.status === 'failed') return `${label} ✗ ${e.result.error || 'failed'}`
+    if (e.result.status === 'submitted') return `${label} → submitted`
+    return label
+  }
   if (tag === 'UpdateState' && detail === '_retry') return 'Retry'
   return formatOpLabel(e)
 }

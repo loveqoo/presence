@@ -37,7 +37,15 @@ const createTracedInterpreter = (inner, { logger, onOp } = {}) => {
       if (logger) logger.debug(`[op:start] ${tag}`, { tag })
       if (onOp) onOp('start', entry)
 
-      const task = inner(functor)
+      // Delegate: next를 래핑하여 DelegateResult 캡처
+      const actual = tag === 'Delegate'
+        ? { ...functor, next: (r) => {
+            if (r?.status) entry.result = { status: r.status, output: r.output, mode: r.mode, error: r.error }
+            return functor.next(r)
+          }}
+        : functor
+
+      const task = inner(actual)
 
       return new Task((reject, resolve) => {
         task.fork(

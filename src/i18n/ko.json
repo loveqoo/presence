@@ -49,7 +49,7 @@
   "transcript": {
     "header": "── 트랜스크립트 ",
     "controls": " [←→ 탭  ↑↓ 스크롤  ^O 상세  ESC 닫기]",
-    "tab_op_chain": "Op Chain",
+    "tab_op_chain": "연산 흐름",
     "tab_turn": "턴 정보",
     "tab_prompt": "프롬프트",
     "tab_response": "응답",
