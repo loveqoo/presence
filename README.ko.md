@@ -75,9 +75,9 @@ npm test    # 1590 tests, 39 files
 
 ## 문서
 
-- [GUIDE.md](GUIDE.md) — 설정, 사용법, 트러블슈팅
-- [SCENARIOS.md](SCENARIOS.md) — 실행 가능한 사용 시나리오
-- [TESTS.md](TESTS.md) — 테스트 커버리지 상세
+- [GUIDE.ko.md](GUIDE.ko.md) — 설정, 사용법, 트러블슈팅
+- [SCENARIOS.ko.md](SCENARIOS.ko.md) — 실행 가능한 사용 시나리오
+- [TESTS.ko.md](TESTS.ko.md) — 테스트 커버리지 상세
 - [PLAN.md](PLAN.md) — 구현 플랜 + 아키텍처 설계
 
 ## 기술 스택

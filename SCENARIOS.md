@@ -1,8 +1,8 @@
-# Presence 사용 시나리오
+# Presence Usage Scenarios
 
-실행 후 `>` 프롬프트에서 직접 입력해볼 수 있는 시나리오입니다.
+Hands-on scenarios you can try at the `>` prompt after startup.
 
-## 시작하기
+## Getting Started
 
 ```bash
 npm start
@@ -10,186 +10,186 @@ npm start
 
 ---
 
-## 1. 기본 대화
+## 1. Basic Conversation
 
-에이전트가 `direct_response`로 바로 답하는 케이스입니다.
+Cases where the agent responds directly with `direct_response`.
 
 ```
-> 안녕하세요
-> 자바스크립트에서 클로저가 뭐야?
-> 오늘 뭐 도와줄 수 있어?
-> FP에서 모나드를 쉽게 설명해줘
+> Hello
+> What is a closure in JavaScript?
+> What can you help me with today?
+> Explain monads in FP in simple terms
 ```
 
-**확인:** 도구 호출 없이 바로 답변이 오는지.
+**Verify:** Responses come without any tool calls.
 
 ---
 
-## 2. 파일 도구
+## 2. File Tools
 
-### 파일 읽기
-
-```
-> package.json 파일 내용 보여줘
-> src/core/agent.js 파일의 처음 10줄만 보여줘
-> CLAUDE.md 파일이 뭐라고 적혀있어?
-```
-
-### 디렉토리 탐색
+### Reading Files
 
 ```
-> 현재 디렉토리에 어떤 파일들이 있어?
-> src/infra 폴더에 뭐가 있어?
-> test 디렉토리 구조를 알려줘
+> Show me the contents of package.json
+> Show just the first 10 lines of src/core/agent.js
+> What does CLAUDE.md say?
 ```
 
-### 파일 쓰기 (승인 필요)
+### Directory Exploration
 
 ```
-> /tmp/hello.txt 파일에 "Hello World" 내용을 써줘
+> What files are in the current directory?
+> What's in the src/infra folder?
+> Show me the test directory structure
 ```
 
-**확인:** `⚠ 승인 필요` 프롬프트가 나오는지. `y`로 승인 후 파일이 생성되는지.
+### Writing Files (approval required)
 
 ```
-> /tmp/hello.txt 파일 읽어봐
+> Write "Hello World" to /tmp/hello.txt
 ```
 
-**확인:** 방금 쓴 내용이 맞는지.
+**Verify:** The `⚠ Approval required` prompt appears. After approving with `y`, the file is created.
+
+```
+> Read /tmp/hello.txt
+```
+
+**Verify:** The content matches what was just written.
 
 ---
 
-## 3. 셸 명령 (승인 필요)
+## 3. Shell Commands (approval required)
 
 ```
-> 현재 git 브랜치가 뭐야?
-> 이 프로젝트의 git log 최근 3개만 보여줘
-> node 버전이 뭐야?
-> 현재 디렉토리의 디스크 사용량 알려줘
+> What's the current git branch?
+> Show me the last 3 git log entries for this project
+> What version of node am I running?
+> Show disk usage for the current directory
 ```
 
-**확인:** 각 명령 실행 전 승인 프롬프트가 나오는지. `n`으로 거부하면 어떻게 되는지도 테스트.
+**Verify:** Approval prompt appears before each command. Also test rejecting with `n`.
 
 ---
 
-## 4. 계산
+## 4. Calculation
 
 ```
-> 7 * 13 계산해줘
-> (100 + 200) * 3은 얼마야?
-> 1부터 10까지 합은?
+> Calculate 7 * 13
+> What's (100 + 200) * 3?
+> What's the sum of 1 to 10?
 ```
 
-**확인:** `calculate` 도구를 사용하여 정확한 결과를 반환하는지.
+**Verify:** The `calculate` tool is used and returns accurate results.
 
 ---
 
-## 5. 웹 페이지 가져오기
+## 5. Web Fetch
 
 ```
-> https://httpbin.org/get 페이지 내용 가져와줘
-> https://jsonplaceholder.typicode.com/todos/1 내용 알려줘
+> Fetch the content of https://httpbin.org/get
+> Show me what's at https://jsonplaceholder.typicode.com/todos/1
 ```
 
-**확인:** URL을 가져와서 내용을 요약하는지.
+**Verify:** URL content is fetched and summarized.
 
 ---
 
-## 6. 멀티스텝 작업
+## 6. Multi-step Tasks
 
-하나의 요청에 여러 도구가 필요한 경우:
+Requests that require multiple tools:
 
 ```
-> package.json에서 프로젝트 이름과 버전을 읽고, 한 줄로 정리해줘
-> src/core 디렉토리의 파일 목록을 보고, 각 파일이 뭘 하는지 간단히 설명해줘
-> git log 최근 5개를 보고 주요 변경사항을 요약해줘
+> Read the project name and version from package.json and summarize in one line
+> List the files in src/core and briefly explain what each one does
+> Show the last 5 git log entries and summarize the key changes
 ```
 
-**확인:** 에이전트가 plan을 생성하여 여러 step을 순서대로 실행하는지.
+**Verify:** The agent generates a plan with multiple steps executed in order.
 
 ---
 
-## 7. 명령어
+## 7. Commands
 
 ```
-> /help              ← 전체 명령어 + 단축키 안내
-> /status            ← 현재 상태 (turnState, turn, lastTurn)
-> /tools             ← 등록된 도구 목록
-> /agents            ← 등록된 에이전트 목록
-> /memory            ← 메모리 요약 (tier별 노드 수)
-> /memory list       ← 전체 메모리 노드 목록
-> /todos             ← TODO 목록
-> /events            ← 이벤트 큐 현황
+> /help              ← Full command list + shortcuts
+> /status            ← Current state (turnState, turn, lastTurn)
+> /tools             ← Registered tools
+> /agents            ← Registered agents
+> /memory            ← Memory summary (nodes per tier)
+> /memory list       ← Full memory node list
+> /todos             ← TODO list
+> /events            ← Event queue status
 ```
 
-**확인:** 각 명령이 즉시 응답하는지 (에이전트 턴 없이).
+**Verify:** Each command responds immediately (no agent turn).
 
 ---
 
-## 8. 메모리 확인
+## 8. Memory Verification
 
-대화를 몇 번 나눈 후:
-
-```
-> 안녕하세요
-> 자바스크립트가 뭐야?
-> /memory            ← 위 대화가 episodic으로 저장되었는지 확인
-```
-
-그 다음:
+After a few conversations:
 
 ```
-> 아까 뭐 물어봤었지?
+> Hello
+> What is JavaScript?
+> /memory            ← Check if above conversations were saved as episodic
 ```
 
-**확인:** 이전 대화를 기억하고 답하는지 (메모리 recall).
+Then:
+
+```
+> What did I ask about earlier?
+```
+
+**Verify:** The agent remembers and answers based on previous conversations (memory recall).
 
 ---
 
-## 9. 에러 처리
+## 9. Error Handling
 
-에이전트가 실패를 올바르게 처리하는지:
+Testing graceful failure:
 
 ```
-> /nonexistent/path/file.txt 읽어줘
+> Read /nonexistent/path/file.txt
 ```
 
-**확인:** "Access denied" 또는 "File not found" 에러가 나오되, 에이전트가 크래시하지 않는지.
+**Verify:** "Access denied" or "File not found" error appears, but the agent doesn't crash.
 
 ```
 > /status
 ```
 
-**확인:** lastTurn이 failure이지만 turnState는 idle인지.
+**Verify:** lastTurn is failure but turnState is idle.
 
 ---
 
-## 10. 승인 거부
+## 10. Approval Rejection
 
 ```
-> /tmp/test.txt에 아무 내용이나 써줘
+> Write something to /tmp/test.txt
 ```
 
-승인 프롬프트에서 `n` 입력:
+At the approval prompt, enter `n`:
 
 ```
-⚠ 승인 필요: ...
-  계속하시겠습니까? (y/n) > n
+⚠ Approval required: ...
+  Continue? (y/n) > n
 ```
 
-**확인:** 에이전트가 "작업이 거부되었습니다" 같은 메시지를 주는지, 크래시 없이 다음 프롬프트로 돌아오는지.
+**Verify:** Agent reports the action was rejected and returns to the prompt without crashing.
 
 ---
 
-## 11. 긴 대화 후 재시작
+## 11. Restart Persistence
 
 ```
-> 안녕
-> package.json 읽어줘
+> Hello
+> Read package.json
 > /quit
 ```
 
-다시 시작:
+Restart:
 
 ```bash
 npm start
@@ -199,102 +199,102 @@ npm start
 > /status
 ```
 
-**확인:** turn 카운터가 이전 값에서 이어지는지 (state restore).
+**Verify:** Turn counter continues from the previous value (state restore).
 
 ---
 
-## 12. 대화 이력 관리
+## 12. Conversation History Management
 
-### /clear로 이력 초기화
-
-```
-> 안녕하세요
-> 오늘 날씨 어때?
-> /status            ← turn 확인
-> /clear             ← 대화 이력 초기화
-> /status            ← turn은 유지, 대화 이력만 초기화
-```
-
-**확인:** 대화 이력은 사라지지만 메모리와 turn 카운터는 유지되는지.
-
-### 메모리 관리
+### Clear history with /clear
 
 ```
-> /memory            ← 현재 메모리 요약
-> /memory list       ← 전체 목록
-> /memory clear 7d   ← 7일 이상 된 메모리 삭제
-> /memory clear episodic  ← episodic tier 전체 삭제
+> Hello
+> How's the weather?
+> /status            ← Check turn count
+> /clear             ← Clear conversation history
+> /status            ← Turn preserved, only history cleared
+```
+
+**Verify:** Conversation history is cleared but memory and turn counter are preserved.
+
+### Memory management
+
+```
+> /memory            ← Current memory summary
+> /memory list       ← Full list
+> /memory clear 7d   ← Delete memories older than 7 days
+> /memory clear episodic  ← Clear entire episodic tier
 ```
 
 ---
 
-## 13. 디버그
+## 13. Debug
 
-### 트랜스크립트
-
-```
-> package.json 읽어줘
-```
-
-답변 후 `Ctrl+T` 입력:
-
-**확인:** Op Chain, 턴 정보, 프롬프트, 응답 탭이 표시되는지. `←→`로 탭 전환, `↑↓`로 스크롤.
-
-### 디버그 리포트
+### Transcript
 
 ```
-> src 디렉토리 파일 목록 보여줘
+> Read package.json
+```
+
+After the response, press `Ctrl+T`:
+
+**Verify:** Op Chain, Turn info, Prompt, and Response tabs are shown. Use `←→` to switch tabs, `↑↓` to scroll.
+
+### Debug report
+
+```
+> List files in the src directory
 > /report
 ```
 
-**확인:** `~/.presence/reports/`에 마크다운 리포트가 생성되는지. 클립보드에 복사되었는지.
+**Verify:** A markdown report is generated in `~/.presence/reports/` and copied to clipboard.
 
 ---
 
-## 14. 모델 전환
+## 14. Model Switching
 
 ```
-> /models            ← 사용 가능한 모델 목록 조회
-> /models gpt-4o-mini   ← 모델 런타임 전환
-> 안녕하세요          ← 변경된 모델로 동작 확인
+> /models            ← List available models
+> /models gpt-4o-mini   ← Switch model at runtime
+> Hello              ← Verify response comes from the new model
 ```
 
-**확인:** 모델이 전환되고, 전환된 모델로 응답하는지.
+**Verify:** Model switches and responses come from the new model.
 
 ---
 
-## 15. 도구 없이 사용
+## 15. No-tool Responses
 
-도구가 필요한 질문을 했을 때:
+When tools aren't needed:
 
 ```
-> 사과의 영어 단어가 뭐야?
-> 1+1은 얼마야?
+> What's the English word for apple?
+> What's 1+1?
 ```
 
-**확인:** 도구 없이 direct_response로 답하는지 (불필요한 plan 생성 없이).
+**Verify:** Agent responds with `direct_response` without generating unnecessary plans.
 
 ---
 
-## 트러블슈팅
+## Troubleshooting
 
-### 응답이 너무 느림
+### Responses are too slow
 
-- `~/.presence/config.json`에서 `responseFormat`을 `json_object`로 변경
-- 로컬 모델이면 `json_schema` 대신 `json_object` 필수
+- Change `responseFormat` to `json_object` in `~/.presence/config.json`
+- Local models: `json_object` instead of `json_schema` is required
 
-### "LLM API error" 반복
+### Repeated "LLM API error"
 
-- `/status`로 상태 확인
-- `~/.presence/config.json`의 `llm.apiKey`와 `llm.baseUrl` 확인
+- Check status with `/status`
+- Verify `llm.apiKey` and `llm.baseUrl` in `~/.presence/config.json`
 
-### 도구가 안 보임
+### Tools not showing up
 
-- `/tools`로 등록된 도구 확인
-- 로컬 도구는 `tools.allowedDirs` 설정 확인
+- Check with `/tools`
+- For local tools, verify `tools.allowedDirs` setting
 
-### 메모리가 안 쌓임
+### Memory not accumulating
 
-- `/memory`로 확인
-- 실패 턴은 메모리에 저장되지 않음 (의도된 동작)
-- `~/.presence/memory/graph.json` 파일 존재 확인
+- Check with `/memory`
+- Failed turns are intentionally not saved to memory
+- Verify `~/.presence/memory/graph.json` exists

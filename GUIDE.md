@@ -1,31 +1,31 @@
-# Presence 사용 가이드
+# Presence User Guide
 
-개인 업무 대리 에이전트 플랫폼.
+A personal task-delegation agent platform.
 
-## 빠른 시작
+## Quick Start
 
 ```bash
-# 설치
+# Install
 npm install
 
-# 설정 파일 생성
+# Create config file
 cp config.example.json ~/.presence/config.json
-# 에디터로 열어 API 키 등을 설정
+# Edit to set your API key
 
-# 실행
+# Run
 npm start
 
-# 테스트
+# Test
 npm test
 ```
 
-## 설정
+## Configuration
 
-설정 파일 위치: `~/.presence/config.json`
+Config file location: `~/.presence/config.json`
 
-환경변수 `PRESENCE_CONFIG`로 경로를 변경할 수 있습니다.
+Use the `PRESENCE_CONFIG` environment variable to change the path.
 
-### 최소 설정 (OpenAI)
+### Minimal Config (OpenAI)
 
 ```json
 {
@@ -35,9 +35,9 @@ npm test
 }
 ```
 
-나머지는 기본값이 적용됩니다 (model: gpt-4o, responseFormat: json_schema).
+Defaults are applied for the rest (model: gpt-4o, responseFormat: json_schema).
 
-### 로컬 모델 설정 (MLX, Ollama 등)
+### Local Model Config (MLX, Ollama, etc.)
 
 ```json
 {
@@ -53,38 +53,38 @@ npm test
 }
 ```
 
-로컬 모델은 `json_schema`가 느리거나 지원되지 않을 수 있으므로 `json_object`를 권장합니다.
+Local models may not support `json_schema` well — use `json_object` instead.
 
-### 전체 설정 옵션
+### Full Config Options
 
-| 경로 | 기본값 | 설명 |
-|------|--------|------|
-| `llm.baseUrl` | `https://api.openai.com/v1` | LLM API 엔드포인트 |
-| `llm.model` | `gpt-4o` | 모델 이름 |
-| `llm.apiKey` | `null` | API 키 |
+| Path | Default | Description |
+|------|---------|-------------|
+| `llm.baseUrl` | `https://api.openai.com/v1` | LLM API endpoint |
+| `llm.model` | `gpt-4o` | Model name |
+| `llm.apiKey` | `null` | API key |
 | `llm.responseFormat` | `json_schema` | `json_schema` / `json_object` / `none` |
-| `llm.maxRetries` | `2` | JSON 파싱 실패 시 재시도 횟수 |
-| `llm.timeoutMs` | `120000` | LLM 요청 타임아웃 (ms) |
-| `maxIterations` | `10` | Incremental Planning 최대 반복 횟수 |
-| `locale` | `ko` | UI 언어 (`ko` / `en`) |
-| `embed.provider` | `openai` | 임베딩 프로바이더 (`openai` / `cohere` / `custom`) |
-| `embed.baseUrl` | `null` | 임베딩 API 엔드포인트 (로컬 서버용) |
-| `embed.apiKey` | `null` | 임베딩 전용 API 키 (없으면 llm.apiKey 사용) |
-| `embed.model` | `null` | 임베딩 모델 (프로바이더 기본값 사용) |
-| `embed.dimensions` | `256` | 임베딩 벡터 차원 |
-| `memory.path` | `~/.presence/memory/graph.json` | 메모리 저장 경로 |
-| `mcp` | `[]` | MCP 서버 목록 |
-| `heartbeat.enabled` | `true` | 주기적 점검 활성화 |
-| `heartbeat.intervalMs` | `300000` | 점검 주기 (ms) |
-| `heartbeat.prompt` | `정기 점검: 현황 확인` | Heartbeat 프롬프트 |
-| `prompt.maxContextTokens` | `8000` | 프롬프트 최대 컨텍스트 토큰 |
-| `prompt.reservedOutputTokens` | `1000` | 출력용 예약 토큰 |
-| `tools.allowedDirs` | `[process.cwd()]` | 파일 도구 허용 디렉토리 |
-| `delegatePolling.intervalMs` | `10000` | 원격 delegate 폴링 주기 (ms) |
+| `llm.maxRetries` | `2` | Retries on JSON parse failure |
+| `llm.timeoutMs` | `120000` | LLM request timeout (ms) |
+| `maxIterations` | `10` | Max Incremental Planning iterations |
+| `locale` | `ko` | UI language (`ko` / `en`) |
+| `embed.provider` | `openai` | Embedding provider (`openai` / `cohere` / `custom`) |
+| `embed.baseUrl` | `null` | Embedding API endpoint (for local servers) |
+| `embed.apiKey` | `null` | Embedding API key (falls back to llm.apiKey) |
+| `embed.model` | `null` | Embedding model (uses provider default) |
+| `embed.dimensions` | `256` | Embedding vector dimensions |
+| `memory.path` | `~/.presence/memory/graph.json` | Memory storage path |
+| `mcp` | `[]` | MCP server list |
+| `heartbeat.enabled` | `true` | Enable periodic check-ins |
+| `heartbeat.intervalMs` | `300000` | Check-in interval (ms) |
+| `heartbeat.prompt` | `정기 점검: 현황 확인` | Heartbeat prompt |
+| `prompt.maxContextTokens` | `8000` | Max prompt context tokens |
+| `prompt.reservedOutputTokens` | `1000` | Reserved output tokens |
+| `tools.allowedDirs` | `[process.cwd()]` | Allowed directories for file tools |
+| `delegatePolling.intervalMs` | `10000` | Remote delegate polling interval (ms) |
 
-### 환경변수 오버라이드
+### Environment Variable Overrides
 
-설정 파일보다 환경변수가 우선합니다.
+Environment variables take precedence over the config file.
 
 ```bash
 OPENAI_API_KEY=sk-...           # llm.apiKey
@@ -99,93 +99,93 @@ PRESENCE_HEARTBEAT=false
 PRESENCE_HEARTBEAT_MS=60000
 ```
 
-## 사용법
+## Usage
 
-### 명령어
+### Commands
 
-실행 후 `>` 프롬프트에서 입력합니다.
+Enter commands at the `>` prompt after startup.
 
-**대화:**
+**Conversation:**
 
-| 명령 | 설명 |
-|------|------|
-| `/clear` | 대화 이력 초기화 (메모리는 유지) |
+| Command | Description |
+|---------|-------------|
+| `/clear` | Clear conversation history (memory is preserved) |
 
-**정보:**
+**Information:**
 
-| 명령 | 설명 |
-|------|------|
-| `/status` | 현재 상태 (턴, 모드, 큐 현황) |
-| `/tools` | 등록된 도구 목록 |
-| `/agents` | 등록된 에이전트 목록 |
-| `/todos` | TODO 목록 |
-| `/events` | 이벤트 큐 + dead letter 현황 |
+| Command | Description |
+|---------|-------------|
+| `/status` | Current state (turn, mode, queue status) |
+| `/tools` | List registered tools |
+| `/agents` | List registered agents |
+| `/todos` | TODO list |
+| `/events` | Event queue + dead letter status |
 
-**설정:**
+**Settings:**
 
-| 명령 | 설명 |
-|------|------|
-| `/models` | 모델 조회 및 전환 (예: `/models gpt-4`) |
-| `/memory` | 메모리 관리 (예: `/memory list`, `/memory clear 7d`) |
-| `/statusline` | 상태바 표시 항목 설정 (예: `/statusline +turn`) |
+| Command | Description |
+|---------|-------------|
+| `/models` | List/switch models (e.g., `/models gpt-4`) |
+| `/memory` | Memory management (e.g., `/memory list`, `/memory clear 7d`) |
+| `/statusline` | Configure status bar display (e.g., `/statusline +turn`) |
 
-**화면:**
+**Display:**
 
-| 명령 | 설명 |
-|------|------|
-| `/panel` | 사이드 패널 토글 |
-| `/report` | 디버그 리포트 저장 (`~/.presence/reports/`) |
-| `/quit` | 종료 |
+| Command | Description |
+|---------|-------------|
+| `/panel` | Toggle side panel |
+| `/report` | Save debug report to `~/.presence/reports/` |
+| `/quit` | Exit |
 
-### 단축키
+### Keyboard Shortcuts
 
-| 키 | 설명 |
-|----|------|
-| `Ctrl+T` | 트랜스크립트 오버레이 (Op 추적, 프롬프트, 응답 확인) |
-| `Ctrl+O` | 상세 보기 토글 (도구 결과 펼침) |
-| `ESC` | 턴 취소 (작업 중) / 도움말 닫기 (대기 중) |
-| `↑ / ↓` | 입력 이력 탐색 |
+| Key | Description |
+|-----|-------------|
+| `Ctrl+T` | Transcript overlay (Op trace, prompt, response) |
+| `Ctrl+O` | Toggle detail view (expand tool results) |
+| `ESC` | Cancel turn (working) / dismiss help (idle) |
+| `↑ / ↓` | Browse input history |
 
-### 에이전트 동작 방식
+### How the Agent Works
 
 Incremental Planning Engine:
-1. LLM이 실행 계획을 JSON으로 생성
-2. 계획을 파싱하여 Free Monad 프로그램으로 변환
-3. 인터프리터가 순차 실행
-4. 결과를 관찰하고, 추가 정보가 필요하면 다시 1번으로 (최대 `maxIterations`회)
-5. 충분한 정보가 모이면 `direct_response`로 최종 답변
+1. LLM generates an execution plan as JSON
+2. Plan is parsed into a Free Monad program
+3. Interpreter executes steps sequentially
+4. Results are observed; if more info is needed, return to step 1 (up to `maxIterations`)
+5. When sufficient information is gathered, respond with `direct_response`
 
-### 내장 도구
+### Built-in Tools
 
-| 도구 | 설명 | APPROVE |
-|------|------|---------|
-| `file_read` | 파일 읽기 | 불필요 |
-| `file_write` | 파일 쓰기 | **필수** |
-| `file_list` | 디렉토리 목록 (트리 형태) | 불필요 |
-| `web_fetch` | URL 내용 가져오기 (15초 타임아웃, 최대 10KB) | 불필요 |
-| `shell_exec` | 셸 명령 실행 (30초 타임아웃) | **필수** |
-| `calculate` | 수학 표현식 계산 | 불필요 |
+| Tool | Description | APPROVE |
+|------|-------------|---------|
+| `file_read` | Read a file | No |
+| `file_write` | Write a file | **Yes** |
+| `file_list` | List directory contents (tree format) | No |
+| `web_fetch` | Fetch URL content (15s timeout, 10KB max) | No |
+| `shell_exec` | Execute shell command (30s timeout) | **Yes** |
+| `calculate` | Evaluate math expressions | No |
 
-`file_write`와 `shell_exec`는 실행 전 사용자 승인을 요청합니다.
-파일 도구는 `tools.allowedDirs`에 지정된 디렉토리만 접근 가능합니다.
+`file_write` and `shell_exec` require user approval before execution.
+File tools only access directories listed in `tools.allowedDirs`.
 
-### 승인(APPROVE) 시스템
+### Approval (APPROVE) System
 
-위험한 작업 전에 에이전트가 승인을 요청합니다:
+The agent requests approval before dangerous actions:
 
 ```
-⚠ 승인 필요: 셸 명령 실행: rm -rf /tmp/old
-  계속하시겠습니까? (y/n) >
+⚠ Approval required: Execute shell command: rm -rf /tmp/old
+  Continue? (y/n) >
 ```
 
-- `y` → 작업 실행
-- `n` → 작업 거부, 에이전트가 대안을 제시
+- `y` → Execute
+- `n` → Reject, agent suggests alternatives
 
-백그라운드 턴(heartbeat, 이벤트)에서는 APPROVE가 자동 거부됩니다.
+Background turns (heartbeat, events) auto-reject APPROVE requests.
 
-### MCP 서버 연동
+### MCP Server Integration
 
-외부 MCP 서버는 설정 파일의 `mcp` 배열에 추가합니다.
+Add external MCP servers in the `mcp` array of the config file.
 
 ```json
 {
@@ -201,54 +201,54 @@ Incremental Planning Engine:
 }
 ```
 
-도구 이름은 `{serverName}_{toolName}` 형태로 등록됩니다 (예: `github_list_pull_requests`).
+Tools are registered as `{serverName}_{toolName}` (e.g., `github_list_pull_requests`).
 
-### 메모리 시스템
+### Memory System
 
-대화 기록이 자동으로 episodic memory에 저장됩니다.
+Conversations are automatically saved as episodic memory.
 
-- **영속화**: `~/.presence/memory/graph.json` (lowdb)
-- **검색**: 키워드 + 벡터 유사도 하이브리드
-- **임베딩**: API 키가 있으면 자동 벡터 생성 (없으면 비활성)
-- **계층**: working (임시) → episodic (대화) → semantic (일반화)
-- **자동 승격**: 동일 주제가 3회 이상 반복되면 episodic → semantic으로 자동 승격
-- **관리**: `/memory list`, `/memory clear 7d` 등으로 관리
+- **Persistence**: `~/.presence/memory/graph.json` (lowdb)
+- **Search**: Hybrid vector + keyword similarity
+- **Embedding**: Auto-generates vectors when API key is available (disabled otherwise)
+- **Tiers**: working (temporary) → episodic (conversations) → semantic (generalized)
+- **Auto-promotion**: Topics mentioned 3+ times are promoted from episodic → semantic
+- **Management**: `/memory list`, `/memory clear 7d`, etc.
 
-### 대화 이력 압축
+### History Compaction
 
-대화가 15턴을 넘으면 자동으로 오래된 이력을 LLM으로 요약 압축합니다.
+When conversation exceeds 15 turns, older history is automatically summarized by the LLM.
 
-- 최근 5턴은 원본 유지, 나머지를 3-5문장 요약으로 교체
-- 요약 위에 새 대화가 쌓이면 다시 압축 (점진적 요약 병합)
-- `/clear`로 전체 초기화 가능
+- Most recent 5 turns are kept verbatim; the rest are replaced with a 3-5 sentence summary
+- When new turns accumulate above the summary, compaction runs again (incremental merge)
+- Use `/clear` to reset entirely
 
-### 프롬프트 예산
+### Prompt Budget
 
-토큰 예산 기반으로 프롬프트를 자동 조립합니다.
+Prompts are automatically assembled within a token budget.
 
-1. 고정 시스템 메시지 (역할, 규칙, 도구 목록)
-2. 대화 이력 (최신 우선, 예산 내에서 최대한)
-3. 관련 메모리 (남은 예산으로)
+1. Fixed system message (role, rules, tool list)
+2. Conversation history (newest first, as much as budget allows)
+3. Related memories (with remaining budget)
 
-예산 사용량이 90%를 넘거나 이력이 제외되면 경고 메시지가 표시됩니다.
+A warning is displayed when budget usage exceeds 90% or when history entries are dropped.
 
 ### Heartbeat
 
-주기적으로 에이전트 턴을 실행합니다 (기본 5분).
+Runs agent turns periodically (default: every 5 minutes).
 
 ```json
 {
   "heartbeat": {
     "enabled": true,
     "intervalMs": 300000,
-    "prompt": "정기 점검: PR, 이슈 현황 확인"
+    "prompt": "Routine check: review current status"
   }
 }
 ```
 
-이벤트 큐를 통해 실행되며, 에이전트가 작업 중이면 큐에 대기합니다.
+Executed via the event queue; queued if the agent is busy.
 
-## 아키텍처
+## Architecture
 
 ```
 User Input → Free Monad Program → Interpreter → Side Effects
@@ -256,52 +256,52 @@ User Input → Free Monad Program → Interpreter → Side Effects
                                     State + Hook → Memory, Persistence, Events
 ```
 
-- **Free Monad**: 프로그램 선언과 실행의 분리
-- **ADT**: 상태 전이를 합타입으로 표현 (Phase, TurnResult, ErrorInfo)
-- **Either/Maybe**: 에러와 null을 값으로 처리
-- **Interpreter**: prod (실제), test (mock), traced (로깅), dryrun (검증)
-- **Policies**: 정책 상수를 `src/core/policies.js`에 통합 관리
+- **Free Monad**: Separation of program declaration and execution
+- **ADT**: State transitions expressed as sum types (Phase, TurnResult, ErrorInfo)
+- **Either/Maybe**: Errors and nulls handled as values
+- **Interpreter**: prod (real), test (mock), traced (logging), dryrun (validation)
+- **Policies**: Policy constants centralized in `src/core/policies.js`
 
-## 테스트
+## Tests
 
 ```bash
-npm test              # 전체 (1578 tests, 39 files)
-node test/core/agent.test.js    # 개별 파일
+npm test              # Full suite (1590 tests, 39 files)
+node test/core/agent.test.js    # Individual file
 ```
 
-모든 테스트는 외부 의존성 없이 실행됩니다.
+All tests run without external dependencies.
 
-## 트러블슈팅
+## Troubleshooting
 
-### 응답이 너무 느림
+### Responses are too slow
 
-- `~/.presence/config.json`에서 `responseFormat`을 `json_object`로 변경
-- 로컬 모델이면 `json_schema` 대신 `json_object` 필수
+- Change `responseFormat` to `json_object` in `~/.presence/config.json`
+- Local models: `json_object` instead of `json_schema` is required
 
-### "LLM API error" 반복
+### Repeated "LLM API error"
 
-- `/status`로 상태 확인
-- `~/.presence/config.json`의 `llm.apiKey`와 `llm.baseUrl` 확인
+- Check status with `/status`
+- Verify `llm.apiKey` and `llm.baseUrl` in `~/.presence/config.json`
 
-### 도구가 안 보임
+### Tools not showing up
 
-- `/tools`로 등록된 도구 확인
-- 로컬 도구는 `tools.allowedDirs` 설정 확인
+- Check with `/tools`
+- For local tools, verify `tools.allowedDirs` setting
 
-### 메모리가 안 쌓임
+### Memory not accumulating
 
-- `/memory`로 확인
-- 실패 턴은 메모리에 저장되지 않음 (의도된 동작)
-- `~/.presence/memory/graph.json` 파일 존재 확인
+- Check with `/memory`
+- Failed turns are intentionally not saved to memory
+- Verify `~/.presence/memory/graph.json` exists
 
-### 프롬프트 예산 경고가 뜸
+### Prompt budget warnings
 
-- `/clear`로 대화 이력 초기화
-- `/memory clear 7d`로 오래된 메모리 정리
-- `prompt.maxContextTokens` 값 증가 검토
+- Use `/clear` to reset conversation history
+- Use `/memory clear 7d` to clean old memories
+- Consider increasing `prompt.maxContextTokens`
 
-### 모델을 변경하고 싶음
+### Switching models
 
-- `/models`로 사용 가능한 모델 조회
-- `/models gpt-4o-mini` 형태로 런타임 전환
-- 설정 파일의 `llm.model`로 기본값 변경
+- Use `/models` to list available models
+- Use `/models gpt-4o-mini` to switch at runtime
+- Change `llm.model` in config for the default

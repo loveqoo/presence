@@ -1,298 +1,302 @@
-# Presence 테스트 시나리오
+# Presence Test Scenarios
 
-1578 tests, 39 test files.
+1590 tests, 39 test files.
 
 ```bash
-npm test              # 전체 실행
-node test/core/agent.test.js   # 개별 파일 실행
+npm test              # Run all
+node test/core/agent.test.js   # Run individual file
 ```
 
 ---
 
-## Phase 1: 코어
+## Phase 1: Core
 
 ### Op ADT (`test/core/makeOp.test.js`, `test/core/op.test.js`) — 84 tests
 
-- makeOp 팩토리: tag, data, next, Functor symbol, map은 continuation에 적용
-- DSL 함수: askLLM, executeTool, respond, approve, delegate, observe, updateState, getState, parallel, spawn
-- askLLM: messages 배열 필수, 비배열 → TypeError
-- 모든 Op: Free.liftF로 리프트, responseFormat/context 보존
+- makeOp factory: tag, data, next, Functor symbol, map applies to continuation
+- DSL functions: askLLM, executeTool, respond, approve, delegate, observe, updateState, getState, parallel, spawn
+- askLLM: messages array required, non-array → TypeError
+- All Ops: lifted via Free.liftF, responseFormat/context preserved
 
 ### State + Hook (`test/infra/state.test.js`, `test/infra/hook.test.js`, `test/infra/reactiveState.test.js`) — 30 tests
 
-- createState: get/set/snapshot, 경로 기반 접근 (dot notation), deepClone 독립성
-- createHooks: on/off/fire, 와일드카드 매칭, 재귀 방지 (MAX_DEPTH)
-- createReactiveState: set 시 hook 자동 발화, hooks 객체 노출
+- createState: get/set/snapshot, path-based access (dot notation), deepClone independence
+- createHooks: on/off/fire, wildcard matching, recursion prevention (MAX_DEPTH)
+- createReactiveState: auto-fires hooks on set, exposes hooks object
 
 ### Test Interpreter (`test/interpreter/test.test.js`) — 17 tests
 
-- 기본 핸들러: AskLLM → mock 응답, ExecuteTool → mock 결과, Respond → message 전달
-- UpdateState/GetState: state 객체 연동
-- 커스텀 핸들러 오버라이드, throw → Task.rejected, 알 수 없는 Op → rejected
-- log 축적: tag + data 기록
+- Default handlers: AskLLM → mock response, ExecuteTool → mock result, Respond → message passthrough
+- UpdateState/GetState: state object integration
+- Custom handler override, throw → Task.rejected, unknown Op → rejected
+- Log accumulation: tag + data recorded
 
-### Free + Interpreter 통합 (`test/core/free-integration.test.js`) — 14 tests
+### Free + Interpreter Integration (`test/core/free-integration.test.js`) — 14 tests
 
 - Free.of → Pure, Free.liftF → Impure
-- chain 합성, runWithTask로 실행
-- updateState → getState 라운드트립
+- chain composition, runWithTask execution
+- updateState → getState roundtrip
 
-### Plan 파서 (`test/core/plan.test.js`) — 79 tests
+### Plan Parser (`test/core/plan.test.js`) — 91 tests
 
-**유틸리티:**
-- resolveRefs: 1-based 인덱스, null → 빈 배열, 범위 초과 → 필터
-- resolveStringRefs: $N 치환, 없으면 유지
-- resolveToolArgs: 문자열만 치환, 숫자 유지
+**Utilities:**
+- resolveRefs: 1-based index, null → empty array, out-of-range → filtered
+- resolveStringRefs: $N substitution, missing → preserved
+- resolveToolArgs: strings substituted, numbers preserved
 
-**Step 검증 (Either):**
-- validateStep: op 존재, 문자열 여부, opHandlers 등록 여부
-- argValidators: EXEC → tool 필수, ASK_LLM → prompt 필수, RESPOND → ref 또는 message 필수
-- APPROVE → description 필수, DELEGATE → target + task 필수
-- LOOKUP_MEMORY → query는 string이거나 생략
+**Step Validation (Either):**
+- validateStep: op presence, string check, opHandlers registration
+- argValidators: EXEC → tool required, ASK_LLM → prompt required, RESPOND → ref or message required
+- APPROVE → description required, DELEGATE → target + task required
+- LOOKUP_MEMORY → query is string or omitted
 
-**Plan 실행:**
+**Plan Execution:**
 - direct_response → Either.Right(responded message)
-- Single EXEC → 결과 배열
-- Multi-step (EXEC → ASK_LLM → RESPOND): ctx 참조, ref 참조
-- Unknown op → Either.Left, short-circuit (이후 step 실행 안 됨)
+- Single EXEC → result array
+- Multi-step (EXEC → ASK_LLM → RESPOND): ctx reference, ref reference
+- Unknown op → Either.Left, short-circuit (subsequent steps skipped)
 - Empty steps → Either.Right([])
-- RESPOND 잘못된 ref → Either.Left
+- RESPOND invalid ref → Either.Left
 - EXEC without tool → Either.Left (PLANNER_SHAPE, not INTERPRETER)
 
+**normalizeStep:**
+- EXEC {tool: "delegate"} → auto-corrected to DELEGATE op
+- tool_args fallback, no target → stays EXEC, passthrough for non-EXEC
+
 **LOOKUP_MEMORY:**
-- 쿼리 필터링, 대소문자 무시, non-string 메모리 처리
-- 메모리 없음 → 빈 배열, 매칭 없음 → 빈 배열
+- Query filtering, case-insensitive, non-string memory handling
+- No memories → empty array, no match → empty array
 
 **ASK_LLM:**
-- context 있으면 전달, 없으면 undefined
-- 빈 ctx → undefined, 범위 초과 → undefined
+- Context passed when present, undefined when absent
+- Empty ctx → undefined, out-of-range → undefined
 
-### Prompt 빌더 (`test/core/prompt.test.js`) — 39 tests
+### Prompt Builder (`test/core/prompt.test.js`) — 39 tests
 
-- planSchema: type enum (plan, direct_response), 6개 op type
-- formatToolList: 도구 목록 포맷, 빈 목록, required 표시
-- buildPlannerPrompt: system + user 메시지, response_format, 메모리 섹션
-- formatMemories, buildMemoryPrompt: 메모리 포맷팅
+- planSchema: type enum (plan, direct_response), 6 op types
+- formatToolList: tool list formatting, empty list, required fields
+- buildPlannerPrompt: system + user messages, response_format, memory section
+- formatMemories, buildMemoryPrompt: memory formatting
 
 ### Assembly + Budget + History (`test/core/assembly.test.js`) — 108 tests
 
-- measureMessages: 메시지 배열 토큰 측정
-- flattenHistory: 턴 → user/assistant 메시지 변환
-- fitHistory: 토큰 예산 내 이력 fitting (최신 우선)
-- fitMemories: 남은 예산으로 메모리 fitting
-- buildIterationBlock: iteration context 조립 (full/summarized)
-- assemblePrompt 통합: budget 기반 단계적 fitting, assembly metadata
+- measureMessages: token measurement for message arrays
+- flattenHistory: turn → user/assistant message conversion
+- fitHistory: history fitting within token budget (newest first)
+- fitMemories: memory fitting with remaining budget
+- buildIterationBlock: iteration context assembly (full/summarized)
+- assemblePrompt integration: budget-based stepped fitting, assembly metadata
 - Conversation history: rolling window, source filtering, truncation
 
-### 에이전트 턴 (`test/core/agent.test.js`) — 154 tests
+### Agent Turn (`test/core/agent.test.js`) — 154 tests
 
-**상태 전이 ADT:**
+**State Transition ADT:**
 - beginTurn → turnState=working(input)
 - finishSuccess → lastTurn=success, turnState=idle
 - finishFailure → lastTurn=failure, turnState=idle
-- 실패 후 성공 → lastTurn이 success로 교체
+- Failure then success → lastTurn replaced with success
 
-**Either 기반 파싱/검증:**
-- safeJsonParse: 유효 JSON → Right, 무효 → Left(PLANNER_PARSE)
+**Either-based Parsing/Validation:**
+- safeJsonParse: valid JSON → Right, invalid → Left(PLANNER_PARSE)
 - validatePlan: direct_response, plan, null, non-string message, empty steps, unknown type
-- chain: safeJsonParse.chain(validatePlan) — parse 실패 시 short-circuit
+- chain: safeJsonParse.chain(validatePlan) — short-circuits on parse failure
 
-**구조 검증:**
-- Either.catch, Either.fold 사용
-- validateExecArgs: required 필드 검증
-- validateRefRange: RESPOND ref, ASK_LLM ctx 범위 검사
-- validateStepFull: Either Kleisli 합성
+**Structural Validation:**
+- Either.catch, Either.fold usage
+- validateExecArgs: required field validation
+- validateRefRange: RESPOND ref, ASK_LLM ctx range checks
+- validateStepFull: Either Kleisli composition
 
-**Invalid plan shapes (12종):**
-- tool_calls, unknown type, plan without steps, empty steps, empty object, 관계없는 객체
-- null, 숫자, 배열, direct_response without/null/numeric message
+**Invalid Plan Shapes (12 variants):**
+- tool_calls, unknown type, plan without steps, empty steps, empty object, unrelated object
+- null, number, array, direct_response without/null/numeric message
 
-**통합:**
-- direct_response: 정상 응답, turnState idle, lastResult 저장
-- plan 실행: Incremental Planning, iteration 반복
-- Conversation history: source=user만 저장, truncation 적용
+**Integration:**
+- direct_response: normal response, turnState idle, lastResult stored
+- Plan execution: Incremental Planning, iteration loops
+- Conversation history: source=user only, truncation applied
 - responseFormat: json_object
-- JSON 파싱 실패 → finishFailure, parse error detail
-- safeRunTurn: null state 안전, 상태 복구
-- createAgent: buildTurn 주입, 기본값 fallback
+- JSON parse failure → finishFailure, parse error detail
+- safeRunTurn: null state safe, state recovery
+- createAgent: buildTurn injection, default fallback
 
 ---
 
-## Phase 2: 실제 연동
+## Phase 2: Real Integration
 
-### LLM 클라이언트 (`test/infra/llm.test.js`) — 20 tests
+### LLM Client (`test/infra/llm.test.js`) — 20 tests
 
-- chat: messages 전달, responseFormat 전달, tools 변환
-- tool_calls 응답: toolCalls 배열 반환
-- 에러: HTTP 상태 코드, 네트워크 실패, no choices
-- timeout: AbortController 기반
+- chat: message passing, responseFormat, tools conversion
+- tool_calls response: toolCalls array returned
+- Errors: HTTP status codes, network failure, no choices
+- Timeout: AbortController-based
 
 ### Production Interpreter (`test/interpreter/prod.test.js`) — 48 tests
 
-- AskLLM: LLM chat 호출, responseFormat 전달, context 주입
-- ExecuteTool: handler 호출, async handler, unknown tool → rejected
-- Respond, Approve, UpdateState, GetState: 기본 동작
-- tool_calls: 구조 반환
+- AskLLM: LLM chat call, responseFormat passing, context injection
+- ExecuteTool: handler call, async handler, unknown tool → rejected
+- Respond, Approve, UpdateState, GetState: basic behavior
+- tool_calls: structure returned
 
 **Delegate:**
-- local agent → DelegateResult.completed
-- unknown agent → DelegateResult.failed
-- local agent throws → failed (not interpreter exception)
-- remote agent completed → output 반환 (mock fetch)
-- remote agent 네트워크 실패 → failed
-- remote submitted → delegates.pending에 등록
-- no agentRegistry → failed
-- 통합: plan DELEGATE step → registry → local run → result
+- Local agent → DelegateResult.completed
+- Unknown agent → DelegateResult.failed
+- Local agent throws → failed (not interpreter exception)
+- Remote agent completed → output returned (mock fetch)
+- Remote agent network failure → failed
+- Remote submitted → added to delegates.pending
+- No agentRegistry → failed
+- Integration: plan DELEGATE step → registry → local run → result
 
 **Parallel:**
-- allSettled: 성공 + 실패 혼합 → [{status, value/reason}]
-- 빈 배열 → []
+- allSettled: mixed success + failure → [{status, value/reason}]
+- Empty array → []
 
 ### Traced Interpreter (`test/interpreter/traced.test.js`) — 14 tests
 
-- trace 축적: tag, timestamp, duration
-- 에러 시 entry.error 기록
-- inner interpreter 위임
+- Trace accumulation: tag, timestamp, duration
+- Error: entry.error recorded
+- Inner interpreter delegation
 
 ### Dry-run Interpreter (`test/interpreter/dryrun.test.js`) — 13 tests
 
-- stub 반환, plan 축적
-- op별 summary 생성 (dispatch object)
-- 커스텀 stub 오버라이드
+- Stub returns, plan accumulation
+- Per-op summary generation (dispatch object)
+- Custom stub override
 
 ### Input Handler (`test/infra/input.test.js`) — 18 tests
 
-- 줄 단위 입력: buffer → onLine 콜백
-- Bracketed Paste Mode: paste 시작/끝 감지, onPaste 콜백
-- flush: 잔여 buffer 처리
+- Line-by-line input: buffer → onLine callback
+- Bracketed Paste Mode: paste start/end detection, onPaste callback
+- flush: remaining buffer handling
 
 ### REPL (`test/core/repl.test.js`) — 28 tests
 
-- 일반 입력 → agent.run 호출, 결과 반환
+- Normal input → agent.run call, result returned
 - /quit, /exit → running = false
-- agent 에러 → onError, null 반환
-- /status → turnState, turn, lastTurn 표시
-- /help → 명령어 목록
-- /tools → 등록 도구 목록
-- /agents → 등록 에이전트 목록
-- /todos → TODO 목록
-- /events → 큐 + dead letter 현황
+- Agent error → onError, null returned
+- /status → turnState, turn, lastTurn display
+- /help → command list
+- /tools → registered tool list
+- /agents → registered agent list
+- /todos → TODO list
+- /events → queue + dead letter status
 - COMMANDS export
 
 ---
 
-## Phase 3: MCP + 도구 확장
+## Phase 3: MCP + Tool Extensions
 
 ### Tool Registry (`test/infra/tools.test.js`) — 9 tests
 
-- register/get/list: 도구 등록, 이름으로 조회, 전체 목록
-- 파라미터 스키마 검증
+- register/get/list: tool registration, lookup by name, full list
+- Parameter schema validation
 
 ### MCP Integration (`test/infra/mcp.test.js`) — 40 tests
 
 **extractContent:**
-- text 추출, 복수 text 합치기, non-text 알림, 빈 배열, null
+- Text extraction, multiple text joining, non-text notification, empty array, null
 
 **ensureObjectSchema:**
-- valid → passthrough, non-object/null/undefined → fallback
+- Valid → passthrough, non-object/null/undefined → fallback
 
 **validateSchema → Either:**
-- valid → Right, null/non-object → Left
+- Valid → Right, null/non-object → Left
 
 **connectMCPServer:**
-- 도구 이름 prefix ({serverName}_{toolName})
-- handler → callTool 위임, 원본 이름(prefix 없이) 서버에 전송
-- schema fallback: non-object → object
-- close: client + transport 정리, idempotent
-- connect/listTools 실패 → 에러 전파 + cleanup
+- Tool name prefix ({serverName}_{toolName})
+- Handler → callTool delegation, original name (without prefix) sent to server
+- Schema fallback: non-object → object
+- close: client + transport cleanup, idempotent
+- connect/listTools failure → error propagation + cleanup
 
 ### Embedding (`test/infra/embedding.test.js`) — 26 tests
 
-**순수 함수:**
-- dotSimilarity: 동일/직교/반대 벡터
-- topK: 상위 K개, 부족하면 전체
-- toEmbeddingText: label + input + output, null 스킵
-- textHash: 결정적, 다른 텍스트 → 다른 해시
-- mergeSearchResults: 합집합, 높은 점수 우선, 겹치면 max
+**Pure Functions:**
+- dotSimilarity: identical/orthogonal/opposite vectors
+- topK: top K items, returns all if insufficient
+- toEmbeddingText: label + input + output, null skipped
+- textHash: deterministic, different text → different hash
+- mergeSearchResults: union, highest score first, overlaps take max
 
 **createEmbedder:**
-- custom embedFn → 직접 사용
-- openai provider: mock fetch, dimensions 반영
-- API 에러: 상태 코드 포함
-- unknown provider → throw
+- Custom embedFn → direct use
+- OpenAI provider: mock fetch, dimensions applied
+- API error: status code included
+- Unknown provider → throw
 
 ### Memory Graph (`test/infra/memory.test.js`) — 82 tests
 
 - addNode, findNode (Maybe), addEdge, query (depth 1/2)
-- recall: 키워드 매칭, 연결 노드 확장
-- tier 관리: getByTier, removeByTier, promoteNode
-- removeNodes(predicate): 노드 제거 + 고아 엣지 정리
-- 영속화: lowdb 저장/복원, MemoryGraph.fromFile
+- recall: keyword matching, connected node expansion
+- Tier management: getByTier, removeByTier, promoteNode
+- removeNodes(predicate): node removal + orphan edge cleanup
+- Persistence: lowdb save/restore, MemoryGraph.fromFile
 
-**임베딩 통합:**
-- embedPending: 벡터 부여, model/dimensions/timestamp/hash 기록
-- 이미 임베딩된 노드 건너뜀, 해시 불일치 → 재임베딩
-- embed 실패 → 건너뛰고 계속
-- 모델/차원 변경 → 재임베딩, 모두 동일 → 건너뜀
-- 차원 불일치 벡터 → 검색에서 제외 (NaN 방지)
-- 하이브리드 recall: 벡터 + 키워드 병합
-- recall without embedder → 빈 배열
-- 영속화 라운드트립: episodic 추가 → save → reload → recall
+**Embedding Integration:**
+- embedPending: vector assignment, model/dimensions/timestamp/hash recorded
+- Already embedded nodes skipped, hash mismatch → re-embed
+- Embed failure → skip and continue
+- Model/dimension change → re-embed, all identical → skip
+- Dimension-mismatched vectors → excluded from search (NaN prevention)
+- Hybrid recall: vector + keyword merge
+- Recall without embedder → empty array
+- Persistence roundtrip: add episodic → save → reload → recall
 
-**중복 방지:**
-- conversation: 같은 label hash → 기존 노드 갱신
-- entity: label + data hash → 기존 반환
-- working tier: 중복 허용
-- cross-tier: semantic 기존 노드에 episodic 추가 시 기존 반환
+**Deduplication:**
+- Conversation: same label hash → existing node updated
+- Entity: label + data hash → existing returned
+- Working tier: duplicates allowed
+- Cross-tier: adding episodic to existing semantic → existing returned
 
 ### Memory Hook Integration (`test/infra/memory-hook.test.js`) — 18 tests
 
-- 턴 시작 → 메모리 recall → context.memories 주입
-- 턴 종료 → working memory 정리
-- 턴 종료 → episodic 기록 추가
-- 실패 턴 → episodic 미저장, working 정리됨
-- 성공 후 실패 후 → 성공만 저장
-- Promotion: 3회 이상 언급 → episodic → semantic
+- Turn start → memory recall → context.memories injected
+- Turn end → working memory cleared
+- Turn end → episodic record added
+- Failed turn → not saved to episodic, working cleared
+- Success then failure → only success saved
+- Promotion: 3+ mentions → episodic → semantic
 
 ---
 
-## Phase 4: Heartbeat + 이벤트 소스
+## Phase 4: Heartbeat + Event Sources
 
 ### Event System (`test/infra/events.test.js`) — 43 tests
 
 **createEventReceiver:**
-- emit → 큐에 추가, id/receivedAt 자동 부여
-- 연속 emit → 유실 없이 누적, 순서 보존
-- custom id 보존
+- emit → added to queue, id/receivedAt auto-assigned
+- Sequential emits → no loss, order preserved
+- Custom id preserved
 
 **wireEventHooks:**
-- idle 시 큐 head 처리 → agent.run 호출
-- working 시 → 큐에 대기
-- agent.run 실패 → deadLetter (error + stack trace)
+- On idle: process queue head → agent.run call
+- While working → queued
+- agent.run failure → deadLetter (error + stack trace)
 
 **wireTodoHooks:**
-- event.todo 있으면 → TODO 생성 (sourceEventId)
-- event.todo 없으면 → 미생성
-- 멱등성: 같은 이벤트 재처리 → 중복 없음
+- event.todo present → TODO created (sourceEventId)
+- event.todo absent → not created
+- Idempotency: same event reprocessed → no duplicates
 
-**순수 함수:**
-- withEventMeta: id, receivedAt 부여, 기존 id 보존
+**Pure Functions:**
+- withEventMeta: id, receivedAt assigned, existing id preserved
 - eventToPrompt: prompt > message > type fallback
 - todoFromEvent: Maybe — Just(todo) / Nothing
-- isDuplicate: sourceEventId 비교
+- isDuplicate: sourceEventId comparison
 
 ### Heartbeat (`test/infra/heartbeat.test.js`) — 19 tests
 
-- start → emit 호출, type=heartbeat, prompt 전달
-- stop → 더 이상 emit 안 함
-- 중복 start 방지
-- emit 에러 → onError, 계속 실행
-- setTimeout 자기 스케줄링 → 중첩 없음
-- coalesce: 큐에 미처리 heartbeat → skip
-- 큐 비우면 다시 emit
-- 다른 타입 이벤트 큐 → heartbeat 영향 없음
+- start → emit called, type=heartbeat, prompt passed
+- stop → no more emits
+- Duplicate start prevention
+- emit error → onError, continues running
+- setTimeout self-scheduling → no nesting
+- Coalesce: unprocessed heartbeat in queue → skip
+- Queue cleared → resume emitting
+- Different event types in queue → no heartbeat impact
 - inFlight heartbeat → skip
-- inFlight 다른 타입 → 영향 없음
+- inFlight different type → no impact
 
 ---
 
@@ -300,7 +304,7 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 ### Agent Registry (`test/infra/agent-registry.test.js`) — 27 tests
 
-**DelegateResult shape:**
+**DelegateResult Shape:**
 - completed: mode, target, status, output
 - submitted: taskId, output null
 - failed: error message, mode null
@@ -309,156 +313,156 @@ node test/core/agent.test.js   # 개별 파일 실행
 - register + get → Maybe(entry)
 - get unknown → Nothing
 - list, has
-- remote agent: type, endpoint
-- local agent: run 함수 호출
+- Remote agent: type, endpoint
+- Local agent: run function call
 
 ### A2A Client (`test/infra/a2a-client.test.js`) — 50 tests
 
-**순수 함수:**
-- extractArtifactText: text 추출, null/빈 배열, non-text
+**Pure Functions:**
+- extractArtifactText: text extraction, null/empty array, non-text
 - buildTaskSendRequest: JSON-RPC 2.0, message/send method
 - buildTaskGetRequest: tasks/get method
 - responseToResult: completed/submitted/working/failed/rpc error/invalid
 
 **sendA2ATask:**
-- completed 즉시 반환, submitted taskId, HTTP 에러, 네트워크 에러, JSON-RPC 에러
-- 요청 형식: endpoint, jsonrpc 2.0, method, task text
+- Completed immediate return, submitted taskId, HTTP error, network error, JSON-RPC error
+- Request format: endpoint, jsonrpc 2.0, method, task text
 
 **getA2ATaskStatus:**
-- completed → output, 네트워크 에러 → failed
+- completed → output, network error → failed
 
 **wireDelegatePolling:**
-- idle 시 pending 폴링 → completed → emit + pending 제거
-- still working → pending 유지
-- 주기적 타이머: 첫 tick working → 두 번째 tick completed → emit
-- polling 가드: 동시 실행 방지
+- On idle: poll pending → completed → emit + remove from pending
+- Still working → pending preserved
+- Periodic timer: first tick working → second tick completed → emit
+- Polling guard: concurrent execution prevention
 
 ### Local Tools (`test/infra/local-tools.test.js`) — 26 tests
 
-**경로 검증:**
-- isPathAllowed: 빈 목록 → 허용, 내부 → 허용, 외부 → 거부
-- sibling-prefix 우회 방지 (/tmp/project-evil)
-- 정확한 디렉토리 매칭
+**Path Validation:**
+- isPathAllowed: empty list → allowed, inside → allowed, outside → denied
+- Sibling-prefix bypass prevention (/tmp/project-evil)
+- Exact directory matching
 
-**도구별:**
-- file_read: 내용 읽기, 없는 파일 → 에러, 접근 거부 → 에러
-- file_write: 쓰기 + 읽기 확인, 접근 거부
-- file_list: 파일/디렉토리 구분, 없는 경로
-- web_fetch: handler 존재, url 필수
-- shell_exec: stdout 캡처, 실패 명령 → 에러
-- calculate: 수식 평가
+**Per-tool:**
+- file_read: content reading, missing file → error, access denied → error
+- file_write: write + read verification, access denied
+- file_list: file/directory distinction, missing path
+- web_fetch: handler exists, url required
+- shell_exec: stdout capture, failed command → error
+- calculate: expression evaluation
 
-**메타데이터:**
-- 6개 도구 등록, 필수 필드 존재
-- file_write, shell_exec description에 APPROVE 명시
+**Metadata:**
+- 6 tools registered, required fields present
+- file_write, shell_exec descriptions mention APPROVE
 
 ---
 
-## Phase 6: 터미널 UI (Ink)
+## Phase 6: Terminal UI (Ink)
 
 ### UI Components (`test/ui/app.test.js`) — 143 tests
 
-- StatusBar: status/turn/memoryCount 렌더링, error 상태
-- ChatArea: user/agent 메시지, tag, 빈 목록
-- SidePanel: 에이전트 목록, 상태 표시
-- MarkdownText: 마크다운 렌더링
-- PlanView: 계획 단계 시각화
-- ToolResultView: 도구 결과 표시
-- deriveStatus selector: working/error/idle 판정
-- deriveMemoryCount selector: 배열 길이, 없으면 0
+- StatusBar: status/turn/memoryCount rendering, error state
+- ChatArea: user/agent messages, tags, empty list
+- SidePanel: agent list, state display
+- MarkdownText: markdown rendering
+- PlanView: plan step visualization
+- ToolResultView: tool result display
+- deriveStatus selector: working/error/idle determination
+- deriveMemoryCount selector: array length, 0 if absent
 
 ### Interactive UI (`test/ui/interactive.test.js`) — 29 tests
 
-- StatusBar: idle/working 상태 렌더링, 활동 텍스트, 가시성 플래그
-- ChatArea: 메시지 표시
-- App 컴포넌트: 전체 앱 렌더링 + 상태 통합
+- StatusBar: idle/working state rendering, activity text, visibility flags
+- ChatArea: message display
+- App component: full app rendering + state integration
 
 ### History Compaction (`test/core/compaction.test.js`) — 91 tests
 
-**순수 함수:**
-- extractForCompaction: threshold/keep 기반 분리, 경계 조건
-- buildCompactionPrompt: 이전 요약 포함/미포함, 시스템 메시지 분기
-- createSummaryEntry: summary marker, 타임스탬프, 랜덤 suffix
-- migrateHistoryIds: 레거시 항목 ID 부여
+**Pure Functions:**
+- extractForCompaction: threshold/keep-based splitting, boundary conditions
+- buildCompactionPrompt: with/without previous summary, system message branching
+- createSummaryEntry: summary marker, timestamp, random suffix
+- migrateHistoryIds: legacy entry ID assignment
 
-**통합:**
-- placeholder 삽입 → 비동기 요약 → 교체
-- epoch 기반 /clear 충돌 방지
-- rolling window: MAX_HISTORY 상한 유지
-- 요약 실패 시 placeholder 제거, remaining 유지
+**Integration:**
+- Placeholder insertion → async summarization → replacement
+- Epoch-based /clear collision prevention
+- Rolling window: MAX_HISTORY ceiling maintained
+- Summary failure: placeholder removed, remaining preserved
 
 ---
 
-## 통합 테스트
+## Integration Tests
 
 ### Phase 5 Integration (`test/integration/phase5.test.js`) — 23 tests
 
 **Heartbeat → Event → Agent:**
-- heartbeat emit → event hook → agent.run 호출, 올바른 prompt
-- working 중 이벤트 큐잉 → idle 후 처리
+- heartbeat emit → event hook → agent.run call, correct prompt
+- Events queued while working → processed after idle
 
 **Plan DELEGATE → Registry → Local Agent:**
-- planner DELEGATE step → registry 조회 → local run → 결과
-- 실패 delegate → plan 결과에 포함
+- Planner DELEGATE step → registry lookup → local run → result
+- Failed delegate → included in plan results
 
 **Parallel:**
-- 여러 Free 프로그램 병렬 실행
+- Multiple Free programs executed in parallel
 
-**이벤트 FIFO:**
-- 3개 이벤트 → idle 전이마다 하나씩 순서대로
+**Event FIFO:**
+- 3 events → one processed per idle transition, in order
 
 **deadLetter:**
-- agent.run 실패 → 에러 기록, 원본 이벤트 보존
+- agent.run failure → error recorded, original event preserved
 
 ---
 
-## 인프라
+## Infrastructure
 
 ### Config (`test/infra/config.test.js`) — 27 tests
 
-- mergeConfig: 중첩 병합, 배열 교체, 빈 override → 기본값
-- readConfigFile: 없는 파일 → {}, 유효 JSON → 파싱, 무효 JSON → {} + 경고
-- loadConfig: 파일 없으면 기본값, 파일 있으면 병합, 기본값 shape 검증
-- validateConfig: 누락 설정 경고
+- mergeConfig: nested merge, array replacement, empty override → defaults
+- readConfigFile: missing file → {}, valid JSON → parsed, invalid JSON → {} + warning
+- loadConfig: no file → defaults, with file → merged, default shape validation
+- validateConfig: missing setting warnings
 
 ### Persistence (`test/infra/persistence.test.js`) — 15 tests
 
-- save → restore: 데이터 보존
-- 빈 restore → null
-- debounce: 마지막 값만 저장
-- connectToState: 상태 변경 시 자동 저장
-- try-catch 래핑: I/O 실패 시 크래시 방지
+- save → restore: data preserved
+- Empty restore → null
+- Debounce: only last value saved
+- connectToState: auto-save on state change
+- try-catch wrapping: crash prevention on I/O failure
 
 ### Persona (`test/infra/persona.test.js`) — 13 tests
 
-- 기본값 병합, 저장/복원, 도구 필터
+- Default merging, save/restore, tool filtering
 
 ### Logger (`test/infra/logger.test.js`) — 8 tests
 
-- info/warn/error 레벨, 설정 변경
+- info/warn/error levels, config changes
 
 ---
 
-## 회귀 테스트
+## Regression Tests
 
 ### LLM Malformed Output (`test/regression/llm-output.test.js`) — 70 tests
 
-- 잘못된 JSON: trailing text, 구조 오류, 불완전 JSON
-- 에이전트가 malformed 응답을 graceful하게 처리 (크래시 없음)
-- extractJson: `<think>` 태그 등 JSON 앞 텍스트 제거
+- Invalid JSON: trailing text, structural errors, incomplete JSON
+- Agent handles malformed responses gracefully (no crashes)
+- extractJson: removes text before JSON (`<think>` tags, etc.)
 
 ### Tool Handler Defense (`test/regression/tool-defense.test.js`) — 34 tests
 
-- 모든 도구 핸들러에 null, undefined, 빈 문자열, 잘못된 타입 입력
-- 에러 throw (크래시 아님) 확인
+- All tool handlers tested with null, undefined, empty string, wrong types
+- Proper error throws confirmed (no crashes)
 
 ### Plan Fuzz (`test/regression/plan-fuzz.test.js`) — 57 tests
 
-- validatePlan: 랜덤 plan 구조 → 항상 Either 반환 (throw 금지)
-- safeJsonParse: 모든 입력 → Either 반환 (throw 금지)
+- validatePlan: random plan structures → always returns Either (no throws)
+- safeJsonParse: any input → returns Either (no throws)
 
 ### E2E Scenario (`test/regression/e2e-scenario.test.js`) — 62 tests
 
-- 경로 정규화: 절대경로 → 허용 디렉토리 상대경로
-- 전체 에이전트 파이프라인: planner → parse → validate → (retry) → execute → finish
-- 다양한 시나리오: 파일 읽기, 셸 명령, 멀티스텝, 승인, 위임
+- Path normalization: absolute path → allowed-directory-relative
+- Full agent pipeline: planner → parse → validate → (retry) → execute → finish
+- Various scenarios: file read, shell command, multi-step, approval, delegation
