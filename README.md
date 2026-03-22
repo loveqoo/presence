@@ -2,7 +2,7 @@
 
 **[한국어](README.ko.md)**
 
-A personal task-delegation agent platform built on Free Monad FP architecture.
+A personal task-delegation agent platform.
 
 ![Presence Demo](docs/presence_capture_0.gif)
 

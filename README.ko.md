@@ -2,7 +2,7 @@
 
 **[English](README.md)**
 
-개인 업무 대리 에이전트 플랫폼. Free Monad 기반 FP 아키텍처.
+개인 업무 대리 에이전트 플랫폼.
 
 ![Presence Demo](docs/presence_capture_0.gif)
 
