@@ -48,20 +48,25 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
   return [
     {
       name: 'file_read',
-      description: 'Read a text file. Use relative paths like "package.json" or "src/core/agent.js".',
+      description: 'Read a text file. Use relative paths like "package.json" or "src/core/agent.js". Use maxLines to read only the first N lines.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Relative file path (e.g. "package.json")' },
+          maxLines: { type: 'integer', description: 'Maximum number of lines to read from the beginning of the file' },
         },
         required: ['path'],
       },
-      handler: ({ path } = {}) => {
+      handler: ({ path, maxLines } = {}) => {
         if (!path) throw new Error(t('error.arg_required', { tool: 'file_read', arg: 'path' }))
         const resolved = resolvePath(path)
         checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path }))
-        return readFileSync(resolved, 'utf-8')
+        const content = readFileSync(resolved, 'utf-8')
+        if (maxLines != null && Number.isInteger(maxLines) && maxLines > 0) {
+          return content.split('\n').slice(0, maxLines).join('\n')
+        }
+        return content
       },
     },
 

@@ -73,6 +73,19 @@ async function run() {
     }
   }
 
+  // file_read maxLines
+  {
+    const multiline = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n')
+    writeFileSync(join(testDir, 'multi.txt'), multiline)
+    const full = byName.file_read.handler({ path: join(testDir, 'multi.txt') })
+    assert(full.split('\n').length === 20, 'file_read: full file has 20 lines')
+    const first5 = byName.file_read.handler({ path: join(testDir, 'multi.txt'), maxLines: 5 })
+    assert(first5.split('\n').length === 5, 'file_read maxLines: returns 5 lines')
+    assert(first5.startsWith('line 1\n'), 'file_read maxLines: starts from line 1')
+    const noLimit = byName.file_read.handler({ path: join(testDir, 'multi.txt'), maxLines: 0 })
+    assert(noLimit.split('\n').length === 20, 'file_read maxLines 0: returns all')
+  }
+
   // --- file_write ---
 
   {
