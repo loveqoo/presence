@@ -25,7 +25,7 @@ npm start
 }
 ```
 
-로컬 모델(MLX, Ollama 등)도 지원합니다. 자세한 설정은 [GUIDE.md](GUIDE.md)를 참고하세요.
+로컬 모델(MLX, Ollama 등)도 지원합니다. 자세한 설정은 [GUIDE.ko.md](GUIDE.ko.md)를 참고하세요.
 
 ## 주요 기능
 
