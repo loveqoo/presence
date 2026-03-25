@@ -2,7 +2,7 @@ import { Free, Either, askLLM, respond, updateState, getState, pipe, runFreeWith
 import { parsePlan, validateStep } from './plan.js'
 import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
 import { HISTORY, MEMORY } from './policies.js'
-import { getByPath } from '../infra/state.js'
+import { getByPath } from '../lib/path.js'
 import { t } from '../i18n/index.js'
 
 // history id: restore 후에도 충돌 없도록 timestamp + counter 조합

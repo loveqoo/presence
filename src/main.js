@@ -19,7 +19,7 @@ import { createHeartbeat } from './infra/heartbeat.js'
 import { loadConfig, validateConfig } from './infra/config.js'
 import { createLocalTools } from './infra/local-tools.js'
 import { initI18n, t } from './i18n/index.js'
-import { charsToTokens } from './infra/tokenizer.js'
+import { charsToTokens } from './lib/tokenizer.js'
 import { App } from './ui/App.js'
 import {
   createMemoryActor, createCompactionActor, createPersistenceActor,

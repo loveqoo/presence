@@ -1,25 +1,9 @@
+import { parsePath, getByPath, setByPathPure } from '../lib/path.js'
+
 // --- Deep clone utility ---
 const deepClone = obj => JSON.parse(JSON.stringify(obj))
 
-// --- Path utilities ---
-const parsePath = path => path.split('.')
-
-const getByPath = (obj, path) =>
-  parsePath(path).reduce(
-    (cur, key) => (cur != null && typeof cur === 'object') ? cur[key] : undefined,
-    obj,
-  )
-
-const setByPathPure = (obj, path, value) => {
-  const keys = parsePath(path)
-  const go = (o, i) => {
-    const cur = o ?? {}
-    if (i === keys.length - 1) return { ...cur, [keys[i]]: value }
-    return { ...cur, [keys[i]]: go(cur[keys[i]], i + 1) }
-  }
-  return go(obj, 0)
-}
-
+// --- Mutable path setter (state 내부 전용) ---
 const setByPath = (obj, path, value) => {
   const keys = parsePath(path)
   let current = obj

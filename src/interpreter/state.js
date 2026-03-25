@@ -1,4 +1,4 @@
-import { getByPath, setByPathPure } from '../infra/state.js'
+import { getByPath, setByPathPure } from '../lib/path.js'
 import { Interpreter } from './compose.js'
 
 // --- StateInterpreter ---
