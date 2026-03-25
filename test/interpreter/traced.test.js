@@ -1,6 +1,6 @@
 import { createTracedInterpreter } from '../../src/interpreter/traced.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { askLLM, executeTool, respond, Free } from '../../src/core/op.js'
+import { askLLM, executeTool, respond, runFreeWithStateT } from '../../src/core/op.js'
 
 let passed = 0
 let failed = 0
@@ -11,17 +11,18 @@ function assert(condition, msg) {
 }
 
 const msg = (t) => [{ role: 'user', content: t }]
+const initialState = {}
 
 async function run() {
   console.log('Traced interpreter tests')
 
   // 1. Trace records op tags and timing
   {
-    const { interpreter: inner } = createTestInterpreter()
-    const { interpreter, trace } = createTracedInterpreter(inner)
-    await Free.runWithTask(interpreter)(
+    const { interpret: inner, ST } = createTestInterpreter()
+    const { interpret, trace } = createTracedInterpreter({ interpret: inner, ST })
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(
       askLLM({ messages: msg('hi') }).chain(r => respond(r))
-    )
+    )(initialState)
     assert(trace.length === 2, 'trace: 2 entries')
     assert(trace[0].tag === 'AskLLM', 'trace: first tag')
     assert(trace[1].tag === 'Respond', 'trace: second tag')
@@ -29,28 +30,27 @@ async function run() {
     assert(trace[0].error === undefined, 'trace: no error on success')
   }
 
-  // 2. Error recorded in trace
+  // 2. ExecuteTool error captured as result (not thrown), trace shows success
   {
-    const { interpreter: inner } = createTestInterpreter({
+    const { interpret: inner, ST } = createTestInterpreter({
       ExecuteTool: () => { throw new Error('fail') }
     })
-    const { interpreter, trace } = createTracedInterpreter(inner)
-    try {
-      await Free.runWithTask(interpreter)(executeTool('x', {}))
-    } catch (_) {}
+    const { interpret, trace } = createTracedInterpreter({ interpret: inner, ST })
+    const [result] = await runFreeWithStateT(interpret, ST)(executeTool('x', {}))(initialState)
 
-    assert(trace[0].error === 'fail', 'trace error: error message recorded')
+    assert(result.startsWith('[ERROR]'), 'trace error: result is error string')
+    assert(trace[0].error === undefined, 'trace error: no error in trace (caught by interpreter)')
     assert(typeof trace[0].duration === 'number', 'trace error: duration recorded')
   }
 
   // 3. onOp callback fired
   {
     const events = []
-    const { interpreter: inner } = createTestInterpreter()
-    const { interpreter } = createTracedInterpreter(inner, {
+    const { interpret: inner, ST } = createTestInterpreter()
+    const { interpret } = createTracedInterpreter({ interpret: inner, ST }, {
       onOp: (phase, entry) => events.push({ phase, tag: entry.tag })
     })
-    await Free.runWithTask(interpreter)(askLLM({ messages: msg('x') }))
+    await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     assert(events.length === 2, 'onOp: 2 events (start + done)')
     assert(events[0].phase === 'start', 'onOp: first is start')
     assert(events[1].phase === 'done', 'onOp: second is done')
@@ -59,13 +59,13 @@ async function run() {
   // 4. onOp with error
   {
     const events = []
-    const { interpreter: inner } = createTestInterpreter({
+    const { interpret: inner, ST } = createTestInterpreter({
       AskLLM: () => { throw new Error('boom') }
     })
-    const { interpreter } = createTracedInterpreter(inner, {
+    const { interpret } = createTracedInterpreter({ interpret: inner, ST }, {
       onOp: (phase, entry) => events.push({ phase, tag: entry.tag })
     })
-    try { await Free.runWithTask(interpreter)(askLLM({ messages: msg('x') })) }
+    try { await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState) }
     catch (_) {}
     assert(events[1].phase === 'error', 'onOp error: second event is error')
   }
@@ -77,20 +77,20 @@ async function run() {
       debug: (msg) => logs.push({ level: 'debug', msg }),
       warn: (msg) => logs.push({ level: 'warn', msg }),
     }
-    const { interpreter: inner } = createTestInterpreter()
-    const { interpreter } = createTracedInterpreter(inner, { logger: mockLogger })
-    await Free.runWithTask(interpreter)(askLLM({ messages: msg('x') }))
+    const { interpret: inner, ST } = createTestInterpreter()
+    const { interpret } = createTracedInterpreter({ interpret: inner, ST }, { logger: mockLogger })
+    await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     assert(logs.some(l => l.level === 'debug' && l.msg.includes('op:start')), 'logger: start logged')
     assert(logs.some(l => l.level === 'debug' && l.msg.includes('op:done')), 'logger: done logged')
   }
 
   // 6. Inner interpreter behavior unchanged (passthrough)
   {
-    const { interpreter: inner } = createTestInterpreter({
+    const { interpret: inner, ST } = createTestInterpreter({
       AskLLM: () => 'custom'
     })
-    const { interpreter } = createTracedInterpreter(inner)
-    const result = await Free.runWithTask(interpreter)(askLLM({ messages: msg('x') }))
+    const { interpret } = createTracedInterpreter({ interpret: inner, ST })
+    const [result] = await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     assert(result === 'custom', 'passthrough: inner result preserved')
   }
 

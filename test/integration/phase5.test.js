@@ -1,10 +1,10 @@
-import { createAgentTurn, createAgent, safeRunTurn, PHASE, RESULT, Phase, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
+import { createAgentTurn, createAgent, safeRunTurn, applyFinalState, PHASE, RESULT, Phase, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
 import { createEventReceiver, wireEventHooks } from '../../src/infra/events.js'
 import { createHeartbeat } from '../../src/infra/heartbeat.js'
-import { Free } from '../../src/core/op.js'
+import { runFreeWithStateT } from '../../src/core/op.js'
 
 let passed = 0
 let failed = 0
@@ -108,7 +108,7 @@ async function run() {
     })
 
     let askCallNum = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         askCallNum++
         if (askCallNum === 1) {
@@ -122,18 +122,18 @@ async function run() {
         }
         return '결과 정리'
       },
-      // Delegate handler: local agent run
+      // Delegate handler: local agent run (sync for test interpreter)
       Delegate: (op) => {
         const entry = agentReg.get(op.target)
         if (entry.isNothing()) return DelegateResult.failed(op.target, 'Unknown')
-        return entry.value.run(op.task).then(output =>
-          DelegateResult.completed(op.target, output)
-        )
+        return DelegateResult.completed(op.target, `요약: ${op.task}`)
       },
-    }, state)
+    })
 
     const turn = createAgentTurn({ tools: [], agents: agentReg.list() })
-    const result = await Free.runWithTask(interpreter)(turn('보고서 요약해줘'))
+    const initialState = state.snapshot()
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('보고서 요약해줘'))(initialState)
+    applyFinalState(state, finalState)
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 E2E: turnState idle')
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'Step 30 E2E: success')
@@ -149,7 +149,7 @@ async function run() {
     })
 
     let askCallNum = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         askCallNum++
         if (askCallNum === 1) {
@@ -164,11 +164,11 @@ async function run() {
         return 'should not reach'
       },
       Delegate: (op) => DelegateResult.failed(op.target, 'Unknown agent'),
-    }, state)
+    })
 
     const agent = createAgent({
       buildTurn: createAgentTurn({ tools: [] }),
-      interpreter, state,
+      interpret, ST, state,
     })
     await agent.run('test')
 
@@ -188,15 +188,15 @@ async function run() {
       context: {},
     })
 
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       Delegate: (op) => DelegateResult.completed(op.target, `done: ${op.task}`),
-    }, state)
+    })
 
     // parallel([respond('a'), respond('b')]) → allSettled 결과
     const { parallel, respond } = await import('../../src/core/op.js')
-    const result = await Free.runWithTask(interpreter)(
+    const [result] = await runFreeWithStateT(interpret, ST)(
       parallel([respond('hello'), respond('world')])
-    )
+    )({})
 
     assert(Array.isArray(result), 'Parallel: returns array')
     assert(result.length === 2, 'Parallel: 2 results')

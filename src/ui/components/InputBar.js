@@ -6,16 +6,16 @@ const h = React.createElement
 const MAX_HISTORY = 50
 
 const InputBar = ({ onSubmit = () => {}, disabled = false, isActive = true, historyRef: externalHistoryRef }) => {
-  const [value, setValue] = useState('')
-  const [cursor, setCursor] = useState(0)
+  // value + cursor를 단일 state로 관리하여 원자적 업데이트 보장.
+  // 별도 state 시 빠른 입력(한글 IME)에서 cursor 클로저가 stale → 글자 순서 뒤바뀜.
+  const [{ value, cursor }, setInput] = useState({ value: '', cursor: 0 })
   const internalHistoryRef = useRef([])
   const historyRef = externalHistoryRef || internalHistoryRef
   const indexRef = useRef(-1)
   const draftRef = useRef('')
 
   const setValueAndCursor = (text, pos) => {
-    setValue(text)
-    setCursor(pos != null ? pos : text.length)
+    setInput({ value: text, cursor: pos != null ? pos : text.length })
   }
 
   useInput((input, key) => {
@@ -62,39 +62,41 @@ const InputBar = ({ onSubmit = () => {}, disabled = false, isActive = true, hist
 
     // ← 커서 왼쪽
     if (key.leftArrow) {
-      setCursor(c => Math.max(0, c - 1))
+      setInput(s => ({ ...s, cursor: Math.max(0, s.cursor - 1) }))
       return
     }
 
     // → 커서 오른쪽
     if (key.rightArrow) {
-      setCursor(c => Math.min(value.length, c + 1))
+      setInput(s => ({ ...s, cursor: Math.min(s.value.length, s.cursor + 1) }))
       return
     }
 
     // Home / Ctrl+A
     if (key.ctrl && input === 'a') {
-      setCursor(0)
+      setInput(s => ({ ...s, cursor: 0 }))
       return
     }
 
     // End / Ctrl+E
     if (key.ctrl && input === 'e') {
-      setCursor(value.length)
+      setInput(s => ({ ...s, cursor: s.value.length }))
       return
     }
 
     if (key.backspace || key.delete) {
-      if (cursor > 0) {
-        setValue(v => v.slice(0, cursor - 1) + v.slice(cursor))
-        setCursor(c => c - 1)
-      }
+      setInput(s => s.cursor > 0
+        ? { value: s.value.slice(0, s.cursor - 1) + s.value.slice(s.cursor), cursor: s.cursor - 1 }
+        : s
+      )
       return
     }
 
     if (input && !key.ctrl && !key.meta) {
-      setValue(v => v.slice(0, cursor) + input + v.slice(cursor))
-      setCursor(c => c + input.length)
+      setInput(s => ({
+        value: s.value.slice(0, s.cursor) + input + s.value.slice(s.cursor),
+        cursor: s.cursor + input.length,
+      }))
     }
   }, { isActive: isActive && !disabled })
 

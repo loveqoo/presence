@@ -1,4 +1,7 @@
-import { connectMCPServer, extractContent, ensureObjectSchema, validateSchema } from '../../src/infra/mcp.js'
+import { connectMCPServer, extractContent, ensureObjectSchema, validateSchema, createTransportForConfig } from '../../src/infra/mcp.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import fp from '../../src/lib/fun-fp.js'
 const { Either } = fp
 
@@ -282,6 +285,71 @@ async function run() {
       createTransport: () => mockTransport(),
     })
     assert(conn.tools.length === 0, 'empty server: 0 tools')
+  }
+
+  // ===========================================
+  // createTransportForConfig 테스트
+  // ===========================================
+
+  // stdio (기본값)
+  {
+    const t = createTransportForConfig({ command: 'echo', args: ['hello'] })
+    assert(t instanceof StdioClientTransport, 'transport: default → StdioClientTransport')
+  }
+
+  {
+    const t = createTransportForConfig({ transport: 'stdio', command: 'echo' })
+    assert(t instanceof StdioClientTransport, 'transport: explicit stdio → StdioClientTransport')
+  }
+
+  // SSE
+  {
+    const t = createTransportForConfig({ transport: 'sse', url: 'http://localhost:3000/mcp/sse' })
+    assert(t instanceof SSEClientTransport, 'transport: sse → SSEClientTransport')
+  }
+
+  // StreamableHTTP
+  {
+    const t = createTransportForConfig({ transport: 'streamable-http', url: 'http://localhost:3000/mcp' })
+    assert(t instanceof StreamableHTTPClientTransport, 'transport: streamable-http → StreamableHTTPClientTransport')
+  }
+
+  // unknown → 에러
+  {
+    try {
+      createTransportForConfig({ transport: 'unknown' })
+      assert(false, 'transport: unknown → should throw')
+    } catch (e) {
+      assert(e.message.includes('Unknown MCP transport'), 'transport: unknown → error message')
+    }
+  }
+
+  // SSE + headers
+  {
+    const t = createTransportForConfig({
+      transport: 'sse',
+      url: 'http://localhost:3000/mcp/sse',
+      headers: { 'Authorization': 'Bearer test-token' },
+    })
+    assert(t instanceof SSEClientTransport, 'transport: sse+headers → SSEClientTransport')
+  }
+
+  // connectMCPServer: transport=sse config 경유 (mock으로 실제 연결 없이)
+  {
+    const client = mockClient({ tools: [{ name: 'remote_tool', inputSchema: { type: 'object', properties: {} } }] })
+    const transport = mockTransport()
+
+    const conn = await connectMCPServer({
+      serverName: 'remote',
+      transport: 'sse',
+      url: 'http://localhost:3000/mcp/sse',
+      createClient: () => client,
+      createTransport: () => transport,
+    })
+
+    assert(conn.serverName === 'remote', 'sse connect: serverName preserved')
+    assert(conn.tools.length === 1, 'sse connect: tools registered')
+    assert(conn.tools[0].name === 'remote_remote_tool', 'sse connect: name prefixed')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

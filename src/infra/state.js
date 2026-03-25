@@ -10,6 +10,16 @@ const getByPath = (obj, path) =>
     obj,
   )
 
+const setByPathPure = (obj, path, value) => {
+  const keys = parsePath(path)
+  const go = (o, i) => {
+    const cur = o ?? {}
+    if (i === keys.length - 1) return { ...cur, [keys[i]]: value }
+    return { ...cur, [keys[i]]: go(cur[keys[i]], i + 1) }
+  }
+  return go(obj, 0)
+}
+
 const setByPath = (obj, path, value) => {
   const keys = parsePath(path)
   let current = obj
@@ -115,4 +125,4 @@ const createReactiveState = (initial = {}) => {
   return reactiveState
 }
 
-export { createState, createHooks, createReactiveState }
+export { createState, createHooks, createReactiveState, getByPath, setByPathPure }

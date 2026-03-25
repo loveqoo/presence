@@ -852,7 +852,7 @@ presence/
 
 ### TODO
 
-- **2-Track 비동기 큐**: 현재 Hook의 비동기 작업(메모리 저장, 임베딩, 히스토리 압축)이 fire-and-forget으로 순서 보장 없음. 모든 비동기 처리를 큐 기반으로 통합하되, 크리티컬 경로(recall → 프롬프트 → LLM → 실행)와 백그라운드(임베딩, 압축)를 분리하는 2-track 큐 구조 도입. 느린 백그라운드 작업이 다음 턴을 차단하지 않으면서도, 크리티컬 경로 내 순서는 보장.
+- **Actor 기반 비동기 처리 (2-Track 큐 대체)**: fun-fp-js에 Actor 추가됨. 비동기 handle 지원이 완성되면(선행: fun-fp-js 측 작업), 현재 fire-and-forget Hook을 Actor로 전환. MemoryActor(recall/save/embed/promote), CompactionActor(히스토리 요약), PersistenceActor(상태 저장), EventActor(이벤트 큐). 각 Actor의 메시지 큐가 순차 처리를 보장하므로 별도 2-Track 큐 구현 불필요.
 
 - **StateT 기반 인터프리터 리팩토링** ← fun-fp-js `StateT(Task)` 준비 완료: 현재 인터프리터가 `state.set()`을 명령형으로 호출하여 상태를 변경함. `StateT(Task)`로 전환하여 상태 전이를 순수하게 보장하고, `UpdateState`/`GetState` Op을 제거. Hook 발동은 `runState` 결과에서 이전/새 상태를 비교하여 처리. `ReaderT(Task)`로 인터프리터 의존성(llm, toolRegistry 등) 주입, `WriterT(Task)`로 Op 트레이싱 대체도 함께 검토.
 

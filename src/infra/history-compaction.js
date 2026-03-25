@@ -1,6 +1,3 @@
-import { HISTORY } from '../core/policies.js'
-import { t } from '../i18n/index.js'
-
 // --- Constants ---
 
 const SUMMARY_MARKER = '[conversation summary]'
@@ -47,71 +44,7 @@ const buildCompactionPrompt = (toCompact) => {
   }
 }
 
-// --- Wire function ---
-
-const wireHistoryCompaction = ({ state, llm, logger }) => {
-  let compacting = false
-
-  state.hooks.on('turnState', (phase, s) => {
-    if (phase.tag !== 'idle') return
-    if (compacting) return
-
-    const history = s.get('context.conversationHistory') || []
-    const split = extractForCompaction(history, HISTORY.COMPACTION_THRESHOLD, HISTORY.COMPACTION_KEEP)
-    if (!split) return
-
-    compacting = true
-    const epochBefore = s.get('_compactionEpoch') || 0
-    const beforeLen = history.length
-
-    // Phase 1: 동기 추출 + placeholder prepend
-    const placeholderId = `placeholder-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const placeholder = {
-      id: placeholderId,
-      input: SUMMARY_MARKER,
-      output: t('compaction.in_progress', { count: split.extracted.length }),
-      ts: Date.now(),
-    }
-    s.set('context.conversationHistory', [placeholder, ...split.remaining])
-    s.set('_compactionEpoch', epochBefore + 1)
-
-    // Phase 2: 비동기 요약
-    const prompt = buildCompactionPrompt(split.extracted)
-    llm.chat(prompt).then(result => {
-      // Phase 3: placeholder → 실제 summary 교체 — epoch 확인 후
-      const epochNow = s.get('_compactionEpoch') || 0
-      if (epochNow !== epochBefore + 1) {
-        // /clear 발생 → 폐기
-        if (logger) logger.info(t('compaction.discarded'))
-        return
-      }
-      const current = s.get('context.conversationHistory') || []
-      const summary = createSummaryEntry(result.content)
-      const hasPlaceholder = current.some(h => h.id === placeholderId)
-      const merged = hasPlaceholder
-        ? current.map(h => h.id === placeholderId ? summary : h)
-        : [summary, ...current]
-      const updated = merged.length > HISTORY.MAX_CONVERSATION
-        ? [merged[0], ...merged.slice(-(HISTORY.MAX_CONVERSATION - 1))]
-        : merged
-      s.set('context.conversationHistory', updated)
-      if (logger) logger.info(t('compaction.completed', { before: beforeLen, after: updated.length }), { before: beforeLen, after: updated.length })
-    }).catch(e => {
-      // placeholder 제거, remaining 유지
-      const epochNow = s.get('_compactionEpoch') || 0
-      if (epochNow === epochBefore + 1) {
-        const current = s.get('context.conversationHistory') || []
-        s.set('context.conversationHistory', current.filter(h => h.id !== placeholderId))
-      }
-      if (logger) logger.warn(t('compaction.failed', { count: split.extracted.length }), { count: split.extracted.length, error: e.message })
-    }).finally(() => {
-      compacting = false
-    })
-  })
-}
-
 export {
-  wireHistoryCompaction,
   extractForCompaction,
   buildCompactionPrompt,
   createSummaryEntry,

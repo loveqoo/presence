@@ -1,7 +1,8 @@
-import { Free, Either, askLLM, respond, updateState, getState, pipe } from './op.js'
+import { Free, Either, askLLM, respond, updateState, getState, pipe, runFreeWithStateT } from './op.js'
 import { parsePlan, validateStep } from './plan.js'
 import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
-import { HISTORY } from './policies.js'
+import { HISTORY, MEMORY } from './policies.js'
+import { getByPath } from '../infra/state.js'
 import { t } from '../i18n/index.js'
 
 // history id: restore 후에도 충돌 없도록 timestamp + counter 조합
@@ -140,8 +141,7 @@ const validatePlan = (plan, { tools = [] } = {}) => {
 
 // --- 상태 전이 함수 ---
 
-const beginTurn = (input) =>
-  updateState('turnState', Phase.working(input))
+const beginTurn = (_input) => Free.of(null)
 
 const finishSuccess = (input, result, { source } = {}) =>
   updateState('_streaming', null)
@@ -188,8 +188,7 @@ const respondAndFail = (input, error) =>
 
 const createAgentTurn = ({ tools = [], agents = [], persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget } = {}) => {
   return (input, { source } = {}) =>
-    beginTurn(input)
-      .chain(() => getState('context.memories'))
+    getState('context.memories')
       .chain(memories => getState('context.conversationHistory').chain(history => {
         const conversationHistory = history || []
         const baseContext = {
@@ -309,20 +308,106 @@ const applyRecovery = (state, recovery) => {
   for (const [key, value] of Object.entries(recovery)) state.set(key, value)
 }
 
-// 인터프리터 레벨 실패에 대한 안전망
-const safeRunTurn = (interpreter, state) => async (program, input) => {
-  try {
-    return await Free.runWithTask(interpreter)(program)
-  } catch (err) {
-    if (state) applyRecovery(state, recoverFromFailure(input, err))
-    throw err
+// Task → Promise 변환 헬퍼
+const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, resolve))
+
+// --- StateT → reactive state 원자적 커밋 ---
+// Free 실행 완료 후 StateT의 최종 상태를 reactive state에 반영.
+// epoch 기반 경합 방어: /clear 또는 compaction이 턴 실행 중 발생하면 conversationHistory 스킵.
+const MANAGED_PATHS = [
+  '_streaming', 'lastTurn', 'turnState',
+  'context.conversationHistory',
+  '_debug.lastTurn', '_debug.lastPrompt', '_debug.lastResponse', '_retry',
+]
+
+const applyFinalState = (reactiveState, finalState, { initialEpoch } = {}) => {
+  if (!reactiveState) return
+  const currentEpoch = reactiveState.get('_compactionEpoch') || 0
+  const epochChanged = initialEpoch !== undefined && initialEpoch !== currentEpoch
+
+  for (const path of MANAGED_PATHS) {
+    if (epochChanged && path === 'context.conversationHistory') continue
+    const value = getByPath(finalState, path)
+    if (value !== undefined) reactiveState.set(path, value)
   }
 }
 
+// 인터프리터 레벨 실패에 대한 안전망 + Actor 기반 턴 전후 처리
+// { interpret, ST }: StateT(Task) 인터프리터 번들
+const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compactionActor, persistenceActor, logger } = {}) =>
+  async (program, input) => {
+    // 턴 시작: lifecycle (turnState → working, turn 증가)
+    if (reactiveState) {
+      reactiveState.set('turnState', Phase.working(input))
+      reactiveState.set('turn', (reactiveState.get('turn') || 0) + 1)
+    }
+
+    // 턴 시작: memory recall (Actor, 명시적 비동기)
+    if (memoryActor && reactiveState) {
+      try {
+        const memories = await forkTask(memoryActor.send({ type: 'recall', input }))
+        reactiveState.set('context.memories', memories.map(n => n.label))
+        reactiveState.set('_debug.recalledMemories', memories.map(n => ({
+          label: n.label, type: n.type, tier: n.tier,
+          createdAt: n.createdAt, embeddedAt: n.embeddedAt,
+        })))
+      } catch (e) {
+        reactiveState.set('context.memories', [])
+        reactiveState.set('_debug.recalledMemories', [])
+        if (logger) logger.warn('Memory recall failed', { error: e.message })
+      }
+    }
+
+    // StateT 실행을 위한 스냅샷 (recall 이후, 최신 memories 포함)
+    const initialSnapshot = reactiveState ? reactiveState.snapshot() : {}
+    const initialEpoch = initialSnapshot._compactionEpoch || 0
+
+    try {
+      const [result, finalState] = await runFreeWithStateT(interpret, ST)(program)(initialSnapshot)
+
+      // 원자적 커밋: StateT 최종 상태 → reactive state
+      applyFinalState(reactiveState, finalState, { initialEpoch })
+
+      // 턴 종료: 후처리 (Actor 메시지, 순서 중요)
+      // save → removeWorking → embed → prune → promote → saveDisk
+      if (memoryActor && reactiveState) {
+        const lastTurn = reactiveState.get('lastTurn')
+        if (lastTurn?.tag === RESULT.SUCCESS) {
+          memoryActor.send({ type: 'save', node: {
+            label: lastTurn.input || 'unknown',
+            type: 'conversation', tier: 'episodic',
+            data: { input: lastTurn.input, output: lastTurn.result },
+          }}).fork(() => {}, () => {})
+        }
+        memoryActor.send({ type: 'removeWorking' }).fork(() => {}, () => {})
+        memoryActor.send({ type: 'embed' }).fork(() => {}, () => {})
+        memoryActor.send({ type: 'prune', tier: 'episodic', max: MEMORY.MAX_EPISODIC }).fork(() => {}, () => {})
+        memoryActor.send({ type: 'promote' }).fork(() => {}, () => {})
+        memoryActor.send({ type: 'saveDisk' }).fork(() => {}, () => {})
+      }
+      if (compactionActor && reactiveState) {
+        const history = reactiveState.get('context.conversationHistory') || []
+        const epoch = reactiveState.get('_compactionEpoch') || 0
+        compactionActor.send({ type: 'check', history, epoch }).fork(() => {}, () => {})
+      }
+      if (persistenceActor && reactiveState) {
+        persistenceActor.send({ type: 'save', snapshot: reactiveState.snapshot() }).fork(() => {}, () => {})
+      }
+
+      return result
+    } catch (err) {
+      if (reactiveState) applyRecovery(reactiveState, recoverFromFailure(input, err))
+      if (persistenceActor && reactiveState) {
+        persistenceActor.send({ type: 'save', snapshot: reactiveState.snapshot() }).fork(() => {}, () => {})
+      }
+      throw err
+    }
+  }
+
 // --- 조립된 에이전트 ---
-const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, maxRetries, maxIterations, interpreter, state, budget }) => {
+const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, maxRetries, maxIterations, interpret, ST, state, budget, execute: injectedExecute }) => {
   const turnBuilder = buildTurn || createAgentTurn({ tools, agents, persona, responseFormatMode, maxRetries, maxIterations, budget })
-  const execute = safeRunTurn(interpreter, state)
+  const execute = injectedExecute || safeRunTurn({ interpret, ST }, state)
 
   const run = (input, opts) => execute(turnBuilder(input, opts), input)
   const program = (input, opts) => turnBuilder(input, opts)
@@ -331,8 +416,8 @@ const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, ma
 }
 
 export {
-  createAgentTurn, safeRunTurn, createAgent, validatePlan, validateExecArgs, validateRefRange, validateStepFull, safeJsonParse, extractJson,
+  createAgentTurn, safeRunTurn, createAgent, applyFinalState, validatePlan, validateExecArgs, validateRefRange, validateStepFull, safeJsonParse, extractJson,
   beginTurn, finishSuccess, finishFailure, respondAndFail,
-  recoverFromFailure, applyRecovery,
+  recoverFromFailure, applyRecovery, MANAGED_PATHS,
   PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo,
 }

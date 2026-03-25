@@ -1,6 +1,8 @@
 import fp from '../lib/fun-fp.js'
+import { getByPath, setByPathPure } from '../infra/state.js'
 
-const { Task } = fp
+const { Task, StateT } = fp
+const ST = StateT('task')
 
 const defaultHandlers = {
   AskLLM:       (op) => `mock-llm-response`,
@@ -14,39 +16,44 @@ const defaultHandlers = {
 }
 
 // log 축적은 관찰 전용 부수효과.
-// 도메인 상태는 UpdateState/GetState + Hook 경로로만 변경한다.
 const appendLog = (log, entry) => { log.push(entry); return entry }
 
-const createTestInterpreter = (handlers = {}, state = null) => {
+const createTestInterpreter = (handlers = {}) => {
   const log = []
   const merged = { ...defaultHandlers, ...handlers }
 
-  const interpreter = (functor) => {
+  const interpret = (functor) => {
     const { tag } = functor
     appendLog(log, { tag, data: { ...functor, next: undefined, map: undefined } })
 
-    if (tag === 'UpdateState' && state) {
-      state.set(functor.path, functor.value)
-      return Task.of(functor.next(state.snapshot()))
+    if (tag === 'UpdateState') {
+      return ST.modify(s => setByPathPure(s, functor.path, functor.value))
+        .chain(() => ST.get)
+        .map(s => functor.next(s))
     }
-    if (tag === 'GetState' && state) {
-      return Task.of(functor.next(state.get(functor.path)))
+    if (tag === 'GetState') {
+      return ST.gets(s => getByPath(s, functor.path))
+        .map(value => functor.next(value))
     }
 
     const handler = merged[tag]
     if (!handler) {
-      return Task.rejected(new Error(`Unknown op: ${tag}`))
+      return ST.lift(Task.rejected(new Error(`Unknown op: ${tag}`)))
     }
 
     try {
       const result = handler(functor)
-      return Task.of(functor.next(result))
+      return ST.of(functor.next(result))
     } catch (err) {
-      return Task.rejected(err)
+      // ExecuteTool 예외 → 에러 결과값으로 변환 (턴 계속 진행, LLM이 re-plan)
+      if (tag === 'ExecuteTool') {
+        return ST.of(functor.next(`[ERROR] ${functor.name}: ${err.message}`))
+      }
+      return ST.lift(Task.rejected(err))
     }
   }
 
-  return { interpreter, log }
+  return { interpret, ST, log }
 }
 
 export { createTestInterpreter, defaultHandlers }

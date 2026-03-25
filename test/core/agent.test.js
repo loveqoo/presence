@@ -1,14 +1,14 @@
 import { initI18n } from '../../src/i18n/index.js'
 initI18n('ko')
 import {
-  createAgentTurn, safeRunTurn, createAgent,
+  createAgentTurn, safeRunTurn, createAgent, applyFinalState,
   beginTurn, finishSuccess, finishFailure,
   safeJsonParse, extractJson, validatePlan,
-  PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo,
+  PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo, MANAGED_PATHS,
 } from '../../src/core/agent.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { Free, Either } from '../../src/core/op.js'
+import { createReactiveState, getByPath } from '../../src/infra/state.js'
+import { Free, Either, runFreeWithStateT } from '../../src/core/op.js'
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -16,8 +16,13 @@ import { dirname, join } from 'path'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // --- 초기 상태 헬퍼 ---
+// reactive state (createAgent/safeRunTurn 경유 테스트용)
 const initState = (overrides = {}) =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+
+// plain object (runFreeWithStateT 직접 실행 테스트용)
+const initSnapshot = (overrides = {}) =>
+  ({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 let passed = 0
 let failed = 0
@@ -34,65 +39,77 @@ async function run() {
   // 상태 전이 단위 테스트
   // ===========================================
 
-  // T1. beginTurn → turnState = working(input)
+  // T1. beginTurn is no-op (lifecycle owned by safeRunTurn)
+  {
+    const { interpret, ST } = createTestInterpreter({})
+    const [, finalState] = await runFreeWithStateT(interpret, ST)(beginTurn('new input'))(initSnapshot())
+
+    assert(finalState.turnState.tag === PHASE.IDLE, 'beginTurn: no-op, turnState stays idle')
+  }
+
+  // T1b. safeRunTurn sets turnState=working before Free execution
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({}, state)
+    let turnStateAtFreeStart = null
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => {
+        turnStateAtFreeStart = state.get('turnState')
+        return JSON.stringify({ type: 'direct_response', message: 'ok' })
+      }
+    })
 
-    await Free.runWithTask(interpreter)(beginTurn('new input'))
+    const agent = createAgent({ interpret, ST, state })
+    await agent.run('new input')
 
-    const ts = state.get('turnState')
-    assert(ts.tag === PHASE.WORKING, 'beginTurn: tag is working')
-    assert(ts.input === 'new input', 'beginTurn: input stored')
+    assert(turnStateAtFreeStart.tag === PHASE.WORKING, 'safeRunTurn: turnState working before Free')
+    assert(turnStateAtFreeStart.input === 'new input', 'safeRunTurn: input stored in working state')
   }
 
   // T2. finishSuccess → lastTurn = success, turnState = idle
   {
-    const state = initState()
-    state.set('turnState', Phase.working('q'))
-    const { interpreter } = createTestInterpreter({}, state)
+    const initial = initSnapshot({ turnState: Phase.working('q') })
+    const { interpret, ST } = createTestInterpreter({})
 
-    const result = await Free.runWithTask(interpreter)(finishSuccess('q', 'ok'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(finishSuccess('q', 'ok'))(initial)
 
     assert(result === 'ok', 'finishSuccess: returns result')
-    const lt = state.get('lastTurn')
+    const lt = finalState.lastTurn
     assert(lt.tag === RESULT.SUCCESS, 'finishSuccess: lastTurn tag is success')
     assert(lt.input === 'q', 'finishSuccess: lastTurn.input preserved')
     assert(lt.result === 'ok', 'finishSuccess: lastTurn.result stored')
-    assert(state.get('turnState').tag === PHASE.IDLE, 'finishSuccess: turnState idle')
+    assert(finalState.turnState.tag === PHASE.IDLE, 'finishSuccess: turnState idle')
   }
 
   // T3. finishFailure → lastTurn = failure, turnState = idle
   {
-    const state = initState()
-    state.set('turnState', Phase.working('q'))
-    const { interpreter } = createTestInterpreter({}, state)
+    const initial = initSnapshot({ turnState: Phase.working('q') })
+    const { interpret, ST } = createTestInterpreter({})
 
     const error = ErrorInfo('bad', ERROR_KIND.PLANNER_PARSE)
-    const result = await Free.runWithTask(interpreter)(finishFailure('q', error, 'error resp'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(finishFailure('q', error, 'error resp'))(initial)
 
     assert(result === 'error resp', 'finishFailure: returns response')
-    const lt = state.get('lastTurn')
+    const lt = finalState.lastTurn
     assert(lt.tag === RESULT.FAILURE, 'finishFailure: lastTurn tag is failure')
     assert(lt.error.message === 'bad', 'finishFailure: error.message stored')
     assert(lt.error.kind === ERROR_KIND.PLANNER_PARSE, 'finishFailure: error.kind stored')
     assert(lt.response === 'error resp', 'finishFailure: response stored')
-    assert(state.get('turnState').tag === PHASE.IDLE, 'finishFailure: turnState idle')
+    assert(finalState.turnState.tag === PHASE.IDLE, 'finishFailure: turnState idle')
   }
 
   // T4. 실패 후 성공 → lastTurn이 success로 교체됨
   {
     const state = initState()
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         if (n === 1) return '<<<invalid>>>'
         return JSON.stringify({ type: 'direct_response', message: 'ok' })
       }
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
 
     await agent.run('fail')
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'turn sequence: failure after bad turn')
@@ -194,6 +211,11 @@ async function run() {
 
     assert(!successBody.includes('finishFailure'), 'structural: finishSuccess independent')
     assert(!failureBody.includes('finishSuccess'), 'structural: finishFailure independent')
+
+    // StateT 구조 검증
+    assert(src.includes('runFreeWithStateT'), 'structural: safeRunTurn uses runFreeWithStateT')
+    assert(src.includes('applyFinalState'), 'structural: applyFinalState exists')
+    assert(!src.includes('Free.runWithTask'), 'structural: Free.runWithTask removed from agent.js')
   }
 
   // T6. invalid plan shape → finishFailure
@@ -217,16 +239,16 @@ async function run() {
       const state = initState()
       let formatterCalled = false
       let n = 0
-      const { interpreter } = createTestInterpreter({
+      const { interpret, ST } = createTestInterpreter({
         AskLLM: () => {
           n++
           if (n === 1) return badPlan
           formatterCalled = true
           return 'formatted'
         }
-      }, state)
+      })
 
-      const agent = createAgent({ interpreter, state })
+      const agent = createAgent({ interpret, ST, state })
       await agent.run('test')
 
       assert(state.get('turnState').tag === PHASE.IDLE, `invalid plan (${label}): turnState idle`)
@@ -238,11 +260,11 @@ async function run() {
   // T7. safeRunTurn — 같은 생성자, input 캡처
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => { throw new Error('LLM down') }
-    }, state)
+    })
 
-    const safe = safeRunTurn(interpreter, state)
+    const safe = safeRunTurn({ interpret, ST }, state)
     try {
       await safe(createAgentTurn()('x'), 'x')
       assert(false, 'safeRunTurn: should throw')
@@ -261,20 +283,20 @@ async function run() {
   {
     // parse failure → PLANNER_PARSE
     const state1 = initState()
-    const { interpreter: i1 } = createTestInterpreter({
+    const { interpret: i1, ST: ST1 } = createTestInterpreter({
       AskLLM: () => '<<<not json>>>'
-    }, state1)
-    const agent1 = createAgent({ interpreter: i1, state: state1 })
+    })
+    const agent1 = createAgent({ interpret: i1, ST: ST1, state: state1 })
     await agent1.run('test')
     assert(state1.get('lastTurn').error.kind === ERROR_KIND.PLANNER_PARSE,
       'error kind: parse failure → PLANNER_PARSE')
 
     // shape failure → PLANNER_SHAPE
     const state2 = initState()
-    const { interpreter: i2 } = createTestInterpreter({
+    const { interpret: i2, ST: ST2 } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'unknown' })
-    }, state2)
-    const agent2 = createAgent({ interpreter: i2, state: state2 })
+    })
+    const agent2 = createAgent({ interpret: i2, ST: ST2, state: state2 })
     await agent2.run('test')
     assert(state2.get('lastTurn').error.kind === ERROR_KIND.PLANNER_SHAPE,
       'error kind: shape failure → PLANNER_SHAPE')
@@ -284,26 +306,26 @@ async function run() {
   // 통합 테스트
   // ===========================================
 
-  // direct_response
+  // direct_response (runFreeWithStateT 직접 실행)
   {
-    const state = initState()
-    const { interpreter, log } = createTestInterpreter({
+    const initial = initSnapshot()
+    const { interpret, ST, log } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: '안녕하세요!' })
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    const result = await Free.runWithTask(interpreter)(turn('안녕'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('안녕'))(initial)
 
     assert(result === '안녕하세요!', 'direct_response: correct message')
-    assert(state.get('turnState').tag === PHASE.IDLE, 'direct_response: turnState idle')
-    assert(state.get('lastTurn').result === '안녕하세요!', 'direct_response: lastTurn.result saved')
+    assert(finalState.turnState.tag === PHASE.IDLE, 'direct_response: turnState idle')
+    assert(finalState.lastTurn.result === '안녕하세요!', 'direct_response: lastTurn.result saved')
     assert(log.some(l => l.tag === 'Respond'), 'direct_response: Respond op called')
   }
 
   // plan with RESPOND (fast exit — no formatter)
   {
-    const state = initState({ context: { memories: ['past context'] } })
-    const { interpreter, log } = createTestInterpreter({
+    const initial = initSnapshot({ context: { memories: ['past context'] } })
+    const { interpret, ST, log } = createTestInterpreter({
       AskLLM: () => JSON.stringify({
         type: 'plan',
         steps: [
@@ -312,13 +334,13 @@ async function run() {
         ]
       }),
       ExecuteTool: (op) => `${op.name}: 3 PRs found`
-    }, state)
+    })
 
     const turn = createAgentTurn({ tools: [{ name: 'github', description: 'GH' }] })
-    const result = await Free.runWithTask(interpreter)(turn('PR 현황'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('PR 현황'))(initial)
 
     assert(result === 'github: 3 PRs found', 'plan+RESPOND: tool result passed through')
-    assert(state.get('turnState').tag === PHASE.IDLE, 'plan+RESPOND: turnState idle')
+    assert(finalState.turnState.tag === PHASE.IDLE, 'plan+RESPOND: turnState idle')
     assert(log.filter(l => l.tag === 'AskLLM').length === 1, 'plan+RESPOND: AskLLM once (no formatter)')
     assert(log.some(l => l.tag === 'ExecuteTool'), 'plan+RESPOND: ExecuteTool called')
     assert(log.some(l => l.tag === 'Respond'), 'plan+RESPOND: Respond op called')
@@ -326,9 +348,9 @@ async function run() {
 
   // plan without RESPOND (iteration)
   {
-    const state = initState()
+    const initial = initSnapshot()
     let n = 0
-    const { interpreter, log } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         if (n === 1) {
@@ -343,35 +365,35 @@ async function run() {
         return JSON.stringify({ type: 'direct_response', message: 'src와 test 디렉토리가 있습니다.' })
       },
       ExecuteTool: () => '[dir] src\n[dir] test'
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    const result = await Free.runWithTask(interpreter)(turn('파일 목록 보여줘'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('파일 목록 보여줘'))(initial)
 
     assert(n === 2, 'iteration: 2 planner calls')
     assert(result === 'src와 test 디렉토리가 있습니다.', 'iteration: direct_response result')
-    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'iteration: success')
+    assert(finalState.lastTurn.tag === RESULT.SUCCESS, 'iteration: success')
   }
 
-  // turnState 훅: working → idle 전이
+  // turnState 훅: working → idle 전이 (safeRunTurn 경유)
   {
     const state = initState()
     const history = []
     state.hooks.on('turnState', (phase) => { history.push(phase.tag) })
 
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' })
-    }, state)
+    })
 
-    const turn = createAgentTurn()
-    await Free.runWithTask(interpreter)(turn('test'))
+    const agent = createAgent({ interpret, ST, state })
+    await agent.run('test')
     await new Promise(r => setTimeout(r, 50))
 
     assert(history.includes(PHASE.WORKING), 'turnState hook: working fired')
     assert(history[history.length - 1] === PHASE.IDLE, 'turnState hook: ends with idle')
   }
 
-  // turnState idle 훅 발화
+  // turnState idle 훅 발화 (safeRunTurn 경유)
   {
     const state = initState()
     let idleFired = false
@@ -379,29 +401,29 @@ async function run() {
       if (phase.tag === PHASE.IDLE) idleFired = true
     })
 
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'hi' })
-    }, state)
+    })
 
-    const turn = createAgentTurn()
-    await Free.runWithTask(interpreter)(turn('hello'))
+    const agent = createAgent({ interpret, ST, state })
+    await agent.run('hello')
     await new Promise(r => setTimeout(r, 50))
     assert(idleFired === true, 'turnState idle hook: fires')
   }
 
   // responseFormat flows into AskLLM op
   {
-    const state = initState()
+    const initial = initSnapshot()
     let capturedOp = null
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: (op) => {
         if (!capturedOp) capturedOp = op
         return JSON.stringify({ type: 'direct_response', message: 'ok' })
       }
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    await Free.runWithTask(interpreter)(turn('test'))
+    await runFreeWithStateT(interpret, ST)(turn('test'))(initial)
 
     assert(capturedOp.responseFormat !== undefined, 'responseFormat: planner carries it')
     assert(capturedOp.responseFormat.type === 'json_object', 'responseFormat: type is json_object')
@@ -409,24 +431,24 @@ async function run() {
 
   // JSON parse failure → finishFailure path
   {
-    const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const initial = initSnapshot()
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => 'NOT VALID JSON {{{'
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    const result = await Free.runWithTask(interpreter)(turn('crash me'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('crash me'))(initial)
 
-    assert(state.get('turnState').tag === PHASE.IDLE, 'parse failure: turnState idle')
-    assert(state.get('lastTurn').tag === RESULT.FAILURE, 'parse failure: lastTurn failure')
+    assert(finalState.turnState.tag === PHASE.IDLE, 'parse failure: turnState idle')
+    assert(finalState.lastTurn.tag === RESULT.FAILURE, 'parse failure: lastTurn failure')
     assert(typeof result === 'string' && result.includes('오류'), 'parse failure: error response')
   }
 
   // Iteration: rolling context in 2nd planner call
   {
-    const state = initState()
+    const initial = initSnapshot()
     const capturedOps = []
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: (op) => {
         capturedOps.push(op)
         if (capturedOps.length === 1) {
@@ -438,10 +460,10 @@ async function run() {
         return JSON.stringify({ type: 'direct_response', message: 'done' })
       },
       ExecuteTool: () => 'tool result'
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    await Free.runWithTask(interpreter)(turn('test'))
+    await runFreeWithStateT(interpret, ST)(turn('test'))(initial)
 
     assert(Array.isArray(capturedOps[0].messages), 'iteration contract: 1st planner has messages')
     assert(Array.isArray(capturedOps[1].messages), 'iteration contract: 2nd planner has messages')
@@ -455,12 +477,11 @@ async function run() {
 
   // safeRunTurn with null state → still throws, no crash
   {
-    const realState = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => { throw new Error('fail') }
-    }, realState)
+    })
 
-    const safe = safeRunTurn(interpreter, null)
+    const safe = safeRunTurn({ interpret, ST }, null)
     try {
       await safe(createAgentTurn()('x'), 'x')
       assert(false, 'safeRunTurn null state: should throw')
@@ -474,7 +495,7 @@ async function run() {
   {
     const state = initState()
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         if (n === 1) {
@@ -485,9 +506,9 @@ async function run() {
         }
         throw new Error('iteration LLM exploded')
       }
-    }, state)
+    })
 
-    const safe = safeRunTurn(interpreter, state)
+    const safe = safeRunTurn({ interpret, ST }, state)
     try {
       await safe(createAgentTurn()('test'), 'test')
       assert(false, 'iteration LLM failure: should throw')
@@ -500,83 +521,89 @@ async function run() {
   // direct_response with null message → rejected
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: null })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('test')
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'direct_response null: turnState idle')
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'direct_response null: rejected')
   }
 
-  // Plan step failure mid-chain → safeRunTurn catches
+  // Plan step failure mid-chain → error captured as result, turn continues
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
-      AskLLM: () => JSON.stringify({
-        type: 'plan',
-        steps: [
-          { op: 'EXEC', args: { tool: 'ok', tool_args: {} } },
-          { op: 'EXEC', args: { tool: 'fail', tool_args: {} } },
-        ]
-      }),
+    let askCount = 0
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => {
+        askCount++
+        if (askCount === 1) {
+          return JSON.stringify({
+            type: 'plan',
+            steps: [
+              { op: 'EXEC', args: { tool: 'ok', tool_args: {} } },
+              { op: 'EXEC', args: { tool: 'fail', tool_args: {} } },
+              { op: 'RESPOND', args: { ref: 2 } },
+            ]
+          })
+        }
+        return JSON.stringify({ type: 'direct_response', message: 'recovered' })
+      },
       ExecuteTool: (op) => {
         if (op.name === 'fail') throw new Error('step 2 failed')
         return 'ok'
       }
-    }, state)
+    })
 
-    const safe = safeRunTurn(interpreter, state)
-    try {
-      await safe(createAgentTurn()('multi-step'), 'multi-step')
-      assert(false, 'mid-step failure: should throw')
-    } catch (e) {
-      assert(state.get('turnState').tag === PHASE.IDLE, 'mid-step failure: turnState recovered')
-      assert(e.message === 'step 2 failed', 'mid-step failure: correct error')
-    }
+    const safe = safeRunTurn({ interpret, ST }, state)
+    await safe(createAgentTurn()('multi-step'), 'multi-step')
+    assert(state.get('turnState').tag === PHASE.IDLE, 'mid-step failure: turnState idle')
+    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'mid-step failure: turn succeeds with error result')
+    assert(state.get('lastTurn').result.includes('[ERROR]'), 'mid-step failure: result contains error string')
   }
 
   // Parse error detail in lastTurn
   {
-    const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const initial = initSnapshot()
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => '<<<not json>>>'
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    await Free.runWithTask(interpreter)(turn('x'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('x'))(initial)
 
-    const lt = state.get('lastTurn')
+    const lt = finalState.lastTurn
     assert(lt.error.message.length > 0, 'parse error detail: error.message is descriptive')
     assert(lt.response.includes('오류'), 'parse error detail: response has error text')
   }
 
-  // Bare runWithTask: turnState stays working (no safeRunTurn)
+  // Bare runFreeWithStateT: turnState stays idle (Free is pure, no safeRunTurn lifecycle)
   {
-    const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const initial = initSnapshot()
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => { throw new Error('crash') }
-    }, state)
+    })
 
     const turn = createAgentTurn()
     try {
-      await Free.runWithTask(interpreter)(turn('test'))
+      await runFreeWithStateT(interpret, ST)(turn('test'))(initial)
     } catch (_) {}
 
-    assert(state.get('turnState').tag === PHASE.WORKING,
-      'bare runWithTask: turnState stays working')
+    // StateT 실행이 실패해도 초기 상태는 불변 (순수)
+    assert(initial.turnState.tag === PHASE.IDLE,
+      'bare runFreeWithStateT: initial state unchanged (pure)')
   }
 
   // createAgent.run() recovery
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => { throw new Error('crash') }
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     try {
       await agent.run('test')
     } catch (_) {}
@@ -588,11 +615,11 @@ async function run() {
   // createAgent.run() success
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: '반갑습니다' })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     const result = await agent.run('안녕')
     assert(result === '반갑습니다', 'createAgent.run success: returns result')
     assert(state.get('turnState').tag === PHASE.IDLE, 'createAgent.run success: turnState idle')
@@ -600,22 +627,20 @@ async function run() {
 
   // createAgent.program() dry-run
   {
-    const state = initState()
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter({})
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state: initState() })
     const program = agent.program('test')
     assert(Free.isImpure(program), 'createAgent.program: returns Free.Impure')
-    assert(state.get('turnState').tag === PHASE.IDLE, 'createAgent.program: state unchanged')
   }
 
   // Valid plan shapes accepted
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' })
-    }, state)
-    const agent = createAgent({ interpreter, state })
+    })
+    const agent = createAgent({ interpret, ST, state })
     const result = await agent.run('hi')
     assert(result === 'ok', 'valid plan (direct_response): accepted')
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'valid plan (direct_response): success')
@@ -624,7 +649,7 @@ async function run() {
   {
     const state = initState()
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         if (n === 1) return JSON.stringify({
@@ -633,8 +658,8 @@ async function run() {
         })
         return 'formatted'
       }
-    }, state)
-    const agent = createAgent({ interpreter, state })
+    })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('do something')
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'valid plan (plan+steps): success')
   }
@@ -642,7 +667,7 @@ async function run() {
   // createAgent with buildTurn (커스텀 전략 주입)
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter({})
 
     const customTurn = (input) =>
       beginTurn(input)
@@ -651,7 +676,8 @@ async function run() {
 
     const agent = createAgent({
       buildTurn: customTurn,
-      interpreter,
+      interpret,
+      ST,
       state,
     })
     const result = await agent.run('test')
@@ -662,11 +688,11 @@ async function run() {
   // createAgent without buildTurn → defaults to incremental planning
   {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'plan 답변' })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     const result = await agent.run('test')
     assert(result === 'plan 답변', 'createAgent default: Plan-then-Execute')
   }
@@ -677,9 +703,9 @@ async function run() {
 
   // maxIterations 초과 → failure
   {
-    const state = initState()
+    const initial = initSnapshot()
     let callCount = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         callCount++
         // 매번 RESPOND 없는 plan → 무한 iteration
@@ -688,21 +714,21 @@ async function run() {
           steps: [{ op: 'EXEC', args: { tool: 'x', tool_args: {} } }]
         })
       }
-    }, state)
+    })
 
     const turn = createAgentTurn({ maxIterations: 3 })
-    await Free.runWithTask(interpreter)(turn('infinite'))
+    const [, finalState] = await runFreeWithStateT(interpret, ST)(turn('infinite'))(initial)
 
     assert(callCount === 3, 'maxIterations: exactly 3 calls')
-    assert(state.get('lastTurn').tag === RESULT.FAILURE, 'maxIterations: failure')
-    assert(state.get('lastTurn').error.kind === ERROR_KIND.MAX_ITERATIONS, 'maxIterations: error kind')
+    assert(finalState.lastTurn.tag === RESULT.FAILURE, 'maxIterations: failure')
+    assert(finalState.lastTurn.error.kind === ERROR_KIND.MAX_ITERATIONS, 'maxIterations: error kind')
   }
 
   // 다단계 iteration: plan → plan → direct_response
   {
-    const state = initState()
+    const initial = initSnapshot()
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         if (n === 1) return JSON.stringify({
@@ -716,21 +742,21 @@ async function run() {
         return JSON.stringify({ type: 'direct_response', message: '3단계 완료' })
       },
       ExecuteTool: (op) => `${op.name} result`
-    }, state)
+    })
 
     const turn = createAgentTurn()
-    const result = await Free.runWithTask(interpreter)(turn('deep'))
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('deep'))(initial)
 
     assert(n === 3, 'multi-iteration: 3 planner calls')
     assert(result === '3단계 완료', 'multi-iteration: final direct_response')
-    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'multi-iteration: success')
+    assert(finalState.lastTurn.tag === RESULT.SUCCESS, 'multi-iteration: success')
   }
 
   // malformed intermediate plan → same validation (not silently passed)
   {
     const state = initState()
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         if (n === 1) return JSON.stringify({
@@ -740,9 +766,9 @@ async function run() {
         // iteration 2: malformed response
         return '<<<invalid json>>>'
       }
-    }, state)
+    })
 
-    const safe = safeRunTurn(interpreter, state)
+    const safe = safeRunTurn({ interpret, ST }, state)
     try {
       await safe(createAgentTurn()('test'), 'test')
     } catch (_) {}
@@ -750,7 +776,41 @@ async function run() {
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'malformed iteration: failure')
   }
 
-  // ERROR_KIND 구조 검증: REACT_* 제거, MAX_ITERATIONS 추가
+  // ===========================================
+  // applyFinalState + epoch 경합 방어 테스트
+  // ===========================================
+
+  // applyFinalState: 정상 적용
+  {
+    const state = initState()
+    const finalState = {
+      turnState: Phase.idle(),
+      lastTurn: TurnResult.success('q', 'ok'),
+      _streaming: null,
+    }
+    applyFinalState(state, finalState, { initialEpoch: 0 })
+    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'applyFinalState: lastTurn applied')
+    assert(state.get('turnState').tag === PHASE.IDLE, 'applyFinalState: turnState applied')
+  }
+
+  // applyFinalState: epoch 불일치 시 conversationHistory 스킵
+  {
+    const state = initState({ _compactionEpoch: 1, context: { conversationHistory: [] } })
+    const finalState = {
+      turnState: Phase.idle(),
+      lastTurn: TurnResult.success('q', 'ok'),
+      context: { conversationHistory: [{ id: 'h-1', input: 'old', output: 'data' }] },
+    }
+    applyFinalState(state, finalState, { initialEpoch: 0 }) // epoch mismatch
+    assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'epoch guard: lastTurn still applied')
+    const history = state.get('context.conversationHistory')
+    assert(Array.isArray(history) && history.length === 0, 'epoch guard: conversationHistory skipped')
+  }
+
+  // ===========================================
+  // ERROR_KIND 구조 검증
+  // ===========================================
+
   {
     assert(ERROR_KIND.MAX_ITERATIONS === 'max_iterations', 'ERROR_KIND: MAX_ITERATIONS exists')
     assert(ERROR_KIND.PLANNER_PARSE === 'planner_parse', 'ERROR_KIND: PLANNER_PARSE exists')

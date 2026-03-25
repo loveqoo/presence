@@ -15,7 +15,6 @@ import {
 } from '../../src/core/agent.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState } from '../../src/infra/state.js'
-import { Free } from '../../src/core/op.js'
 
 const initState = (overrides = {}) =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
@@ -367,11 +366,11 @@ async function run() {
 
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'response!' })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('hello', { source: 'user' })
 
     const history = state.get('context.conversationHistory')
@@ -388,11 +387,11 @@ async function run() {
 
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'response!' })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('hello')
 
     const history = state.get('context.conversationHistory')
@@ -405,11 +404,11 @@ async function run() {
 
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'response!' })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('hello', { source: 'heartbeat' })
 
     const history = state.get('context.conversationHistory')
@@ -423,11 +422,11 @@ async function run() {
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
     const longMessage = 'x'.repeat(2000)
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: longMessage })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('a'.repeat(800), { source: 'user' })
 
     const history = state.get('context.conversationHistory')
@@ -446,14 +445,14 @@ async function run() {
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         return JSON.stringify({ type: 'direct_response', message: `answer ${n}` })
       }
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('q1', { source: 'user' })
     await agent.run('q2', { source: 'user' })
     await agent.run('q3', { source: 'user' })
@@ -473,15 +472,15 @@ async function run() {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
     const capturedOps = []
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: (op) => {
         capturedOps.push(op)
         n++
         return JSON.stringify({ type: 'direct_response', message: `resp ${n}` })
       }
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('first', { source: 'user' })
     await agent.run('second', { source: 'user' })
 
@@ -500,11 +499,11 @@ async function run() {
 
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' })
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('test', { source: 'user' })
 
     const debug = state.get('_debug.lastTurn')
@@ -528,16 +527,16 @@ async function run() {
     ]
     const state = initState({ context: { memories: [], conversationHistory: history } })
     let capturedOp = null
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: (op) => {
         if (!capturedOp) capturedOp = op
         return JSON.stringify({ type: 'direct_response', message: 'ok' })
       }
-    }, state)
+    })
 
     // Tight token budget — won't fit all 3 history turns
     const agent = createAgent({
-      interpreter, state,
+      interpret, ST, state,
       budget: { maxContextChars: 920, reservedOutputChars: 0 },
     })
     await agent.run('current', { source: 'user' })
@@ -609,14 +608,14 @@ async function run() {
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
     let n = 0
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => {
         n++
         return JSON.stringify({ type: 'direct_response', message: `ok ${n}` })
       }
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     for (let i = 0; i < 25; i++) {
       await agent.run(`q${i}`, { source: 'user' })
     }
@@ -633,7 +632,7 @@ async function run() {
 
   {
     const state = initState({ context: { memories: [], conversationHistory: [] } })
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({
         type: 'plan',
         steps: [
@@ -642,9 +641,9 @@ async function run() {
         ]
       }),
       ExecuteTool: () => 'tool result'
-    }, state)
+    })
 
-    const agent = createAgent({ interpreter, state })
+    const agent = createAgent({ interpret, ST, state })
     await agent.run('do it', { source: 'user' })
 
     const history = state.get('context.conversationHistory')

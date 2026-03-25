@@ -9,7 +9,7 @@ import { createLogger } from './infra/logger.js'
 import { LLMClient } from './infra/llm.js'
 import { createProdInterpreter } from './interpreter/prod.js'
 import { createTracedInterpreter } from './interpreter/traced.js'
-import { createAgent, PHASE, Phase } from './core/agent.js'
+import { createAgent, safeRunTurn, PHASE, Phase } from './core/agent.js'
 import { PROMPT } from './core/policies.js'
 import { createAgentRegistry } from './infra/agent-registry.js'
 import { connectMCPServer } from './infra/mcp.js'
@@ -22,8 +22,10 @@ import { createLocalTools } from './infra/local-tools.js'
 import { initI18n, t } from './i18n/index.js'
 import { charsToTokens } from './infra/tokenizer.js'
 import { App } from './ui/App.js'
-import { wireMemoryHooks, wireMemoryMaintenance } from './infra/memory-maintenance.js'
-import { wireHistoryCompaction } from './infra/history-compaction.js'
+import {
+  createMemoryActor, createCompactionActor, createPersistenceActor,
+  applyCompaction, forkTask,
+} from './infra/actors.js'
 import { wireBudgetWarning } from './infra/budget-warning.js'
 
 const h = React.createElement
@@ -37,10 +39,13 @@ const resolveBudget = (prompt) => {
   return { maxContextChars: maxContextTokens, reservedOutputChars: reservedOutputTokens }
 }
 
-// --- Main ---
+// =============================================================================
+// Bootstrap: config → infra → agent 조립. TTY/UI 의존 없음.
+// e2e 테스트에서 직접 사용 가능: const app = await bootstrap(config)
+// =============================================================================
 
-const main = async () => {
-  const config = loadConfig()
+const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
+  const config = configOverride || loadConfig()
   initI18n(config.locale)
   const { logger } = createLogger()
 
@@ -68,7 +73,6 @@ const main = async () => {
   logger.info(t('startup.memory_loaded', { path: memoryPath, count: memory.allNodes().length }))
 
   // --- Embedder ---
-  // apiKey 또는 baseUrl 중 하나만 있으면 embedder 활성화 (로컬 서버는 키 불필요)
   const embedApiKey = config.embed.apiKey
     || (config.embed.provider === 'openai' ? config.llm.apiKey : null)
   const embedEnabled = embedApiKey || config.embed.baseUrl
@@ -83,18 +87,16 @@ const main = async () => {
     : null
 
   // --- Persistence (restore + connect) ---
-  const persistence = createPersistence()
+  const persistence = createPersistence(persistenceCwd ? { cwd: persistenceCwd } : {})
   const restored = persistence.restore()
   if (restored && typeof restored === 'object') {
     try {
       if (typeof restored.turn === 'number') state.set('turn', restored.turn)
       if (restored.context && typeof restored.context === 'object') state.set('context', restored.context)
       if (Array.isArray(restored.todos)) state.set('todos', restored.todos)
-      // history migration: id 없는 레거시 항목에 id 부여
       if (Array.isArray(restored.context?.conversationHistory)) {
         const migrated = migrateHistoryIds(restored.context.conversationHistory)
         state.set('context.conversationHistory', migrated)
-        // wholesale replace 규약: restore도 epoch 증가
         state.set('_compactionEpoch', (state.get('_compactionEpoch') || 0) + 1)
       }
       logger.info(`State restored (turn: ${restored.turn || 0})`)
@@ -102,7 +104,6 @@ const main = async () => {
       logger.warn('State restore failed, starting fresh', { error: e.message })
     }
   }
-  persistence.connectToState(state)
 
   // --- Tools ---
   const toolRegistry = createToolRegistry()
@@ -137,7 +138,6 @@ const main = async () => {
   })
 
   // --- Approve channel ---
-  // REPL 턴에서만 interactive, 백그라운드(heartbeat/event)에서는 자동 거부.
   let _approveResolve = null
   let _interactive = false
 
@@ -160,7 +160,7 @@ const main = async () => {
     }
   }
 
-  // --- Abort (ESC로 턴 취소) ---
+  // --- Abort ---
   let _turnAbort = null
 
   const getAbortSignal = () => _turnAbort?.signal
@@ -172,18 +172,16 @@ const main = async () => {
     }
   }
 
-  const prodInterpreter = createProdInterpreter({ llm, toolRegistry, state, agentRegistry, onApprove, getAbortSignal })
-  const { interpreter, trace } = createTracedInterpreter(prodInterpreter, {
+  const prodInterpreter = createProdInterpreter({ llm, toolRegistry, reactiveState: state, agentRegistry, onApprove, getAbortSignal })
+  const { interpret: tracedInterpret, ST, trace } = createTracedInterpreter(prodInterpreter, {
     logger,
     onOp: (event, _entry) => {
-      // 'done'/'error' 시에만 업데이트 (start 제외 → state.set 횟수 절반)
       if (event !== 'start') {
         state.set('_debug.opTrace', trace.map(e => ({ ...e })))
       }
     },
   })
 
-  // 턴 시작 시 Op trace 초기화
   state.hooks.on('turnState', (phase) => {
     if (phase.tag === PHASE.WORKING) {
       trace.length = 0
@@ -208,27 +206,45 @@ const main = async () => {
     },
   })
 
+  // --- Actors ---
+  const memoryActor = createMemoryActor({ graph: memory, embedder, logger })
+  const compactionActor = createCompactionActor({ llm, logger })
+  const persistenceActor = createPersistenceActor({ store: persistence.store })
+
+  compactionActor.subscribe((result) => {
+    if (result === 'skip') return
+    const { summary, extractedIds, epoch } = result
+    const currentEpoch = state.get('_compactionEpoch') || 0
+    if (epoch !== undefined && epoch !== currentEpoch) {
+      logger.info('Compaction result discarded (epoch mismatch)')
+      return
+    }
+    applyCompaction(state, { summary, extractedIds })
+  })
+
   // --- Agent ---
   const tools = persona.filterTools(toolRegistry.list())
   const agents = agentRegistry.list()
   const responseFormatMode = config.llm.responseFormat
 
+  const execute = safeRunTurn({ interpret: tracedInterpret, ST }, state, {
+    memoryActor, compactionActor, persistenceActor, logger,
+  })
   const agent = createAgent({
     tools, agents, persona: personaConfig,
     responseFormatMode,
     maxRetries: config.llm.maxRetries,
     maxIterations: config.maxIterations,
-    interpreter, state,
+    interpret: tracedInterpret, ST,
+    state,
     budget: resolveBudget(config.prompt),
+    execute,
   })
 
   // --- Events ---
   const { emit } = createEventReceiver(state)
 
   // --- Hooks 조립 ---
-  wireMemoryHooks({ state, memory, embedder, logger })
-  wireMemoryMaintenance({ state, memory, logger })
-  wireHistoryCompaction({ state, llm, logger })
   wireBudgetWarning({ state })
   wireEventHooks({ state, agent, logger })
   wireTodoHooks({ state, logger })
@@ -243,7 +259,7 @@ const main = async () => {
     onError: (e) => logger.warn('Heartbeat emit failed', { error: e.message }),
   })
 
-  // --- Input handler ---
+  // --- Controller: Input handler ---
   const handleInput = async (input) => {
     _interactive = true
     _turnAbort = new AbortController()
@@ -282,18 +298,34 @@ const main = async () => {
   const shutdown = async () => {
     heartbeat.stop()
     delegatePoller.stop()
+    try {
+      await forkTask(persistenceActor.send({ type: 'flush', snapshot: state.snapshot() }))
+    } catch (_) {}
     for (const conn of mcpConnections) {
       try { await conn.close() } catch (_) {}
     }
   }
-  const onSignal = async () => {
-    await shutdown().catch(() => {})
-    process.exit(0)
-  }
-  process.on('SIGTERM', onSignal)
-  process.on('SIGINT', onSignal)
 
-  // --- Render Ink App ---
+  return {
+    agent, state, config, logger,
+    tools, agents, personaConfig,
+    handleInput, handleApproveResponse, handleCancel,
+    heartbeat, delegatePoller,
+    memory, llm,
+    shutdown,
+  }
+}
+
+// =============================================================================
+// View: Ink 렌더링. TTY 필요.
+// =============================================================================
+
+const main = async () => {
+  const app = await bootstrap()
+
+  process.on('SIGTERM', async () => { await app.shutdown().catch(() => {}); process.exit(0) })
+  process.on('SIGINT', async () => { await app.shutdown().catch(() => {}); process.exit(0) })
+
   const cwd = process.cwd()
   let gitBranch = ''
   try {
@@ -303,33 +335,31 @@ const main = async () => {
 
   const { waitUntilExit } = render(
     h(App, {
-      state,
-      onInput: handleInput,
-      onApprove: handleApproveResponse,
-      onCancel: handleCancel,
-      agentName: personaConfig.name,
-      tools,
-      agents,
+      state: app.state,
+      onInput: app.handleInput,
+      onApprove: app.handleApproveResponse,
+      onCancel: app.handleCancel,
+      agentName: app.personaConfig.name,
+      tools: app.tools,
+      agents: app.agents,
       cwd,
       gitBranch,
-      model: config.llm.model,
-      config,
-      memory,
-      llm,
+      model: app.config.llm.model,
+      config: app.config,
+      memory: app.memory,
+      llm: app.llm,
       initialMessages: [],
     })
   )
 
-  // --- Start background tasks ---
-  if (config.heartbeat.enabled) heartbeat.start()
-  delegatePoller.start()
+  if (app.config.heartbeat.enabled) app.heartbeat.start()
+  app.delegatePoller.start()
 
-  // --- Wait for exit ---
   await waitUntilExit()
-  await shutdown()
+  await app.shutdown()
 }
 
-export { main }
+export { main, bootstrap }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
   main().catch(err => { console.error('Fatal:', err); process.exit(1) })

@@ -24,7 +24,9 @@ const tests = [
   'test/infra/memory.test.js',
   'test/infra/embedding.test.js',
   'test/infra/mcp.test.js',
+  'test/infra/mcp-sse.test.js',
   'test/infra/memory-hook.test.js',
+  'test/infra/actors.test.js',
   'test/infra/agent-registry.test.js',
   'test/infra/a2a-client.test.js',
   'test/infra/events.test.js',
@@ -50,6 +52,8 @@ const tests = [
   'test/regression/tool-defense.test.js',
   'test/regression/plan-fuzz.test.js',
   'test/regression/e2e-scenario.test.js',
+  // E2E bootstrap
+  'test/e2e/bootstrap.test.js',
 ]
 
 let allPassed = true

@@ -1,5 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import fp from '../lib/fun-fp.js'
 
 const { Either, once } = fp
@@ -52,6 +54,45 @@ const makeCleanup = (client, transport) => once(async () => {
   try { if (transport.close) await transport.close() } catch (_) {}
 })
 
+// --- Transport 생성 ---
+
+const createTransportForConfig = ({
+  transport: type = 'stdio',
+  command, args = [], env = {},
+  url, headers = {},
+  fetchFn,
+}) => {
+  switch (type) {
+    case 'stdio':
+      return new StdioClientTransport({ command, args, env })
+
+    case 'sse':
+      return new SSEClientTransport(
+        new URL(url),
+        {
+          eventSourceInit: { fetch: fetchFn },
+          requestInit: Object.keys(headers).length > 0
+            ? { headers }
+            : undefined,
+        },
+      )
+
+    case 'streamable-http':
+      return new StreamableHTTPClientTransport(
+        new URL(url),
+        {
+          requestInit: Object.keys(headers).length > 0
+            ? { headers }
+            : undefined,
+          fetch: fetchFn,
+        },
+      )
+
+    default:
+      throw new Error(`Unknown MCP transport: ${type}. Use "stdio", "sse", or "streamable-http".`)
+  }
+}
+
 // --- MCP 서버 연결 ---
 
 const connectMCPServer = async ({
@@ -59,8 +100,12 @@ const connectMCPServer = async ({
   command,
   args = [],
   env = {},
+  transport: transportType,
+  url,
+  headers,
+  fetchFn,
   createClient = () => new Client({ name: 'presence', version: '1.0.0' }),
-  createTransport = () => new StdioClientTransport({ command, args, env }),
+  createTransport = () => createTransportForConfig({ transport: transportType, command, args, env, url, headers, fetchFn }),
 }) => {
   const transport = createTransport()
   const client = createClient()
@@ -80,4 +125,7 @@ const connectMCPServer = async ({
   return { serverName, tools, close: cleanup }
 }
 
-export { connectMCPServer, extractContent, ensureObjectSchema, validateSchema, mcpToolToRegistryTool }
+export {
+  connectMCPServer, extractContent, ensureObjectSchema, validateSchema,
+  mcpToolToRegistryTool, createTransportForConfig,
+}

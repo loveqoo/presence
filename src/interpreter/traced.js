@@ -25,48 +25,55 @@ const extractDetail = (f) => {
   }
 }
 
-const createTracedInterpreter = (inner, { logger, onOp } = {}) => {
+// inner: { interpret, ST } — StateT(Task) 인터프리터 번들
+const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}) => {
   const trace = []
 
-  return {
-    interpreter: (functor) => {
-      const { tag } = functor
-      const detail = extractDetail(functor)
-      const entry = appendTrace(trace, { tag, detail, timestamp: Date.now() })
+  const interpret = (functor) => {
+    const { tag } = functor
+    const detail = extractDetail(functor)
+    const entry = appendTrace(trace, { tag, detail, timestamp: Date.now() })
 
-      if (logger) logger.debug(`[op:start] ${tag}`, { tag })
-      if (onOp) onOp('start', entry)
+    if (logger) logger.debug(`[op:start] ${tag}`, { tag })
+    if (onOp) onOp('start', entry)
 
-      // Delegate: next를 래핑하여 DelegateResult 캡처
-      const actual = tag === 'Delegate'
-        ? { ...functor, next: (r) => {
-            if (r?.status) entry.result = { status: r.status, output: r.output, mode: r.mode, error: r.error }
-            return functor.next(r)
-          }}
-        : functor
+    // Delegate: next를 래핑하여 DelegateResult 캡처
+    const actual = tag === 'Delegate'
+      ? { ...functor, next: (r) => {
+          if (r?.status) entry.result = { status: r.status, output: r.output, mode: r.mode, error: r.error }
+          return functor.next(r)
+        }}
+      : functor
 
-      const task = inner(actual)
+    const innerST = inner(actual)
 
-      return new Task((reject, resolve) => {
-        task.fork(
-          (err) => {
-            entry.error = err.message || String(err)
+    // inner StateT의 Task를 래핑: 성공/에러 모두 트레이싱.
+    // ST.get으로 현재 상태를 얻고, inner의 run(state) Task를 감싸서
+    // 에러 시에도 entry에 duration/error를 기록한 뒤 re-reject 한다.
+    return ST.get.chain(currentState =>
+      ST.lift(new Task((reject, resolve) => {
+        innerST.run(currentState).fork(
+          err => {
             entry.duration = Date.now() - entry.timestamp
-            if (logger) logger.warn(`[op:error] ${tag}: ${entry.error}`, { tag, error: entry.error })
+            entry.error = err instanceof Error ? err.message : String(err)
+            if (logger) logger.warn(`[op:error] ${tag} (${entry.duration}ms): ${entry.error}`, { tag, error: entry.error })
             if (onOp) onOp('error', entry)
             reject(err)
           },
-          (value) => {
+          ([nextFree, newState]) => {
             entry.duration = Date.now() - entry.timestamp
             if (logger) logger.debug(`[op:done] ${tag} (${entry.duration}ms)`, { tag, duration: entry.duration })
             if (onOp) onOp('done', entry)
-            resolve(value)
+            resolve([nextFree, newState])
           }
         )
-      })
-    },
-    trace,
+      }))
+    ).chain(([nextFree, newState]) =>
+      ST.put(newState).map(() => nextFree)
+    )
   }
+
+  return { interpret, ST, trace }
 }
 
 export { createTracedInterpreter }

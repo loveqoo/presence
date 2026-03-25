@@ -1,6 +1,6 @@
 import fp from '../lib/fun-fp.js'
 
-const { Free, Either, Task, identity, once, pipe } = fp
+const { Free, Either, Task, StateT, identity, once, pipe } = fp
 const FUNCTOR = Symbol.for('fun-fp-js/Functor')
 
 // --- makeOp factory ---
@@ -39,8 +39,30 @@ const getState     = (path)            => Free.liftF(GetState({ path }))
 const parallel     = (programs)        => Free.liftF(Parallel({ programs }))
 const spawn        = (programs)        => Free.liftF(Spawn({ programs }))
 
+// --- StateT(Task) runner ---
+// Free 프로그램을 StateT(Task) 인터프리터로 실행.
+// 인터프리터: Op → StateT(Task), 순수 상태 전이 + 비동기 효과 분리.
+// 반환: Promise<[result, finalState]>
+const runFreeWithStateT = (interpret, ST) => program => initialState =>
+  new Promise((resolve, reject) => {
+    const step = (state, free) => {
+      if (Free.isPure(free)) return resolve([free.value, state])
+      if (Free.isImpure(free)) {
+        try {
+          interpret(free.functor)
+            .run(state)
+            .fork(reject, ([nextFree, newState]) => step(newState, nextFree))
+        } catch (err) { reject(err) }
+      } else {
+        reject(new Error('runFreeWithStateT: unexpected Free node'))
+      }
+    }
+    step(initialState, program)
+  })
+
 export {
-  makeOp, FUNCTOR, Free, Either, Task, identity, once, pipe,
+  makeOp, FUNCTOR, Free, Either, Task, StateT, identity, once, pipe,
+  runFreeWithStateT,
   AskLLM, ExecuteTool, Respond, Approve, Delegate,
   Observe, UpdateState, GetState, Parallel, Spawn,
   askLLM, executeTool, respond, approve, delegate,

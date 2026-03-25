@@ -1,7 +1,7 @@
 import { parsePlan, normalizeStep, validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs } from '../../src/core/plan.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createState } from '../../src/infra/state.js'
-import { Free, Either } from '../../src/core/op.js'
+import { runFreeWithStateT } from '../../src/core/op.js'
+import { Either } from '../../src/core/op.js'
 
 let passed = 0
 let failed = 0
@@ -77,9 +77,9 @@ async function run() {
 
   // 1. direct_response → Either.Right
   {
-    const { interpreter, log } = createTestInterpreter()
+    const { interpret, ST, log } = createTestInterpreter()
     const plan = { type: 'direct_response', message: 'hi there' }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isRight(result), 'direct_response: Right')
     assert(result.value === 'hi there', 'direct_response: returns message')
     assert(log[0].tag === 'Respond', 'direct_response: uses Respond op')
@@ -87,12 +87,12 @@ async function run() {
 
   // 2. Single EXEC step → Either.Right
   {
-    const { interpreter, log } = createTestInterpreter()
+    const { interpret, ST, log } = createTestInterpreter()
     const plan = {
       type: 'plan',
       steps: [{ op: 'EXEC', args: { tool: 'test_tool', tool_args: { x: 1 } } }]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isRight(result), 'single EXEC: Right')
     assert(log[0].tag === 'ExecuteTool', 'single EXEC: ExecuteTool op')
     assert(result.value.length === 1, 'single EXEC: 1 result')
@@ -100,7 +100,7 @@ async function run() {
 
   // 3. Multi-step with ctx references
   {
-    const { interpreter, log } = createTestInterpreter({
+    const { interpret, ST, log } = createTestInterpreter({
       ExecuteTool: (op) => `tool-result-for-${op.name}`,
       AskLLM: (op) => {
         assert(Array.isArray(op.messages), 'ASK_LLM step: messages is array')
@@ -116,7 +116,7 @@ async function run() {
         { op: 'RESPOND', args: { ref: 2 } },
       ]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isRight(result), 'multi-step: Right')
     assert(log.length === 3, 'multi-step: 3 ops executed')
     assert(result.value[2] === 'llm-said-tool-result-for-github', 'multi-step: ctx reference works')
@@ -124,7 +124,7 @@ async function run() {
 
   // 4. Unknown op → Either.Left, short-circuits (EXEC 실행 안 됨)
   {
-    const { interpreter, log } = createTestInterpreter()
+    const { interpret, ST, log } = createTestInterpreter()
     const plan = {
       type: 'plan',
       steps: [
@@ -132,7 +132,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'test', tool_args: {} } },
       ]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isLeft(result), 'unknown op: Left')
     assert(result.value.includes('UNKNOWN_OP'), 'unknown op: error mentions op name')
     assert(log.filter(l => l.tag === 'ExecuteTool').length === 0, 'unknown op: EXEC not executed')
@@ -140,9 +140,9 @@ async function run() {
 
   // 5. Empty steps → Either.Right([])
   {
-    const { interpreter, log } = createTestInterpreter()
+    const { interpret, ST, log } = createTestInterpreter()
     const plan = { type: 'plan', steps: [] }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isRight(result), 'empty steps: Right')
     assert(result.value.length === 0, 'empty steps: empty array')
     assert(log.length === 0, 'empty steps: no ops executed')
@@ -150,7 +150,7 @@ async function run() {
 
   // 6. APPROVE step
   {
-    const { interpreter: i1, log: l1 } = createTestInterpreter({ Approve: () => true })
+    const { interpret: i1, ST, log: l1 } = createTestInterpreter({ Approve: () => true })
     const plan = {
       type: 'plan',
       steps: [
@@ -158,7 +158,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'slack', tool_args: {} } },
       ]
     }
-    const r1 = await Free.runWithTask(i1)(parsePlan(plan))
+    const [r1] = await runFreeWithStateT(i1, ST)(parsePlan(plan))({})
     assert(Either.isRight(r1), 'APPROVE: Right')
     assert(r1.value[0] === true, 'APPROVE: returns true when approved')
     assert(l1[0].tag === 'Approve', 'APPROVE: logged as Approve')
@@ -166,13 +166,13 @@ async function run() {
 
   // 7. LOOKUP_MEMORY → filters by query
   {
-    const state = createState({ context: { memories: ['회의 안건', 'PR 현황', '회의록 정리'] } })
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter()
+    const initialState = { context: { memories: ['회의 안건', 'PR 현황', '회의록 정리'] } }
     const plan = {
       type: 'plan',
       steps: [{ op: 'LOOKUP_MEMORY', args: { query: '회의' } }]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
     assert(result.value[0].length === 2, 'LOOKUP_MEMORY: filters by query (2 of 3 match)')
     assert(result.value[0].includes('회의 안건'), 'LOOKUP_MEMORY: includes matching memory')
     assert(!result.value[0].includes('PR 현황'), 'LOOKUP_MEMORY: excludes non-matching')
@@ -180,19 +180,19 @@ async function run() {
 
   // 7b. LOOKUP_MEMORY without query → returns all
   {
-    const state = createState({ context: { memories: ['a', 'b'] } })
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter()
+    const initialState = { context: { memories: ['a', 'b'] } }
     const plan = {
       type: 'plan',
       steps: [{ op: 'LOOKUP_MEMORY', args: {} }]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
     assert(result.value[0].length === 2, 'LOOKUP_MEMORY no query: returns all')
   }
 
   // 8. EXEC with $N in tool_args
   {
-    const { interpreter, log } = createTestInterpreter({
+    const { interpret, ST, log } = createTestInterpreter({
       AskLLM: () => 'formatted-message',
       ExecuteTool: (op) => `sent: ${op.args.message}`,
     })
@@ -203,7 +203,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'slack', tool_args: { channel: '#team', message: '$1' } } },
       ]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(result.value[1] === 'sent: formatted-message', 'EXEC $N: tool_args reference resolved')
   }
 
@@ -211,38 +211,38 @@ async function run() {
 
   // 9. case-insensitive
   {
-    const state = createState({ context: { memories: ['Hello World', 'foo bar'] } })
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter()
+    const initialState = { context: { memories: ['Hello World', 'foo bar'] } }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'HELLO' } }] }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
     assert(result.value[0].length === 1 && result.value[0][0] === 'Hello World', 'LOOKUP_MEMORY: case-insensitive')
   }
 
   // 10. memories undefined → empty
   {
-    const state = createState({ context: {} })
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter()
+    const initialState = { context: {} }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'x' } }] }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
     assert(result.value[0].length === 0, 'LOOKUP_MEMORY: undefined memories → []')
   }
 
   // 11. non-string memories
   {
-    const state = createState({ context: { memories: [{ text: 'meeting' }, 42, null, 'meeting room'] } })
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter()
+    const initialState = { context: { memories: [{ text: 'meeting' }, 42, null, 'meeting room'] } }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'meeting' } }] }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
     assert(result.value[0].length === 1, 'LOOKUP_MEMORY: non-string memories handled')
     assert(result.value[0][0] === 'meeting room', 'LOOKUP_MEMORY: only string memory matched')
   }
 
   // 12. query matches nothing
   {
-    const state = createState({ context: { memories: ['a', 'b', 'c'] } })
-    const { interpreter } = createTestInterpreter({}, state)
+    const { interpret, ST } = createTestInterpreter()
+    const initialState = { context: { memories: ['a', 'b', 'c'] } }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'zzz' } }] }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
     assert(result.value[0].length === 0, 'LOOKUP_MEMORY: no match → empty')
   }
 
@@ -251,11 +251,11 @@ async function run() {
   // 13. without ctx → context undefined
   {
     let capturedOp = null
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: (op) => { capturedOp = op; return 'ok' }
     })
     const plan = { type: 'plan', steps: [{ op: 'ASK_LLM', args: { prompt: 'hello' } }] }
-    await Free.runWithTask(interpreter)(parsePlan(plan))
+    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(capturedOp.context === undefined, 'ASK_LLM no ctx: context is undefined')
     assert(capturedOp.messages[0].content === 'hello', 'ASK_LLM no ctx: prompt in messages')
   }
@@ -263,18 +263,18 @@ async function run() {
   // 14. empty ctx → context undefined
   {
     let capturedOp = null
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: (op) => { capturedOp = op; return 'ok' }
     })
     const plan = { type: 'plan', steps: [{ op: 'ASK_LLM', args: { prompt: 'hi', ctx: [] } }] }
-    await Free.runWithTask(interpreter)(parsePlan(plan))
+    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(capturedOp.context === undefined, 'ASK_LLM empty ctx: context is undefined')
   }
 
   // 15. out-of-range ctx
   {
     let capturedOp = null
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       ExecuteTool: () => 'only-result',
       AskLLM: (op) => { capturedOp = op; return 'ok' }
     })
@@ -285,14 +285,14 @@ async function run() {
         { op: 'ASK_LLM', args: { prompt: 'summarize', ctx: [99] } },
       ]
     }
-    await Free.runWithTask(interpreter)(parsePlan(plan))
+    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(capturedOp.context === undefined, 'ASK_LLM out-of-range ctx: context undefined')
   }
 
   // 16. mixed ASK_LLM
   {
     const captured = []
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       ExecuteTool: () => 'data',
       AskLLM: (op) => { captured.push(op); return 'response' }
     })
@@ -304,7 +304,7 @@ async function run() {
         { op: 'ASK_LLM', args: { prompt: 'no ctx' } },
       ]
     }
-    await Free.runWithTask(interpreter)(parsePlan(plan))
+    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Array.isArray(captured[0].context) && captured[0].context[0] === 'data',
       'mixed ASK_LLM: first has context')
     assert(captured[1].context === undefined,
@@ -315,12 +315,12 @@ async function run() {
 
   // 17. EXEC without tool → Left (PLANNER_SHAPE, not INTERPRETER)
   {
-    const { interpreter, log } = createTestInterpreter()
+    const { interpret, ST, log } = createTestInterpreter()
     const plan = {
       type: 'plan',
       steps: [{ op: 'EXEC', args: { tool_args: { x: 1 } } }]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isLeft(result), 'EXEC no tool: Left')
     assert(result.value.includes('EXEC'), 'EXEC no tool: error mentions EXEC')
     assert(log.filter(l => l.tag === 'ExecuteTool').length === 0, 'EXEC no tool: not dispatched')
@@ -328,19 +328,19 @@ async function run() {
 
   // 18. RESPOND without ref or message → Left
   {
-    const { interpreter } = createTestInterpreter()
+    const { interpret, ST } = createTestInterpreter()
     const plan = {
       type: 'plan',
       steps: [{ op: 'RESPOND', args: {} }]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isLeft(result), 'RESPOND no args: Left')
     assert(result.value.includes('RESPOND'), 'RESPOND no args: error mentions RESPOND')
   }
 
   // 19. RESPOND with out-of-range ref → Either.Left
   {
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       ExecuteTool: () => 'result',
     })
     const plan = {
@@ -350,7 +350,7 @@ async function run() {
         { op: 'RESPOND', args: { ref: 99 } },
       ]
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isLeft(result), 'RESPOND bad ref: Left')
     assert(result.value.includes('99'), 'RESPOND bad ref: error mentions index')
   }
@@ -392,7 +392,7 @@ async function run() {
   // 통합: EXEC delegate가 parsePlan에서 DELEGATE로 실행됨
   {
     const delegateResults = []
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       Delegate: (op) => { delegateResults.push(op); return 'delegated-result' },
     })
     const plan = {
@@ -401,7 +401,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'delegate', target: 'summarizer', task: 'summarize this' } },
       ],
     }
-    const result = await Free.runWithTask(interpreter)(parsePlan(plan))
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
     assert(Either.isRight(result), 'normalizeStep integration: Right')
     assert(delegateResults.length === 1, 'normalizeStep integration: delegate called')
     assert(delegateResults[0].target === 'summarizer', 'normalizeStep integration: correct target')

@@ -1,6 +1,7 @@
 import fp from '../lib/fun-fp.js'
 
-const { Task } = fp
+const { Task, StateT } = fp
+const ST = StateT('task')
 
 const DEFAULT_STUBS = {
   AskLLM:       () => '(dry-run: LLM response)',
@@ -27,14 +28,13 @@ const summarizers = {
 }
 
 // plan 축적은 관찰 전용 부수효과.
-// 도메인 상태는 UpdateState/GetState + Hook 경로로만 변경한다.
 const appendPlan = (plan, entry) => { plan.push(entry); return entry }
 
 const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
   const plan = []
   const merged = { ...DEFAULT_STUBS, ...stubs }
 
-  const interpreter = (functor) => {
+  const interpret = (functor) => {
     const { tag } = functor
     const summarize = summarizers[tag]
     const entry = appendPlan(plan, {
@@ -45,16 +45,16 @@ const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
     if (onOp) onOp(entry)
 
     const stub = merged[tag]
-    if (!stub) return Task.of(functor.next(undefined))
+    if (!stub) return ST.of(functor.next(undefined))
 
     try {
-      return Task.of(functor.next(stub(functor)))
+      return ST.of(functor.next(stub(functor)))
     } catch (err) {
-      return Task.rejected(err)
+      return ST.lift(Task.rejected(err))
     }
   }
 
-  return { interpreter, plan }
+  return { interpret, ST, plan }
 }
 
 export { createDryRunInterpreter, DEFAULT_STUBS }

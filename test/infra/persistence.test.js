@@ -65,26 +65,7 @@ async function run() {
     p.clear()
   }
 
-  // 4. connectToState: auto-save on state change
-  {
-    const cwd = join(testDir, 'test4')
-    mkdirSync(cwd, { recursive: true })
-    const p = createPersistence({ cwd, debounceMs: 10 })
-    p.clear()
-
-    const state = createReactiveState({ turnState: { tag: 'idle' }, turn: 0 })
-    p.connectToState(state)
-
-    state.set('turnState', { tag: 'working', input: 'test' })
-    await new Promise(r => setTimeout(r, 100))
-
-    const restored = p.restore()
-    assert(restored !== null, 'connectToState: auto-saved')
-    assert(restored.turnState.tag === 'working', 'connectToState: saved correct state')
-    p.clear()
-  }
-
-  // 5. _접두사 키는 persistence에서 제외
+  // 4. _접두사 키는 persistence에서 제외
   {
     const cwd = join(testDir, 'test5')
     mkdirSync(cwd, { recursive: true })

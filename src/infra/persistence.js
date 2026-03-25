@@ -1,7 +1,7 @@
 import Conf from 'conf'
 
 // _접두사 키는 일시적 UI 상태 (_streaming, _debug, _toolResults 등)
-const stripTransient = (snap) => {
+export const stripTransient = (snap) => {
   const out = {}
   for (const key of Object.keys(snap)) {
     if (!key.startsWith('_')) out[key] = snap[key]
@@ -47,20 +47,7 @@ const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } =
 
   const clear = () => store.delete('agentState')
 
-  const connectToState = (reactiveState) => {
-    // Save on any top-level state change by hooking into common paths
-    const hookSave = () => save(reactiveState)
-    reactiveState.hooks.on('turnState', hookSave)
-    reactiveState.hooks.on('turn', hookSave)
-    reactiveState.hooks.on('lastTurn', hookSave)
-    return { unhook: () => {
-      reactiveState.hooks.off('turnState', hookSave)
-      reactiveState.hooks.off('turn', hookSave)
-      reactiveState.hooks.off('lastTurn', hookSave)
-    }}
-  }
-
-  return { save, saveImmediate, restore, clear, connectToState, store }
+  return { save, saveImmediate, restore, clear, store }
 }
 
 // 순수 함수: id 없는 history 항목에 id 부여

@@ -10,7 +10,7 @@ import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { createLocalTools } from '../../src/infra/local-tools.js'
 import { createToolRegistry } from '../../src/infra/tools.js'
-import { Free } from '../../src/core/op.js'
+import { runFreeWithStateT } from '../../src/core/op.js'
 
 const initState = () =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] } })
@@ -33,10 +33,10 @@ async function run() {
 
   const testMalformed = async (label, llmResponse) => {
     const state = initState()
-    const { interpreter } = createTestInterpreter({
+    const { interpret, ST } = createTestInterpreter({
       AskLLM: () => typeof llmResponse === 'string' ? llmResponse : JSON.stringify(llmResponse),
-    }, state)
-    const agent = createAgent({ interpreter, state, tools: toolRegistry.list() })
+    })
+    const agent = createAgent({ interpret, ST, state, tools: toolRegistry.list() })
     await agent.run('test')
     const lt = state.get('lastTurn')
     assert(state.get('turnState').tag === PHASE.IDLE, `${label}: turnState idle`)

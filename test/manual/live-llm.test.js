@@ -16,7 +16,8 @@ import { createToolRegistry } from '../../src/infra/tools.js'
 import { createAgentRegistry } from '../../src/infra/agent-registry.js'
 import { Free } from '../../src/core/op.js'
 import { MemoryGraph } from '../../src/infra/memory.js'
-import { wireMemoryHooks } from '../../src/infra/memory-maintenance.js'
+import { createMemoryActor } from '../../src/infra/actors.js'
+import { safeRunTurn } from '../../src/core/agent.js'
 import { createEmbedder } from '../../src/infra/embedding.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
@@ -408,17 +409,18 @@ async function run() {
       data: { content: '프로젝트 X는 2025년 완료 예정' },
     })
 
-    wireMemoryHooks({ state, memory, embedder: null, logger: null })
+    const memActor = createMemoryActor({ graph: memory, embedder: null, logger: null })
 
     const interpreter = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
+    const execute = safeRunTurn(interpreter, state, { memoryActor: memActor })
     const agent = createAgent({
       tools: toolRegistry.list(),
       agents: agentRegistry.list(),
       responseFormatMode: config.llm.responseFormat,
-      maxRetries: 2, maxIterations: 5, interpreter, state,
+      maxRetries: 2, maxIterations: 5, state, execute,
     })
 
     console.log(`\n  [${label}] embedder=null memory recall test`)
@@ -497,17 +499,18 @@ async function run() {
       return
     }
 
-    wireMemoryHooks({ state, memory, embedder, logger: null })
+    const memActor2 = createMemoryActor({ graph: memory, embedder, logger: null })
 
     const interpreter = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
+    const execute2 = safeRunTurn(interpreter, state, { memoryActor: memActor2 })
     const agent = createAgent({
       tools: toolRegistry.list(),
       agents: agentRegistry.list(),
       responseFormatMode: config.llm.responseFormat,
-      maxRetries: 2, maxIterations: 5, interpreter, state,
+      maxRetries: 2, maxIterations: 5, state, execute: execute2,
     })
 
     // 프랑스 관련 질문 → "파리는 프랑스의 수도" 노드가 recall 되어야 함
