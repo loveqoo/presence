@@ -1,5 +1,6 @@
 import fp from '../lib/fun-fp.js'
-import { getByPath, setByPathPure } from '../infra/state.js'
+import { createStateInterpreter } from './state.js'
+import { Interpreter } from './compose.js'
 
 const { Task, StateT } = fp
 const ST = StateT('task')
@@ -18,39 +19,37 @@ const defaultHandlers = {
 // log 축적은 관찰 전용 부수효과.
 const appendLog = (log, entry) => { log.push(entry); return entry }
 
+// 핸들러 함수를 Interpreter 인스턴스로 변환.
+// ExecuteTool 예외는 에러 결과값으로 변환 (턴 계속 진행).
+const handlerToInterpreter = (tag, handler) =>
+  new Interpreter([tag], (f) => {
+    try {
+      const result = handler(f)
+      return ST.of(f.next(result))
+    } catch (err) {
+      if (tag === 'ExecuteTool') {
+        return ST.of(f.next(`[ERROR] ${f.name}: ${err.message}`))
+      }
+      return ST.lift(Task.rejected(err))
+    }
+  })
+
 const createTestInterpreter = (handlers = {}) => {
   const log = []
   const merged = { ...defaultHandlers, ...handlers }
 
+  // State 인터프리터 공유 + mock 핸들러를 Interpreter로 변환
+  const stateI = createStateInterpreter(ST)
+  const mockInterpreters = Object.entries(merged)
+    .filter(([tag]) => !stateI.handles.has(tag))
+    .map(([tag, handler]) => handlerToInterpreter(tag, handler))
+
+  const composed = Interpreter.compose(ST, stateI, ...mockInterpreters)
+
+  // 로깅은 합성된 interpret 위에 래핑 (모든 Op 대상)
   const interpret = (functor) => {
-    const { tag } = functor
-    appendLog(log, { tag, data: { ...functor, next: undefined, map: undefined } })
-
-    if (tag === 'UpdateState') {
-      return ST.modify(s => setByPathPure(s, functor.path, functor.value))
-        .chain(() => ST.get)
-        .map(s => functor.next(s))
-    }
-    if (tag === 'GetState') {
-      return ST.gets(s => getByPath(s, functor.path))
-        .map(value => functor.next(value))
-    }
-
-    const handler = merged[tag]
-    if (!handler) {
-      return ST.lift(Task.rejected(new Error(`Unknown op: ${tag}`)))
-    }
-
-    try {
-      const result = handler(functor)
-      return ST.of(functor.next(result))
-    } catch (err) {
-      // ExecuteTool 예외 → 에러 결과값으로 변환 (턴 계속 진행, LLM이 re-plan)
-      if (tag === 'ExecuteTool') {
-        return ST.of(functor.next(`[ERROR] ${functor.name}: ${err.message}`))
-      }
-      return ST.lift(Task.rejected(err))
-    }
+    appendLog(log, { tag: functor.tag, data: { ...functor, next: undefined, map: undefined } })
+    return composed(functor)
   }
 
   return { interpret, ST, log }

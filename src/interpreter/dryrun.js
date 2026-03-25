@@ -1,4 +1,5 @@
 import fp from '../lib/fun-fp.js'
+import { Interpreter } from './compose.js'
 
 const { Task, StateT } = fp
 const ST = StateT('task')
@@ -30,10 +31,26 @@ const summarizers = {
 // plan 축적은 관찰 전용 부수효과.
 const appendPlan = (plan, entry) => { plan.push(entry); return entry }
 
+// stub 핸들러를 Interpreter 인스턴스로 변환
+const stubToInterpreter = (tag, stub) =>
+  new Interpreter([tag], (f) => {
+    try {
+      return ST.of(f.next(stub(f)))
+    } catch (err) {
+      return ST.lift(Task.rejected(err))
+    }
+  })
+
 const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
   const plan = []
   const merged = { ...DEFAULT_STUBS, ...stubs }
 
+  const stubInterpreters = Object.entries(merged)
+    .map(([tag, stub]) => stubToInterpreter(tag, stub))
+
+  const composed = Interpreter.compose(ST, ...stubInterpreters)
+
+  // 요약 로깅은 합성된 interpret 위에 래핑
   const interpret = (functor) => {
     const { tag } = functor
     const summarize = summarizers[tag]
@@ -41,17 +58,8 @@ const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
       tag,
       ...(summarize ? { summary: summarize(functor) } : {}),
     })
-
     if (onOp) onOp(entry)
-
-    const stub = merged[tag]
-    if (!stub) return ST.of(functor.next(undefined))
-
-    try {
-      return ST.of(functor.next(stub(functor)))
-    } catch (err) {
-      return ST.lift(Task.rejected(err))
-    }
+    return composed(functor)
   }
 
   return { interpret, ST, plan }
