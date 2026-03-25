@@ -52,6 +52,10 @@ const tests = [
   'test/regression/tool-defense.test.js',
   'test/regression/plan-fuzz.test.js',
   'test/regression/e2e-scenario.test.js',
+  // applyFinalState ordering + turn chaining
+  'test/core/apply-final-state.test.js',
+  // Turn concurrency
+  'test/core/turn-concurrency.test.js',
   // E2E bootstrap
   'test/e2e/bootstrap.test.js',
   // Server

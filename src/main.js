@@ -14,8 +14,7 @@ import { PROMPT } from './core/policies.js'
 import { createAgentRegistry } from './infra/agent-registry.js'
 import { connectMCPServer } from './infra/mcp.js'
 import { createEmbedder } from './infra/embedding.js'
-import { createEventReceiver, wireEventHooks, wireTodoHooks } from './infra/events.js'
-import { wireDelegatePolling } from './infra/a2a-client.js'
+import { withEventMeta } from './infra/events.js'
 import { createHeartbeat } from './infra/heartbeat.js'
 import { loadConfig, validateConfig } from './infra/config.js'
 import { createLocalTools } from './infra/local-tools.js'
@@ -24,9 +23,9 @@ import { charsToTokens } from './infra/tokenizer.js'
 import { App } from './ui/App.js'
 import {
   createMemoryActor, createCompactionActor, createPersistenceActor,
-  applyCompaction, forkTask,
+  createTurnActor, applyCompaction, forkTask,
+  createEventActor, createEmit, createBudgetActor, createDelegateActor,
 } from './infra/actors.js'
-import { wireBudgetWarning } from './infra/budget-warning.js'
 
 const h = React.createElement
 
@@ -182,13 +181,6 @@ const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
     },
   })
 
-  state.hooks.on('turnState', (phase) => {
-    if (phase.tag === PHASE.WORKING) {
-      trace.length = 0
-      state.set('_debug.opTrace', [])
-    }
-  })
-
   // --- Local sub-agents ---
   agentRegistry.register({
     name: 'summarizer',
@@ -241,30 +233,50 @@ const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
     execute,
   })
 
-  // --- Events ---
-  const { emit } = createEventReceiver(state)
+  // --- TurnActor: 모든 턴 요청 직렬화 ---
+  const turnActor = createTurnActor((input, opts) => agent.run(input, opts))
 
-  // --- Hooks 조립 ---
-  wireBudgetWarning({ state })
-  wireEventHooks({ state, agent, logger })
-  wireTodoHooks({ state, logger })
-  const delegatePoller = wireDelegatePolling({
-    state, emit, agentRegistry, logger,
+  // --- Actors (비동기 비즈니스 로직 통합) ---
+  const eventActor = createEventActor({ turnActor, state, logger })
+  const budgetActor = createBudgetActor({ state })
+  const delegateActor = createDelegateActor({
+    state, eventActor, agentRegistry, logger,
     pollIntervalMs: config.delegatePolling.intervalMs,
   })
+
+  // --- emit (EventActor 경유) ---
+  const emit = createEmit(eventActor)
+
+  // --- 브릿지 Hook (로직 없음) ---
+  state.hooks.on('turnState', (phase) => {
+    if (phase.tag === 'idle') {
+      eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+      delegateActor.send({ type: 'poll' }).fork(() => {}, () => {})
+    }
+    if (phase.tag === PHASE.WORKING) {
+      trace.length = 0
+      state.set('_debug.opTrace', [])
+    }
+  })
+  state.hooks.on('_debug.lastTurn', (debug, s) => {
+    budgetActor.send({ type: 'check', debug, turn: s.get('turn') }).fork(() => {}, () => {})
+  })
+
   const heartbeat = createHeartbeat({
-    emit, state,
+    eventActor, state,
     intervalMs: config.heartbeat.intervalMs,
     prompt: config.heartbeat.prompt,
     onError: (e) => logger.warn('Heartbeat emit failed', { error: e.message }),
   })
 
-  // --- Controller: Input handler ---
+  // --- Controller: Input handler (TurnActor 경유) ---
   const handleInput = async (input) => {
     _interactive = true
     _turnAbort = new AbortController()
     try {
-      return await agent.run(input, { source: 'user' })
+      const result = await forkTask(turnActor.send({ input, source: 'user' }))
+      if (result?._turnError) throw new Error(result.message)
+      return result
     } catch (err) {
       logger.error('Turn failed', { error: err.message })
       throw err
@@ -297,7 +309,7 @@ const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
   // --- Shutdown ---
   const shutdown = async () => {
     heartbeat.stop()
-    delegatePoller.stop()
+    delegateActor.send({ type: 'stop' }).fork(() => {}, () => {})
     try {
       await forkTask(persistenceActor.send({ type: 'flush', snapshot: state.snapshot() }))
     } catch (_) {}
@@ -310,7 +322,7 @@ const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
     agent, state, config, logger,
     tools, agents, personaConfig,
     handleInput, handleApproveResponse, handleCancel,
-    heartbeat, delegatePoller,
+    heartbeat, delegateActor,
     memory, llm,
     shutdown,
   }
@@ -353,7 +365,7 @@ const main = async () => {
   )
 
   if (app.config.heartbeat.enabled) app.heartbeat.start()
-  app.delegatePoller.start()
+  app.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
 
   await waitUntilExit()
   await app.shutdown()

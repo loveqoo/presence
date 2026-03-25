@@ -1,8 +1,5 @@
 import { randomUUID } from 'crypto'
 import { DelegateResult } from './agent-registry.js'
-import fp from '../lib/fun-fp.js'
-
-const { Maybe } = fp
 
 // --- A2A artifact에서 텍스트 추출 (순수) ---
 
@@ -125,81 +122,7 @@ const getA2ATaskStatus = async (target, endpoint, taskId, { fetchFn, timeoutMs =
   }
 }
 
-// --- 비동기 delegate 폴링 hook ---
-// turnState=idle일 때 pending delegate를 폴링하고,
-// 완료/실패 시 이벤트 큐로 결과를 흘려보냄.
-
-const wireDelegatePolling = ({ state, emit, agentRegistry, fetchFn, logger, pollIntervalMs = 10_000 }) => {
-  let timer = null
-  let stopped = true
-  let polling = false
-
-  const pollPending = async () => {
-    if (polling) return
-    const ts = state.get('turnState')
-    if (!ts || ts.tag !== 'idle') return
-    const pending = state.get('delegates.pending') || []
-    if (pending.length === 0) return
-
-    polling = true
-    try {
-      const resolveEndpoint = (entry) =>
-        Maybe.fold(
-          () => entry.endpoint,
-          agent => agent.endpoint || entry.endpoint,
-          agentRegistry ? agentRegistry.get(entry.target) : Maybe.Nothing(),
-        )
-
-      const pollEntry = async (entry) => {
-        const endpoint = resolveEndpoint(entry)
-        if (!endpoint) return { entry, done: false }
-        const result = await getA2ATaskStatus(entry.target, endpoint, entry.taskId, { fetchFn })
-        return { entry, result, done: result.status === 'completed' || result.status === 'failed' }
-      }
-
-      const settled = await Promise.all(pending.map(pollEntry))
-
-      settled
-        .filter(s => s.done)
-        .forEach(s => {
-          emit({ type: 'delegate_result', target: s.entry.target, taskId: s.entry.taskId, result: s.result })
-          if (logger) logger.info(`Delegate ${s.result.status}: ${s.entry.target}/${s.entry.taskId}`)
-        })
-
-      state.set('delegates.pending', settled.filter(s => !s.done).map(s => s.entry))
-    } finally {
-      polling = false
-    }
-  }
-
-  // 주기적 폴링 (setTimeout self-scheduling)
-  const tick = async () => {
-    if (stopped) return
-    await pollPending()
-    if (!stopped) timer = setTimeout(tick, pollIntervalMs)
-  }
-
-  // turnState idle 시에도 즉시 한 번 시도
-  state.hooks.on('turnState', (phase) => {
-    if (phase.tag === 'idle') pollPending()
-  })
-
-  const start = () => {
-    if (!stopped) return
-    stopped = false
-    timer = setTimeout(tick, pollIntervalMs)
-  }
-
-  const stop = () => {
-    stopped = true
-    if (timer) { clearTimeout(timer); timer = null }
-  }
-
-  return { start, stop, pollPending }
-}
-
 export {
   sendA2ATask, getA2ATaskStatus, extractArtifactText,
   buildTaskSendRequest, buildTaskGetRequest, responseToResult,
-  wireDelegatePolling,
 }

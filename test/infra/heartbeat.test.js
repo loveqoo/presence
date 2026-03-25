@@ -1,5 +1,7 @@
 import { createHeartbeat } from '../../src/infra/heartbeat.js'
 import { createReactiveState } from '../../src/infra/state.js'
+import { createEventActor, createTurnActor, forkTask } from '../../src/infra/actors.js'
+import { Phase } from '../../src/core/agent.js'
 
 let passed = 0
 let failed = 0
@@ -9,14 +11,35 @@ function assert(condition, msg) {
   else { failed++; console.error(`  ✗ ${msg}`) }
 }
 
+// 테스트용: EventActor 내부 큐 enqueue를 추적하는 mock eventActor
+const createMockEventActor = () => {
+  const enqueued = []
+  let _state = { queue: [], inFlight: null, deadLetter: [], lastProcessed: null }
+  return {
+    enqueued,
+    send: (msg) => ({
+      fork: (_, resolve) => {
+        if (msg.type === 'enqueue') {
+          enqueued.push(msg.event)
+          _state = { ..._state, queue: [..._state.queue, msg.event] }
+        }
+        resolve('ok')
+      },
+    }),
+    getState: () => _state,
+    _clearQueue: () => { _state = { ..._state, queue: [] } },
+    _setInFlight: (v) => { _state = { ..._state, inFlight: v } },
+  }
+}
+
 async function run() {
   console.log('Heartbeat tests')
 
-  // 1. start → emit 호출
+  // 1. start → eventActor.enqueue 호출
   {
-    const emitted = []
+    const mockActor = createMockEventActor()
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
+      eventActor: mockActor,
       intervalMs: 30,
       prompt: '테스트 점검',
     })
@@ -25,34 +48,34 @@ async function run() {
     await new Promise(r => setTimeout(r, 80))
     hb.stop()
 
-    assert(emitted.length >= 1, 'heartbeat: emitted at least once')
-    assert(emitted[0].type === 'heartbeat', 'heartbeat: type is heartbeat')
-    assert(emitted[0].prompt === '테스트 점검', 'heartbeat: prompt passed')
+    assert(mockActor.enqueued.length >= 1, 'heartbeat: enqueued at least once')
+    assert(mockActor.enqueued[0].type === 'heartbeat', 'heartbeat: type is heartbeat')
+    assert(mockActor.enqueued[0].prompt === '테스트 점검', 'heartbeat: prompt passed')
   }
 
   // 2. stop → 더 이상 emit 안 함
   {
-    const emitted = []
+    const mockActor = createMockEventActor()
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
     hb.start()
     await new Promise(r => setTimeout(r, 50))
     hb.stop()
-    const countAtStop = emitted.length
+    const countAtStop = mockActor.enqueued.length
     await new Promise(r => setTimeout(r, 50))
 
-    assert(emitted.length === countAtStop, 'stop: no more emits after stop')
+    assert(mockActor.enqueued.length === countAtStop, 'stop: no more enqueues after stop')
     assert(!hb.running, 'stop: running is false')
   }
 
   // 3. 중복 start 방지
   {
-    let emitCount = 0
+    const mockActor = createMockEventActor()
     const hb = createHeartbeat({
-      emit: () => emitCount++,
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
@@ -64,15 +87,23 @@ async function run() {
     assert(hb.running === false, 'double start: stopped normally')
   }
 
-  // 4. emit 에러 → onError 호출, 계속 실행
+  // 4. eventActor.send 에러 → onError 호출, 계속 실행
   {
     const errors = []
-    let emitCount = 0
+    let sendCount = 0
+    const mockActor = {
+      send: () => ({
+        fork: (_, resolve) => {
+          sendCount++
+          if (sendCount === 1) throw new Error('send failed')
+          resolve('ok')
+        },
+      }),
+      getState: () => ({ queue: [], inFlight: null }),
+    }
+
     const hb = createHeartbeat({
-      emit: () => {
-        emitCount++
-        if (emitCount === 1) throw new Error('emit failed')
-      },
+      eventActor: mockActor,
       intervalMs: 20,
       onError: (e) => errors.push(e),
     })
@@ -81,21 +112,29 @@ async function run() {
     await new Promise(r => setTimeout(r, 60))
     hb.stop()
 
-    assert(errors.length === 1, 'emit error: onError called')
-    assert(errors[0].message === 'emit failed', 'emit error: correct error')
-    assert(emitCount >= 2, 'emit error: continued after failure')
+    assert(errors.length === 1, 'send error: onError called')
+    assert(errors[0].message === 'send failed', 'send error: correct error')
+    assert(sendCount >= 2, 'send error: continued after failure')
   }
 
   // 5. setTimeout 기반 → 중첩 없음 (self-scheduling)
   {
     let concurrent = 0
     let maxConcurrent = 0
+    const mockActor = {
+      send: () => ({
+        fork: (_, resolve) => {
+          concurrent++
+          maxConcurrent = Math.max(maxConcurrent, concurrent)
+          concurrent--
+          resolve('ok')
+        },
+      }),
+      getState: () => ({ queue: [], inFlight: null }),
+    }
+
     const hb = createHeartbeat({
-      emit: () => {
-        concurrent++
-        maxConcurrent = Math.max(maxConcurrent, concurrent)
-        concurrent--
-      },
+      eventActor: mockActor,
       intervalMs: 10,
     })
 
@@ -108,7 +147,8 @@ async function run() {
 
   // 6. 기본값
   {
-    const hb = createHeartbeat({ emit: () => {}, intervalMs: 100 })
+    const mockActor = createMockEventActor()
+    const hb = createHeartbeat({ eventActor: mockActor, intervalMs: 100 })
     assert(!hb.running, 'initial: not running')
     hb.start()
     assert(hb.running, 'after start: running')
@@ -116,61 +156,61 @@ async function run() {
     assert(!hb.running, 'after stop: not running')
   }
 
-  // 7. coalesce: 큐에 미처리 heartbeat가 있으면 skip
+  // 7. coalesce: Actor 큐에 미처리 heartbeat가 있으면 skip
   {
-    const state = createReactiveState({
-      events: { queue: [{ type: 'heartbeat', prompt: '이전 것' }] },
-    })
+    const mockActor = createMockEventActor()
+    // 큐에 heartbeat 넣기
+    mockActor.send({ type: 'enqueue', event: { type: 'heartbeat', prompt: '이전 것', id: 'hb-old', receivedAt: 1 } })
+      .fork(() => {}, () => {})
 
-    const emitted = []
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
-      state,
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
+    const countBefore = mockActor.enqueued.length
     hb.start()
     await new Promise(r => setTimeout(r, 60))
     hb.stop()
 
-    assert(emitted.length === 0, 'coalesce: skipped while pending heartbeat in queue')
+    assert(mockActor.enqueued.length === countBefore, 'coalesce: skipped while pending heartbeat in queue')
   }
 
   // 8. coalesce: 큐가 비면 다시 emit
   {
-    const state = createReactiveState({
-      events: { queue: [{ type: 'heartbeat' }] },
-    })
+    const mockActor = createMockEventActor()
+    // 큐에 heartbeat 넣기
+    mockActor.send({ type: 'enqueue', event: { type: 'heartbeat', id: 'hb-x', receivedAt: 1 } })
+      .fork(() => {}, () => {})
 
-    const emitted = []
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
-      state,
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
+    const countBefore = mockActor.enqueued.length
     hb.start()
     await new Promise(r => setTimeout(r, 30))
-    assert(emitted.length === 0, 'coalesce phase 1: skipped')
+    assert(mockActor.enqueued.length === countBefore, 'coalesce phase 1: skipped')
 
     // 큐 비우기
-    state.set('events.queue', [])
+    mockActor._clearQueue()
     await new Promise(r => setTimeout(r, 40))
     hb.stop()
 
-    assert(emitted.length >= 1, 'coalesce phase 2: emitted after queue drained')
+    assert(mockActor.enqueued.length > countBefore, 'coalesce phase 2: enqueued after queue drained')
   }
 
   // 9. coalesce: 다른 타입 이벤트가 큐에 있으면 heartbeat는 emit
   {
-    const state = createReactiveState({
-      events: { queue: [{ type: 'webhook', data: 'pr' }] },
-    })
+    const mockActor = createMockEventActor()
+    // 큐에 비-heartbeat 넣기
+    mockActor.send({ type: 'enqueue', event: { type: 'webhook', data: 'pr', id: 'wh-1', receivedAt: 1 } })
+      .fork(() => {}, () => {})
 
-    const emitted = []
+    const countBefore = mockActor.enqueued.length
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
-      state,
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
@@ -178,45 +218,35 @@ async function run() {
     await new Promise(r => setTimeout(r, 40))
     hb.stop()
 
-    assert(emitted.length >= 1, 'non-heartbeat queue: heartbeat still emitted')
+    assert(mockActor.enqueued.length > countBefore, 'non-heartbeat queue: heartbeat still enqueued')
   }
 
   // 10. coalesce: heartbeat가 처리 중 (inFlight)이면 skip
   {
-    const state = createReactiveState({
-      events: {
-        queue: [],
-        inFlight: { type: 'heartbeat', id: 'hb-running' },
-      },
-    })
+    const mockActor = createMockEventActor()
+    mockActor._setInFlight({ type: 'heartbeat', id: 'hb-running' })
 
-    const emitted = []
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
-      state,
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
+    const countBefore = mockActor.enqueued.length
     hb.start()
     await new Promise(r => setTimeout(r, 50))
     hb.stop()
 
-    assert(emitted.length === 0, 'inFlight coalesce: skipped while heartbeat processing')
+    assert(mockActor.enqueued.length === countBefore, 'inFlight coalesce: skipped while heartbeat processing')
   }
 
   // 11. inFlight가 다른 타입이면 heartbeat emit 허용
   {
-    const state = createReactiveState({
-      events: {
-        queue: [],
-        inFlight: { type: 'webhook', id: 'wh-1' },
-      },
-    })
+    const mockActor = createMockEventActor()
+    mockActor._setInFlight({ type: 'webhook', id: 'wh-1' })
 
-    const emitted = []
+    const countBefore = mockActor.enqueued.length
     const hb = createHeartbeat({
-      emit: (event) => emitted.push(event),
-      state,
+      eventActor: mockActor,
       intervalMs: 20,
     })
 
@@ -224,7 +254,7 @@ async function run() {
     await new Promise(r => setTimeout(r, 40))
     hb.stop()
 
-    assert(emitted.length >= 1, 'non-heartbeat inFlight: heartbeat still emitted')
+    assert(mockActor.enqueued.length > countBefore, 'non-heartbeat inFlight: heartbeat still enqueued')
   }
 
   console.log(`\n${passed} passed, ${failed} failed`)

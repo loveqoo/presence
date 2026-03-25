@@ -1,11 +1,11 @@
 import {
   sendA2ATask, getA2ATaskStatus, extractArtifactText,
   buildTaskSendRequest, buildTaskGetRequest, responseToResult,
-  wireDelegatePolling,
 } from '../../src/infra/a2a-client.js'
 import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { Phase } from '../../src/core/agent.js'
+import { createDelegateActor, createEventActor, createTurnActor, forkTask } from '../../src/infra/actors.js'
 
 let passed = 0
 let failed = 0
@@ -249,21 +249,22 @@ async function run() {
   }
 
   // ===========================================
-  // wireDelegatePolling
+  // DelegateActor
   // ===========================================
 
-  // idle hook → pending delegate 즉시 폴링 → completed → emit
+  // poll → pending delegate 폴링 → completed → eventActor.enqueue → drain → 처리
   {
     const state = createReactiveState({
       turnState: Phase.idle(),
       delegates: { pending: [
         { target: 'remote-agent', taskId: 'tid-1', endpoint: 'https://a2a.test/rpc' },
       ]},
+      events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
+      todos: [],
     })
     const agentReg = createAgentRegistry()
     agentReg.register({ name: 'remote-agent', type: 'remote', endpoint: 'https://a2a.test/rpc' })
 
-    const emitted = []
     const mockFetch = async () => ({
       ok: true,
       json: async () => ({
@@ -272,24 +273,33 @@ async function run() {
       }),
     })
 
-    const poller = wireDelegatePolling({ state, emit: (e) => emitted.push(e), agentRegistry: agentReg, fetchFn: mockFetch })
-    state.set('turnState', Phase.idle())
-    await new Promise(r => setTimeout(r, 50))
-    poller.stop()
+    const turnActor = createTurnActor(async () => 'done')
+    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const delegateActor = createDelegateActor({
+      state, eventActor, agentRegistry: agentReg, fetchFn: mockFetch,
+    })
 
-    assert(emitted.length === 1, 'polling completed: event emitted')
-    assert(emitted[0].type === 'delegate_result', 'polling completed: event type')
-    assert(emitted[0].result.status === 'completed', 'polling completed: result status')
-    assert(state.get('delegates.pending').length === 0, 'polling completed: removed from pending')
+    await forkTask(delegateActor.send({ type: 'poll' }))
+    // eventActor.enqueue + drain은 fire-and-forget이므로 처리 완료 대기
+    await new Promise(r => setTimeout(r, 200))
+
+    // drain이 이미 처리했으므로 lastProcessed에서 확인
+    const lastProcessed = state.get('events.lastProcessed')
+    assert(lastProcessed != null, 'DelegateActor poll: event processed')
+    assert(lastProcessed.type === 'delegate_result', 'DelegateActor poll: event type')
+    assert(lastProcessed.result.status === 'completed', 'DelegateActor poll: result status')
+    assert(state.get('delegates.pending').length === 0, 'DelegateActor poll: removed from pending')
   }
 
-  // still working → pending 유지, 타이머 재시도 후 completed → emit
+  // tick 중복에도 poll 1회만
   {
     const state = createReactiveState({
       turnState: Phase.idle(),
       delegates: { pending: [
         { target: 'slow', taskId: 'tid-2', endpoint: 'https://a2a.test/rpc' },
       ]},
+      events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
+      todos: [],
     })
     const agentReg = createAgentRegistry()
     agentReg.register({ name: 'slow', type: 'remote', endpoint: 'https://a2a.test/rpc' })
@@ -311,24 +321,25 @@ async function run() {
       }
     }
 
-    const emitted = []
-    const poller = wireDelegatePolling({
-      state, emit: (e) => emitted.push(e), agentRegistry: agentReg,
+    const turnActor = createTurnActor(async () => 'done')
+    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const delegateActor = createDelegateActor({
+      state, eventActor, agentRegistry: agentReg,
       fetchFn: mockFetch, pollIntervalMs: 30,
     })
-    poller.start()
+    await forkTask(delegateActor.send({ type: 'start' }))
 
     // 첫 tick: working → pending 유지
     await new Promise(r => setTimeout(r, 50))
-    assert(emitted.length === 0, 'periodic poll: first tick still working')
-    assert(state.get('delegates.pending').length === 1, 'periodic poll: still pending')
+    assert(state.get('delegates.pending').length === 1, 'periodic poll: still pending after first tick')
 
-    // 두 번째 tick: completed → emit
-    await new Promise(r => setTimeout(r, 80))
-    poller.stop()
+    // 두 번째 tick: completed → eventActor.enqueue → drain
+    await new Promise(r => setTimeout(r, 200))
+    await forkTask(delegateActor.send({ type: 'stop' }))
 
-    assert(emitted.length === 1, 'periodic poll: completed on second tick')
-    assert(emitted[0].result.output === 'finally', 'periodic poll: correct output')
+    // drain이 이미 처리했으므로 lastProcessed 확인
+    const lastProcessed = state.get('events.lastProcessed')
+    assert(lastProcessed != null && lastProcessed.type === 'delegate_result', 'periodic poll: completed event processed')
     assert(state.get('delegates.pending').length === 0, 'periodic poll: removed from pending')
   }
 

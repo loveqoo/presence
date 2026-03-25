@@ -168,7 +168,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
 
   // Background tasks
   if (app.config.heartbeat.enabled) app.heartbeat.start()
-  app.delegatePoller.start()
+  app.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
 
   // Graceful shutdown
   const shutdown = async () => {

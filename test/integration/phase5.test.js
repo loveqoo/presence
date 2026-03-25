@@ -2,8 +2,9 @@ import { createAgentTurn, createAgent, safeRunTurn, applyFinalState, PHASE, RESU
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
-import { createEventReceiver, wireEventHooks } from '../../src/infra/events.js'
+import { withEventMeta } from '../../src/infra/events.js'
 import { createHeartbeat } from '../../src/infra/heartbeat.js'
+import { createEventActor, createEmit, createTurnActor, forkTask } from '../../src/infra/actors.js'
 import { runFreeWithStateT } from '../../src/core/op.js'
 
 let passed = 0
@@ -21,7 +22,7 @@ async function run() {
   // Step 29: Heartbeat → Event Queue → Agent.run
   // ===========================================
 
-  // E2E: heartbeat emits → event hook processes → agent.run called
+  // E2E: heartbeat emits → EventActor processes → turnActor called
   {
     const state = createReactiveState({
       turnState: Phase.idle(),
@@ -29,33 +30,37 @@ async function run() {
       turn: 0,
       context: { memories: [] },
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
+      todos: [],
     })
 
     let agentRunCalled = false
     let agentRunPrompt = null
-    const mockAgent = {
-      run: async (input) => {
-        agentRunCalled = true
-        agentRunPrompt = input
-        return 'heartbeat result'
-      },
-    }
+    const turnActor = createTurnActor(async (input) => {
+      agentRunCalled = true
+      agentRunPrompt = input
+      return 'heartbeat result'
+    })
+    const eventActor = createEventActor({ turnActor, state, logger: null })
 
-    wireEventHooks({ state, agent: mockAgent })
+    // 브릿지 hook
+    state.hooks.on('turnState', (phase) => {
+      if (phase.tag === 'idle') {
+        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+      }
+    })
 
-    const { emit } = createEventReceiver(state)
     const heartbeat = createHeartbeat({
-      emit,
+      eventActor,
       state,
       intervalMs: 20,
       prompt: '정기 점검',
     })
 
     heartbeat.start()
-    await new Promise(r => setTimeout(r, 80))
+    await new Promise(r => setTimeout(r, 150))
     heartbeat.stop()
 
-    assert(agentRunCalled, 'Step 29 E2E: agent.run called by heartbeat event')
+    assert(agentRunCalled, 'Step 29 E2E: turnActor called by heartbeat event')
     assert(agentRunPrompt === '정기 점검', 'Step 29 E2E: correct prompt from heartbeat')
     assert(state.get('events.lastProcessed')?.type === 'heartbeat', 'Step 29 E2E: lastProcessed is heartbeat')
   }
@@ -66,23 +71,30 @@ async function run() {
       turnState: Phase.working('user turn'),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
+      todos: [],
     })
 
     let runCount = 0
-    const mockAgent = { run: async () => { runCount++; return 'done' } }
+    const turnActor = createTurnActor(async () => { runCount++; return 'done' })
+    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const emit = createEmit(eventActor)
 
-    wireEventHooks({ state, agent: mockAgent })
+    // 브릿지 hook
+    state.hooks.on('turnState', (phase) => {
+      if (phase.tag === 'idle') {
+        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+      }
+    })
 
-    const { emit } = createEventReceiver(state)
     emit({ type: 'heartbeat', prompt: '점검' })
 
     await new Promise(r => setTimeout(r, 30))
     assert(runCount === 0, 'Step 29 busy: event queued while working')
     assert(state.get('events.queue').length === 1, 'Step 29 busy: 1 event in queue')
 
-    // idle로 전환 → 큐 처리
+    // idle로 전환 → 브릿지 hook → drain
     state.set('turnState', Phase.idle())
-    await new Promise(r => setTimeout(r, 50))
+    await new Promise(r => setTimeout(r, 100))
 
     assert(runCount === 1, 'Step 29 busy→idle: event processed after idle')
     assert(state.get('events.queue').length === 0, 'Step 29 busy→idle: queue drained')
@@ -208,43 +220,40 @@ async function run() {
   // 이벤트 FIFO 순서 보장
   // ===========================================
 
-  // 큐에 3개 쌓인 후 idle 전이마다 하나씩 처리
+  // 큐에 3개 쌓인 후 idle 전이 → EventActor drain이 순차 처리
   {
     const state = createReactiveState({
       turnState: Phase.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
+      todos: [],
     })
 
     const processed = []
-    const mockAgent = {
-      run: async (input) => { processed.push(input); return 'ok' },
-    }
+    const turnActor = createTurnActor(async (input) => { processed.push(input); return 'ok' })
+    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const emit = createEmit(eventActor)
 
-    wireEventHooks({ state, agent: mockAgent })
+    // 브릿지 hook
+    state.hooks.on('turnState', (phase) => {
+      if (phase.tag === 'idle') {
+        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+      }
+    })
 
-    const { emit } = createEventReceiver(state)
     emit({ type: 'a', prompt: 'first' })
     emit({ type: 'b', prompt: 'second' })
     emit({ type: 'c', prompt: 'third' })
 
+    await new Promise(r => setTimeout(r, 30))
     assert(processed.length === 0, 'FIFO: queued while working')
 
-    // idle 전이 → 첫 번째 처리
+    // idle 전이 → drain이 3개 순차 처리
     state.set('turnState', Phase.idle())
-    await new Promise(r => setTimeout(r, 30))
-    assert(processed.length === 1, 'FIFO: 1st processed on idle')
+    await new Promise(r => setTimeout(r, 300))
+
+    assert(processed.length === 3, 'FIFO: all 3 processed')
     assert(processed[0] === 'first', 'FIFO: first processed first')
-
-    // 다시 idle → 두 번째
-    state.set('turnState', Phase.idle())
-    await new Promise(r => setTimeout(r, 30))
-    assert(processed.length === 2, 'FIFO: 2nd processed')
     assert(processed[1] === 'second', 'FIFO: second processed second')
-
-    // 다시 idle → 세 번째
-    state.set('turnState', Phase.idle())
-    await new Promise(r => setTimeout(r, 30))
-    assert(processed.length === 3, 'FIFO: 3rd processed')
     assert(processed[2] === 'third', 'FIFO: third processed third')
   }
 
@@ -256,18 +265,16 @@ async function run() {
     const state = createReactiveState({
       turnState: Phase.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
+      todos: [],
     })
 
-    const mockAgent = {
-      run: async () => { throw new Error('agent crashed') },
-    }
+    const turnActor = createTurnActor(async () => { throw new Error('agent crashed') })
+    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const emit = createEmit(eventActor)
 
-    wireEventHooks({ state, agent: mockAgent })
-
-    const { emit } = createEventReceiver(state)
     emit({ type: 'bad-event', prompt: 'crash' })
 
-    await new Promise(r => setTimeout(r, 50))
+    await new Promise(r => setTimeout(r, 150))
 
     const dl = state.get('events.deadLetter')
     assert(dl.length === 1, 'deadLetter: failed event recorded')

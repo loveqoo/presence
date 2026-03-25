@@ -28,8 +28,8 @@ const todoFromEvent = (event) =>
 const isDuplicate = (todos, eventId) =>
   todos.some(t => t.sourceEventId === eventId)
 
-// --- 이벤트 수신 ---
-
+// --- createEventReceiver (deprecated) ---
+// EventActor + createEmit로 대체됨. 기존 테스트 호환을 위해 유지.
 const createEventReceiver = (state) => {
   const emit = (event) => {
     const withMeta = withEventMeta(event)
@@ -41,64 +41,4 @@ const createEventReceiver = (state) => {
   return { emit }
 }
 
-// --- 이벤트 처리 hook ---
-
-const wireEventHooks = ({ state, agent, logger }) => {
-  let processing = false
-
-  const processNext = async () => {
-    if (processing) return
-    const ts = state.get('turnState')
-    if (!ts || ts.tag !== 'idle') return
-
-    const queue = state.get('events.queue') || []
-    if (queue.length === 0) return
-
-    processing = true
-    const [event, ...rest] = queue
-    state.set('events.queue', rest)
-    state.set('events.inFlight', event)
-
-    try {
-      await agent.run(eventToPrompt(event))
-      state.set('events.lastProcessed', event)
-    } catch (e) {
-      const deadLetter = state.get('events.deadLetter') || []
-      state.set('events.deadLetter', [...deadLetter, {
-        ...event,
-        error: e.message || String(e),
-        stack: e.stack || null,
-        failedAt: Date.now(),
-      }])
-      if (logger) logger.warn('Event processing failed', { eventId: event.id, error: e.message, stack: e.stack })
-    } finally {
-      state.set('events.inFlight', null)
-      processing = false
-    }
-  }
-
-  state.hooks.on('events.queue', processNext)
-  state.hooks.on('turnState', (phase) => {
-    if (phase.tag === 'idle') processNext()
-  })
-}
-
-// --- TODO hook ---
-// Maybe로 todo 생성 여부 판단, isDuplicate로 멱등성 보장.
-
-const wireTodoHooks = ({ state, logger }) => {
-  state.hooks.on('events.lastProcessed', (event) => {
-    Maybe.fold(
-      () => {},
-      todo => {
-        const todos = state.get('todos') || []
-        if (isDuplicate(todos, event.id)) return
-        state.set('todos', [...todos, todo])
-        if (logger) logger.info('TODO added', { todoId: todo.id, type: todo.type })
-      },
-      todoFromEvent(event),
-    )
-  })
-}
-
-export { createEventReceiver, wireEventHooks, wireTodoHooks, withEventMeta, eventToPrompt, todoFromEvent, isDuplicate }
+export { createEventReceiver, withEventMeta, eventToPrompt, todoFromEvent, isDuplicate }

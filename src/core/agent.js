@@ -314,10 +314,13 @@ const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, re
 // --- StateT → reactive state 원자적 커밋 ---
 // Free 실행 완료 후 StateT의 최종 상태를 reactive state에 반영.
 // epoch 기반 경합 방어: /clear 또는 compaction이 턴 실행 중 발생하면 conversationHistory 스킵.
+// turnState는 반드시 마지막: idle 전이 시 hook이 발동되어 다음 턴이 시작될 수 있으므로,
+// 그 시점에 conversationHistory, lastTurn 등이 이미 최신이어야 한다.
 const MANAGED_PATHS = [
-  '_streaming', 'lastTurn', 'turnState',
+  '_streaming', 'lastTurn',
   'context.conversationHistory',
   '_debug.lastTurn', '_debug.lastPrompt', '_debug.lastResponse', '_retry',
+  'turnState',
 ]
 
 const applyFinalState = (reactiveState, finalState, { initialEpoch } = {}) => {
@@ -365,13 +368,11 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
     try {
       const [result, finalState] = await runFreeWithStateT(interpret, ST)(program)(initialSnapshot)
 
-      // 원자적 커밋: StateT 최종 상태 → reactive state
-      applyFinalState(reactiveState, finalState, { initialEpoch })
-
-      // 턴 종료: 후처리 (Actor 메시지, 순서 중요)
-      // save → removeWorking → embed → prune → promote → saveDisk
-      if (memoryActor && reactiveState) {
-        const lastTurn = reactiveState.get('lastTurn')
+      // 턴 종료: 후처리 메시지를 applyFinalState **이전에** 큐잉.
+      // idle hook이 다음 턴을 시작해도 cleanup이 먼저 Actor 큐에 있으므로 순서 보장.
+      // finalState에서 lastTurn을 읽음 (reactive state는 아직 미커밋).
+      if (memoryActor) {
+        const lastTurn = getByPath(finalState, 'lastTurn')
         if (lastTurn?.tag === RESULT.SUCCESS) {
           memoryActor.send({ type: 'save', node: {
             label: lastTurn.input || 'unknown',
@@ -385,11 +386,15 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
         memoryActor.send({ type: 'promote' }).fork(() => {}, () => {})
         memoryActor.send({ type: 'saveDisk' }).fork(() => {}, () => {})
       }
-      if (compactionActor && reactiveState) {
-        const history = reactiveState.get('context.conversationHistory') || []
-        const epoch = reactiveState.get('_compactionEpoch') || 0
-        compactionActor.send({ type: 'check', history, epoch }).fork(() => {}, () => {})
+      if (compactionActor) {
+        const history = getByPath(finalState, 'context.conversationHistory') || []
+        compactionActor.send({ type: 'check', history, epoch: initialEpoch }).fork(() => {}, () => {})
       }
+
+      // 원자적 커밋: StateT 최종 상태 → reactive state
+      // turnState=idle이 마지막 → idle hook 발동 시 cleanup 메시지가 이미 Actor 큐에 있음
+      applyFinalState(reactiveState, finalState, { initialEpoch })
+
       if (persistenceActor && reactiveState) {
         persistenceActor.send({ type: 'save', snapshot: reactiveState.snapshot() }).fork(() => {}, () => {})
       }
