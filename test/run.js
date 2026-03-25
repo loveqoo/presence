@@ -54,6 +54,8 @@ const tests = [
   'test/regression/e2e-scenario.test.js',
   // E2E bootstrap
   'test/e2e/bootstrap.test.js',
+  // Server
+  'test/server/server.test.js',
 ]
 
 let allPassed = true
