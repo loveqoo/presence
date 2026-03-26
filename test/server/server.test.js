@@ -210,6 +210,68 @@ async function run() {
       assert(Array.isArray(res.body), 'GET /api/agents: array')
     }
 
+    // 15. WS init 메시지에 session_id 포함
+    {
+      const { ws, messages } = await connectWS(port)
+      await new Promise(r => setTimeout(r, 100))
+      assert(messages[0].session_id === 'user-default', 'WS: init has session_id')
+      ws.close()
+    }
+
+    // 16. GET /api/sessions — user-default 포함
+    {
+      const res = await request(port, 'GET', '/api/sessions')
+      assert(res.status === 200, 'GET /api/sessions: 200')
+      assert(Array.isArray(res.body), 'GET /api/sessions: array')
+      assert(res.body.some(s => s.id === 'user-default'), 'GET /api/sessions: user-default exists')
+    }
+
+    // 17. POST /api/sessions — 새 세션 생성
+    {
+      const res = await request(port, 'POST', '/api/sessions', { type: 'user' })
+      assert(res.status === 201, 'POST /api/sessions: 201')
+      assert(typeof res.body.id === 'string', 'POST /api/sessions: id returned')
+      assert(res.body.type === 'user', 'POST /api/sessions: type returned')
+
+      // 생성된 세션으로 chat
+      const sessionId = res.body.id
+      const beforeChatState = await request(port, 'GET', `/api/sessions/${sessionId}/state`)
+      const turnBefore = beforeChatState.body.turn
+
+      const chatRes = await request(port, 'POST', `/api/sessions/${sessionId}/chat`, { input: '세션 테스트' })
+      assert(chatRes.status === 200, 'session chat: 200')
+      assert(chatRes.body.type === 'agent', 'session chat: agent type')
+
+      // 세션 상태 조회
+      const stateRes = await request(port, 'GET', `/api/sessions/${sessionId}/state`)
+      assert(stateRes.status === 200, 'session state: 200')
+      assert(stateRes.body.turn === turnBefore + 1, 'session state: turn incremented')
+
+      // 세션 소멸
+      const deleteRes = await request(port, 'DELETE', `/api/sessions/${sessionId}`)
+      assert(deleteRes.status === 200, 'DELETE session: 200')
+      assert(deleteRes.body.ok === true, 'DELETE session: ok')
+
+      // 소멸된 세션 접근 → 404
+      const afterRes = await request(port, 'GET', `/api/sessions/${sessionId}/state`)
+      assert(afterRes.status === 404, 'deleted session: 404')
+    }
+
+    // 18. /api/sessions/:id/chat — 세션 격리 (user-default 턴 영향 없음)
+    {
+      const beforeState = await request(port, 'GET', '/api/state')
+      const turnBefore = beforeState.body.turn
+
+      const newSession = await request(port, 'POST', '/api/sessions', { type: 'user' })
+      const sessionId = newSession.body.id
+      await request(port, 'POST', `/api/sessions/${sessionId}/chat`, { input: '격리 테스트' })
+
+      const afterState = await request(port, 'GET', '/api/state')
+      assert(afterState.body.turn === turnBefore, 'session isolation: user-default turn unchanged')
+
+      await request(port, 'DELETE', `/api/sessions/${sessionId}`)
+    }
+
   } finally {
     await shutdown()
     await mockLLM.close()

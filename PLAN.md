@@ -5,6 +5,72 @@
 > 설계 문서: [docs/architecture.md](docs/architecture.md)
 > 완료 이력: [docs/completed.md](docs/completed.md)
 
+## 진행 중 Phase
+
+### Phase 7: 서버-클라이언트 분리 + 세션 관리
+
+**목표**: 서버는 24/7 상시 실행, 클라이언트(터미널/브라우저)는 뷰만 렌더링.
+세션별 격리(history, todos, events)로 계층 에이전트의 기반 마련.
+
+#### 분리 기준
+
+| 전역 (서버 1개) | 세션별 |
+|---|---|
+| LLM 클라이언트 | ReactiveState |
+| mem0 (장기 기억) | TurnActor, EventActor |
+| MCP 서버 연결 | CompactionActor, BudgetActor, DelegateActor |
+| JobStore (SQLite) | MemoryActor (recall context) |
+| AgentRegistry | Agent 인스턴스 |
+| SchedulerActor | conversationHistory, todos, events queue |
+| config, logger | PersistenceActor (ephemeral 세션은 no-op) |
+
+#### WS 프로토콜
+
+```json
+// client → server
+{ "type": "join", "session_id": "user-default" }
+{ "type": "input", "session_id": "user-default", "payload": "..." }
+{ "type": "approve", "session_id": "user-default", "payload": { "approved": true } }
+{ "type": "cancel", "session_id": "user-default" }
+
+// server → client
+{ "type": "init", "session_id": "user-default", "state": {...} }
+{ "type": "state", "session_id": "user-default", "path": "turnState", "value": {...} }
+```
+
+#### Phase A: bootstrap() 분리 — 동작 변경 없음 ✅
+
+- [x] `createGlobalContext(configOverride?)` 추출 — LLM, mem0, MCP, jobStore, agentRegistry, config, logger
+- [x] `createSession(globalCtx, { persistenceCwd? })` 추출 — state, actors, agent, handleInput/approve/cancel
+- [x] `bootstrap()` = `createGlobalContext` + `createSession` 조합으로 교체 (하위 호환)
+- [x] 기존 테스트 전체 통과 확인 (2015 passed, 0 failed)
+
+#### Phase B: SessionManager + 멀티 세션 서버 ✅
+
+- [x] `src/infra/session-manager.js` 신규 — `create / get / list / destroy`
+- [x] `SchedulerActor`: `eventActor` 직접 참조 → `onDispatch(jobEvent)` 콜백으로 교체
+- [x] `src/server/index.js` — session-aware 라우팅, `createSessionBridge(sessionManager, wss)`
+- [x] REST: `/api/sessions/:id/chat|state|approve|cancel` (기존 `/api/chat` 하위 호환 유지)
+- [x] 서버 기동 시 `user-default` 세션 자동 생성 + persistence restore
+- [x] 테스트: 세션 생성/소멸, 세션 격리 (2030 passed, 0 failed)
+
+#### Phase C: Ink 씬 클라이언트 ✅
+
+- [x] `src/infra/remote-state.js` — WS 기반 상태 어댑터 (get/hooks.on/off 인터페이스, useAgentState 그대로 동작)
+- [x] `src/main.js` — 서버 자동 감지 → 없으면 spawn → `runRemote()` (WS 상태 + REST 커맨드)
+- [x] `handleInput/approve/cancel` → REST POST 경유
+- [x] `--local` 플래그: in-process `runLocal()` 모드 유지
+- [x] 테스트 전체 통과 (2030 passed, 0 failed)
+
+#### Phase D: 세션 정리 + 스케줄러 ephemeral 세션 ✅
+
+- [x] 스케줄러: 잡 실행 시 `sessionManager.create({ type: 'scheduled', id: runId })` → `job_done/fail` 후 `sessionManager.destroy(runId)`
+- [x] 유저 세션 idle timeout 지원 (`idleTimeoutMs` 설정)
+- [x] 세션 종료 시 history + todos + events 정리 (mem0 장기 기억은 보존)
+- [x] 테스트: ephemeral 세션 생명주기, idle timeout 소멸 (2041 passed, 0 failed)
+
+---
+
 ## 미착수 Phase
 
 ### Phase 8: 계층적 에이전트

@@ -1,12 +1,16 @@
 import { createServer } from 'node:http'
 import express from 'express'
 import { WebSocketServer } from 'ws'
-import { bootstrap } from '../main.js'
+import { createGlobalContext } from '../main.js'
+import { createSessionManager } from '../infra/session-manager.js'
+import { createSchedulerActor } from '../infra/scheduler-actor.js'
 import { clearDebugState } from '../core/agent.js'
+import { SESSION_TYPE } from '../core/policies.js'
 
 // =============================================================================
-// State → WebSocket Bridge
-// state.hooks 변경을 연결된 모든 클라이언트에 push
+// State → WebSocket Bridge (세션 인식)
+// 세션의 state.hooks 변경을 연결된 모든 클라이언트에 push.
+// session_id 포함으로 클라이언트가 멀티 세션 구분 가능.
 // =============================================================================
 
 const WATCHED_PATHS = [
@@ -18,7 +22,7 @@ const WATCHED_PATHS = [
   'todos', 'events', 'events.*', 'delegates', 'delegates.*',
 ]
 
-const createStateBridge = (state, wss) => {
+const createSessionBridge = (wss) => {
   const broadcast = (data) => {
     const msg = JSON.stringify(data)
     for (const ws of wss.clients) {
@@ -26,17 +30,21 @@ const createStateBridge = (state, wss) => {
     }
   }
 
-  for (const path of WATCHED_PATHS) {
-    state.hooks.on(path, (value) => {
-      broadcast({ type: 'state', path: path.replace('.*', ''), value })
-    })
+  const watchSession = (sessionId, state) => {
+    for (const path of WATCHED_PATHS) {
+      const broadcastPath = path.replace('.*', '')
+      // wildcard 경로(events.*)는 sub-value가 아닌 부모 전체를 전송
+      state.hooks.on(path, () => {
+        broadcast({ type: 'state', session_id: sessionId, path: broadcastPath, value: state.get(broadcastPath) })
+      })
+    }
   }
 
-  return { broadcast }
+  return { broadcast, watchSession }
 }
 
 // =============================================================================
-// Slash commands (App.js에서 UI 의존 없는 것만 추출)
+// Slash commands
 // =============================================================================
 
 const handleSlashCommand = (input, { state, tools, memory, mcpControl }) => {
@@ -83,65 +91,64 @@ const handleSlashCommand = (input, { state, tools, memory, mcpControl }) => {
 }
 
 // =============================================================================
-// Express App + REST API
+// Per-session Express Router
+// session: createSession() 반환값
+// globalCtx: createGlobalContext() 반환값 (mcpControl, memory, config 등)
 // =============================================================================
 
-const createApp = (app) => {
+const createSessionRoutes = (session, globalCtx) => {
+  const { mcpControl, memory, config } = globalCtx
   const router = express.Router()
   router.use(express.json())
 
-  // POST /api/chat — 사용자 입력 → 에이전트 턴 실행
+  // POST /chat — 사용자 입력 → 에이전트 턴 실행
   router.post('/chat', async (req, res) => {
     const { input } = req.body
     if (!input || typeof input !== 'string') {
       return res.status(400).json({ error: 'input (string) required' })
     }
-
-    // Slash command 처리
     if (input.startsWith('/')) {
-      const cmd = handleSlashCommand(input, app)
+      const cmd = handleSlashCommand(input, { state: session.state, tools: session.tools, memory, mcpControl })
       if (cmd.handled) return res.json(cmd.result)
     }
-
     try {
-      const result = await app.handleInput(input)
+      const result = await session.handleInput(input)
       res.json({ type: 'agent', content: result })
     } catch (err) {
       res.status(500).json({ type: 'error', content: err.message })
     }
   })
 
-  // GET /api/state — 현재 상태 스냅샷
+  // GET /state — 현재 상태 스냅샷
   router.get('/state', (_req, res) => {
-    res.json(app.state.snapshot())
+    res.json(session.state.snapshot())
   })
 
-  // POST /api/approve — 도구 사용 승인/거부
+  // POST /approve — 도구 사용 승인/거부
   router.post('/approve', (req, res) => {
-    const { approved } = req.body
-    app.handleApproveResponse(!!approved)
+    session.handleApproveResponse(!!req.body.approved)
     res.json({ ok: true })
   })
 
-  // POST /api/cancel — 현재 턴 취소
+  // POST /cancel — 현재 턴 취소
   router.post('/cancel', (_req, res) => {
-    app.handleCancel()
+    session.handleCancel()
     res.json({ ok: true })
   })
 
-  // GET /api/tools — 도구 목록
+  // GET /tools — 도구 목록
   router.get('/tools', (_req, res) => {
-    res.json(app.tools.map(t => ({ name: t.name, description: t.description, source: t.source })))
+    res.json(session.tools.map(t => ({ name: t.name, description: t.description, source: t.source })))
   })
 
-  // GET /api/agents — 에이전트 목록
+  // GET /agents — 에이전트 목록
   router.get('/agents', (_req, res) => {
-    res.json(app.agents)
+    res.json(session.agents)
   })
 
-  // GET /api/config — 설정 (apiKey 제외)
+  // GET /config — 설정 (apiKey 제외)
   router.get('/config', (_req, res) => {
-    const { llm, ...rest } = app.config
+    const { llm, ...rest } = config
     const { apiKey, ...safeLlm } = llm
     res.json({ ...rest, llm: safeLlm })
   })
@@ -154,10 +161,50 @@ const createApp = (app) => {
 // =============================================================================
 
 const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', persistenceCwd } = {}) => {
-  const app = await bootstrap(configOverride, { persistenceCwd })
+  const globalCtx = await createGlobalContext(configOverride)
 
   const expressApp = express()
-  expressApp.use('/api', createApp(app))
+  const server = createServer(expressApp)
+  const wss = new WebSocketServer({ server })
+
+  const bridge = createSessionBridge(wss)
+
+  const sessionManager = createSessionManager(globalCtx, {
+    // ephemeral(scheduled) 세션은 WS 브릿지 구독 제외
+    onSessionCreated: ({ id, type, session }) => {
+      if (type !== SESSION_TYPE.SCHEDULED) bridge.watchSession(id, session.state)
+    },
+  })
+
+  // 전역 스케줄러 — 잡 실행 시 ephemeral 세션 생성, 완료 후 소멸
+  let globalSchedulerActor = createSchedulerActor({
+    store: globalCtx.jobStore,
+    onDispatch: (jobEvent) => {
+      const sessionId = `scheduled-${jobEvent.runId}`
+      const entry = sessionManager.create({
+        type: SESSION_TYPE.SCHEDULED,
+        id: sessionId,
+        onScheduledJobDone: (event, outcome) => {
+          if (outcome.success) {
+            globalSchedulerActor.send({ type: 'job_done', runId: event.runId, jobId: event.jobId, result: outcome.result }).fork(() => {}, () => {})
+          } else {
+            globalSchedulerActor.send({ type: 'job_fail', runId: event.runId, jobId: event.jobId, attempt: event.attempt ?? 1, error: outcome.error }).fork(() => {}, () => {})
+          }
+          sessionManager.destroy(sessionId).catch(() => {})
+        },
+      })
+      entry.session.eventActor.send({ type: 'enqueue', event: jobEvent }).fork(() => {}, () => {})
+    },
+    logger: globalCtx.logger,
+    pollIntervalMs: globalCtx.config.scheduler.pollIntervalMs,
+  })
+
+  // 기본 사용자 세션 생성 (글로벌 스케줄러가 scheduled_job 처리)
+  const defaultEntry = sessionManager.create({
+    id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd,
+    onScheduledJobDone: () => {},
+  })
+  const defaultSession = defaultEntry.session
 
   // 정적 파일 (web/ 빌드 결과)
   try {
@@ -166,29 +213,93 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     const webDist = join(import.meta.dirname, '../../web/dist')
     if (existsSync(webDist)) {
       expressApp.use(express.static(webDist))
-      // SPA fallback
       expressApp.get('*', (_req, res) => res.sendFile(join(webDist, 'index.html')))
     }
   } catch (_) {}
 
-  const server = createServer(expressApp)
-  const wss = new WebSocketServer({ server })
+  // 레거시 라우트 (user-default, 하위 호환)
+  expressApp.use('/api', createSessionRoutes(defaultSession, globalCtx))
 
-  // State → WebSocket bridge
-  const bridge = createStateBridge(app.state, wss)
+  // 세션별 라우트: /api/sessions/:sessionId/*
+  expressApp.use('/api/sessions/:sessionId', express.json(), (req, res, next) => {
+    const entry = sessionManager.get(req.params.sessionId)
+    if (!entry) return res.status(404).json({ error: `Session not found: ${req.params.sessionId}` })
+    req.presenceSession = entry
+    next()
+  })
+  expressApp.post('/api/sessions/:sessionId/chat', async (req, res) => {
+    const { session } = req.presenceSession
+    const { input } = req.body
+    if (!input || typeof input !== 'string') return res.status(400).json({ error: 'input (string) required' })
+    if (input.startsWith('/')) {
+      const cmd = handleSlashCommand(input, { state: session.state, tools: session.tools, memory: globalCtx.memory, mcpControl: globalCtx.mcpControl })
+      if (cmd.handled) return res.json(cmd.result)
+    }
+    try {
+      const result = await session.handleInput(input)
+      res.json({ type: 'agent', content: result })
+    } catch (err) {
+      res.status(500).json({ type: 'error', content: err.message })
+    }
+  })
+  expressApp.get('/api/sessions/:sessionId/state', (req, res) => res.json(req.presenceSession.session.state.snapshot()))
+  expressApp.post('/api/sessions/:sessionId/approve', (req, res) => {
+    req.presenceSession.session.handleApproveResponse(!!req.body.approved)
+    res.json({ ok: true })
+  })
+  expressApp.post('/api/sessions/:sessionId/cancel', (req, res) => {
+    req.presenceSession.session.handleCancel()
+    res.json({ ok: true })
+  })
 
-  // WebSocket 연결 시 초기 상태 전송
+  // GET /api/sessions — 세션 목록
+  expressApp.get('/api/sessions', (_req, res) => {
+    res.json(sessionManager.list().map(({ id, type }) => ({ id, type })))
+  })
+
+  // POST /api/sessions — 새 세션 생성
+  expressApp.post('/api/sessions', express.json(), (req, res) => {
+    const { type = 'user', id } = req.body || {}
+    const entry = sessionManager.create({ id, type })
+    res.status(201).json({ id: entry.id, type: entry.type })
+  })
+
+  // DELETE /api/sessions/:sessionId — 세션 소멸
+  expressApp.delete('/api/sessions/:sessionId', async (req, res) => {
+    const { sessionId } = req.params
+    if (!sessionManager.get(sessionId)) return res.status(404).json({ error: `Session not found: ${sessionId}` })
+    await sessionManager.destroy(sessionId)
+    res.json({ ok: true })
+  })
+
+  // WebSocket: 연결 시 user-default 초기 상태 전송, join 메시지 처리
   wss.on('connection', (ws) => {
-    ws.send(JSON.stringify({ type: 'init', state: app.state.snapshot() }))
+    ws.send(JSON.stringify({ type: 'init', session_id: 'user-default', state: defaultSession.state.snapshot() }))
+
+    ws.on('message', (data) => {
+      try {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'join') {
+          const entry = sessionManager.get(msg.session_id)
+          if (entry) {
+            ws.send(JSON.stringify({ type: 'init', session_id: msg.session_id, state: entry.session.state.snapshot() }))
+          }
+        }
+      } catch (_) {}
+    })
   })
 
   // Background tasks
-  if (app.config.scheduler.enabled) app.schedulerActor.send({ type: 'start' }).fork(() => {}, () => {})
-  app.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
+  if (globalCtx.config.scheduler.enabled) {
+    globalSchedulerActor.send({ type: 'start' }).fork(() => {}, () => {})
+  }
+  defaultSession.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
 
   // Graceful shutdown
   const shutdown = async () => {
-    await app.shutdown()
+    globalSchedulerActor.send({ type: 'stop' }).fork(() => {}, () => {})
+    await Promise.all(sessionManager.list().map(({ session }) => session.shutdown().catch(() => {})))
+    await globalCtx.shutdown()
     wss.close()
     server.close()
   }
@@ -196,12 +307,32 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   process.on('SIGINT', async () => { await shutdown(); process.exit(0) })
 
   await new Promise(resolve => server.listen(port, host, resolve))
-  app.logger.info(`Server listening on http://${host}:${port}`)
+  globalCtx.logger.info(`Server listening on http://${host}:${port}`)
 
-  return { server, wss, app, shutdown }
+  // app: 하위 호환용 래퍼 (기존 코드가 app.state, app.tools 등에 접근하는 경우)
+  const app = {
+    state: defaultSession.state,
+    tools: defaultSession.tools,
+    agents: defaultSession.agents,
+    config: globalCtx.config,
+    logger: globalCtx.logger,
+    personaConfig: globalCtx.personaConfig,
+    memory: globalCtx.memory,
+    llm: globalCtx.llm,
+    mcpControl: globalCtx.mcpControl,
+    jobStore: globalCtx.jobStore,
+    handleInput: defaultSession.handleInput,
+    handleApproveResponse: defaultSession.handleApproveResponse,
+    handleCancel: defaultSession.handleCancel,
+    schedulerActor: globalSchedulerActor,
+    delegateActor: defaultSession.delegateActor,
+    shutdown,
+  }
+
+  return { server, wss, app, sessionManager, globalCtx, shutdown }
 }
 
-export { startServer, createApp, createStateBridge, handleSlashCommand }
+export { startServer, createSessionRoutes, createSessionBridge, handleSlashCommand }
 
 // CLI 실행
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {

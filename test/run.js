@@ -32,6 +32,7 @@ const tests = [
   'test/infra/a2a-client.test.js',
   'test/infra/events.test.js',
   'test/infra/scheduler.test.js',
+  'test/infra/session.test.js',
   'test/infra/local-tools.test.js',
   'test/infra/config.test.js',
   'test/infra/persona.test.js',

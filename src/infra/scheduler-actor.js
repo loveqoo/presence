@@ -19,7 +19,7 @@ const BACKOFF_BASE_MS = 1_000
 
 const nextBackoffMs = (attempt) => BACKOFF_BASE_MS * (2 ** (attempt - 1))
 
-const createSchedulerActor = ({ store, eventActor, logger, pollIntervalMs = 60_000 }) => {
+const createSchedulerActor = ({ store, onDispatch, logger, pollIntervalMs = 60_000 }) => {
   let actor
 
   actor = Actor({
@@ -54,20 +54,17 @@ const createSchedulerActor = ({ store, eventActor, logger, pollIntervalMs = 60_0
           return new Task((reject, resolve) => {
             for (const job of due) {
               const runId = store.startRun(job.id, 1)
-              eventActor.send({
-                type: 'enqueue',
-                event: {
-                  id: runId,
-                  type: 'scheduled_job',
-                  jobId: job.id,
-                  jobName: job.name,
-                  prompt: job.prompt,
-                  runId,
-                  attempt: 1,
-                  allowedTools: job.allowedTools || [],
-                  createdAt: Date.now(),
-                },
-              }).fork(() => {}, () => {})
+              onDispatch({
+                id: runId,
+                type: 'scheduled_job',
+                jobId: job.id,
+                jobName: job.name,
+                prompt: job.prompt,
+                runId,
+                attempt: 1,
+                allowedTools: job.allowedTools || [],
+                createdAt: Date.now(),
+              })
               // nextRun을 미리 갱신 (중복 실행 방지)
               const nextRun = calcNextRun(job.cron)
               store.updateJob(job.id, { next_run: nextRun })
@@ -99,20 +96,17 @@ const createSchedulerActor = ({ store, eventActor, logger, pollIntervalMs = 60_0
               setTimeout(() => {
                 try {
                   const retryRunId = store.startRun(jobId, attempt + 1)
-                  eventActor.send({
-                    type: 'enqueue',
-                    event: {
-                      id: retryRunId,
-                      type: 'scheduled_job',
-                      jobId,
-                      jobName: job.name,
-                      prompt: job.prompt,
-                      runId: retryRunId,
-                      attempt: attempt + 1,
-                      allowedTools: job.allowedTools || [],
-                      createdAt: Date.now(),
-                    },
-                  }).fork(() => {}, () => {})
+                  onDispatch({
+                    id: retryRunId,
+                    type: 'scheduled_job',
+                    jobId,
+                    jobName: job.name,
+                    prompt: job.prompt,
+                    runId: retryRunId,
+                    attempt: attempt + 1,
+                    allowedTools: job.allowedTools || [],
+                    createdAt: Date.now(),
+                  })
                 } catch (_) {}  // store가 닫힌 경우 무시
               }, delayMs)
               ;(logger || console).info(`Job retry scheduled: ${job.name} (attempt ${attempt + 1}/${job.maxRetries})`)

@@ -20,8 +20,10 @@ const makeTmpDir = () => {
 
 const createMockEventActor = () => {
   const enqueued = []
+  const onDispatch = (event) => enqueued.push(event)
   return {
     enqueued,
+    onDispatch,
     send: (msg) => ({ fork: (_, resolve) => { if (msg.type === 'enqueue') enqueued.push(msg.event); resolve('ok') } }),
   }
 }
@@ -188,7 +190,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     store.createJob({ name: 'due-job', prompt: '실행', cron: '* * * * *', nextRun: Date.now() - 1000 })
     const mockActor = createMockEventActor()
-    const actor = createSchedulerActor({ store, eventActor: mockActor, pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
     assert(mockActor.enqueued.length === 1, 'S13: enqueued due job')
@@ -203,7 +205,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     store.createJob({ name: 'future', prompt: 'p', cron: '* * * * *', nextRun: Date.now() + 60000 })
     const mockActor = createMockEventActor()
-    const actor = createSchedulerActor({ store, eventActor: mockActor, pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
     const result = await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
     assert(result === 'no-op:empty', 'S14: no-op:empty when no due jobs')
@@ -216,7 +218,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
-    const actor = createSchedulerActor({ store, eventActor: createMockEventActor(), pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'job_done', runId, result: 'finished' }).fork(() => {}, r))
     const history = store.getRunHistory(job.id)
@@ -232,7 +234,7 @@ async function run() {
     const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 3 })
     const runId = store.startRun(job.id, 1)
     const mockActor = createMockEventActor()
-    const actor = createSchedulerActor({ store, eventActor: mockActor, pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'job_fail', runId, jobId: job.id, attempt: 1, error: 'oops' }).fork(() => {}, r))
     // 첫 번째 run 실패로 기록됨
@@ -250,7 +252,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 3 })
     const runId = store.startRun(job.id, 3)
-    const actor = createSchedulerActor({ store, eventActor: createMockEventActor(), pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'job_fail', runId, jobId: job.id, attempt: 3, error: 'fatal' }).fork(() => {}, r))
     const updated = store.getJob(job.id)
@@ -265,7 +267,7 @@ async function run() {
     const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000 })
     store.updateJob(job.id, { enabled: 0 })
     const mockActor = createMockEventActor()
-    const actor = createSchedulerActor({ store, eventActor: mockActor, pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
     assert(mockActor.enqueued.length === 0, 'S18: disabled job not enqueued')
@@ -278,7 +280,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000 })
     const mockActor = createMockEventActor()
-    const actor = createSchedulerActor({ store, eventActor: mockActor, pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
     await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
@@ -290,7 +292,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const actor = createSchedulerActor({ store, eventActor: createMockEventActor(), pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'start' }).fork(() => {}, r))
     await new Promise(r => actor.send({ type: 'stop' }).fork(() => {}, r))
@@ -354,7 +356,7 @@ async function run() {
       todos: [],
     })
     const turnActor = createTurnActor(async () => '성공 결과')
-    const schedulerActor = createSchedulerActor({ store, eventActor: null, pollIntervalMs: 10_000 })
+    const schedulerActor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
     const eventActor = createEventActor({
       turnActor, state, logger: null,
@@ -396,7 +398,7 @@ async function run() {
       todos: [],
     })
     const turnActor = createTurnActor(async () => { throw new Error('job crashed') })
-    const schedulerActor = createSchedulerActor({ store, eventActor: null, pollIntervalMs: 10_000 })
+    const schedulerActor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
     const eventActor = createEventActor({
       turnActor, state, logger: null,
@@ -657,7 +659,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000, allowedTools: ['read_file'] })
     const mockActor = createMockEventActor()
-    const actor = createSchedulerActor({ store, eventActor: mockActor, pollIntervalMs: 10_000 })
+    const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
     await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
     assert(mockActor.enqueued.length === 1, 'T17: enqueued')
