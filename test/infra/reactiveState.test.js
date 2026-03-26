@@ -1,12 +1,5 @@
 import { createReactiveState } from '../../src/infra/state.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 function run() {
   console.log('createReactiveState tests')
@@ -53,8 +46,7 @@ function run() {
   s6.set('v', 1)
   assert(asyncDone === false, 'async hook: set returns before async work completes')
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

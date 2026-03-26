@@ -1,12 +1,5 @@
 import { LLMClient } from '../../src/infra/llm.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // Mock fetch factory
 const mockFetch = (handler) => async (url, opts) => {
@@ -190,8 +183,7 @@ async function run() {
     }
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

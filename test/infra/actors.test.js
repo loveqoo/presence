@@ -1,9 +1,8 @@
 import { initI18n } from '../../src/i18n/index.js'
 initI18n('ko')
 import fp from '../../src/lib/fun-fp.js'
-import { createMemoryGraph, TIERS } from '../../src/infra/memory.js'
 import { createReactiveState } from '../../src/infra/state.js'
-import { MEMORY, HISTORY } from '../../src/core/policies.js'
+import { HISTORY } from '../../src/core/policies.js'
 import {
   createMemoryActor, createCompactionActor, createPersistenceActor,
   applyCompaction, forkTask,
@@ -11,16 +10,9 @@ import {
 import {
   extractForCompaction, createSummaryEntry, SUMMARY_MARKER,
 } from '../../src/infra/history-compaction.js'
+import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
 
 // --- Helpers ---
 
@@ -34,119 +26,134 @@ async function run() {
   console.log('Actor tests')
 
   // =============================================
-  // MemoryActor
+  // MemoryActor (mem0 기반)
   // =============================================
 
-  // M1. recall → 결과 반환
+  const makeMockMem0 = ({ searchResult = [], addResult = {}, failSearch = false, failAdd = false } = {}) => {
+    const calls = { search: [], add: [] }
+    return {
+      calls,
+      search: async (query, config) => {
+        calls.search.push({ query, config })
+        if (failSearch) throw new Error('search failed')
+        return { results: searchResult }
+      },
+      add: async (messages, config) => {
+        calls.add.push({ messages, config })
+        if (failAdd) throw new Error('add failed')
+        return addResult
+      },
+    }
+  }
+
+  // M1. recall → mem0.search 호출, { label } 배열 반환
   {
-    const memory = await createMemoryGraph()
-    memory.addNode({ label: '회의 안건', type: 'entity', tier: TIERS.EPISODIC })
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
+    const mem0 = makeMockMem0({ searchResult: [
+      { id: '1', memory: '회의 안건 A', score: 0.9 },
+      { id: '2', memory: '회의 안건 B', score: 0.8 },
+    ]})
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({ type: 'recall', input: '회의' }))
     assert(Array.isArray(result), 'MemoryActor recall: returns array')
+    assert(result.length === 2, 'MemoryActor recall: correct count')
+    assert(result[0].label === '회의 안건 A', 'MemoryActor recall: label mapped')
+    assert(mem0.calls.search[0].query === '회의', 'MemoryActor recall: correct query')
   }
 
-  // M2. save → addNode + persist
+  // M2. save → mem0.add 호출, 'ok' 반환
   {
-    const memory = await createMemoryGraph()
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
+    const mem0 = makeMockMem0()
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({
       type: 'save',
-      node: { label: 'test node', type: 'conversation', tier: TIERS.EPISODIC, data: { input: 'q', output: 'a' } },
+      node: { label: 'test', type: 'conversation', data: { input: 'q', output: 'a' } },
     }))
     assert(result === 'ok', 'MemoryActor save: returns ok')
-    const episodic = memory.getNodesByTier(TIERS.EPISODIC)
-    assert(episodic.length === 1, 'MemoryActor save: node added')
-    assert(episodic[0].label === 'test node', 'MemoryActor save: correct label')
+    assert(mem0.calls.add.length === 1, 'MemoryActor save: add called')
+    assert(mem0.calls.add[0].messages[0].content === 'q', 'MemoryActor save: user message')
+    assert(mem0.calls.add[0].messages[1].content === 'a', 'MemoryActor save: assistant message')
   }
 
-  // M3. removeWorking → working 노드 제거
+  // M3. mem0=null → recall 빈 배열, save skip
   {
-    const memory = await createMemoryGraph()
-    memory.addNode({ label: 'temp', tier: TIERS.WORKING })
-    assert(memory.getNodesByTier(TIERS.WORKING).length === 1, 'MemoryActor removeWorking: 1 working before')
+    const actor = createMemoryActor({ mem0: null, adapter: null, logger: null })
 
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
-    await forkTask(actor.send({ type: 'removeWorking' }))
-    assert(memory.getNodesByTier(TIERS.WORKING).length === 0, 'MemoryActor removeWorking: cleaned')
-  }
+    const recalled = await forkTask(actor.send({ type: 'recall', input: '회의' }))
+    assert(Array.isArray(recalled) && recalled.length === 0, 'MemoryActor null: recall returns []')
 
-  // M4. prune → 동기 처리
-  {
-    const memory = await createMemoryGraph()
-    for (let i = 0; i < 5; i++) {
-      memory.addNode({ label: `node-${i}`, type: 'conversation', tier: TIERS.EPISODIC, data: {} })
-    }
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
-
-    const pruned = await forkTask(actor.send({ type: 'prune', tier: TIERS.EPISODIC, max: 3 }))
-    assert(typeof pruned === 'number', 'MemoryActor prune: returns count')
-    assert(memory.getNodesByTier(TIERS.EPISODIC).length <= 3, 'MemoryActor prune: respects max')
-  }
-
-  // M5. promote → 동기 처리 (3개 미만이면 0)
-  {
-    const memory = await createMemoryGraph()
-    memory.addNode({ label: 'unique topic', type: 'conversation', tier: TIERS.EPISODIC, data: {} })
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
-
-    const count = await forkTask(actor.send({ type: 'promote' }))
-    assert(count === 0, 'MemoryActor promote: no candidates → 0')
-  }
-
-  // M6. embed → embedder null이면 0 반환
-  {
-    const memory = await createMemoryGraph()
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
-
-    const count = await forkTask(actor.send({ type: 'embed' }))
-    assert(count === 0 || typeof count === 'number', 'MemoryActor embed: returns count')
-  }
-
-  // M7. 메시지 큐 직렬화: send 3개 연속 → 순서대로 처리
-  {
-    const memory = await createMemoryGraph()
-    const order = []
-    const originalSave = memory.save.bind(memory)
-    memory.save = async () => {
-      order.push('save')
-      return originalSave()
-    }
-    const originalRemove = memory.removeNodesByTier.bind(memory)
-    memory.removeNodesByTier = (tier) => {
-      order.push('removeWorking')
-      return originalRemove(tier)
-    }
-
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
-
-    // Fire all three without awaiting individually
-    const p1 = forkTask(actor.send({
+    const saved = await forkTask(actor.send({
       type: 'save',
-      node: { label: 'seq-test', type: 'conversation', tier: TIERS.EPISODIC, data: {} },
+      node: { data: { input: 'q', output: 'a' } },
     }))
-    const p2 = forkTask(actor.send({ type: 'removeWorking' }))
-    const p3 = forkTask(actor.send({ type: 'saveDisk' }))
+    assert(saved === 'skip', 'MemoryActor null: save returns skip')
+  }
+
+  // M4. save data.input 없음 → skip
+  {
+    const mem0 = makeMockMem0()
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+
+    const result = await forkTask(actor.send({ type: 'save', node: { data: {} } }))
+    assert(result === 'skip', 'MemoryActor save: no input → skip')
+    assert(mem0.calls.add.length === 0, 'MemoryActor save: add not called')
+  }
+
+  // M5. 미지원 메시지 → no-op (embed/prune/promote/removeWorking/saveDisk)
+  {
+    const mem0 = makeMockMem0()
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+
+    for (const type of ['embed', 'prune', 'promote', 'removeWorking', 'saveDisk']) {
+      const result = await forkTask(actor.send({ type }))
+      assert(result === 'no-op', `MemoryActor no-op: ${type}`)
+    }
+    assert(mem0.calls.search.length === 0, 'MemoryActor no-op: no mem0 calls')
+  }
+
+  // M6. recall 오류 → 빈 배열 반환 (격리)
+  {
+    const mem0 = makeMockMem0({ failSearch: true })
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+
+    const result = await forkTask(actor.send({ type: 'recall', input: 'x' }))
+    assert(Array.isArray(result) && result.length === 0, 'MemoryActor recall error: returns []')
+
+    // 다음 메시지 정상 처리
+    const next = await forkTask(actor.send({ type: 'embed' }))
+    assert(next === 'no-op', 'MemoryActor recall error: next message ok')
+  }
+
+  // M7. save 오류 → skip 반환 (격리)
+  {
+    const mem0 = makeMockMem0({ failAdd: true })
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+
+    const result = await forkTask(actor.send({
+      type: 'save',
+      node: { data: { input: 'q', output: 'a' } },
+    }))
+    assert(result === 'skip', 'MemoryActor save error: returns skip')
+  }
+
+  // M8. 메시지 큐 직렬화: recall + save 연속 → 순서대로 처리
+  {
+    const order = []
+    const mem0 = {
+      search: async () => { order.push('search'); return { results: [] } },
+      add: async () => { order.push('add') },
+    }
+    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+
+    const p1 = forkTask(actor.send({ type: 'recall', input: 'x' }))
+    const p2 = forkTask(actor.send({ type: 'save', node: { data: { input: 'q', output: 'a' } } }))
+    const p3 = forkTask(actor.send({ type: 'recall', input: 'y' }))
 
     await Promise.all([p1, p2, p3])
-    assert(order[0] === 'save', 'MemoryActor queue: save first')
-    assert(order[1] === 'removeWorking', 'MemoryActor queue: removeWorking second')
-    assert(order[2] === 'save', 'MemoryActor queue: saveDisk third (calls save)')
-  }
-
-  // M8. 에러 격리: handle reject → 다음 메시지 정상 처리
-  {
-    const memory = await createMemoryGraph()
-    const actor = createMemoryActor({ graph: memory, embedder: null, logger: null })
-
-    // recall with no nodes → should still work (returns empty)
-    const result1 = await forkTask(actor.send({ type: 'recall', input: 'nonexistent' }))
-    assert(Array.isArray(result1), 'MemoryActor error isolation: first message ok')
-
-    const result2 = await forkTask(actor.send({ type: 'removeWorking' }))
-    assert(result2 === 'ok', 'MemoryActor error isolation: second message ok after first')
+    assert(order[0] === 'search', 'MemoryActor queue: recall first')
+    assert(order[1] === 'add', 'MemoryActor queue: save second')
+    assert(order[2] === 'search', 'MemoryActor queue: recall third')
   }
 
   // =============================================
@@ -456,13 +463,11 @@ async function run() {
 
   // I1. recall 성공 → context.memories 반영
   {
-    const { safeRunTurn, createAgentTurn, PHASE, Phase, RESULT } = await import('../../src/core/agent.js')
+    const { safeRunTurn, createAgentTurn, Phase } = await import('../../src/core/agent.js')
     const { createTestInterpreter } = await import('../../src/interpreter/test.js')
-    const { Free } = await import('../../src/core/op.js')
 
-    const memory = await createMemoryGraph()
-    memory.addNode({ label: 'recall target', type: 'entity', tier: TIERS.EPISODIC })
-    const memActor = createMemoryActor({ graph: memory, embedder: null, logger: null })
+    const mockMem0 = makeMockMem0({ searchResult: [{ memory: 'recall target' }] })
+    const memActor = createMemoryActor({ mem0: mockMem0, adapter: null, logger: null })
 
     const state = createReactiveState({
       turnState: Phase.idle(), lastTurn: null, turn: 0,
@@ -642,8 +647,7 @@ async function run() {
     assert(state.get('turnState').tag === PHASE.IDLE, 'integration persistence error: state recovered')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

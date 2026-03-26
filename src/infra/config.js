@@ -1,8 +1,48 @@
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { z } from 'zod'
 import fp from '../lib/fun-fp.js'
 
 const { Either, Maybe } = fp
+
+// --- Config 스키마 ---
+
+const ConfigSchema = z.object({
+  llm: z.object({
+    baseUrl: z.string(),
+    model: z.string(),
+    apiKey: z.string().nullable(),
+    responseFormat: z.enum(['json_schema', 'json_object']),
+    maxRetries: z.number().int().min(0),
+    timeoutMs: z.number().positive(),
+  }),
+  embed: z.object({
+    provider: z.string(),
+    baseUrl: z.string().nullable(),
+    apiKey: z.string().nullable(),
+    model: z.string().nullable(),
+    dimensions: z.number().int().positive(),
+  }),
+  locale: z.string(),
+  maxIterations: z.number().int().positive(),
+  memory: z.object({ path: z.string().nullable() }),
+  mcp: z.array(z.unknown()),
+  scheduler: z.object({
+    enabled: z.boolean(),
+    pollIntervalMs: z.number().positive(),
+    todoReview: z.object({
+      enabled: z.boolean(),
+      cron: z.string(),
+    }),
+  }),
+  delegatePolling: z.object({ intervalMs: z.number().positive() }),
+  prompt: z.object({
+    maxContextTokens: z.number().int().positive(),
+    reservedOutputTokens: z.number().int().positive(),
+    maxContextChars: z.number().nullable(),
+    reservedOutputChars: z.number().nullable(),
+  }),
+})
 
 // --- 기본값 ---
 
@@ -28,10 +68,13 @@ const DEFAULTS = {
     path: null,
   },
   mcp: [],
-  heartbeat: {
+  scheduler: {
     enabled: true,
-    intervalMs: 300_000,
-    prompt: '정기 점검: 현황 확인',
+    pollIntervalMs: 60_000,
+    todoReview: {
+      enabled: true,
+      cron: '0 9 * * *',  // 매일 09:00
+    },
   },
   delegatePolling: {
     intervalMs: 10_000,
@@ -106,11 +149,11 @@ const envOverrides = () => {
     if (!isNaN(n)) overrides.maxIterations = n
   }
   if (env.PRESENCE_MEMORY_PATH) overrides.memory = { path: env.PRESENCE_MEMORY_PATH }
-  if (env.PRESENCE_HEARTBEAT_MS) {
-    const ms = Number(env.PRESENCE_HEARTBEAT_MS)
-    if (!isNaN(ms)) overrides.heartbeat = { intervalMs: ms }
+  if (env.PRESENCE_SCHEDULER_POLL_MS) {
+    const ms = Number(env.PRESENCE_SCHEDULER_POLL_MS)
+    if (!isNaN(ms)) overrides.scheduler = { pollIntervalMs: ms }
   }
-  if (env.PRESENCE_HEARTBEAT === 'false') overrides.heartbeat = { ...overrides.heartbeat, enabled: false }
+  if (env.PRESENCE_SCHEDULER === 'false') overrides.scheduler = { ...overrides.scheduler, enabled: false }
 
   return overrides
 }
@@ -137,13 +180,11 @@ const readConfigFile = (filePath, t) =>
       : Either.Left(null),
   )
 
-// --- 설정 검증 ---
+// --- 설정 검증 (런타임 경고: 구조 오류는 ConfigSchema.safeParse가 담당) ---
 
 const validateConfig = (config) => {
   const warnings = []
-  if (!config.llm.apiKey) warnings.push('llm.apiKey is not set — LLM calls will fail')
-  if (!config.llm.baseUrl) warnings.push('llm.baseUrl is not set')
-  if (config.embed.dimensions && isNaN(config.embed.dimensions)) warnings.push('embed.dimensions is not a number')
+  if (!config.llm?.apiKey) warnings.push('llm.apiKey is not set — LLM calls will fail')
   return warnings
 }
 
@@ -160,8 +201,16 @@ const loadConfig = (configPath) => {
   const path = configPath || process.env.PRESENCE_CONFIG || defaultConfigPath()
   const fromFile = readConfigFile(path)
   const fromEnv = envOverrides()
+  const merged = mergeConfig(mergeConfig(DEFAULTS, fromFile), fromEnv)
 
-  return mergeConfig(mergeConfig(DEFAULTS, fromFile), fromEnv)
+  const result = ConfigSchema.safeParse(merged)
+  if (!result.success) {
+    result.error.errors.forEach(e =>
+      console.warn(`[config] schema error — ${e.path.join('.')}: ${e.message}`)
+    )
+    return merged
+  }
+  return result.data
 }
 
-export { loadConfig, mergeConfig, envOverrides, readConfigFile, validateConfig, defaultConfigPath, DEFAULTS }
+export { loadConfig, mergeConfig, envOverrides, readConfigFile, validateConfig, defaultConfigPath, DEFAULTS, ConfigSchema }

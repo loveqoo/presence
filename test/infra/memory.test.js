@@ -1,15 +1,9 @@
 import { createMemoryGraph, MemoryGraph, InMemoryStore, LowdbStore, TIERS } from '../../src/infra/memory.js'
+import { createMemoryEmbedder } from '../../src/infra/memory-embedder.js'
 import { existsSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Graph memory tests')
@@ -262,7 +256,7 @@ async function run() {
       dimensions: 2,
     }
 
-    const count = await g.embedPending(mockEmbedder)
+    const count = await createMemoryEmbedder(mockEmbedder).embedPending(g)
     assert(count === 2, 'embedPending: 2 nodes embedded')
     assert(g.allNodes().every(n => Array.isArray(n.vector)), 'embedPending after: all have vectors')
     assert(g.allNodes()[0].embeddingModel === 'mock', 'embedPending: model recorded')
@@ -282,7 +276,7 @@ async function run() {
     const embedder = { embed: async () => { callCount++; return [0.3, 0.4] }, model: 'm', dimensions: 2 }
 
     // textHash 불일치 → 재임베딩
-    await g.embedPending(embedder)
+    await createMemoryEmbedder(embedder).embedPending(g)
     assert(callCount === 1, 'embedPending stale hash: re-embedded')
   }
 
@@ -302,7 +296,7 @@ async function run() {
       model: 'm', dimensions: 1,
     }
 
-    const count = await g.embedPending(embedder)
+    const count = await createMemoryEmbedder(embedder).embedPending(g)
     assert(count === 1, 'embedPending failure: 1 succeeded, 1 skipped')
     assert(g.allNodes()[0].vector === null, 'embedPending failure: failed node still null')
     assert(g.allNodes()[1].vector != null, 'embedPending failure: second node embedded')
@@ -323,7 +317,7 @@ async function run() {
     const embedder = { embed: async () => [0.85, 0.15], model: 'm', dimensions: 2 }
 
     // 벡터 검색: n1이 가장 유사 (0.9*0.85 + 0.1*0.15 = 0.78)
-    // 키워드 검색: '회의' → n1 매칭
+    // 키워드 검색: '회의'는 정확 term — '회의록'(다른 term)은 미매칭, 벡터로 보강
     const results = await g.recall('회의', { embedder })
     assert(results.length >= 1, 'hybrid recall: at least 1 result')
     assert(results[0].label === '회의록', 'hybrid recall: keyword+vector top match')
@@ -341,7 +335,7 @@ async function run() {
   {
     const g = MemoryGraph.create()
     g.addNode({ label: 'test' })
-    const count = await g.embedPending(null)
+    const count = await createMemoryEmbedder(null).embedPending(g)
     assert(count === 0, 'embedPending null: returns 0')
   }
 
@@ -376,7 +370,7 @@ async function run() {
     node.embeddingTextHash = 'whatever'
 
     const newEmbedder = { embed: async () => [0.5, 0.5, 0.5], model: 'new-model', dimensions: 3 }
-    const count = await g.embedPending(newEmbedder)
+    const count = await createMemoryEmbedder(newEmbedder).embedPending(g)
 
     assert(count === 1, 'model change: node re-embedded')
     assert(node.vector.length === 3, 'model change: new dimensions')
@@ -393,7 +387,7 @@ async function run() {
     node.embeddingTextHash = 'whatever'
 
     const embedder = { embed: async () => [0.3, 0.4, 0.5, 0.6], model: 'same-model', dimensions: 4 }
-    const count = await g.embedPending(embedder)
+    const count = await createMemoryEmbedder(embedder).embedPending(g)
 
     assert(count === 1, 'dim change: node re-embedded')
     assert(node.vector.length === 4, 'dim change: new vector length')
@@ -414,7 +408,7 @@ async function run() {
 
     let called = false
     const embedder = { embed: async () => { called = true; return [0.1] }, model: 'm', dimensions: 1 }
-    await g.embedPending(embedder)
+    await createMemoryEmbedder(embedder).embedPending(g)
 
     assert(!called, 'no change: embed not called')
   }
@@ -498,8 +492,92 @@ async function run() {
     assert(g.edges[0].from === a.id && g.edges[0].to === c.id, 'removeNodes: surviving edge correct')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  // --- 메모리 무효화 ---
+
+  // 34. expiresAt: 만료된 노드는 recall에서 제외
+  {
+    const g = MemoryGraph.create()
+    const expired = g.addNode({ label: '오래된 정보', tier: TIERS.EPISODIC,
+      expiresAt: Date.now() - 1000 })   // 1초 전 만료
+    const valid = g.addNode({ label: '최신 정보', tier: TIERS.EPISODIC })
+    expired.vector = [0.9, 0.1]
+    valid.vector = [0.9, 0.1]
+
+    const embedder = { embed: async () => [0.9, 0.1], model: 'm', dimensions: 2 }
+    const results = await g.recall('정보', { embedder })
+    assert(!results.find(n => n.id === expired.id), 'expiresAt: expired node excluded from recall')
+    assert(results.find(n => n.id === valid.id), 'expiresAt: valid node included in recall')
+  }
+
+  // 35. expiresAt: 미래 만료 노드는 정상 반환
+  {
+    const g = MemoryGraph.create()
+    const node = g.addNode({ label: '유효 정보', tier: TIERS.EPISODIC,
+      expiresAt: Date.now() + 60_000 })  // 1분 후 만료
+    node.vector = [0.9, 0.1]
+
+    const embedder = { embed: async () => [0.9, 0.1], model: 'm', dimensions: 2 }
+    const results = await g.recall('정보', { embedder })
+    assert(results.find(n => n.id === node.id), 'expiresAt future: node still returned')
+  }
+
+  // 36. expiresAt null: 만료 없이 항상 유효
+  {
+    const g = MemoryGraph.create()
+    const node = g.addNode({ label: '영구 정보', tier: TIERS.EPISODIC, expiresAt: null })
+    node.vector = [0.9, 0.1]
+
+    const embedder = { embed: async () => [0.9, 0.1], model: 'm', dimensions: 2 }
+    const results = await g.recall('정보', { embedder })
+    assert(results.find(n => n.id === node.id), 'expiresAt null: always valid')
+  }
+
+  // 37. source dedup: 같은 도구+인자 → 기존 노드 갱신
+  {
+    const g = MemoryGraph.create()
+    const src = { tool: 'github_list_prs', toolArgs: { repo: 'my/repo' } }
+    const n1 = g.addNode({ label: 'PR 목록', data: { prs: ['#1'] }, tier: TIERS.EPISODIC, source: src })
+
+    const n2 = g.addNode({ label: 'PR 목록', data: { prs: ['#1', '#2'] }, tier: TIERS.EPISODIC, source: src })
+    assert(g.allNodes().length === 1, 'source dedup: no new node created')
+    assert(n2.id === n1.id, 'source dedup: returns same node')
+    assert(n2.data.prs.length === 2, 'source dedup: data updated to latest')
+    assert(n2.vector === null, 'source dedup: vector reset for re-embedding')
+  }
+
+  // 38. source dedup: 다른 도구 → 별도 노드
+  {
+    const g = MemoryGraph.create()
+    g.addNode({ label: 'data', tier: TIERS.EPISODIC,
+      source: { tool: 'tool_a', toolArgs: {} } })
+    g.addNode({ label: 'data', tier: TIERS.EPISODIC,
+      source: { tool: 'tool_b', toolArgs: {} } })
+    assert(g.allNodes().length === 2, 'source dedup: different tool → separate nodes')
+  }
+
+  // 39. source dedup: 같은 도구, 다른 인자 → 별도 노드
+  {
+    const g = MemoryGraph.create()
+    g.addNode({ label: 'PR', tier: TIERS.EPISODIC,
+      source: { tool: 'github_list_prs', toolArgs: { repo: 'repo-a' } } })
+    g.addNode({ label: 'PR', tier: TIERS.EPISODIC,
+      source: { tool: 'github_list_prs', toolArgs: { repo: 'repo-b' } } })
+    assert(g.allNodes().length === 2, 'source dedup: different args → separate nodes')
+  }
+
+  // 40. source dedup: expiresAt 갱신
+  {
+    const g = MemoryGraph.create()
+    const src = { tool: 'fetch_data', toolArgs: {} }
+    const n1 = g.addNode({ label: 'data', tier: TIERS.EPISODIC, source: src,
+      expiresAt: Date.now() - 1000 })  // 이미 만료
+
+    const freshExpiry = Date.now() + 60_000
+    g.addNode({ label: 'data', tier: TIERS.EPISODIC, source: src, expiresAt: freshExpiry })
+    assert(n1.expiresAt === freshExpiry, 'source dedup: expiresAt updated on re-save')
+  }
+
+  summary()
 }
 
 run()

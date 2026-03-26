@@ -4,14 +4,7 @@ import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import fp from '../../src/lib/fun-fp.js'
 const { Either } = fp
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // --- mock factory helpers ---
 
@@ -352,8 +345,7 @@ async function run() {
     assert(conn.tools[0].name === 'remote_remote_tool', 'sse connect: name prefixed')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

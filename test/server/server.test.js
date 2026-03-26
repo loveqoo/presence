@@ -4,14 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { WebSocket } from 'ws'
 import { startServer } from '../../src/server/index.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // --- Mock LLM HTTP 서버 ---
 
@@ -86,7 +79,7 @@ async function run() {
     locale: 'ko', maxIterations: 5,
     memory: { path: join(tmpDir, 'memory') },
     mcp: [],
-    heartbeat: { enabled: false, intervalMs: 300000, prompt: '' },
+    scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
     delegatePolling: { intervalMs: 60000 },
     prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
   }
@@ -194,14 +187,36 @@ async function run() {
       ws.close()
     }
 
+    // 12. POST /api/chat — /mcp list (서버 없음)
+    {
+      const res = await request(port, 'POST', '/api/chat', { input: '/mcp list' })
+      assert(res.status === 200, 'slash /mcp list: 200')
+      assert(res.body.type === 'system', 'slash /mcp list: type system')
+      assert(res.body.content.includes('No MCP servers'), 'slash /mcp list: no servers message')
+    }
+
+    // 13. POST /api/chat — /mcp enable (서버 없음)
+    {
+      const res = await request(port, 'POST', '/api/chat', { input: '/mcp enable mcp0' })
+      assert(res.status === 200, 'slash /mcp enable: 200')
+      assert(res.body.type === 'system', 'slash /mcp enable: type system')
+      assert(res.body.content.includes('No MCP servers'), 'slash /mcp enable: no servers message')
+    }
+
+    // 14. GET /api/agents
+    {
+      const res = await request(port, 'GET', '/api/agents')
+      assert(res.status === 200, 'GET /api/agents: 200')
+      assert(Array.isArray(res.body), 'GET /api/agents: array')
+    }
+
   } finally {
     await shutdown()
     await mockLLM.close()
     rmSync(tmpDir, { recursive: true, force: true })
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

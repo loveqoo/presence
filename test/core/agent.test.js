@@ -24,13 +24,7 @@ const initState = (overrides = {}) =>
 const initSnapshot = (overrides = {}) =>
   ({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Agent turn tests')
@@ -820,8 +814,7 @@ async function run() {
     assert(!('REACT_MULTI_TOOL' in ERROR_KIND), 'ERROR_KIND: REACT_MULTI_TOOL removed')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

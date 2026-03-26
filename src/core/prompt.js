@@ -1,6 +1,11 @@
 import { measureMessages as measureTokens, estimateTokens } from '../lib/tokenizer.js'
 import { PROMPT as PROMPT_POLICY } from './policies.js'
 
+// --- Prompt Section ADT ---
+
+const section = (id, content) => Object.freeze({ id, content })
+const renderSections = (sections) => sections.map(s => s.content).join('\n\n')
+
 // --- Plan JSON Schema ---
 const planSchema = {
   name: 'agent_plan',
@@ -52,8 +57,10 @@ const planSchema = {
   },
 }
 
-// --- Prompt text constants ---
-const ROLE_DEFINITION = `You are a planner for a task-delegation agent.
+// --- Prompt sections (structured data) ---
+
+const PROMPT_SECTIONS = Object.freeze({
+  ROLE_DEFINITION: section('role_definition', `You are a planner for a task-delegation agent.
 Analyze the user's request and respond with ONLY valid JSON. No explanation text, ONLY JSON.
 
 ## Response Format
@@ -98,9 +105,9 @@ IMPORTANT:
 - All string values MUST be double-quoted (including op values)
 - Use "message" field (NOT "content")
 - RESPOND ref must reference a PREVIOUS step index (1-based)
-- Respond in the user's language.`
+- Respond in the user's language.`),
 
-const OP_REFERENCE = `Available ops:
+  OP_REFERENCE: section('op_reference', `Available ops:
 
 LOOKUP_MEMORY: Search memory for relevant information
   args: { "query": "search term" }
@@ -120,16 +127,17 @@ APPROVE: Request user approval
   args: { "description": "what needs approval" }
 
 DELEGATE: Delegate to another agent
-  args: { "target": "agent_id", "task": "task description" }`
+  args: { "target": "agent_id", "task": "task description" }`),
 
-const APPROVE_RULES = `Add APPROVE before any:
+  APPROVE_RULES: section('approve_rules', `Add APPROVE before any:
 - file_write (creating/overwriting files)
 - shell_exec (executing shell commands)
+- mcp_call_tool (MCP tools may perform write/irreversible operations)
 - Write operations (sending messages, creating issues)
 - Irreversible actions (deletions, state changes)
-Read-only actions (file_read, file_list, web_fetch) do NOT need APPROVE.`
+Read-only actions (file_read, file_list, web_fetch, mcp_search_tools) do NOT need APPROVE.`),
 
-const PLAN_RULES = `Rules:
+  PLAN_RULES: section('plan_rules', `Rules:
 1. If you have enough information to answer, use direct_response. This is the preferred way to respond.
 2. If you need more data, return a plan WITHOUT RESPOND. Steps will execute and results will be shown to you in the next iteration.
 3. RESPOND is optional — use it only to pass a step result directly to the user as a fast exit. If included, it must be the LAST step.
@@ -138,7 +146,8 @@ const PLAN_RULES = `Rules:
 6. Use "$N" strings in tool_args to reference previous step results.
 7. ALWAYS use tools for real-time data. NEVER answer from memory for file/command requests.
 8. Every EXEC tool_args MUST include all required parameters. Check each tool's required fields.
-9. Do NOT use RESPOND to pass raw intermediate results. If the user's request requires further processing (calculation, summarization, comparison), continue planning instead of ending early with RESPOND.`
+9. Do NOT use RESPOND to pass raw intermediate results. If the user's request requires further processing (calculation, summarization, comparison), continue planning instead of ending early with RESPOND.`),
+})
 
 // --- Formatters ---
 const formatToolList = (tools) => {
@@ -255,18 +264,21 @@ const assemblePrompt = ({
   const usable = effectiveBudget.maxContextChars - effectiveBudget.reservedOutputChars
 
   // 1. Fixed system sections (same order as original)
-  const fixedSections = [
-    persona.systemPrompt || ROLE_DEFINITION,
-    OP_REFERENCE,
-    formatToolList(tools),
-    formatAgentList(agents),
-    persona.rules && persona.rules.length > 0
-      ? 'User rules:\n' + persona.rules.map(r => `- ${r}`).join('\n')
-      : '',
-    APPROVE_RULES,
-    PLAN_RULES,
+  const userRulesContent = persona.rules && persona.rules.length > 0
+    ? 'User rules:\n' + persona.rules.map(r => `- ${r}`).join('\n')
+    : null
+  const agentsContent = agents && agents.length > 0 ? formatAgentList(agents) : null
+
+  const activeSections = [
+    persona.systemPrompt ? section('custom_role', persona.systemPrompt) : PROMPT_SECTIONS.ROLE_DEFINITION,
+    PROMPT_SECTIONS.OP_REFERENCE,
+    section('tools', formatToolList(tools)),
+    agentsContent ? section('agents', agentsContent) : null,
+    userRulesContent ? section('user_rules', userRulesContent) : null,
+    PROMPT_SECTIONS.APPROVE_RULES,
+    PROMPT_SECTIONS.PLAN_RULES,
   ].filter(Boolean)
-  const fixedSystemText = fixedSections.join('\n\n')
+  const fixedSystemText = renderSections(activeSections)
 
   const inputText = input
   let iterBlock = buildIterationBlock(iterationContext)
@@ -319,6 +331,7 @@ const assemblePrompt = ({
       historyUsed: fittedHistory.length,
       historyDropped: history.length - fittedHistory.length,
       memoriesUsed: fittedMemories.length,
+      sections: activeSections.map(s => s.id),
     },
   }
 }
@@ -354,8 +367,15 @@ const buildRetryPrompt = (originalPrompt, errorMessage) => ({
   response_format: originalPrompt.response_format,
 })
 
+// String aliases for backward compatibility
+const ROLE_DEFINITION = PROMPT_SECTIONS.ROLE_DEFINITION.content
+const OP_REFERENCE    = PROMPT_SECTIONS.OP_REFERENCE.content
+const APPROVE_RULES   = PROMPT_SECTIONS.APPROVE_RULES.content
+const PLAN_RULES      = PROMPT_SECTIONS.PLAN_RULES.content
+
 export {
   planSchema,
+  PROMPT_SECTIONS,
   assemblePrompt,
   buildIterationPrompt,
   buildResponseFormat,

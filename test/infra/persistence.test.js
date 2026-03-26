@@ -3,14 +3,7 @@ import { createReactiveState } from '../../src/infra/state.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Persistence tests')
@@ -109,8 +102,7 @@ async function run() {
   // Cleanup
   rmSync(testDir, { recursive: true, force: true })
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

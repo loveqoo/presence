@@ -19,13 +19,7 @@ import { createReactiveState } from '../../src/infra/state.js'
 const initState = (overrides = {}) =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Assembly + Budget + History tests')
@@ -652,8 +646,7 @@ async function run() {
     assert(history[0].output === 'tool result', 'plan+RESPOND: output stored')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

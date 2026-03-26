@@ -3,15 +3,10 @@ import {
   formatToolList, formatAgentList, formatMemories,
   summarizeResults,
   planSchema,
+  PROMPT_SECTIONS,
 } from '../../src/core/prompt.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('Prompt builder tests')
 
@@ -166,5 +161,60 @@ console.log('Prompt builder tests')
   assert(system.includes('without RESPOND'), 'prompt: mentions plan without RESPOND')
 }
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+// 19. PROMPT_SECTIONS: structure
+{
+  const ids = ['role_definition', 'op_reference', 'approve_rules', 'plan_rules']
+  ids.forEach(id => {
+    const key = id.replace(/_([a-z])/g, (_, c) => c.toUpperCase()).replace(/^./, c => c.toUpperCase()).replace('Definition', 'DEFINITION').replace('Reference', 'REFERENCE').replace('Rules', 'RULES')
+    // Just check by iterating values
+  })
+  const sections = Object.values(PROMPT_SECTIONS)
+  assert(sections.length === 4, 'PROMPT_SECTIONS: 4 named sections')
+  assert(sections.every(s => typeof s.id === 'string' && s.id.length > 0), 'PROMPT_SECTIONS: all have id')
+  assert(sections.every(s => typeof s.content === 'string' && s.content.length > 0), 'PROMPT_SECTIONS: all have content')
+}
+
+// 20. PROMPT_SECTIONS: known IDs
+{
+  assert(PROMPT_SECTIONS.ROLE_DEFINITION.id === 'role_definition', 'PROMPT_SECTIONS: role_definition id')
+  assert(PROMPT_SECTIONS.OP_REFERENCE.id === 'op_reference', 'PROMPT_SECTIONS: op_reference id')
+  assert(PROMPT_SECTIONS.APPROVE_RULES.id === 'approve_rules', 'PROMPT_SECTIONS: approve_rules id')
+  assert(PROMPT_SECTIONS.PLAN_RULES.id === 'plan_rules', 'PROMPT_SECTIONS: plan_rules id')
+}
+
+// 21. PROMPT_SECTIONS: content signatures (regression — fails if content changes unexpectedly)
+{
+  assert(PROMPT_SECTIONS.ROLE_DEFINITION.content.includes('planner for a task-delegation agent'), 'PROMPT_SECTIONS: role_definition signature')
+  assert(PROMPT_SECTIONS.OP_REFERENCE.content.includes('LOOKUP_MEMORY') && PROMPT_SECTIONS.OP_REFERENCE.content.includes('DELEGATE'), 'PROMPT_SECTIONS: op_reference has all ops')
+  assert(PROMPT_SECTIONS.APPROVE_RULES.content.includes('file_write') && PROMPT_SECTIONS.APPROVE_RULES.content.includes('shell_exec'), 'PROMPT_SECTIONS: approve_rules signature')
+  assert(PROMPT_SECTIONS.PLAN_RULES.content.includes('direct_response') && PROMPT_SECTIONS.PLAN_RULES.content.match(/^\d+\./m), 'PROMPT_SECTIONS: plan_rules has numbered rules')
+}
+
+// 22. PROMPT_SECTIONS: sections are frozen (immutable)
+{
+  const s = PROMPT_SECTIONS.ROLE_DEFINITION
+  let threw = false
+  try { s.content = 'tampered' } catch (_) { threw = true }
+  assert(threw || s.content !== 'tampered', 'PROMPT_SECTIONS: sections are immutable')
+}
+
+// 23. assemblePrompt _assembly.sections tracks active section IDs
+{
+  const prompt = buildIterationPrompt({ tools: [], memories: [], input: 'test' })
+  assert(Array.isArray(prompt._assembly.sections), '_assembly.sections: is array')
+  assert(prompt._assembly.sections.includes('role_definition'), '_assembly.sections: has role_definition')
+  assert(prompt._assembly.sections.includes('op_reference'), '_assembly.sections: has op_reference')
+  assert(prompt._assembly.sections.includes('plan_rules'), '_assembly.sections: has plan_rules')
+}
+
+// 24. assemblePrompt _assembly.sections: custom_role when persona.systemPrompt set
+{
+  const prompt = buildIterationPrompt({
+    tools: [], memories: [], input: 'test',
+    persona: { systemPrompt: '커스텀 역할' },
+  })
+  assert(prompt._assembly.sections.includes('custom_role'), '_assembly.sections: custom_role with persona')
+  assert(!prompt._assembly.sections.includes('role_definition'), '_assembly.sections: no default role with persona')
+}
+
+summary()

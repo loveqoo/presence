@@ -15,6 +15,8 @@ import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
+import { assert, summary } from '../lib/assert.js'
+
 const testDir = join(tmpdir(), `presence-e2e-${Date.now()}`)
 mkdirSync(testDir, { recursive: true })
 writeFileSync(join(testDir, 'package.json'), '{"name":"test"}')
@@ -27,13 +29,6 @@ const tools = toolRegistry.list()
 
 const initState = (overrides = {}) =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
-
-let passed = 0
-let failed = 0
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
 
 async function run() {
   console.log('E2E scenario regression tests')
@@ -362,6 +357,31 @@ async function run() {
   }
 
   // =============================================
+  // 10c. EXEC 미등록 툴
+  //      레지스트리에 없는 툴 → validateExecArgs가 Left 반환, 실행 전 거부
+  // =============================================
+  {
+    const state = initState()
+    let toolExecuted = false
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => JSON.stringify({
+        type: 'plan',
+        steps: [
+          { op: 'EXEC', args: { tool: 'nonexistent_tool', tool_args: {} } },
+        ]
+      }),
+      ExecuteTool: () => { toolExecuted = true; return 'should not run' },
+    })
+
+    const agent = createAgent({ interpret, ST, state, tools })
+    await agent.run('존재하지 않는 툴')
+
+    assert(state.get('lastTurn').tag === RESULT.FAILURE, 'unknown tool: rejected')
+    assert(state.get('lastTurn').error.kind === ERROR_KIND.PLANNER_SHAPE, 'unknown tool: PLANNER_SHAPE')
+    assert(!toolExecuted, 'unknown tool: tool never executed')
+  }
+
+  // =============================================
   // 11. ASK_LLM ctx에 0 포함
   //     argValidators가 양의 정수만 허용
   // =============================================
@@ -610,8 +630,7 @@ async function run() {
   // Cleanup
   rmSync(testDir, { recursive: true, force: true })
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

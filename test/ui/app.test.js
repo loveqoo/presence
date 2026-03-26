@@ -10,14 +10,7 @@ import { detectWholeCodeLang } from '../../src/ui/components/MarkdownText.js'
 import { deriveStatus, deriveMemoryCount } from '../../src/ui/hooks/useAgentState.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('UI component tests (renderToString)')
 
@@ -636,5 +629,4 @@ import { buildReport, formatDuration, truncate } from '../../src/ui/report.js'
   assert(report.includes('ERROR: state error'), 'buildReport error: shows op error')
 }
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+summary()

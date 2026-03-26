@@ -1,12 +1,5 @@
 import { InputHandler, PASTE_START, PASTE_END } from '../../src/infra/input.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('InputHandler tests')
 
@@ -108,5 +101,4 @@ console.log('InputHandler tests')
   assert(lines[0] === 'fallback', 'no onPaste: falls back to onLine')
 }
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+summary()

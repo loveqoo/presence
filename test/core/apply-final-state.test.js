@@ -8,13 +8,7 @@ import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState, getByPath } from '../../src/infra/state.js'
 import { runFreeWithStateT } from '../../src/core/op.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('applyFinalState ordering + turn chaining tests')
@@ -354,8 +348,7 @@ async function run() {
     assert(state.get('lastTurn')?.result === 'old result', 'F13: undefined path preserves old value')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

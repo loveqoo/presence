@@ -4,13 +4,7 @@ import { createToolRegistry } from '../../src/infra/tools.js'
 import { createAgentRegistry } from '../../src/infra/agent-registry.js'
 import { Phase } from '../../src/core/agent.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 const mockAgent = (response) => ({
   run: async () => response,
@@ -186,8 +180,7 @@ async function run() {
     assert(Object.keys(COMMANDS).length >= 8, 'COMMANDS: at least 8 commands')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

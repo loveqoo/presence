@@ -12,19 +12,14 @@ import { createLocalTools } from '../../src/infra/local-tools.js'
 import { createToolRegistry } from '../../src/infra/tools.js'
 import { runFreeWithStateT } from '../../src/core/op.js'
 
+import { assert, summary } from '../lib/assert.js'
+
 const initState = () =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] } })
 
 const tools = createLocalTools({ allowedDirs: ['/tmp/test'] })
 const toolRegistry = createToolRegistry()
 for (const t of tools) toolRegistry.register(t)
-
-let passed = 0
-let failed = 0
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
 
 async function run() {
   console.log('LLM malformed output regression tests')
@@ -170,8 +165,7 @@ async function run() {
   await testMalformed('nested invalid',
     { type: 'plan', steps: [{ op: 'EXEC', args: null }] })
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

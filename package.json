@@ -11,15 +11,20 @@
     "@inkjs/ui": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "conf": "^15.1.0",
+    "croner": "^10.0.1",
     "express": "^5.2.1",
     "fullscreen-ink": "^0.1.0",
     "i18next": "^25.9.0",
     "ink": "^6.8.0",
     "ink-testing-library": "^4.0.0",
     "lowdb": "^7.0.1",
+    "mem0ai": "^2.4.2",
     "react": "^19.2.4",
     "winston": "^3.19.0",
     "ws": "^8.20.0",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "fast-check": "^4.6.0"
   }
 }

@@ -5,17 +5,10 @@ import {
   askLLM, executeTool, respond, updateState, getState, Free,
   runFreeWithStateT
 } from '../../src/core/op.js'
+import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp
 const msg = (text) => [{ role: 'user', content: text }]
-
-let passed = 0
-let failed = 0
-
-function assert(condition, m) {
-  if (condition) { passed++; console.log(`  ✓ ${m}`) }
-  else { failed++; console.error(`  ✗ ${m}`) }
-}
 
 async function run() {
   console.log('createTestInterpreter tests')
@@ -126,8 +119,7 @@ async function run() {
     assert(result === 1, 'UpdateState/GetState: built-in handlers work')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

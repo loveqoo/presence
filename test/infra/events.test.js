@@ -8,14 +8,7 @@ import fp from '../../src/lib/fun-fp.js'
 const { Maybe } = fp
 import { createReactiveState } from '../../src/infra/state.js'
 import { Phase } from '../../src/core/agent.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Event system tests')
@@ -320,8 +313,7 @@ async function run() {
     assert(isDuplicate([], 'e1') === false, 'isDuplicate: empty list')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

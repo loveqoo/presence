@@ -9,6 +9,7 @@ import { TranscriptOverlay } from './components/TranscriptOverlay.js'
 import { useAgentState } from './hooks/useAgentState.js'
 import { MarkdownText } from './components/MarkdownText.js'
 import { buildReport } from './report.js'
+import { clearDebugState } from '../core/agent.js'
 import { t } from '../i18n/index.js'
 
 const h = React.createElement
@@ -123,7 +124,7 @@ const handleMemoryCommand = (input, memory, addMessage) => {
   addMessage({ role: 'system', content: t('memory_cmd.unknown_sub') })
 }
 
-const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tools = [], agents = [], initialMessages = [], cwd = '', gitBranch = '', model: initialModel = '', config = null, memory = null, llm = null }) => {
+const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tools = [], agents = [], initialMessages = [], cwd = '', gitBranch = '', model: initialModel = '', config = null, memory = null, llm = null, mcpControl = null }) => {
   const { exit } = useApp()
   const agentState = useAgentState(state)
   const [messages, setMessages] = useState(initialMessages)
@@ -199,14 +200,31 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
     }
     if (input === '/clear') {
       setMessages([])
-      if (state) {
-        state.set('context.conversationHistory', [])
-        state.set('_compactionEpoch', (state.get('_compactionEpoch') || 0) + 1)
-      }
+      if (state) clearDebugState(state)
       return
     }
     if (input === '/help') {
       addMessage({ role: 'system', content: t('help.commands'), tag: 'help' })
+      return
+    }
+    if (input.startsWith('/mcp')) {
+      if (!mcpControl || mcpControl.list().length === 0) {
+        addMessage({ role: 'system', content: 'No MCP servers configured.' })
+        return
+      }
+      const args = input.trim().split(/\s+/).slice(1)
+      const sub = args[0] || 'list'
+      if (sub === 'list') {
+        const lines = mcpControl.list().map(s => `${s.enabled ? '●' : '○'} ${s.prefix}  ${s.serverName}  (${s.toolCount} tools)`)
+        addMessage({ role: 'system', content: `MCP servers:\n${lines.join('\n')}` })
+      } else if (sub === 'enable' || sub === 'disable') {
+        const prefix = args[1]
+        if (!prefix) { addMessage({ role: 'system', content: `Usage: /mcp ${sub} <id>  (e.g. mcp0)` }); return }
+        const ok = sub === 'enable' ? mcpControl.enable(prefix) : mcpControl.disable(prefix)
+        addMessage({ role: 'system', content: ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}` })
+      } else {
+        addMessage({ role: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' })
+      }
       return
     }
     if (input === '/report') {
@@ -215,6 +233,7 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
       const report = buildReport({
         debug: agentState.debug,
         opTrace: agentState.opTrace,
+        iterationHistory: agentState.iterationHistory,
         lastPrompt,
         lastResponse,
         state,

@@ -2,14 +2,7 @@ import { loadConfig, mergeConfig, readConfigFile, DEFAULTS } from '../../src/inf
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Config tests')
@@ -73,7 +66,7 @@ async function run() {
     const config = loadConfig('/nonexistent/config.json')
     assert(config.llm.model === DEFAULTS.llm.model, 'loadConfig no file: uses defaults')
     assert(config.maxIterations === 10, 'loadConfig no file: default maxIterations')
-    assert(config.heartbeat.enabled === true, 'loadConfig no file: heartbeat enabled')
+    assert(config.scheduler.enabled === true, 'loadConfig no file: scheduler enabled')
   }
 
   {
@@ -90,7 +83,7 @@ async function run() {
     assert(config.llm.model === 'qwen3.5-35b', 'loadConfig file: llm.model')
     assert(config.llm.responseFormat === 'json_object', 'loadConfig file: responseFormat')
     assert(config.maxIterations === 5, 'loadConfig file: maxIterations')
-    assert(config.heartbeat.enabled === true, 'loadConfig file: defaults still apply')
+    assert(config.scheduler.enabled === true, 'loadConfig file: defaults still apply')
     rmSync(dir, { recursive: true, force: true })
   }
 
@@ -125,8 +118,7 @@ async function run() {
     delete process.env.PRESENCE_MAX_RETRIES
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

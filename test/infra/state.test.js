@@ -1,12 +1,5 @@
 import { createState } from '../../src/infra/state.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('createState tests')
 
@@ -50,5 +43,4 @@ assert(full.a === 1 && full.b.c === 2, 'get() returns full state')
 full.a = 999
 assert(s5.get('a') === 1, 'get() returns deep copy')
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+summary()

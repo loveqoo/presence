@@ -7,13 +7,7 @@ import { initI18n } from '../../src/i18n/index.js'
 initI18n('ko')
 import { validatePlan, safeJsonParse } from '../../src/core/agent.js'
 import { Free, Either } from '../../src/core/op.js'
-
-let passed = 0
-let failed = 0
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 function run() {
   console.log('Plan fuzz tests')
@@ -163,8 +157,7 @@ function run() {
     assert(Either.isRight(r5), 'no RESPOND: Right (intermediate plan)')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

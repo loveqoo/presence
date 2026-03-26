@@ -1,7 +1,7 @@
 import { Free, Either, askLLM, respond, updateState, getState, pipe, runFreeWithStateT } from './op.js'
 import { parsePlan, validateStep } from './plan.js'
 import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
-import { HISTORY, MEMORY } from './policies.js'
+import { DEBUG, HISTORY, MEMORY } from './policies.js'
 import { getByPath } from '../lib/path.js'
 import { t } from '../i18n/index.js'
 
@@ -58,7 +58,7 @@ const validateExecArgs = (step, tools) => {
   if (step.op !== 'EXEC' || !tools || tools.length === 0) return Either.Right(true)
   const a = step.args || {}
   const toolDef = tools.find(t => t.name === a.tool)
-  if (!toolDef) return Either.Right(true) // 도구 미등록은 실행 시 처리
+  if (!toolDef) return Either.Left(ErrorInfo(`EXEC: unknown tool: ${a.tool}`, ERROR_KIND.PLANNER_SHAPE))
 
   const required = toolDef.parameters?.required || []
   if (required.length === 0) return Either.Right(true)
@@ -247,9 +247,23 @@ const createAgentTurn = ({ tools = [], agents = [], persona = {}, responseFormat
                 timestamp: Date.now(),
               }
 
+              const iterEntry = {
+                ...debugInfo,
+                promptMessages: currentPrompt.messages.length,
+                promptChars: currentPrompt.messages.reduce((s, m) => s + (m.content?.length || 0), 0),
+                response: rawResponse,
+              }
+
               return updateState('_debug.lastTurn', debugInfo)
                 .chain(() => updateState('_debug.lastPrompt', currentPrompt.messages))
                 .chain(() => updateState('_debug.lastResponse', rawResponse))
+                .chain(() => getState('_debug.iterationHistory').chain(prev => {
+                  const history = [...(prev || []), iterEntry]
+                  const capped = history.length > DEBUG.MAX_ITERATION_HISTORY
+                    ? history.slice(-DEBUG.MAX_ITERATION_HISTORY)
+                    : history
+                  return updateState('_debug.iterationHistory', capped)
+                }))
                 .chain(() => Either.fold(
                 error => {
                   if (retriesLeft <= 0) return respondAndFail(input, error)
@@ -319,9 +333,21 @@ const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, re
 const MANAGED_PATHS = [
   '_streaming', 'lastTurn',
   'context.conversationHistory',
-  '_debug.lastTurn', '_debug.lastPrompt', '_debug.lastResponse', '_retry',
+  '_debug.lastTurn', '_debug.lastPrompt', '_debug.lastResponse', '_debug.iterationHistory', '_retry',
   'turnState',
 ]
+
+const clearDebugState = (state) => {
+  state.set('context.conversationHistory', [])
+  state.set('context.memories', [])
+  state.set('_compactionEpoch', (state.get('_compactionEpoch') || 0) + 1)
+  state.set('_debug.lastTurn', null)
+  state.set('_debug.lastPrompt', null)
+  state.set('_debug.lastResponse', null)
+  state.set('_debug.opTrace', [])
+  state.set('_debug.recalledMemories', [])
+  state.set('_debug.iterationHistory', [])
+}
 
 const applyFinalState = (reactiveState, finalState, { initialEpoch } = {}) => {
   if (!reactiveState) return
@@ -343,6 +369,7 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
     if (reactiveState) {
       reactiveState.set('turnState', Phase.working(input))
       reactiveState.set('turn', (reactiveState.get('turn') || 0) + 1)
+      reactiveState.set('_debug.iterationHistory', [])
     }
 
     // 턴 시작: memory recall (Actor, 명시적 비동기)
@@ -357,7 +384,7 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
       } catch (e) {
         reactiveState.set('context.memories', [])
         reactiveState.set('_debug.recalledMemories', [])
-        if (logger) logger.warn('Memory recall failed', { error: e.message })
+        ;(logger || console).warn('Memory recall failed', { error: e.message })
       }
     }
 
@@ -423,6 +450,6 @@ const createAgent = ({ buildTurn, tools, agents, persona, responseFormatMode, ma
 export {
   createAgentTurn, safeRunTurn, createAgent, applyFinalState, validatePlan, validateExecArgs, validateRefRange, validateStepFull, safeJsonParse, extractJson,
   beginTurn, finishSuccess, finishFailure, respondAndFail,
-  recoverFromFailure, applyRecovery, MANAGED_PATHS,
+  recoverFromFailure, applyRecovery, MANAGED_PATHS, clearDebugState,
   PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo,
 }

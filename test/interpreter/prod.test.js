@@ -7,14 +7,7 @@ import {
   observe, updateState, getState, parallel, Free,
   runFreeWithStateT,
 } from '../../src/core/op.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 const msg = (text) => [{ role: 'user', content: text }]
 
@@ -475,8 +468,7 @@ async function run() {
     assert(toolResults[0].args.after === true, 'Parallel UI restore: only post-parallel tool recorded')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

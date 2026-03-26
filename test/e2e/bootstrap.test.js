@@ -5,13 +5,7 @@ import { tmpdir } from 'node:os'
 import { bootstrap } from '../../src/main.js'
 import { PHASE, RESULT } from '../../src/core/agent.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // --- Mock LLM HTTP 서버 ---
 // 시나리오별 응답을 주입할 수 있는 간이 OpenAI-compatible 서버
@@ -66,7 +60,7 @@ const createTestConfig = (port, tmpDir) => ({
   maxIterations: 5,
   memory: { path: join(tmpDir, 'memory') },
   mcp: [],
-  heartbeat: { enabled: false, intervalMs: 300000, prompt: '' },
+  scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
   delegatePolling: { intervalMs: 60000 },
   prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
 })
@@ -316,8 +310,142 @@ async function run() {
     assert(finalState.lastTurn.tag === 'success', 'e2e-6: turn succeeds overall')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  // ===========================================
+  // 7. mcpControl — MCP 없을 때 빈 목록
+  // ===========================================
+  {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'presence-e2e-'))
+    const mockLLM = createMockLLM(() => JSON.stringify({ type: 'direct_response', message: 'ok' }))
+    const port = await mockLLM.start()
+    try {
+      const app = await bootstrap(createTestConfig(port, tmpDir), { persistenceCwd: tmpDir })
+
+      assert(Array.isArray(app.mcpControl.list()), 'e2e-7: mcpControl.list() is array')
+      assert(app.mcpControl.list().length === 0, 'e2e-7: no MCP servers')
+      assert(app.mcpControl.enable('mcp0') === false, 'e2e-7: enable unknown returns false')
+      assert(app.mcpControl.disable('mcp0') === false, 'e2e-7: disable unknown returns false')
+
+      // mcp_search_tools / mcp_call_tool 미등록 확인 (allMcpTools.length === 0)
+      assert(!app.tools.some(t => t.name === 'mcp_search_tools'), 'e2e-7: no mcp_search_tools')
+
+      await app.shutdown()
+    } finally {
+      await mockLLM.close()
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }
+
+  // ===========================================
+  // 8. mcpControl — mock MCP 연결 + enable/disable
+  // ===========================================
+  {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'presence-e2e-'))
+    const mockLLM = createMockLLM(() => JSON.stringify({ type: 'direct_response', message: 'ok' }))
+    const port = await mockLLM.start()
+
+    const mockTools = [
+      { name: 'search', description: 'Search issues', inputSchema: { type: 'object', properties: { q: { type: 'string' } } } },
+      { name: 'create', description: 'Create issue', inputSchema: { type: 'object', properties: { title: { type: 'string' } } } },
+    ]
+    const config = {
+      ...createTestConfig(port, tmpDir),
+      mcp: [{
+        serverName: 'jira',
+        enabled: true,
+        createTransport: () => ({}),
+        createClient: () => ({
+          connect: async () => {},
+          listTools: async () => ({ tools: mockTools }),
+          callTool: async ({ name }) => ({ content: [{ type: 'text', text: `called ${name}` }] }),
+          close: async () => {},
+        }),
+      }],
+    }
+
+    try {
+      const app = await bootstrap(config, { persistenceCwd: tmpDir })
+
+      const list = app.mcpControl.list()
+      assert(list.length === 1, 'e2e-8: 1 MCP server')
+      assert(list[0].serverName === 'jira', 'e2e-8: jira server name')
+      assert(list[0].toolCount === 2, 'e2e-8: 2 tools')
+      assert(list[0].enabled === true, 'e2e-8: initially enabled')
+      assert(list[0].prefix === 'mcp0', 'e2e-8: prefix mcp0')
+
+      assert(app.tools.some(t => t.name === 'mcp_search_tools'), 'e2e-8: mcp_search_tools registered')
+      assert(app.tools.some(t => t.name === 'mcp_call_tool'), 'e2e-8: mcp_call_tool registered')
+
+      assert(app.mcpControl.disable('mcp0') === true, 'e2e-8: disable returns true')
+      assert(app.mcpControl.list()[0].enabled === false, 'e2e-8: disabled')
+      assert(app.mcpControl.enable('mcp0') === true, 'e2e-8: enable returns true')
+      assert(app.mcpControl.list()[0].enabled === true, 'e2e-8: re-enabled')
+
+      // 알 수 없는 prefix
+      assert(app.mcpControl.disable('mcp99') === false, 'e2e-8: disable unknown returns false')
+
+      await app.shutdown()
+    } finally {
+      await mockLLM.close()
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }
+
+  // ===========================================
+  // 9. mcp_search_tools — disabled 서버 툴 제외
+  // ===========================================
+  {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'presence-e2e-'))
+    const mockLLM = createMockLLM(() => JSON.stringify({ type: 'direct_response', message: 'ok' }))
+    const port = await mockLLM.start()
+
+    const mockTools = [
+      { name: 'find_event', description: 'Find calendar event', inputSchema: { type: 'object', properties: {} } },
+    ]
+    const config = {
+      ...createTestConfig(port, tmpDir),
+      mcp: [{
+        serverName: 'calendar',
+        enabled: true,
+        createTransport: () => ({}),
+        createClient: () => ({
+          connect: async () => {},
+          listTools: async () => ({ tools: mockTools }),
+          callTool: async () => ({ content: [{ type: 'text', text: 'event found' }] }),
+          close: async () => {},
+        }),
+      }],
+    }
+
+    try {
+      const app = await bootstrap(config, { persistenceCwd: tmpDir })
+
+      const searchTool = app.tools.find(t => t.name === 'mcp_search_tools')
+      const callTool = app.tools.find(t => t.name === 'mcp_call_tool')
+
+      // 활성화 상태에서 검색 (이름: mcp0__calendar_find_event)
+      const enabledResult = await searchTool.handler({ query: 'find' })
+      assert(enabledResult.includes('mcp0__calendar_find_event'), 'e2e-9: tool visible when enabled')
+
+      // disable 후 검색 결과에서 제외
+      app.mcpControl.disable('mcp0')
+      const disabledResult = await searchTool.handler({ query: 'find' })
+      assert(!disabledResult.includes('mcp0__calendar_find_event'), 'e2e-9: tool hidden when disabled')
+      assert(disabledResult.includes('No MCP tools found'), 'e2e-9: no tools message when disabled')
+
+      // mcp_call_tool: disabled 서버 툴 호출 시 에러
+      let callError = null
+      try { await callTool.handler({ tool_name: 'mcp0__calendar_find_event' }) } catch (e) { callError = e }
+      assert(callError !== null, 'e2e-9: call disabled tool throws')
+      assert(callError.message.includes('disabled'), 'e2e-9: error mentions disabled')
+
+      await app.shutdown()
+    } finally {
+      await mockLLM.close()
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }
+
+  summary()
 }
 
 run()

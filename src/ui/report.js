@@ -24,7 +24,7 @@ const truncate = (str, max = 200) => {
   return s.length > max ? s.slice(0, max) + `... (${s.length} chars total)` : s
 }
 
-const buildReport = ({ debug, opTrace, lastPrompt, lastResponse, state, config }) => {
+const buildReport = ({ debug, opTrace, iterationHistory, lastPrompt, lastResponse, state, config }) => {
   const lines = []
   const add = (line = '') => lines.push(line)
 
@@ -48,8 +48,8 @@ const buildReport = ({ debug, opTrace, lastPrompt, lastResponse, state, config }
 
   // --- Op Timeline ---
   if (opTrace && opTrace.length > 0) {
-    const totalMs = opTrace.reduce((s, e) => s + (e.duration || 0), 0)
-    const maxDur = Math.max(...opTrace.map(e => e.duration || 0))
+    let totalMs = 0, maxDur = 0
+    for (const e of opTrace) { const d = e.duration || 0; totalMs += d; if (d > maxDur) maxDur = d }
     add(`## Timeline (${opTrace.length} ops, ${formatDuration(totalMs)})`)
     add('```')
     add(`${'#'.padStart(3)} ${'Op'.padEnd(35)} ${'Duration'.padStart(10)} Status`)
@@ -73,6 +73,29 @@ const buildReport = ({ debug, opTrace, lastPrompt, lastResponse, state, config }
   }
   add()
 
+  // --- Iteration History ---
+  if (iterationHistory && iterationHistory.length > 0) {
+    add(`## Iterations (${iterationHistory.length})`)
+    for (const iter of iterationHistory) {
+      add()
+      add(`### Iteration ${iter.iteration + 1}`)
+      add(`- **Parsed type:** ${iter.parsedType || 'unknown'}`)
+      add(`- **Step count:** ${iter.stepCount ?? '?'}`)
+      if (iter.error) add(`- **Error:** ${iter.error}`)
+      add(`- **Assembly used:** ${iter.assembly?.used ?? '?'} tokens`)
+      if (iter.promptMessages > 0) {
+        add(`- **Prompt:** ${iter.promptMessages} messages, ${iter.promptChars} chars`)
+      }
+      if (iter.response) {
+        add(`- **Response (${iter.response.length} chars):**`)
+        add('```json')
+        add(iter.response.length > 500 ? iter.response.slice(0, 500) + '\n... (truncated)' : iter.response)
+        add('```')
+      }
+    }
+    add()
+  }
+
   // --- Assembly ---
   const assembly = debug?.assembly
   if (assembly) {
@@ -95,7 +118,8 @@ const buildReport = ({ debug, opTrace, lastPrompt, lastResponse, state, config }
     for (let i = 0; i < lastPrompt.length; i++) {
       const m = lastPrompt[i]
       const body = m.content || ''
-      const firstLine = body.split('\n')[0]
+      const nl = body.indexOf('\n')
+      const firstLine = nl === -1 ? body : body.slice(0, nl)
       add(`[${i}] ${m.role} (${body.length} chars): ${truncate(firstLine, 120)}`)
     }
     add('```')

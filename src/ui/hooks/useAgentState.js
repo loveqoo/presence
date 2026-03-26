@@ -33,6 +33,7 @@ const useAgentState = (state) => {
   const [debug, setDebug] = useState(null)
   const [opTrace, setOpTrace] = useState([])
   const [recalledMemories, setRecalledMemories] = useState([])
+  const [iterationHistory, setIterationHistory] = useState([])
   const [budgetWarning, setBudgetWarning] = useState(null)
   const [toolResults, setToolResults] = useState([])
 
@@ -65,6 +66,7 @@ const useAgentState = (state) => {
       '_debug.lastTurn': (val) => setDebug(val || null),
       '_debug.opTrace': (val) => setOpTrace(Array.isArray(val) ? val : []),
       '_debug.recalledMemories': (val) => setRecalledMemories(Array.isArray(val) ? val : []),
+      '_debug.iterationHistory': (val) => setIterationHistory(Array.isArray(val) ? val : []),
       '_budgetWarning': (val) => setBudgetWarning(val || null),
       '_toolResults': (val) => setToolResults(val || []),
       todos: (val) => setTodos(Array.isArray(val) ? val : []),
@@ -91,6 +93,7 @@ const useAgentState = (state) => {
     setDebug(state.get('_debug.lastTurn') || null)
     setOpTrace(state.get('_debug.opTrace') || [])
     setRecalledMemories(state.get('_debug.recalledMemories') || [])
+    setIterationHistory(state.get('_debug.iterationHistory') || [])
     setToolResults(state.get('_toolResults') || [])
     refreshEvents()
     refreshDelegates()
@@ -104,7 +107,7 @@ const useAgentState = (state) => {
 
   return {
     status, turn, memoryCount, activity, lastTurn,
-    todos, events, delegates, retryInfo, approve, streaming, debug, opTrace, recalledMemories, budgetWarning, toolResults,
+    todos, events, delegates, retryInfo, approve, streaming, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolResults,
   }
 }
 

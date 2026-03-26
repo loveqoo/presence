@@ -1,14 +1,7 @@
 import { createMemoryGraph, TIERS } from '../../src/infra/memory.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { PHASE, RESULT, Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // Wire up memory hooks (same logic that main.js uses)
 const wireMemoryHooks = (state, memory) => {
@@ -249,8 +242,7 @@ async function run() {
     assert(episodic[0].data.output === 'PR 5건', 'dedup hook: output updated to latest')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

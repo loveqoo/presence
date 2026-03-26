@@ -1,14 +1,7 @@
 import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
 import fp from '../../src/lib/fun-fp.js'
+import { assert, summary } from '../lib/assert.js'
 const { Maybe } = fp
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
 
 async function run() {
   console.log('Agent registry tests')
@@ -119,8 +112,7 @@ async function run() {
     assert(result === 'echo: hello', 'local run: returns result')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

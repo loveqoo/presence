@@ -133,17 +133,38 @@ const opHandlers = {
     delegate(a.target, a.task),
 }
 
+// --- Normalization rules ---
+// 각 규칙: step → step (불변). 매칭 안 되면 원본 반환.
+
 // LLM이 DELEGATE op 대신 EXEC {tool: "delegate"} 를 생성하는 패턴 보정
-const normalizeStep = (step) => {
+const normalizeExecToDelegate = (step) => {
   if (!step || step.op !== 'EXEC') return step
   const a = step.args || {}
-  if (a.tool === 'delegate') {
-    const target = a.target || a.tool_args?.target
-    const task = a.task || a.tool_args?.task
-    if (target) return { op: 'DELEGATE', args: { target, task } }
-  }
+  if (a.tool !== 'delegate') return step
+  const target = a.target || a.tool_args?.target
+  const task = a.task || a.tool_args?.task
+  if (target) return { op: 'DELEGATE', args: { target, task } }
   return step
 }
+
+// LLM이 APPROVE op 대신 EXEC {tool: "approve"} 를 생성하는 패턴 보정
+const normalizeExecToApprove = (step) => {
+  if (!step || step.op !== 'EXEC') return step
+  const a = step.args || {}
+  if (a.tool !== 'approve') return step
+  const description = a.description || a.tool_args?.description
+  if (description) return { op: 'APPROVE', args: { description } }
+  return step
+}
+
+// --- Pipeline ---
+const defaultRules = [
+  normalizeExecToDelegate,
+  normalizeExecToApprove,
+]
+
+const normalizeStep = (step, rules = defaultRules) =>
+  rules.reduce((s, rule) => rule(s), step)
 
 const stepToOp = (step, results) =>
   Either.fold(
@@ -191,4 +212,9 @@ const parsePlan = (plan) => {
   )
 }
 
-export { parsePlan, stepToOp, normalizeStep, opHandlers, validateStep, argValidators, isPositiveInt, isPositiveIntArray, resolveRefs, resolveStringRefs, resolveToolArgs, safeLookup }
+export {
+  parsePlan, stepToOp, normalizeStep, defaultRules,
+  normalizeExecToDelegate, normalizeExecToApprove,
+  opHandlers, validateStep, argValidators,
+  isPositiveInt, isPositiveIntArray, resolveRefs, resolveStringRefs, resolveToolArgs, safeLookup,
+}

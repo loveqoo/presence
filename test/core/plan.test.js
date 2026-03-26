@@ -1,15 +1,13 @@
-import { parsePlan, normalizeStep, validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs } from '../../src/core/plan.js'
+import {
+  parsePlan, normalizeStep, defaultRules,
+  normalizeExecToDelegate, normalizeExecToApprove,
+  validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs,
+} from '../../src/core/plan.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { runFreeWithStateT } from '../../src/core/op.js'
 import { Either } from '../../src/core/op.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b)
@@ -407,8 +405,91 @@ async function run() {
     assert(delegateResults[0].target === 'summarizer', 'normalizeStep integration: correct target')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  // --- normalizeExecToApprove ---
+
+  // EXEC {tool: "approve", description} → APPROVE
+  {
+    const step = { op: 'EXEC', args: { tool: 'approve', description: 'delete files?' } }
+    const n = normalizeExecToApprove(step)
+    assert(n.op === 'APPROVE', 'normalizeExecToApprove: → APPROVE op')
+    assert(n.args.description === 'delete files?', 'normalizeExecToApprove: description preserved')
+  }
+
+  // EXEC {tool: "approve", tool_args: {description}} → APPROVE (tool_args fallback)
+  {
+    const step = { op: 'EXEC', args: { tool: 'approve', tool_args: { description: 'send email?' } } }
+    const n = normalizeExecToApprove(step)
+    assert(n.op === 'APPROVE', 'normalizeExecToApprove: tool_args fallback → APPROVE')
+    assert(n.args.description === 'send email?', 'normalizeExecToApprove: tool_args description')
+  }
+
+  // EXEC {tool: "approve"} without description → stays EXEC
+  {
+    const step = { op: 'EXEC', args: { tool: 'approve' } }
+    const n = normalizeExecToApprove(step)
+    assert(n.op === 'EXEC', 'normalizeExecToApprove: no description → stays EXEC')
+  }
+
+  // non-EXEC → passthrough
+  {
+    const step = { op: 'APPROVE', args: { description: 'x' } }
+    assert(normalizeExecToApprove(step) === step, 'normalizeExecToApprove: non-EXEC unchanged')
+    assert(normalizeExecToApprove(null) === null, 'normalizeExecToApprove: null passthrough')
+  }
+
+  // --- Pipeline behavior ---
+
+  // defaultRules has 3 rules
+  assert(defaultRules.length === 2, 'defaultRules: 2 rules')
+
+  // Pipeline applies rules sequentially
+  {
+    const step = { op: 'EXEC', args: { tool: 'delegate', target: 'a', task: 'b' } }
+    const n = normalizeStep(step)
+    assert(n.op === 'DELEGATE', 'pipeline: EXEC delegate → DELEGATE via pipeline')
+  }
+
+  {
+    const step = { op: 'EXEC', args: { tool: 'approve', description: 'ok?' } }
+    const n = normalizeStep(step)
+    assert(n.op === 'APPROVE', 'pipeline: EXEC approve → APPROVE via pipeline')
+  }
+
+  // Custom rules override
+  {
+    const customRule = (s) => s && s.op === 'EXEC' ? { ...s, op: 'CUSTOM' } : s
+    const step = { op: 'EXEC', args: { tool: 'anything' } }
+    const n = normalizeStep(step, [customRule])
+    assert(n.op === 'CUSTOM', 'pipeline: custom rules applied')
+  }
+
+  // Empty rules → passthrough
+  {
+    const step = { op: 'EXEC', args: { tool: 'delegate', target: 'a', task: 'b' } }
+    const n = normalizeStep(step, [])
+    assert(n.op === 'EXEC', 'pipeline: empty rules → no normalization')
+  }
+
+  // 통합: EXEC approve가 parsePlan에서 APPROVE로 실행됨
+  {
+    const approveResults = []
+    const { interpret, ST } = createTestInterpreter({
+      Approve: (op) => { approveResults.push(op); return true },
+    })
+    const plan = {
+      type: 'plan',
+      steps: [
+        { op: 'EXEC', args: { tool: 'approve', description: 'deploy to prod?' } },
+        { op: 'EXEC', args: { tool: 'deploy', tool_args: {} } },
+      ],
+    }
+    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    assert(Either.isRight(result), 'normalizeStep approve integration: Right')
+    assert(approveResults.length === 1, 'normalizeStep approve integration: approve called')
+    assert(approveResults[0].description === 'deploy to prod?', 'normalizeStep approve integration: correct description')
+  }
+
+  summary()
 }
 
 run()

@@ -1,3 +1,8 @@
+// --- Debug policy ---
+export const DEBUG = Object.freeze({
+  MAX_ITERATION_HISTORY: 10,
+})
+
 // --- History policy ---
 export const HISTORY = Object.freeze({
   MAX_CONVERSATION: 20,
@@ -19,4 +24,9 @@ export const PROMPT = Object.freeze({
   SUMMARIZED_RESULT_MAX_LEN: 200,
   DEFAULT_MAX_CONTEXT_TOKENS: 8000,
   DEFAULT_RESERVED_OUTPUT_TOKENS: 1000,
+})
+
+// --- System job names ---
+export const SYSTEM_JOBS = Object.freeze({
+  TODO_REVIEW: '__todo_review__',
 })

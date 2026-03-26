@@ -1,12 +1,6 @@
 import { makeOp, FUNCTOR, Free } from '../../src/core/op.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('makeOp factory tests')
 
@@ -52,6 +46,5 @@ Free.runWithTask(runner)(lifted).then(result => {
 }).then(result => {
   assert(result === 'result100', 'Free.runWithTask resolves chained op')
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 })

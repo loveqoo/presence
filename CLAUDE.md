@@ -6,7 +6,9 @@
 
 ## 구현 플랜
 
-`PLAN.md` 참조. Phase 1-6 완료, Phase 7(웹 UI) 이후 미착수.
+- `PLAN.md` — TODO + 미착수 Phase + 운영 결정 (현행)
+- `docs/architecture.md` — 아키텍처 설계 문서 (Phase 1-6 확정)
+- `docs/completed.md` — 완료된 Phase + TODO 이력
 
 ## 핵심 의존성
 
@@ -61,7 +63,7 @@ node test/infra/memory.test.js
 
 ## 주의사항
 
-- AgentOp ADT의 `map`은 data가 아닌 continuation(next)에 적용해야 함 (PLAN.md의 AgentOp 섹션 참조)
+- AgentOp ADT의 `map`은 data가 아닌 continuation(next)에 적용해야 함 (docs/architecture.md의 Op 설계 참조)
 - 인터프리터는 효과 실행 후 `op.next(result)`로 다음 Free step 반환
 - `Free.runWithTask(interpreter)(program)`으로 프로그램 실행
 - 정책 상수(max history, compaction threshold 등)는 `src/core/policies.js`에 통합 — 파일별 로컬 상수 금지

@@ -3,17 +3,10 @@ import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
 import { withEventMeta } from '../../src/infra/events.js'
-import { createHeartbeat } from '../../src/infra/heartbeat.js'
 import { createEventActor, createEmit, createTurnActor, forkTask } from '../../src/infra/actors.js'
 import { runFreeWithStateT } from '../../src/core/op.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Phase 5 integration tests')
@@ -49,20 +42,15 @@ async function run() {
       }
     })
 
-    const heartbeat = createHeartbeat({
-      eventActor,
-      state,
-      intervalMs: 20,
-      prompt: '정기 점검',
-    })
+    // scheduled_job 이벤트를 직접 enqueue (scheduler 역할)
+    const event = withEventMeta({ type: 'scheduled_job', jobId: 'test-job', jobName: '정기 점검', prompt: '정기 점검', runId: 'run-1', attempt: 1 })
+    eventActor.send({ type: 'enqueue', event }).fork(() => {}, () => {})
 
-    heartbeat.start()
     await new Promise(r => setTimeout(r, 150))
-    heartbeat.stop()
 
-    assert(agentRunCalled, 'Step 29 E2E: turnActor called by heartbeat event')
-    assert(agentRunPrompt === '정기 점검', 'Step 29 E2E: correct prompt from heartbeat')
-    assert(state.get('events.lastProcessed')?.type === 'heartbeat', 'Step 29 E2E: lastProcessed is heartbeat')
+    assert(agentRunCalled, 'Step 29 E2E: turnActor called by scheduled_job event')
+    assert(agentRunPrompt === '정기 점검', 'Step 29 E2E: correct prompt from scheduled_job')
+    assert(state.get('events.lastProcessed')?.type === 'scheduled_job', 'Step 29 E2E: lastProcessed is scheduled_job')
   }
 
   // heartbeat → event 큐 → agent busy → 큐에 대기 → idle 후 처리
@@ -86,7 +74,7 @@ async function run() {
       }
     })
 
-    emit({ type: 'heartbeat', prompt: '점검' })
+    emit({ type: 'scheduled_job', jobId: 'test', jobName: '점검', prompt: '점검', runId: 'r1', attempt: 1 })
 
     await new Promise(r => setTimeout(r, 30))
     assert(runCount === 0, 'Step 29 busy: event queued while working')
@@ -282,8 +270,7 @@ async function run() {
     assert(dl[0].type === 'bad-event', 'deadLetter: original event preserved')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

@@ -1,12 +1,5 @@
 import { createToolRegistry } from '../../src/infra/tools.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('Tool registry tests')
 
@@ -59,5 +52,4 @@ assert(names.length === 2, 'schema: 2 names')
 assert(names.includes('github_list_prs'), 'schema: includes github')
 assert(names.includes('slack_send'), 'schema: includes slack')
 
-console.log(`\n${passed} passed, ${failed} failed`)
-if (failed > 0) process.exit(1)
+summary()

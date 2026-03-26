@@ -5,16 +5,9 @@ import { ChatArea } from '../../src/ui/components/ChatArea.js'
 import { App } from '../../src/ui/App.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
+import { assert, summary } from '../lib/assert.js'
 
 const h = React.createElement
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
 
 async function run() {
   console.log('Interactive UI tests')
@@ -252,8 +245,7 @@ async function run() {
     unmount()
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

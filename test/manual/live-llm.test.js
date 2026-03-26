@@ -16,6 +16,7 @@ import { createToolRegistry } from '../../src/infra/tools.js'
 import { createAgentRegistry } from '../../src/infra/agent-registry.js'
 import { Free } from '../../src/core/op.js'
 import { MemoryGraph } from '../../src/infra/memory.js'
+import { createMemoryEmbedder } from '../../src/infra/memory-embedder.js'
 import { createMemoryActor } from '../../src/infra/actors.js'
 import { safeRunTurn } from '../../src/core/agent.js'
 import { createEmbedder } from '../../src/infra/embedding.js'
@@ -490,7 +491,7 @@ async function run() {
     // 벡터 임베딩 수행
     console.log(`\n  [${label}] embedding ${memory.allNodes().length} nodes...`)
     try {
-      const embedded = await memory.embedPending(embedder)
+      const embedded = await createMemoryEmbedder(embedder).embedPending(memory)
       console.log(`  [${label}] embedded: ${embedded} nodes`)
       assert(embedded === 3, `${label}: all 3 nodes embedded`)
     } catch (err) {

@@ -6,17 +6,7 @@ import {
 import { migrateHistoryIds } from '../../src/infra/persistence.js'
 import { createReactiveState } from '../../src/infra/state.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
-
-function assertDeepEqual(a, b, msg) {
-  assert(JSON.stringify(a) === JSON.stringify(b), msg)
-}
+import { assert, assertDeepEqual, summary } from '../lib/assert.js'
 
 // --- 헬퍼 ---
 const makeHistory = (n) => Array.from({ length: n }, (_, i) => ({
@@ -568,8 +558,7 @@ async function run() {
     assert(prompt.messages[0].content.includes('이전 요약'), 'placeholder: merge instruction triggered')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

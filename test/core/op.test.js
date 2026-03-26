@@ -6,13 +6,7 @@ import {
   observe, updateState, getState, parallel, spawn,
 } from '../../src/core/op.js'
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 console.log('Op ADT tests')
 
@@ -128,6 +122,5 @@ Free.runWithTask(runner)(composed).then(result => {
     return Task.of(functor.next('ok'))
   })(allFields)
 }).then(() => {
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 })

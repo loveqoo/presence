@@ -5,14 +5,7 @@ import { connectMCPServer } from '../../src/infra/mcp.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { z } from 'zod'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // --- 미니 MCP SSE 서버 ---
 // Node http + SSEServerTransport로 테스트용 서버 구성
@@ -169,8 +162,7 @@ async function run() {
     await testServer.close()
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

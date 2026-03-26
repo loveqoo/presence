@@ -1,10 +1,34 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { execSync } from 'child_process'
 import { resolve, join } from 'path'
+import { z } from 'zod'
 import { t } from '../i18n/index.js'
 import fp from '../lib/fun-fp.js'
 
 const { Maybe } = fp
+
+// --- 도구 인자 스키마 ---
+
+const FileReadArgs   = z.object({ path: z.string().min(1), maxLines: z.number().int().nonnegative().optional(), tailLines: z.number().int().positive().optional() })
+const FileWriteArgs  = z.object({ path: z.string().min(1), content: z.string() })
+const FileListArgs   = z.object({ path: z.string().min(1) })
+const WebFetchArgs   = z.object({ url: z.string().min(1) })
+const ShellExecArgs  = z.object({ command: z.string().min(1) })
+const CalculateArgs  = z.object({ expression: z.string().min(1) })
+
+// 필수 인자 누락 → i18n 메시지, 타입 오류 → descriptive error
+const parseArgs = (schema, args, toolName) => {
+  const result = schema.safeParse(args ?? {})
+  if (!result.success) {
+    const first = result.error.issues[0]
+    const arg = first.path.join('.') || 'args'
+    const msg = first.code === 'invalid_type' && first.received === undefined
+      ? t('error.arg_required', { tool: toolName, arg })
+      : `${toolName}: ${arg}: ${first.message}`
+    throw new Error(msg)
+  }
+  return result.data
+}
 
 // --- 경로 검증 (순수) ---
 
@@ -58,19 +82,15 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['path'],
       },
-      handler: ({ path, maxLines, tailLines } = {}) => {
-        if (!path) throw new Error(t('error.arg_required', { tool: 'file_read', arg: 'path' }))
+      handler: (rawArgs) => {
+        const { path, maxLines, tailLines } = parseArgs(FileReadArgs, rawArgs, 'file_read')
         const resolved = resolvePath(path)
         checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path }))
         const content = readFileSync(resolved, 'utf-8')
         const lines = content.split('\n')
-        if (tailLines != null && Number.isInteger(tailLines) && tailLines > 0) {
-          return lines.slice(-tailLines).join('\n')
-        }
-        if (maxLines != null && Number.isInteger(maxLines) && maxLines > 0) {
-          return lines.slice(0, maxLines).join('\n')
-        }
+        if (tailLines != null) return lines.slice(-tailLines).join('\n')
+        if (maxLines) return lines.slice(0, maxLines).join('\n')
         return content
       },
     },
@@ -86,8 +106,8 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['path', 'content'],
       },
-      handler: ({ path, content } = {}) => {
-        if (!path || content == null) throw new Error(t('error.arg_required', { tool: 'file_write', arg: 'path, content' }))
+      handler: (rawArgs) => {
+        const { path, content } = parseArgs(FileWriteArgs, rawArgs, 'file_write')
         const resolved = resolvePath(path)
         checkAccess(resolved)
         writeFileSync(resolved, content, 'utf-8')
@@ -105,8 +125,8 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['path'],
       },
-      handler: ({ path: dirPath } = {}) => {
-        if (!dirPath) throw new Error(t('error.arg_required', { tool: 'file_list', arg: 'path' }))
+      handler: (rawArgs) => {
+        const { path: dirPath } = parseArgs(FileListArgs, rawArgs, 'file_list')
         const resolved = resolvePath(dirPath)
         checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.dir_not_found', { path: dirPath }))
@@ -139,8 +159,8 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['url'],
       },
-      handler: async ({ url } = {}) => {
-        if (!url) throw new Error(t('error.arg_required', { tool: 'web_fetch', arg: 'url' }))
+      handler: async (rawArgs) => {
+        const { url } = parseArgs(WebFetchArgs, rawArgs, 'web_fetch')
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 15_000)
         try {
@@ -164,8 +184,8 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['command'],
       },
-      handler: ({ command } = {}) => {
-        if (!command) throw new Error(t('error.arg_required', { tool: 'shell_exec', arg: 'command' }))
+      handler: (rawArgs) => {
+        const { command } = parseArgs(ShellExecArgs, rawArgs, 'shell_exec')
         try {
           return execSync(command, { encoding: 'utf-8', timeout: 30_000 }).trim()
         } catch (e) {
@@ -184,8 +204,8 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['expression'],
       },
-      handler: ({ expression } = {}) => {
-        if (!expression) throw new Error(t('error.arg_required', { tool: 'calculate', arg: 'expression' }))
+      handler: (rawArgs) => {
+        const { expression } = parseArgs(CalculateArgs, rawArgs, 'calculate')
         try {
           const result = new Function(`return (${expression})`)()
           if (typeof result !== 'number' || !isFinite(result)) throw new Error('Invalid result')

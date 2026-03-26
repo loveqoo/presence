@@ -6,13 +6,7 @@ import {
 
 const msg = (text) => [{ role: 'user', content: text }]
 
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('Free + Mock interpreter integration tests')
@@ -91,8 +85,7 @@ async function run() {
     assert(log.length === 5, 'full flow: 5 ops executed')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

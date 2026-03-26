@@ -6,14 +6,7 @@ import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-regis
 import { createReactiveState } from '../../src/infra/state.js'
 import { Phase } from '../../src/core/agent.js'
 import { createDelegateActor, createEventActor, createTurnActor, forkTask } from '../../src/infra/actors.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('A2A client tests')
@@ -343,8 +336,7 @@ async function run() {
     assert(state.get('delegates.pending').length === 0, 'periodic poll: removed from pending')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

@@ -1,14 +1,7 @@
 import { createTracedInterpreter } from '../../src/interpreter/traced.js'
 import { createTestInterpreter } from '../../src/interpreter/test.js'
 import { askLLM, executeTool, respond, runFreeWithStateT } from '../../src/core/op.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 const msg = (t) => [{ role: 'user', content: t }]
 const initialState = {}
@@ -94,8 +87,7 @@ async function run() {
     assert(result === 'custom', 'passthrough: inner result preserved')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

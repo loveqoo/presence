@@ -92,6 +92,26 @@ const COMMANDS = {
     },
   },
 
+  '/mcp': {
+    description: 'MCP server management: list / enable <id> / disable <id>',
+    handler: ({ mcp, onOutput, input }) => {
+      if (!mcp || mcp.list().length === 0) { onOutput('No MCP servers configured.'); return }
+      const args = input.trim().split(/\s+/).slice(1)
+      const sub = args[0] || 'list'
+      if (sub === 'list') {
+        const lines = mcp.list().map(s => `  ${s.enabled ? '●' : '○'} ${s.prefix}  ${s.serverName}  (${s.toolCount} tools)`)
+        onOutput(`MCP servers:\n${lines.join('\n')}`)
+      } else if (sub === 'enable' || sub === 'disable') {
+        const prefix = args[1]
+        if (!prefix) { onOutput(`Usage: /mcp ${sub} <id>  (e.g. mcp0)`); return }
+        const ok = sub === 'enable' ? mcp.enable(prefix) : mcp.disable(prefix)
+        onOutput(ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}`)
+      } else {
+        onOutput('Usage: /mcp [list | enable <id> | disable <id>]')
+      }
+    },
+  },
+
   '/quit': {
     description: 'Exit the agent',
     handler: ({ stop }) => stop(),
@@ -103,12 +123,12 @@ const COMMANDS = {
   },
 }
 
-const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegistry, memory }) => {
+const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegistry, memory, mcp }) => {
   let running = true
   let turnCount = 0
 
-  const ctx = () => ({
-    state, toolRegistry, agentRegistry, memory,
+  const ctx = (input = '') => ({
+    state, toolRegistry, agentRegistry, memory, mcp, input,
     onOutput, turnCount,
     stop: () => { running = false },
   })
@@ -116,7 +136,7 @@ const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegist
   const handleInput = async (input) => {
     const cmd = COMMANDS[input.split(/\s/)[0]]
     if (cmd) {
-      cmd.handler(ctx())
+      cmd.handler(ctx(input))
       return null
     }
 

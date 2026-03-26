@@ -2,14 +2,7 @@ import { createHeartbeat } from '../../src/infra/heartbeat.js'
 import { createReactiveState } from '../../src/infra/state.js'
 import { createEventActor, createTurnActor, forkTask } from '../../src/infra/actors.js'
 import { Phase } from '../../src/core/agent.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 // 테스트용: EventActor 내부 큐 enqueue를 추적하는 mock eventActor
 const createMockEventActor = () => {
@@ -257,8 +250,7 @@ async function run() {
     assert(mockActor.enqueued.length > countBefore, 'non-heartbeat inFlight: heartbeat still enqueued')
   }
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()

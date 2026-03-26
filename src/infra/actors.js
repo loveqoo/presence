@@ -1,12 +1,11 @@
 import fp from '../lib/fun-fp.js'
-import { TIERS } from './memory.js'
-import { MEMORY, HISTORY } from '../core/policies.js'
+import { HISTORY } from '../core/policies.js'
+const MEM0_USER_ID = 'default'
 import { stripTransient } from './persistence.js'
-import { findPromotionCandidates, applyPromotions } from './memory-maintenance.js'
 import {
   extractForCompaction, buildCompactionPrompt, createSummaryEntry,
 } from './history-compaction.js'
-import { withEventMeta, eventToPrompt, todoFromEvent, isDuplicate } from './events.js'
+import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, todoFromEvent, isDuplicate } from './events.js'
 import { getA2ATaskStatus } from './a2a-client.js'
 
 const { Actor, Task, Maybe } = fp
@@ -16,60 +15,53 @@ const { Actor, Task, Maybe } = fp
 const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, resolve))
 
 // --- MemoryActor ---
-// recall, save, embed, prune, promote, removeWorking 통합
-// Actor 큐 직렬화로 순서 보장
+// mem0 기반: recall → mem0.search, save → mem0.add
+// embed/prune/promote/removeWorking/saveDisk → no-op (mem0가 내부적으로 처리)
 
-const createMemoryActor = ({ graph, embedder, logger }) => Actor({
-  init: { graph, embedder, logger },
+const createMemoryActor = ({ mem0, adapter, logger }) => Actor({
+  init: { mem0, adapter, logger },
   handle: (state, msg) => {
-    const { graph, embedder, logger } = state
+    const { mem0, adapter, logger } = state
+
     switch (msg.type) {
-      case 'recall':
+      case 'recall': {
+        if (!mem0) return [[], state]
         return new Task((reject, resolve) =>
-          graph.recall(msg.input, { embedder, topK: 10, logger })
-            .then(memories => resolve([memories, state]))
-            .catch(reject)
+          mem0.search(msg.input, { userId: MEM0_USER_ID, limit: 10 })
+            .then(result => {
+              const memories = (result.results || []).map(r => ({ label: r.memory }))
+              resolve([memories, state])
+            })
+            .catch(e => {
+              ;(logger || console).warn('mem0 recall failed', { error: e.message })
+              resolve([[], state])
+            })
         )
-
-      case 'save':
-        graph.addNode(msg.node)
-        return new Task((reject, resolve) =>
-          graph.save()
-            .then(() => resolve(['ok', state]))
-            .catch(reject)
-        )
-
-      case 'embed':
-        return new Task((reject, resolve) =>
-          graph.embedPending(embedder, { logger })
-            .then(count => resolve([count, state]))
-            .catch(reject)
-        )
-
-      case 'prune': {
-        const pruned = graph.pruneByTier(msg.tier, msg.max)
-        return [pruned, state]
       }
 
-      case 'promote': {
-        const candidates = findPromotionCandidates(graph)
-        if (candidates.length > 0) applyPromotions(graph, candidates, logger)
-        return [candidates.length, state]
+      case 'save': {
+        if (!mem0) return ['skip', state]
+        const { data } = msg.node || {}
+        if (!data?.input) return ['skip', state]
+        return new Task((reject, resolve) =>
+          mem0.add([
+            { role: 'user', content: data.input },
+            { role: 'assistant', content: data.output || '' },
+          ], { userId: MEM0_USER_ID })
+            .then(() => {
+              if (adapter) adapter._refreshCache().catch(() => {})
+              resolve(['ok', state])
+            })
+            .catch(e => {
+              ;(logger || console).warn('mem0 save failed', { error: e.message })
+              resolve(['skip', state])
+            })
+        )
       }
 
-      case 'removeWorking':
-        graph.removeNodesByTier(TIERS.WORKING)
-        return ['ok', state]
-
-      case 'saveDisk':
-        return new Task((reject, resolve) =>
-          graph.save()
-            .then(() => resolve(['saved', state]))
-            .catch(reject)
-        )
-
+      // mem0가 내부적으로 처리하는 작업들 — no-op
       default:
-        return ['unknown', state]
+        return ['no-op', state]
     }
   },
 })
@@ -97,7 +89,7 @@ const createCompactionActor = ({ llm, logger }) => Actor({
           resolve([{ summary, extractedIds, epoch: msg.epoch }, state])
         })
         .catch(e => {
-          if (logger) logger.warn('Compaction failed', { error: e.message })
+          ;(logger || console).warn('Compaction failed', { error: e.message })
           resolve(['skip', state])
         })
     })
@@ -155,9 +147,9 @@ const applyCompaction = (reactiveState, { summary, extractedIds }) => {
 
 const createTurnActor = (runTurn) => Actor({
   init: {},
-  handle: (_state, { input, source }) =>
+  handle: (_state, { input, source, allowedTools }) =>
     new Task((reject, resolve) => {
-      runTurn(input, { source })
+      runTurn(input, { source, allowedTools: allowedTools || [] })
         .then(result => resolve([result, _state]))
         .catch(err => resolve([{ _turnError: true, message: err.message }, _state]))
     }),
@@ -189,7 +181,7 @@ const projectEvents = (state, { queue, inFlight, deadLetter, lastProcessed }) =>
   if (lastProcessed !== undefined) state.set('events.lastProcessed', lastProcessed)
 }
 
-const createEventActor = ({ turnActor, state, logger }) => {
+const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJobName }) => {
   let actor
 
   actor = Actor({
@@ -214,15 +206,32 @@ const createEventActor = ({ turnActor, state, logger }) => {
           const ts = state.get('turnState')
           if (!ts || ts.tag !== 'idle') return ['no-op:busy', s]
 
-          const [event, ...rest] = s.queue
+          let [event, ...rest] = s.queue
+
+          // todo_review: 대기 중 todos가 없으면 turn 시작 없이 skip
+          const isTodoReview = event.type === 'todo_review' ||
+            (todoReviewJobName && event.jobName === todoReviewJobName)
+          if (isTodoReview) {
+            const pending = (state.get('todos') || []).filter(t => !t.done)
+            if (pending.length === 0) {
+              const skipped = { ...s, queue: rest }
+              projectEvents(state, skipped)
+              if (rest.length > 0) actor.send({ type: 'drain' }).fork(() => {}, () => {})
+              return ['no-op:no-todos', skipped]
+            }
+            // todos 있으면 동적 프롬프트 주입
+            event = { ...event, prompt: buildTodoReviewPrompt(pending) }
+          }
+
           const draining = { ...s, queue: rest, inFlight: event }
           projectEvents(state, draining)
 
           return new Task((reject, resolve) => {
-            forkTask(turnActor.send({ input: eventToPrompt(event), source: 'event' }))
+            forkTask(turnActor.send({ input: eventToPrompt(event), source: 'event', allowedTools: event.allowedTools || [] }))
               .then(result => {
                 if (result?._turnError) throw new Error(result.message)
                 applyTodo(state, event)
+                if (onEventDone) onEventDone(event, { success: true, result })
                 const done = { ...draining, queue: [...draining.queue], inFlight: null, lastProcessed: event }
                 // queue는 drain 중에 enqueue로 변경되었을 수 있으므로 Actor state에서 읽지 않음
                 // (Actor 직렬화이므로 drain 완료 전 enqueue는 큐에 대기)
@@ -246,7 +255,8 @@ const createEventActor = ({ turnActor, state, logger }) => {
                   deadLetter: [...draining.deadLetter, deadLetterEntry],
                 }
                 projectEvents(state, failed)
-                if (logger) logger.warn('Event processing failed', { eventId: event.id, error: err.message })
+                if (onEventDone) onEventDone(event, { success: false, error: err.message })
+                ;(logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
                 // 실패해도 큐에 남은 이벤트 계속 처리
                 if (failed.queue.length > 0) {
                   actor.send({ type: 'drain' }).fork(() => {}, () => {})
@@ -376,7 +386,7 @@ const createDelegateActor = ({ state, eventActor, agentRegistry, logger, fetchFn
                       result: r.result,
                     })
                     eventActor.send({ type: 'enqueue', event: enriched }).fork(() => {}, () => {})
-                    if (logger) logger.info(`Delegate ${r.result.status}: ${r.entry.target}/${r.entry.taskId}`)
+                    ;(logger || console).info(`Delegate ${r.result.status}: ${r.entry.target}/${r.entry.taskId}`)
                   })
                 state.set('delegates.pending', settled.filter(r => !r.done).map(r => r.entry))
                 resolve(['polled', { ...polling, polling: false }])

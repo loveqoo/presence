@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import { bootstrap } from '../main.js'
+import { clearDebugState } from '../core/agent.js'
 
 // =============================================================================
 // State → WebSocket Bridge
@@ -38,10 +39,25 @@ const createStateBridge = (state, wss) => {
 // Slash commands (App.js에서 UI 의존 없는 것만 추출)
 // =============================================================================
 
-const handleSlashCommand = (input, { state, tools, memory }) => {
+const handleSlashCommand = (input, { state, tools, memory, mcpControl }) => {
+  if (input.startsWith('/mcp')) {
+    if (!mcpControl || mcpControl.list().length === 0) return { handled: true, result: { type: 'system', content: 'No MCP servers configured.' } }
+    const args = input.trim().split(/\s+/).slice(1)
+    const sub = args[0] || 'list'
+    if (sub === 'list') {
+      const lines = mcpControl.list().map(s => `${s.enabled ? '●' : '○'} ${s.prefix}  ${s.serverName}  (${s.toolCount} tools)`)
+      return { handled: true, result: { type: 'system', content: `MCP servers:\n${lines.join('\n')}` } }
+    }
+    if (sub === 'enable' || sub === 'disable') {
+      const prefix = args[1]
+      if (!prefix) return { handled: true, result: { type: 'system', content: `Usage: /mcp ${sub} <id>` } }
+      const ok = sub === 'enable' ? mcpControl.enable(prefix) : mcpControl.disable(prefix)
+      return { handled: true, result: { type: 'system', content: ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}` } }
+    }
+    return { handled: true, result: { type: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' } }
+  }
   if (input === '/clear') {
-    state.set('context.conversationHistory', [])
-    state.set('_compactionEpoch', (state.get('_compactionEpoch') || 0) + 1)
+    clearDebugState(state)
     return { handled: true, result: { type: 'system', content: 'Conversation cleared.' } }
   }
   if (input === '/status') {
@@ -167,7 +183,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   })
 
   // Background tasks
-  if (app.config.heartbeat.enabled) app.heartbeat.start()
+  if (app.config.scheduler.enabled) app.schedulerActor.send({ type: 'start' }).fork(() => {}, () => {})
   app.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
 
   // Graceful shutdown

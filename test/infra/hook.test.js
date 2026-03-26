@@ -1,12 +1,5 @@
 import { createHooks, createState } from '../../src/infra/state.js'
-
-let passed = 0
-let failed = 0
-
-function assert(condition, msg) {
-  if (condition) { passed++; console.log(`  ✓ ${msg}`) }
-  else { failed++; console.error(`  ✗ ${msg}`) }
-}
+import { assert, summary } from '../lib/assert.js'
 
 async function run() {
   console.log('createHooks tests')
@@ -93,8 +86,7 @@ async function run() {
   h8.fire('nothing', 1, null) // should not throw
   assert(true, 'fire on unregistered path: no error')
 
-  console.log(`\n${passed} passed, ${failed} failed`)
-  if (failed > 0) process.exit(1)
+  summary()
 }
 
 run()
