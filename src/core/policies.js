@@ -35,4 +35,5 @@ export const SYSTEM_JOBS = Object.freeze({
 export const SESSION_TYPE = Object.freeze({
   USER: 'user',
   SCHEDULED: 'scheduled',
+  AGENT: 'agent',  // 서브 에이전트 세션: persistence 없음, 장기 유지
 })

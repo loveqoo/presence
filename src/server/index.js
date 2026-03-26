@@ -206,6 +206,22 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   })
   const defaultSession = defaultEntry.session
 
+  // config.agents → 서브 에이전트 세션 생성 + agentRegistry 등록
+  for (const agentDef of (globalCtx.config.agents || [])) {
+    const agentEntry = sessionManager.create({
+      id: `agent-${agentDef.name}`,
+      type: SESSION_TYPE.AGENT,
+    })
+    globalCtx.agentRegistry.register({
+      name: agentDef.name,
+      description: agentDef.description,
+      capabilities: agentDef.capabilities || [],
+      type: 'local',
+      run: (task) => agentEntry.session.handleInput(task),
+    })
+    agentEntry.session.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
+  }
+
   // 정적 파일 (web/ 빌드 결과)
   try {
     const { join } = await import('node:path')

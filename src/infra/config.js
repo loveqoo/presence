@@ -36,6 +36,11 @@ const ConfigSchema = z.object({
     }),
   }),
   delegatePolling: z.object({ intervalMs: z.number().positive() }),
+  agents: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    capabilities: z.array(z.string()).default([]),
+  })).default([]),
   prompt: z.object({
     maxContextTokens: z.number().int().positive(),
     reservedOutputTokens: z.number().int().positive(),
@@ -79,6 +84,7 @@ const DEFAULTS = {
   delegatePolling: {
     intervalMs: 10_000,
   },
+  agents: [],
   prompt: {
     maxContextTokens: 8000,
     reservedOutputTokens: 1000,

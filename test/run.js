@@ -60,8 +60,13 @@ const tests = [
   'test/core/turn-concurrency.test.js',
   // E2E bootstrap
   'test/e2e/bootstrap.test.js',
+  // Interpreter
+  'test/interpreter/delegate.test.js',
+  // Infra
+  'test/infra/supervisor-session.test.js',
   // Server
   'test/server/server.test.js',
+  'test/server/supervisor.test.js',
 ]
 
 let allPassed = true

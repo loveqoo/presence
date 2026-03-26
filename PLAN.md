@@ -71,13 +71,18 @@
 
 ---
 
+## 완료된 Phase
+
+### Phase 8: 계층적 에이전트 (Supervisor 패턴) ✅
+
+- [x] `SESSION_TYPE.AGENT` — 영속성 없음, schedulerActor 없음, job 툴 없음
+- [x] `config.agents` — 서브 에이전트 선언적 정의 (name, description, capabilities)
+- [x] `src/server/index.js` — config.agents → AGENT 세션 생성 + agentRegistry 등록
+- [x] `Delegate` Op — Free Monad DSL, DelegateInterpreter (local/remote)
+- [x] `agentRegistry.list()` lazy — 세션 생성 후 등록된 에이전트도 프롬프트에 포함
+- [x] 테스트: delegate.test.js (29), supervisor-session.test.js (24), supervisor.test.js (60) — 총 113 assertions
+
 ## 미착수 Phase
-
-### Phase 8: 계층적 에이전트
-
-| Step | 내용 | 선행 조사 |
-|------|------|----------|
-| **43** | 계층적 에이전트 (Supervisor 패턴) | Google ADK 아키텍처 조사 |
 
 ## TODO
 

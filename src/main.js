@@ -237,8 +237,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   })
 
   // --- Persistence (restore + connect) ---
-  // ephemeral 세션(type:'scheduled')은 restore/flush 없음
-  const isEphemeral = type === SESSION_TYPE.SCHEDULED
+  // ephemeral 세션(scheduled) 및 서브 에이전트 세션(agent)은 restore/flush 없음
+  const isEphemeral = type === SESSION_TYPE.SCHEDULED || type === SESSION_TYPE.AGENT
   const persistence = isEphemeral ? null : createPersistence(persistenceCwd ? { cwd: persistenceCwd } : {})
   if (!isEphemeral) {
     const restored = persistence.restore()
@@ -324,14 +324,14 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
 
   // --- Agent ---
   const tools = persona.filterTools(toolRegistry.list())
-  const agents = agentRegistry.list()
+  const getAgents = () => agentRegistry.list()
   const responseFormatMode = config.llm.responseFormat
 
   const execute = safeRunTurn({ interpret: tracedInterpret, ST }, state, {
     memoryActor, compactionActor, persistenceActor, logger,
   })
   const agent = createAgent({
-    tools, agents, persona: personaConfig,
+    tools, getAgents, persona: personaConfig,
     responseFormatMode,
     maxRetries: config.llm.maxRetries,
     maxIterations: config.maxIterations,
@@ -395,34 +395,34 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     pollIntervalMs: config.scheduler.pollIntervalMs,
   })
 
-  // --- Job 툴 등록 ---
-  const jobTools = createJobTools({ store: jobStore, eventActor })
-  for (const tool of jobTools) toolRegistry.register(tool)
+  // --- Job 툴 등록 (USER 세션만: 중복 등록 방지, 서브 에이전트는 불필요) ---
+  if (type === SESSION_TYPE.USER) {
+    const jobTools = createJobTools({ store: jobStore, eventActor })
+    for (const tool of jobTools) toolRegistry.register(tool)
 
-  // --- read_todos 툴 ---
-  toolRegistry.register({
-    name: 'read_todos',
-    description: '현재 대기 중인 TODO 항목 목록을 반환합니다.',
-    parameters: { type: 'object', properties: {} },
-    handler: () => {
-      const todos = (state.get('todos') || []).filter(t => !t.done)
-      if (todos.length === 0) return '대기 중인 TODO 항목이 없습니다.'
-      return formatTodosAsLines(todos).join('\n')
-    },
-  })
+    toolRegistry.register({
+      name: 'read_todos',
+      description: '현재 대기 중인 TODO 항목 목록을 반환합니다.',
+      parameters: { type: 'object', properties: {} },
+      handler: () => {
+        const todos = (state.get('todos') || []).filter(t => !t.done)
+        if (todos.length === 0) return '대기 중인 TODO 항목이 없습니다.'
+        return formatTodosAsLines(todos).join('\n')
+      },
+    })
 
-  // --- Todo Review 시스템 Job ---
-  if (config.scheduler.todoReview.enabled) {
-    const exists = jobStore.listJobs().find(j => j.name === SYSTEM_JOBS.TODO_REVIEW)
-    if (!exists) {
-      const cron = config.scheduler.todoReview.cron
-      jobStore.createJob({
-        name: SYSTEM_JOBS.TODO_REVIEW,
-        prompt: SYSTEM_JOBS.TODO_REVIEW,
-        cron,
-        maxRetries: 1,
-        nextRun: calcNextRun(cron),
-      })
+    if (config.scheduler.todoReview.enabled) {
+      const exists = jobStore.listJobs().find(j => j.name === SYSTEM_JOBS.TODO_REVIEW)
+      if (!exists) {
+        const cron = config.scheduler.todoReview.cron
+        jobStore.createJob({
+          name: SYSTEM_JOBS.TODO_REVIEW,
+          prompt: SYSTEM_JOBS.TODO_REVIEW,
+          cron,
+          maxRetries: 1,
+          nextRun: calcNextRun(cron),
+        })
+      }
     }
   }
 
@@ -488,7 +488,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   }
 
   return {
-    agent, state, tools, agents,
+    agent, state, tools,
+    get agents() { return agentRegistry.list() },
     handleInput, handleApproveResponse, handleCancel,
     schedulerActor, delegateActor, eventActor, emit,
     shutdown,
