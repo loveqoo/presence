@@ -234,6 +234,7 @@ test('입력 히스토리 ↑↓ 탐색', async ({ page }) => {
   await input.fill('BBB')
   await input.press('Enter')
   await expect(page.locator('.msg-agent').nth(1)).toBeVisible({ timeout: 10000 })
+  await expect(input).toBeEnabled({ timeout: 5000 })
 
   // ↑ → BBB, ↑ → AAA
   await input.press('ArrowUp')
