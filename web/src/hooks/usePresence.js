@@ -83,8 +83,6 @@ const usePresence = (sessionId = 'user-default') => {
                 break
               case 'lastTurn':
                 setStatus(deriveStatus(stateRef.current))
-                // 턴 완료: tools 갱신 (/mcp enable|disable 등 반영)
-                loadTools()
                 break
               case 'turn':
                 setTurn(value || 0)
@@ -128,11 +126,14 @@ const usePresence = (sessionId = 'user-default') => {
       })
       const data = await res.json()
       setMessages(prev => [...prev, { role: data.type === 'system' ? 'system' : 'agent', content: data.content }])
+      // 슬래시 명령(/mcp enable|disable 등)은 agent turn 없이 즉시 반환되므로
+      // lastTurn WS push를 기다리지 않고 여기서 tools를 갱신
+      loadTools()
       return data
     } catch (err) {
       setMessages(prev => [...prev, { role: 'error', content: err.message }])
     }
-  }, [apiBase])
+  }, [apiBase, loadTools])
 
   const clearMessages = useCallback(() => setMessages([]), [])
 
