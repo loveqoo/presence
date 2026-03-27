@@ -91,9 +91,8 @@ const waitForServer = async (baseUrl, { maxMs = 10_000, intervalMs = 300 } = {})
 // 서버 프로세스 백그라운드 spawn (터미널 종료 후에도 유지)
 const spawnServer = async (port) => {
   const { spawn } = await import('node:child_process')
-  const { fileURLToPath } = await import('node:url')
-  const { join, dirname } = await import('node:path')
-  const serverPath = join(dirname(fileURLToPath(import.meta.url)), 'server/index.js')
+  const { createRequire } = await import('node:module')
+  const serverPath = createRequire(import.meta.url).resolve('@presence/server')
   const child = spawn(process.execPath, [serverPath], {
     detached: true,
     stdio: 'ignore',

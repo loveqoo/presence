@@ -329,7 +329,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   try {
     const { join } = await import('node:path')
     const { existsSync } = await import('node:fs')
-    const webDist = join(import.meta.dirname, '../../web/dist')
+    const webDist = join(import.meta.dirname, '../../../web/dist')
     if (existsSync(webDist)) {
       expressApp.use(express.static(webDist))
       expressApp.get('/{*splat}', (_req, res) => res.sendFile(join(webDist, 'index.html')))
