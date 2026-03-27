@@ -149,6 +149,31 @@ if (noNetwork && skipped > 0) {
   console.log(`    To run all tests: node test/run.js`)
 }
 
+// --- Playwright (웹 브라우저 E2E) ---
+if (!noNetwork) {
+  console.log('\n--- Playwright (web browser E2E) ---')
+  try {
+    const pwOutput = execSync('npx playwright test --reporter=list', {
+      cwd: join(root, 'web'),
+      encoding: 'utf-8',
+      timeout: 120000,
+    })
+    const pwPassed = (pwOutput.match(/(\d+) passed/)?.[1]) || '0'
+    const pwFailed = (pwOutput.match(/(\d+) failed/)?.[1]) || '0'
+    totalPassed += Number(pwPassed)
+    totalFailed += Number(pwFailed)
+    if (Number(pwFailed) > 0) allPassed = false
+    console.log(`  ✓ web/e2e/chat.spec.js — ${pwPassed} passed, ${pwFailed} failed`)
+  } catch (e) {
+    allPassed = false
+    filesFailed++
+    console.error('  ✗ Playwright FAILED')
+    if (e.stdout) console.error(e.stdout.trim().split('\n').slice(-5).join('\n'))
+    if (e.stderr) console.error(e.stderr.trim().split('\n').slice(0, 3).join('\n'))
+  }
+  console.log(`\n=== Grand Total: ${totalPassed} passed, ${totalFailed} failed${filesFailed > 0 ? `, ${filesFailed} file(s) errored` : ''} ===`)
+}
+
 if (!allPassed || totalFailed > 0 || filesFailed > 0) {
   process.exit(1)
 }
