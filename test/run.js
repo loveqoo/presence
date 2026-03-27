@@ -5,6 +5,20 @@ import { dirname, join } from 'path'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 
+// 네트워크 바인딩(HTTP/WebSocket listen)이 필요한 테스트.
+// EPERM 환경(샌드박스 등)에서는 --no-network 플래그로 건너뜁니다.
+const NETWORK_TESTS = new Set([
+  'test/infra/llm.test.js',
+  'test/infra/mcp-sse.test.js',
+  'test/infra/remote-state.test.js',
+  'test/infra/session.test.js',
+  'test/infra/supervisor-session.test.js',
+  'test/e2e/bootstrap.test.js',
+  'test/e2e/server-e2e.test.js',
+  'test/server/server.test.js',
+  'test/server/supervisor.test.js',
+])
+
 const tests = [
   'test/core/makeOp.test.js',
   'test/core/op.test.js',
@@ -71,14 +85,23 @@ const tests = [
   'test/server/supervisor.test.js',
 ]
 
+const noNetwork = process.argv.includes('--no-network')
+
 let allPassed = true
 let totalPassed = 0
 let totalFailed = 0
 let filesFailed = 0
+let skipped = 0
 
-console.log('=== Presence Test Suite ===\n')
+console.log(`=== Presence Test Suite${noNetwork ? ' (--no-network)' : ''} ===\n`)
 
 for (const test of tests) {
+  if (noNetwork && NETWORK_TESTS.has(test)) {
+    console.log(`  - ${test} (skipped: network)`)
+    skipped++
+    continue
+  }
+
   try {
     const output = execSync(`node ${test}`, { cwd: root, encoding: 'utf-8', timeout: 30000 })
     const match = output.match(/(\d+) passed, (\d+) failed/)
@@ -113,7 +136,12 @@ for (const test of tests) {
   }
 }
 
-console.log(`\n=== Total: ${totalPassed} passed, ${totalFailed} failed${filesFailed > 0 ? `, ${filesFailed} file(s) errored` : ''} ===`)
+const skippedNote = skipped > 0 ? `, ${skipped} skipped (network)` : ''
+console.log(`\n=== Total: ${totalPassed} passed, ${totalFailed} failed${filesFailed > 0 ? `, ${filesFailed} file(s) errored` : ''}${skippedNote} ===`)
+
+if (noNetwork && skipped > 0) {
+  console.log(`    To run all tests: node test/run.js`)
+}
 
 if (!allPassed || totalFailed > 0 || filesFailed > 0) {
   process.exit(1)
