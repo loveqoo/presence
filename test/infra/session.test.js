@@ -113,6 +113,49 @@ async function run() {
       await session.shutdown()
     }
 
+    // SD3b. allowedTools: scheduled_job에 allowedTools 있을 때 실행이 깨지지 않음
+    // (이전 버그: createAgentTurn 호출 시 agents 변수 없어 ReferenceError)
+    {
+      const done = []
+      const toolCalled = []
+
+      // globalCtx.toolRegistry에 테스트 툴 등록
+      const trackerTool = {
+        name: 'tracker',
+        description: 'track calls',
+        parameters: { type: 'object', properties: {} },
+        handler: () => { toolCalled.push(1); return 'tracked' },
+      }
+
+      // allowedTools를 사용하는 session: USER로 만들어야 job 툴 포함
+      const freshCtx = await createGlobalContext(config)
+      const sd3bSession = createSession(freshCtx, {
+        type: 'user',
+        onScheduledJobDone: (event, outcome) => done.push({ event, outcome }),
+      })
+      freshCtx.toolRegistry.register(trackerTool)
+
+      await new Promise((resolve) => {
+        sd3bSession.eventActor.send({
+          type: 'enqueue',
+          event: {
+            id: 'evt-sd3b', type: 'scheduled_job', runId: 'run-sd3b', jobId: 'job-sd3b',
+            prompt: '작업 실행', attempt: 1, createdAt: Date.now(),
+            allowedTools: ['tracker'],  // 허용 툴 목록 설정
+          },
+        }).fork(() => {}, resolve)
+      })
+
+      await delay(600)
+
+      // allowedTools > 0 분기가 실행돼도 오류 없이 완료
+      assert(done.length === 1, 'SD3b: onScheduledJobDone called with allowedTools set')
+      assert(done[0].outcome.success === true, 'SD3b: turn succeeds with allowedTools filtering')
+
+      await sd3bSession.shutdown()
+      await freshCtx.shutdown()
+    }
+
     // SD4. idle timeout: turnState idle 전환 후 콜백 실행
     {
       const idled = []

@@ -33,6 +33,7 @@ const tests = [
   'test/infra/events.test.js',
   'test/infra/scheduler.test.js',
   'test/infra/session.test.js',
+  'test/infra/remote-state.test.js',
   'test/infra/local-tools.test.js',
   'test/infra/config.test.js',
   'test/infra/persona.test.js',
