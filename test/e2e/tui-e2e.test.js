@@ -13,6 +13,13 @@
  *  TE6.  turn 카운터 증가
  *  TE7.  /status 슬래시 커맨드
  *  TE8.  /clear 후 히스토리 초기화
+ *  TE9.  /tools 슬래시 커맨드 — 도구 목록 system 메시지
+ *  TE10. 빈 입력 → 전송 안됨 (LLM 호출 없음)
+ *  TE11. 공백 입력 → 전송 안됨
+ *  TE12. working 중 입력 거부 — 두 번째 메시지 무시
+ *  TE13. 입력 히스토리 ↑↓ 탐색
+ *  TE14. iteration — RESPOND 없는 plan → re-plan → 응답
+ *  TE15. 도구 부분 실패 → re-plan → 최종 응답
  */
 
 import React from 'react'
@@ -203,7 +210,7 @@ const setupTuiE2E = async (mockHandler) => {
     rmSync(tmpDir, { recursive: true, force: true })
   }
 
-  return { port, remoteState, lastFrame, stdin, post, get, tools, cleanup }
+  return { port, remoteState, lastFrame, stdin, post, get, tools, llmCalls: mockLLM.calls, cleanup }
 }
 
 // ---------------------------------------------------------------------------
@@ -451,6 +458,227 @@ async function run() {
       assert(!lastFrame().includes('안녕!'), 'TE8: /clear 후 메시지 초기화')
       // idle 상태는 유지
       assert(lastFrame().includes('idle'), 'TE8: /clear 후 idle 유지')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE9. /tools 슬래시 커맨드 — 도구 목록 system 메시지
+  // =========================================================================
+  {
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: '응답' })
+    )
+
+    try {
+      await delay(100)
+      await typeInput(stdin, '/tools')
+
+      await waitFor(() => lastFrame().includes('file_'), { timeout: 3000 })
+      assert(lastFrame().includes('file_'), 'TE9: /tools system 메시지에 도구 목록 표시')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE10. 빈 입력 → 전송 안됨 (LLM 호출 없음)
+  // =========================================================================
+  {
+    const { lastFrame, llmCalls, stdin, remoteState, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: '전송됨' })
+    )
+
+    try {
+      await delay(100)
+
+      // Enter만 누르기 (빈 입력)
+      stdin.write('\r')
+      await delay(200)
+
+      assert(llmCalls.length === 0, 'TE10: 빈 입력 → LLM 호출 없음')
+      assert(remoteState.get('turn') === 0, 'TE10: 빈 입력 → turn 증가 없음')
+      assert(!lastFrame().includes('전송됨'), 'TE10: 빈 입력 → 에이전트 응답 없음')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE11. 공백 입력 → 전송 안됨
+  // =========================================================================
+  {
+    const { lastFrame, llmCalls, stdin, remoteState, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: '전송됨' })
+    )
+
+    try {
+      await delay(100)
+
+      // 공백만 입력 후 Enter
+      await typeInput(stdin, '   ')
+
+      await delay(200)
+      assert(llmCalls.length === 0, 'TE11: 공백 입력 → LLM 호출 없음')
+      assert(remoteState.get('turn') === 0, 'TE11: 공백 입력 → turn 증가 없음')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE12. working 중 입력 거부 — 두 번째 메시지 무시
+  // =========================================================================
+  {
+    let resolveLLM
+    const llmGate = new Promise(r => { resolveLLM = r })
+
+    const { lastFrame, stdin, llmCalls, cleanup } = await setupTuiE2E(async (_req, n) => {
+      if (n === 1) {
+        await llmGate
+        return JSON.stringify({ type: 'direct_response', message: '첫 번째 응답' })
+      }
+      return JSON.stringify({ type: 'direct_response', message: '두 번째 응답' })
+    })
+
+    try {
+      await delay(100)
+
+      // 첫 번째 메시지 전송 (LLM이 막혀있음)
+      typeInput(stdin, '첫 번째').catch(() => {})
+
+      // working 상태 대기
+      await waitFor(() => lastFrame().includes('thinking'), { timeout: 5000 })
+
+      // working 중 두 번째 메시지 시도 — 무시되어야 함
+      await typeInput(stdin, '두 번째')
+      await delay(200)
+
+      // LLM 아직 1번만 호출됨 (두 번째 메시지는 서버에 전달 안 됨)
+      assert(llmCalls.length === 1, 'TE12: working 중 추가 메시지 → LLM 추가 호출 없음')
+
+      // LLM 해제 → 첫 번째 응답 완료
+      resolveLLM()
+      await waitFor(() => lastFrame().includes('첫 번째 응답'), { timeout: 5000 })
+      assert(lastFrame().includes('첫 번째 응답'), 'TE12: 첫 번째 응답 표시')
+      assert(!lastFrame().includes('두 번째 응답'), 'TE12: 두 번째 응답 없음')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE13. 입력 히스토리 ↑↓ 탐색
+  //       ArrowUp: \x1B[A  ArrowDown: \x1B[B
+  // =========================================================================
+  {
+    let callN = 0
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: `응답 ${++callN}` })
+    )
+
+    try {
+      await delay(100)
+
+      // 'AAA' 전송 후 완료 대기
+      await typeInput(stdin, 'AAA')
+      await waitFor(() => lastFrame().includes('응답 1'), { timeout: 10000 })
+      await waitFor(() => !lastFrame().includes('thinking'), { timeout: 5000 })
+
+      // 'BBB' 전송 후 완료 대기
+      await typeInput(stdin, 'BBB')
+      await waitFor(() => lastFrame().includes('응답 2'), { timeout: 10000 })
+      await waitFor(() => !lastFrame().includes('thinking'), { timeout: 5000 })
+
+      // ↑ → 'BBB' 복원
+      stdin.write('\x1B[A')
+      await waitFor(() => lastFrame().includes('BBB'), { timeout: 2000 })
+      assert(lastFrame().includes('BBB'), 'TE13: ↑ → 마지막 입력(BBB) 복원')
+
+      // ↑ → 'AAA' 복원
+      stdin.write('\x1B[A')
+      await waitFor(() => lastFrame().includes('AAA'), { timeout: 2000 })
+      assert(lastFrame().includes('AAA'), 'TE13: ↑↑ → 이전 입력(AAA) 복원')
+
+      // ↓ → 'BBB' 복원
+      stdin.write('\x1B[B')
+      await waitFor(() => lastFrame().includes('BBB'), { timeout: 2000 })
+      assert(lastFrame().includes('BBB'), 'TE13: ↓ → BBB 복원')
+
+      // ↓ → 빈 입력
+      stdin.write('\x1B[B')
+      await delay(100)
+      // 빈 입력 상태: 프레임에 입력 커서(>) 이후 내용 없음
+      // InputBar는 입력창에 텍스트가 없으면 > 뒤가 비어있음
+      assert(!lastFrame().match(/>\s*[A-Z]{3}/), 'TE13: ↓↓ → 입력창 비워짐')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE14. iteration — RESPOND 없는 plan → LLM re-plan → 최종 응답
+  // =========================================================================
+  {
+    let callN = 0
+    const { lastFrame, stdin, llmCalls, cleanup } = await setupTuiE2E((_req, n) => {
+      callN = n
+      if (n === 1) {
+        return JSON.stringify({
+          type: 'plan',
+          steps: [
+            { op: 'EXEC', args: { tool: 'file_list', tool_args: { path: '.' } } },
+            // RESPOND 없음 → 에이전트가 re-plan 요청
+          ],
+        })
+      }
+      return JSON.stringify({ type: 'direct_response', message: '파일을 확인했습니다.' })
+    })
+
+    try {
+      await delay(100)
+
+      await typeInput(stdin, '파일 확인')
+
+      // 최종 응답 대기 (re-plan 후 direct_response)
+      await waitFor(() => lastFrame().includes('파일을 확인했습니다.'), { timeout: 15000 })
+      assert(callN >= 2, 'TE14: LLM 2회 이상 호출 (re-plan 발생)')
+      assert(lastFrame().includes('파일을 확인했습니다.'), 'TE14: re-plan 후 최종 응답 표시')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE15. 도구 부분 실패 → re-plan → 최종 응답
+  //       3개 tool 중 1개(nonexistent_tool) 실패 → LLM에 실패 결과 전달 → re-plan
+  // =========================================================================
+  {
+    let callN = 0
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E((_req, n) => {
+      callN = n
+      if (n === 1) {
+        return JSON.stringify({
+          type: 'plan',
+          steps: [
+            { op: 'EXEC', args: { tool: 'file_list', tool_args: { path: '.' } } },
+            { op: 'EXEC', args: { tool: 'nonexistent_tool', tool_args: {} } },
+            { op: 'EXEC', args: { tool: 'file_list', tool_args: { path: '.' } } },
+          ],
+        })
+      }
+      return JSON.stringify({ type: 'direct_response', message: '2개 성공, 1개 실패 확인.' })
+    })
+
+    try {
+      await delay(100)
+
+      await typeInput(stdin, '도구 3개 실행')
+
+      await waitFor(() => lastFrame().includes('2개 성공, 1개 실패 확인.'), { timeout: 15000 })
+      assert(callN >= 2, 'TE15: 부분 실패 후 re-plan (LLM 2회 이상 호출)')
+      assert(lastFrame().includes('2개 성공, 1개 실패 확인.'), 'TE15: re-plan 후 최종 응답 표시')
     } finally {
       await cleanup()
     }
