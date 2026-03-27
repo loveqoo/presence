@@ -48,7 +48,7 @@ src/
 ## 테스트
 
 ```bash
-# 전체 테스트 (1578 assertions, 39 test files)
+# 전체 테스트 (2222 assertions, 43 test files)
 npm test
 # 또는
 node test/run.js
@@ -59,7 +59,31 @@ node test/core/plan.test.js
 node test/infra/memory.test.js
 ```
 
-모든 테스트는 외부 의존성(LLM, 네트워크) 없이 실행됩니다.
+### --no-network 플래그
+
+샌드박스·CI 등 `listen()` 권한이 제한된 환경(EPERM)에서는 네트워크 바인딩이 필요한
+테스트 9개를 건너뜁니다.
+
+```bash
+node test/run.js --no-network   # 1921 assertions, 9 skipped
+```
+
+건너뛰는 테스트 (HTTP/WebSocket 서버를 직접 생성):
+
+| 파일 | 이유 |
+|------|------|
+| `test/infra/llm.test.js` | mock LLM HTTP 서버 |
+| `test/infra/mcp-sse.test.js` | SSE 서버 |
+| `test/infra/remote-state.test.js` | WebSocket 서버 |
+| `test/infra/session.test.js` | mock LLM HTTP 서버 |
+| `test/infra/supervisor-session.test.js` | mock LLM HTTP 서버 |
+| `test/e2e/bootstrap.test.js` | mock LLM HTTP 서버 |
+| `test/e2e/server-e2e.test.js` | Express + mock LLM |
+| `test/server/server.test.js` | Express 서버 |
+| `test/server/supervisor.test.js` | Express 서버 |
+
+> 이 테스트들은 외부 서비스가 아닌 localhost 포트를 점유하므로, 코드 자체의 문제가
+> 아니라 실행 환경의 네트워크 바인딩 권한 부족일 때만 실패합니다.
 
 ## 주의사항
 

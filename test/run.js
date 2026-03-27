@@ -6,7 +6,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 
 // 네트워크 바인딩(HTTP/WebSocket listen)이 필요한 테스트.
-// EPERM 환경(샌드박스 등)에서는 --no-network 플래그로 건너뜁니다.
+// 샌드박스·CI 등 listen() 권한이 제한된 환경(EPERM)에서는
+// `node test/run.js --no-network` 로 이 9개를 건너뜁니다.
+// 코드 문제가 아니라 실행 환경의 네트워크 바인딩 권한 부족이 원인입니다.
 const NETWORK_TESTS = new Set([
   'test/infra/llm.test.js',
   'test/infra/mcp-sse.test.js',
