@@ -48,6 +48,7 @@ export const startTestServer = async (mockLLM, { port = 3200 } = {}) => {
     memory: { path: join(tmpDir, 'memory') },
     mcp: [],
     heartbeat: { enabled: false, intervalMs: 300000, prompt: '' },
+    scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
     delegatePolling: { intervalMs: 60000 },
     prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
   }
