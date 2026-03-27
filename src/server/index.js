@@ -248,6 +248,16 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     }
   })
   expressApp.get('/api/sessions/:sessionId/state', (req, res) => res.json(req.presenceSession.session.state.snapshot()))
+  expressApp.get('/api/sessions/:sessionId/tools', (req, res) => {
+    const { session } = req.presenceSession
+    res.json(session.tools.map(t => ({ name: t.name, description: t.description, source: t.source })))
+  })
+  expressApp.get('/api/sessions/:sessionId/agents', (req, res) => res.json(req.presenceSession.session.agents))
+  expressApp.get('/api/sessions/:sessionId/config', (req, res) => {
+    const { llm, ...rest } = globalCtx.config
+    const { apiKey, ...safeLlm } = llm
+    res.json({ ...rest, llm: safeLlm })
+  })
   expressApp.post('/api/sessions/:sessionId/approve', (req, res) => {
     req.presenceSession.session.handleApproveResponse(!!req.body.approved)
     res.json({ ok: true })
@@ -302,14 +312,17 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
 
   // Graceful shutdown
   const shutdown = async () => {
+    process.off('SIGTERM', onSignal)
+    process.off('SIGINT', onSignal)
     globalSchedulerActor.send({ type: 'stop' }).fork(() => {}, () => {})
     await Promise.all(sessionManager.list().map(({ session }) => session.shutdown().catch(() => {})))
     await globalCtx.shutdown()
     wss.close()
     server.close()
   }
-  process.on('SIGTERM', async () => { await shutdown(); process.exit(0) })
-  process.on('SIGINT', async () => { await shutdown(); process.exit(0) })
+  const onSignal = async () => { await shutdown(); process.exit(0) }
+  process.on('SIGTERM', onSignal)
+  process.on('SIGINT', onSignal)
 
   // 정적 파일 (web/ 빌드 결과) — API 라우트 이후 등록해야 GET /api/* 가 먼저 매칭됨
   let hasWebUI = false

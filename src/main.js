@@ -663,8 +663,9 @@ const runRemote = async (baseUrl) => {
     gitBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
   } catch (_) {}
 
-  process.on('SIGTERM', () => { remoteState.disconnect(); process.exit(0) })
-  process.on('SIGINT',  () => { remoteState.disconnect(); process.exit(0) })
+  const onSignal = () => { remoteState.disconnect(); process.exit(0) }
+  process.on('SIGTERM', onSignal)
+  process.on('SIGINT', onSignal)
 
   const { waitUntilExit } = render(
     h(App, {
@@ -687,6 +688,8 @@ const runRemote = async (baseUrl) => {
   )
 
   await waitUntilExit()
+  process.off('SIGTERM', onSignal)
+  process.off('SIGINT', onSignal)
   remoteState.disconnect()
 }
 
@@ -694,8 +697,9 @@ const runRemote = async (baseUrl) => {
 const runLocal = async () => {
   const app = await bootstrap()
 
-  process.on('SIGTERM', async () => { await app.shutdown().catch(() => {}); process.exit(0) })
-  process.on('SIGINT', async () => { await app.shutdown().catch(() => {}); process.exit(0) })
+  const onSignal = async () => { await app.shutdown().catch(() => {}); process.exit(0) }
+  process.on('SIGTERM', onSignal)
+  process.on('SIGINT', onSignal)
 
   const cwd = process.cwd()
   let gitBranch = ''
@@ -728,6 +732,8 @@ const runLocal = async () => {
   app.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
 
   await waitUntilExit()
+  process.off('SIGTERM', onSignal)
+  process.off('SIGINT', onSignal)
   await app.shutdown()
 }
 
