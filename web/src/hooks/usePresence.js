@@ -102,6 +102,8 @@ const usePresence = (sessionId = 'user-default') => {
       }
     }
 
+    // 세션 전환 시 이전 세션의 메시지가 남지 않도록 초기화
+    setMessages([])
     connect()
     loadTools()
 

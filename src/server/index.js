@@ -317,8 +317,8 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     globalSchedulerActor.send({ type: 'stop' }).fork(() => {}, () => {})
     await Promise.all(sessionManager.list().map(({ session }) => session.shutdown().catch(() => {})))
     await globalCtx.shutdown()
-    wss.close()
-    server.close()
+    await new Promise(r => wss.close(r))
+    await new Promise(r => server.close(r))
   }
   const onSignal = async () => { await shutdown(); process.exit(0) }
   process.on('SIGTERM', onSignal)
