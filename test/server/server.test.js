@@ -1,10 +1,13 @@
 import http from 'node:http'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { WebSocket } from 'ws'
 import { startServer } from '../../src/server/index.js'
 import { assert, summary } from '../lib/assert.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // --- Mock LLM HTTP 서버 ---
 
@@ -276,6 +279,60 @@ async function run() {
     await shutdown()
     await mockLLM.close()
     rmSync(tmpDir, { recursive: true, force: true })
+  }
+
+  // ==========================================================================
+  // 19. SPA 정적 파일 fallback — API 라우트 우선 매칭 (web/dist 존재 시)
+  // Express 5에서 '/{*splat}' 패턴 사용, API 라우트 이후 등록으로 GET /api/* 선점
+  // ==========================================================================
+  const webDist = join(__dirname, '../../web/dist')
+  if (existsSync(webDist)) {
+    const tmpDir2 = mkdtempSync(join(tmpdir(), 'presence-spa-'))
+    const mockLLM2 = createMockLLM((_req, n) =>
+      JSON.stringify({ type: 'direct_response', message: `ok ${n}` })
+    )
+    const llmPort2 = await mockLLM2.start()
+    const config2 = {
+      llm: { baseUrl: `http://127.0.0.1:${llmPort2}/v1`, model: 'test', apiKey: 'k', responseFormat: 'json_object', maxRetries: 0, timeoutMs: 5000 },
+      embed: { provider: 'openai', baseUrl: null, apiKey: null, model: null, dimensions: 256 },
+      locale: 'ko', maxIterations: 5,
+      memory: { path: join(tmpDir2, 'memory') },
+      mcp: [],
+      scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
+      delegatePolling: { intervalMs: 60000 },
+      prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
+    }
+    const { server: server2, shutdown: shutdown2 } = await startServer(config2, { port: 0, persistenceCwd: tmpDir2 })
+    const port2 = server2.address().port
+    try {
+      // GET /api/state는 JSON을 반환해야 함 (index.html로 먹히면 안 됨)
+      const apiRes = await request(port2, 'GET', '/api/state')
+      assert(apiRes.status === 200, '19: GET /api/state returns 200 with web/dist present')
+      assert(typeof apiRes.body === 'object' && apiRes.body.turn !== undefined, '19: GET /api/state returns JSON not HTML')
+
+      // GET /api/tools도 JSON 반환
+      const toolsRes = await request(port2, 'GET', '/api/tools')
+      assert(toolsRes.status === 200, '19: GET /api/tools returns 200 with web/dist present')
+      assert(Array.isArray(toolsRes.body), '19: GET /api/tools returns array not HTML')
+
+      // SPA fallback: 알 수 없는 경로 → index.html (200, HTML 응답)
+      const spaRes = await new Promise((resolve, reject) => {
+        const opts = { hostname: '127.0.0.1', port: port2, method: 'GET', path: '/some-client-route' }
+        const req = http.request(opts, (res) => {
+          let data = ''
+          res.on('data', d => { data += d })
+          res.on('end', () => resolve({ status: res.statusCode, body: data, ct: res.headers['content-type'] }))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      assert(spaRes.status === 200, '19: SPA fallback returns 200')
+      assert(spaRes.body.includes('<html') || spaRes.body.includes('<!DOCTYPE'), '19: SPA fallback returns HTML')
+    } finally {
+      await shutdown2()
+      await mockLLM2.close()
+      rmSync(tmpDir2, { recursive: true, force: true })
+    }
   }
 
   summary()

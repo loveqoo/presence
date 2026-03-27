@@ -222,17 +222,6 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     agentEntry.session.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
   }
 
-  // 정적 파일 (web/ 빌드 결과)
-  try {
-    const { join } = await import('node:path')
-    const { existsSync } = await import('node:fs')
-    const webDist = join(import.meta.dirname, '../../web/dist')
-    if (existsSync(webDist)) {
-      expressApp.use(express.static(webDist))
-      expressApp.get('*', (_req, res) => res.sendFile(join(webDist, 'index.html')))
-    }
-  } catch (_) {}
-
   // 레거시 라우트 (user-default, 하위 호환)
   expressApp.use('/api', createSessionRoutes(defaultSession, globalCtx))
 
@@ -321,6 +310,17 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   }
   process.on('SIGTERM', async () => { await shutdown(); process.exit(0) })
   process.on('SIGINT', async () => { await shutdown(); process.exit(0) })
+
+  // 정적 파일 (web/ 빌드 결과) — API 라우트 이후 등록해야 GET /api/* 가 먼저 매칭됨
+  try {
+    const { join } = await import('node:path')
+    const { existsSync } = await import('node:fs')
+    const webDist = join(import.meta.dirname, '../../web/dist')
+    if (existsSync(webDist)) {
+      expressApp.use(express.static(webDist))
+      expressApp.get('/{*splat}', (_req, res) => res.sendFile(join(webDist, 'index.html')))
+    }
+  } catch (_) {}
 
   await new Promise(resolve => server.listen(port, host, resolve))
   globalCtx.logger.info(`Server listening on http://${host}:${port}`)

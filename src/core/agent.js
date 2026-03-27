@@ -186,14 +186,15 @@ const respondAndFail = (input, error) =>
 //   plan + RESPOND      → execute → finishSuccess (RESPOND이 빠른 종료)
 //   plan - RESPOND      → execute → 결과를 rolling context에 추가 → 다음 iteration
 
-const createAgentTurn = ({ tools = [], agents = [], getAgents, persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget } = {}) => {
+const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget } = {}) => {
   return (input, { source } = {}) =>
     getState('context.memories')
       .chain(memories => getState('context.conversationHistory').chain(history => {
         const conversationHistory = history || []
+        const resolvedTools = getTools ? getTools() : tools
         const resolvedAgents = getAgents ? getAgents() : agents
         const baseContext = {
-          tools, agents: resolvedAgents, memories: memories || [], input, persona, responseFormatMode,
+          tools: resolvedTools, agents: resolvedAgents, memories: memories || [], input, persona, responseFormatMode,
           previousPlan: null, previousResults: null,
         }
 
@@ -438,8 +439,8 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
   }
 
 // --- 조립된 에이전트 ---
-const createAgent = ({ buildTurn, tools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, interpret, ST, state, budget, execute: injectedExecute }) => {
-  const turnBuilder = buildTurn || createAgentTurn({ tools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, budget })
+const createAgent = ({ buildTurn, tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, interpret, ST, state, budget, execute: injectedExecute }) => {
+  const turnBuilder = buildTurn || createAgentTurn({ tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, budget })
   const execute = injectedExecute || safeRunTurn({ interpret, ST }, state)
 
   const run = (input, opts) => execute(turnBuilder(input, opts), input)

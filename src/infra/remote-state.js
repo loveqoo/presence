@@ -70,8 +70,10 @@ const createRemoteState = ({ wsUrl, sessionId = 'user-default' }) => {
   let ws
   let reconnectTimer
   let connectAttempt = 0
+  let stopped = false
 
   const connect = () => {
+    if (stopped) return
     ws = new WebSocket(wsUrl)
 
     ws.on('open', () => {
@@ -88,6 +90,7 @@ const createRemoteState = ({ wsUrl, sessionId = 'user-default' }) => {
     })
 
     ws.on('close', () => {
+      if (stopped) return
       const delay = Math.min(500 * Math.pow(2, connectAttempt++), 15_000)
       reconnectTimer = setTimeout(connect, delay)
     })
@@ -98,6 +101,7 @@ const createRemoteState = ({ wsUrl, sessionId = 'user-default' }) => {
   connect()
 
   const disconnect = () => {
+    stopped = true
     clearTimeout(reconnectTimer)
     ws?.close()
   }

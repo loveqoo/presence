@@ -293,8 +293,16 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     }
   }
 
+  // --- Session-local tool registry ---
+  // 글로벌 registry(MCP 툴 등)를 복사. job/todo 툴은 이 세션 전용 registry에만 등록.
+  // 이렇게 하면: (1) USER 세션은 자신의 job 툴을 즉시 볼 수 있고,
+  //             (2) AGENT 세션은 job 툴을 물려받지 않으며,
+  //             (3) 글로벌 registry가 오염되지 않는다.
+  const sessionToolRegistry = createToolRegistry()
+  for (const tool of toolRegistry.list()) sessionToolRegistry.register(tool)
+
   // --- Interpreter ---
-  const prodInterpreter = createProdInterpreter({ llm, toolRegistry, reactiveState: state, agentRegistry, onApprove, getAbortSignal })
+  const prodInterpreter = createProdInterpreter({ llm, toolRegistry: sessionToolRegistry, reactiveState: state, agentRegistry, onApprove, getAbortSignal })
   const { interpret: tracedInterpret, ST, trace } = createTracedInterpreter(prodInterpreter, {
     logger,
     onOp: (event, _entry) => {
@@ -323,7 +331,9 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   })
 
   // --- Agent ---
-  const tools = persona.filterTools(toolRegistry.list())
+  // getTools/getAgents는 매 턴마다 현재 registry를 읽음.
+  // 이렇게 하면 세션 생성 이후 등록된 툴(job 툴 등)도 바로 반영된다.
+  const getTools = () => persona.filterTools(sessionToolRegistry.list())
   const getAgents = () => agentRegistry.list()
   const responseFormatMode = config.llm.responseFormat
 
@@ -331,7 +341,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     memoryActor, compactionActor, persistenceActor, logger,
   })
   const agent = createAgent({
-    tools, getAgents, persona: personaConfig,
+    getTools, getAgents, persona: personaConfig,
     responseFormatMode,
     maxRetries: config.llm.maxRetries,
     maxIterations: config.maxIterations,
@@ -346,13 +356,14 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     const { allowedTools = [] } = opts || {}
     if (allowedTools.length === 0) return agent.run(input, opts)
 
-    const effectiveTools = tools.filter(t =>
+    const currentTools = getTools()
+    const effectiveTools = currentTools.filter(t =>
       allowedTools.some(p => { try { return new RegExp(p).test(t.name) } catch (_) { return false } })
     )
-    if (effectiveTools.length === tools.length) return agent.run(input, opts)
+    if (effectiveTools.length === currentTools.length) return agent.run(input, opts)
 
     const filteredTurn = createAgentTurn({
-      tools: effectiveTools, agents, persona: personaConfig,
+      tools: effectiveTools, getAgents, persona: personaConfig,
       responseFormatMode,
       maxRetries: config.llm.maxRetries,
       maxIterations: config.maxIterations,
@@ -395,12 +406,12 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     pollIntervalMs: config.scheduler.pollIntervalMs,
   })
 
-  // --- Job 툴 등록 (USER 세션만: 중복 등록 방지, 서브 에이전트는 불필요) ---
+  // --- Job 툴 등록 (USER 세션만, 세션 로컬 registry에만 등록) ---
   if (type === SESSION_TYPE.USER) {
     const jobTools = createJobTools({ store: jobStore, eventActor })
-    for (const tool of jobTools) toolRegistry.register(tool)
+    for (const tool of jobTools) sessionToolRegistry.register(tool)
 
-    toolRegistry.register({
+    sessionToolRegistry.register({
       name: 'read_todos',
       description: '현재 대기 중인 TODO 항목 목록을 반환합니다.',
       parameters: { type: 'object', properties: {} },
@@ -488,7 +499,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   }
 
   return {
-    agent, state, tools,
+    agent, state,
+    get tools() { return getTools() },
     get agents() { return agentRegistry.list() },
     handleInput, handleApproveResponse, handleCancel,
     schedulerActor, delegateActor, eventActor, emit,
