@@ -1,31 +1,21 @@
 {
-  "name": "presence",
+  "name": "presence-workspace",
   "version": "0.1.0",
-  "type": "module",
   "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/infra",
+    "packages/server",
+    "packages/tui",
+    "packages/web"
+  ],
   "scripts": {
-    "start": "node src/server/index.js",
-    "start:cli": "node src/main.js",
-    "dev:web": "cd web && npm run dev",
-    "build:web": "cd web && npm run build",
-    "test": "node test/run.js"
-  },
-  "dependencies": {
-    "@inkjs/ui": "^2.0.0",
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "conf": "^15.1.0",
-    "croner": "^10.0.1",
-    "express": "^5.2.1",
-    "fullscreen-ink": "^0.1.0",
-    "i18next": "^25.9.0",
-    "ink": "^6.8.0",
-    "ink-testing-library": "^4.0.0",
-    "lowdb": "^7.0.1",
-    "mem0ai": "^2.4.2",
-    "react": "^19.2.4",
-    "winston": "^3.19.0",
-    "ws": "^8.20.0",
-    "zod": "^4.3.6"
+    "test": "node test/run.js",
+    "start": "npm run start --workspace=@presence/server",
+    "start:cli": "npm run start --workspace=@presence/tui",
+    "dev:web": "npm run dev --workspace=@presence/web",
+    "build:web": "npm run build --workspace=@presence/web"
   },
   "devDependencies": {
     "fast-check": "^4.6.0"
