@@ -4,8 +4,8 @@
   "type": "module",
   "private": true,
   "exports": {
-    "./core/*": "./src/core/*.js",
-    "./interpreter/*": "./src/interpreter/*.js",
-    "./lib/*": "./src/lib/*.js"
+    "./core/*.js": "./src/core/*.js",
+    "./interpreter/*.js": "./src/interpreter/*.js",
+    "./lib/*.js": "./src/lib/*.js"
   }
 }

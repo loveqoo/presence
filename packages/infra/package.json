@@ -4,8 +4,8 @@
   "type": "module",
   "private": true,
   "exports": {
-    "./infra/*": "./src/infra/*.js",
-    "./interpreter/*": "./src/interpreter/*.js",
+    "./infra/*.js": "./src/infra/*.js",
+    "./interpreter/*.js": "./src/interpreter/*.js",
     "./i18n": "./src/i18n/index.js"
   },
   "dependencies": {

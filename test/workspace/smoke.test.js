@@ -1,0 +1,55 @@
+// Workspace smoke test: @presence/* export map이 실제로 resolve되는지 검증.
+// 각 패키지의 핵심 진입점을 import하고 최소한의 shape를 확인한다.
+
+import { assert, check, summary } from '../lib/assert.js'
+
+// --- @presence/core ---
+import { createAgent, createAgentTurn, PHASE } from '@presence/core/core/agent.js'
+import { askLLM, executeTool, respond, updateState, getState } from '@presence/core/core/op.js'
+import { DEBUG, HISTORY, MEMORY, PROMPT, SESSION_TYPE } from '@presence/core/core/policies.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import fp from '@presence/core/lib/fun-fp.js'
+import { getByPath } from '@presence/core/lib/path.js'
+
+// --- @presence/infra ---
+import { createGlobalContext } from '@presence/infra/infra/global-context.js'
+import { createSession } from '@presence/infra/infra/session-factory.js'
+import { createSessionManager } from '@presence/infra/infra/session-manager.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
+import { createDelegateInterpreter } from '@presence/infra/interpreter/delegate.js'
+import { initI18n, t } from '@presence/infra/i18n'
+
+console.log('Workspace smoke tests')
+
+// @presence/core
+assert(typeof createAgent === 'function',           'core: createAgent is a function')
+assert(typeof createAgentTurn === 'function',       'core: createAgentTurn is a function')
+assert(PHASE.IDLE === 'idle',                       'core: PHASE.IDLE === "idle"')
+assert(PHASE.WORKING === 'working',                 'core: PHASE.WORKING === "working"')
+assert(typeof askLLM === 'function',                'core: op.askLLM is a function')
+assert(typeof executeTool === 'function',           'core: op.executeTool is a function')
+assert(typeof respond === 'function',               'core: op.respond is a function')
+assert(typeof updateState === 'function',           'core: op.updateState is a function')
+assert(typeof getState === 'function',              'core: op.getState is a function')
+assert(typeof SESSION_TYPE.USER === 'string',       'core: SESSION_TYPE.USER is a string')
+assert(typeof HISTORY === 'object' && HISTORY !== null, 'core: HISTORY is an object')
+assert(typeof MEMORY === 'object' && MEMORY !== null,   'core: MEMORY is an object')
+assert(typeof PROMPT === 'object' && PROMPT !== null,   'core: PROMPT is an object')
+assert(typeof createTestInterpreter === 'function', 'core: createTestInterpreter is a function')
+assert(fp != null,                                  'core: fun-fp default export exists')
+assert(getByPath({ a: { b: 42 } }, 'a.b') === 42,  'core: getByPath utility works')
+
+// @presence/infra
+assert(typeof createGlobalContext === 'function',   'infra: createGlobalContext is a function')
+assert(typeof createSession === 'function',         'infra: createSession is a function')
+assert(typeof createSessionManager === 'function',  'infra: createSessionManager is a function')
+assert(typeof createReactiveState === 'function',   'infra: createReactiveState is a function')
+assert(typeof createProdInterpreter === 'function', 'infra: createProdInterpreter is a function')
+assert(typeof createDelegateInterpreter === 'function', 'infra: createDelegateInterpreter is a function')
+
+initI18n('ko')
+assert(typeof t === 'function',                     'infra: i18n t is a function')
+assert(typeof t('startup.memory_loaded') === 'string', 'infra: i18n t returns string')
+
+summary()

@@ -22,6 +22,8 @@ const NETWORK_TESTS = new Set([
 ])
 
 const tests = [
+  // Workspace import map smoke test (must run first)
+  'test/workspace/smoke.test.js',
   'test/core/makeOp.test.js',
   'test/core/op.test.js',
   'test/infra/state.test.js',
