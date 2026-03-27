@@ -339,7 +339,7 @@ const createMemoryGraph = async (dbPath = null) => {
 
 const defaultMemoryPath = () => {
   const home = process.env.HOME || process.env.USERPROFILE || '.'
-  return `${home}/.presence/memory/graph.json`
+  return `${home}/.presence/memory`
 }
 
 export { MemoryGraph, InMemoryStore, LowdbStore, createMemoryGraph, TIERS, defaultMemoryPath }
