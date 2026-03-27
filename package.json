@@ -4,7 +4,10 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node src/main.js",
+    "start": "node src/server/index.js",
+    "start:cli": "node src/main.js",
+    "dev:web": "cd web && npm run dev",
+    "build:web": "cd web && npm run build",
     "test": "node test/run.js"
   },
   "dependencies": {
