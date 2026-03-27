@@ -312,6 +312,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   process.on('SIGINT', async () => { await shutdown(); process.exit(0) })
 
   // 정적 파일 (web/ 빌드 결과) — API 라우트 이후 등록해야 GET /api/* 가 먼저 매칭됨
+  let hasWebUI = false
   try {
     const { join } = await import('node:path')
     const { existsSync } = await import('node:fs')
@@ -319,11 +320,32 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     if (existsSync(webDist)) {
       expressApp.use(express.static(webDist))
       expressApp.get('/{*splat}', (_req, res) => res.sendFile(join(webDist, 'index.html')))
+      hasWebUI = true
     }
   } catch (_) {}
 
   await new Promise(resolve => server.listen(port, host, resolve))
   globalCtx.logger.info(`Server listening on http://${host}:${port}`)
+
+  // 터미널 시작 요약
+  const { config: cfg, mcpConnections, jobStore } = globalCtx
+  const toolCount = defaultSession.tools.length
+  const agentCount = globalCtx.agentRegistry.list().length
+  const jobCount = jobStore.listJobs().filter(j => j.enabled).length
+
+  console.log(`\nPresence server ready`)
+  console.log(`  URL        : http://${host}:${port}`)
+  console.log(`  WebSocket  : ws://${host}:${port}`)
+  console.log(`  Model      : ${cfg.llm.model}`)
+  console.log(`  Memory     : ${globalCtx.memoryPath}`)
+  console.log(`  Tools      : ${toolCount}`)
+  console.log(`  Agents     : ${agentCount}`)
+  if (mcpConnections.length > 0) console.log(`  MCP        : ${mcpConnections.length} server(s)`)
+  console.log(`  Scheduler  : ${cfg.scheduler.enabled ? `enabled (${jobCount} active jobs)` : 'disabled'}`)
+  if (hasWebUI) console.log(`  Web UI     : http://${host}:${port}`)
+  console.log(`\n  CLI client : npm run start:cli`)
+  console.log(`  Logs       : ~/.presence/logs/agent.log`)
+  console.log()
 
   // app: 하위 호환용 래퍼 (기존 코드가 app.state, app.tools 등에 접근하는 경우)
   const app = {
@@ -353,5 +375,14 @@ export { startServer, createSessionRoutes, createSessionBridge, handleSlashComma
 // CLI 실행
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
   const port = Number(process.env.PORT) || 3000
-  startServer(undefined, { port }).catch(err => { console.error('Fatal:', err); process.exit(1) })
+  console.log(`Starting Presence server on port ${port}...`)
+  startServer(undefined, { port }).catch(err => {
+    console.error(`\nFailed to start server: ${err.message}`)
+    if (err.code === 'EADDRINUSE') {
+      console.error(`  Port ${port} is already in use. Set a different port with PORT=<n> npm run start`)
+    } else if (err.code === 'EACCES') {
+      console.error(`  Permission denied. Try a port above 1024.`)
+    }
+    process.exit(1)
+  })
 }
