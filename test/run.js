@@ -61,6 +61,7 @@ const tests = [
   'test/core/turn-concurrency.test.js',
   // E2E bootstrap
   'test/e2e/bootstrap.test.js',
+  'test/e2e/server-e2e.test.js',
   // Interpreter
   'test/interpreter/delegate.test.js',
   // Infra
