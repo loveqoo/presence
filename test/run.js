@@ -17,6 +17,7 @@ const NETWORK_TESTS = new Set([
   'test/infra/supervisor-session.test.js',
   'test/e2e/bootstrap.test.js',
   'test/e2e/server-e2e.test.js',
+  'test/e2e/tui-e2e.test.js',
   'test/server/server.test.js',
   'test/server/supervisor.test.js',
 ])
@@ -80,6 +81,7 @@ const tests = [
   // E2E bootstrap
   'test/e2e/bootstrap.test.js',
   'test/e2e/server-e2e.test.js',
+  'test/e2e/tui-e2e.test.js',
   // Interpreter
   'test/interpreter/delegate.test.js',
   // Infra
