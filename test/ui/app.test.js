@@ -1,15 +1,15 @@
 import React from 'react'
 import { renderToString, Box, Text } from 'ink'
-import { StatusBar } from '../../src/ui/components/StatusBar.js'
-import { ChatArea } from '../../src/ui/components/ChatArea.js'
-import { SidePanel } from '../../src/ui/components/SidePanel.js'
-import { TranscriptOverlay, buildLines } from '../../src/ui/components/TranscriptOverlay.js'
-import { ToolResultView, parseFileEntries, toGrid, truncateLines, getSummary } from '../../src/ui/components/ToolResultView.js'
-import { CodeView, detectLang, highlightJS, highlightJSON } from '../../src/ui/components/CodeView.js'
-import { detectWholeCodeLang } from '../../src/ui/components/MarkdownText.js'
-import { deriveStatus, deriveMemoryCount } from '../../src/ui/hooks/useAgentState.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
+import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
+import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
+import { SidePanel } from '@presence/tui/ui/components/SidePanel.js'
+import { TranscriptOverlay, buildLines } from '@presence/tui/ui/components/TranscriptOverlay.js'
+import { ToolResultView, parseFileEntries, toGrid, truncateLines, getSummary } from '@presence/tui/ui/components/ToolResultView.js'
+import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/ui/components/CodeView.js'
+import { detectWholeCodeLang } from '@presence/tui/ui/components/MarkdownText.js'
+import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgentState.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
 import { assert, summary } from '../lib/assert.js'
 
 console.log('UI component tests (renderToString)')
@@ -535,7 +535,7 @@ console.log('UI component tests (renderToString)')
 
 // --- buildReport ---
 
-import { buildReport, formatDuration, truncate } from '../../src/ui/report.js'
+import { buildReport, formatDuration, truncate } from '@presence/tui/ui/report.js'
 
 // 51. formatDuration helper
 {

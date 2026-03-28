@@ -1,5 +1,5 @@
-import { createPersistence } from '../../src/infra/persistence.js'
-import { createReactiveState } from '../../src/infra/state.js'
+import { createPersistence } from '@presence/infra/infra/persistence.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

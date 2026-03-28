@@ -1,4 +1,4 @@
-import { createToolRegistry } from '../../src/infra/tools.js'
+import { createToolRegistry } from '@presence/infra/infra/tools.js'
 import { assert, summary } from '../lib/assert.js'
 
 console.log('Tool registry tests')

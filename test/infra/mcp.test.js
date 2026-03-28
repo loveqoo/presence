@@ -1,4 +1,4 @@
-import { connectMCPServer, extractContent, ensureObjectSchema, validateSchema, createTransportForConfig } from '../../src/infra/mcp.js'
+import { connectMCPServer, extractContent, ensureObjectSchema, validateSchema, createTransportForConfig } from '@presence/infra/infra/mcp.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'

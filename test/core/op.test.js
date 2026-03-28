@@ -4,7 +4,7 @@ import {
   Observe, UpdateState, GetState, Parallel, Spawn,
   askLLM, executeTool, respond, approve, delegate,
   observe, updateState, getState, parallel, spawn,
-} from '../../src/core/op.js'
+} from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
 

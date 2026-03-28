@@ -1,4 +1,4 @@
-import { createState } from '../../src/infra/state.js'
+import { createState } from '@presence/infra/infra/state.js'
 import { assert, summary } from '../lib/assert.js'
 
 console.log('createState tests')

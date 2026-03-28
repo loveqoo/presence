@@ -1,6 +1,6 @@
 import {
   dotSimilarity, topK, toEmbeddingText, textHash, mergeSearchResults, createEmbedder,
-} from '../../src/infra/embedding.js'
+} from '@presence/infra/infra/embedding.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {

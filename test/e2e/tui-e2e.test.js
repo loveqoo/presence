@@ -28,9 +28,9 @@ import http from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createRemoteState } from '../../src/infra/remote-state.js'
-import { App } from '../../src/ui/App.js'
-import { startServer } from '../../src/server/index.js'
+import { createRemoteState } from '@presence/infra/infra/remote-state.js'
+import { App } from '@presence/tui/ui/App.js'
+import { startServer } from '@presence/server'
 import { assert, summary } from '../lib/assert.js'
 
 const h = React.createElement

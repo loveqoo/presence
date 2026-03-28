@@ -1,4 +1,5 @@
-import { t } from '../i18n/index.js'
+// identity fallback: t를 주입받지 않으면 key를 그대로 반환
+const _identityT = (key) => key
 
 // REPL — 콜백 기반. 슬래시 명령어는 agent를 거치지 않고 직접 처리.
 
@@ -32,17 +33,17 @@ const COMMANDS = {
 
   '/tools': {
     description: 'List registered tools',
-    handler: ({ toolRegistry, onOutput }) => {
+    handler: ({ toolRegistry, onOutput, t = _identityT }) => {
       const tools = toolRegistry ? toolRegistry.list() : []
       if (tools.length === 0) { onOutput(t('repl.no_tools')); return }
-      const lines = tools.map(t => `  ${t.name.padEnd(20)} ${t.description || ''}`)
+      const lines = tools.map(tool => `  ${tool.name.padEnd(20)} ${tool.description || ''}`)
       onOutput(`Tools (${tools.length}):\n${lines.join('\n')}`)
     },
   },
 
   '/agents': {
     description: 'List registered agents',
-    handler: ({ agentRegistry, onOutput }) => {
+    handler: ({ agentRegistry, onOutput, t = _identityT }) => {
       const agents = agentRegistry ? agentRegistry.list() : []
       if (agents.length === 0) { onOutput(t('repl.no_agents')); return }
       const lines = agents.map(a => `  ${a.name.padEnd(20)} [${a.type}] ${a.description || ''}`)
@@ -52,7 +53,7 @@ const COMMANDS = {
 
   '/memory': {
     description: 'Show recent memories',
-    handler: ({ memory, onOutput }) => {
+    handler: ({ memory, onOutput, t = _identityT }) => {
       if (!memory) { onOutput(t('repl.memory_unavailable')); return }
       const nodes = memory.allNodes().slice(-10)
       if (nodes.length === 0) { onOutput(t('repl.no_memories')); return }
@@ -65,11 +66,11 @@ const COMMANDS = {
 
   '/todos': {
     description: 'Show TODO list',
-    handler: ({ state, onOutput }) => {
+    handler: ({ state, onOutput, t = _identityT }) => {
       const todos = state.get('todos') || []
       if (todos.length === 0) { onOutput(t('repl.no_todos')); return }
-      const lines = todos.map(t =>
-        `  ${t.done ? '✓' : '○'} [${t.type}] ${t.title}`
+      const lines = todos.map(todo =>
+        `  ${todo.done ? '✓' : '○'} [${todo.type}] ${todo.title}`
       )
       onOutput(`TODOs (${todos.length}):\n${lines.join('\n')}`)
     },
@@ -123,13 +124,13 @@ const COMMANDS = {
   },
 }
 
-const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegistry, memory, mcp }) => {
+const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegistry, memory, mcp, t = _identityT }) => {
   let running = true
   let turnCount = 0
 
   const ctx = (input = '') => ({
     state, toolRegistry, agentRegistry, memory, mcp, input,
-    onOutput, turnCount,
+    onOutput, turnCount, t,
     stop: () => { running = false },
   })
 

@@ -1,10 +1,10 @@
-import { createAgentTurn, createAgent, safeRunTurn, applyFinalState, PHASE, RESULT, Phase, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
-import { withEventMeta } from '../../src/infra/events.js'
-import { createEventActor, createEmit, createTurnActor, forkTask } from '../../src/infra/actors.js'
-import { runFreeWithStateT } from '../../src/core/op.js'
+import { createAgentTurn, createAgent, safeRunTurn, applyFinalState, PHASE, RESULT, Phase, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+import { withEventMeta } from '@presence/infra/infra/events.js'
+import { createEventActor, createEmit, createTurnActor, forkTask } from '@presence/infra/infra/actors.js'
+import { runFreeWithStateT } from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
 
@@ -193,7 +193,7 @@ async function run() {
     })
 
     // parallel([respond('a'), respond('b')]) → allSettled 결과
-    const { parallel, respond } = await import('../../src/core/op.js')
+    const { parallel, respond } = await import('@presence/core/core/op.js')
     const [result] = await runFreeWithStateT(interpret, ST)(
       parallel([respond('hello'), respond('world')])
     )({})

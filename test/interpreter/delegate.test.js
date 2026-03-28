@@ -1,8 +1,8 @@
-import { createProdInterpreter } from '../../src/interpreter/prod.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createToolRegistry } from '../../src/infra/tools.js'
-import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
-import { delegate, respond, Free, runFreeWithStateT } from '../../src/core/op.js'
+import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createToolRegistry } from '@presence/infra/infra/tools.js'
+import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+import { delegate, respond, Free, runFreeWithStateT } from '@presence/core/core/op.js'
 import { assert, summary } from '../lib/assert.js'
 
 const mockLLM = () => ({ chat: async () => ({ type: 'text', content: '' }) })

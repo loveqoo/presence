@@ -3,7 +3,9 @@ import { parsePlan, validateStep } from './plan.js'
 import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
 import { DEBUG, HISTORY, MEMORY } from './policies.js'
 import { getByPath } from '../lib/path.js'
-import { t } from '../i18n/index.js'
+
+// identity fallback: t를 주입받지 않으면 key를 그대로 반환
+const _identityT = (key) => key
 
 // history id: restore 후에도 충돌 없도록 timestamp + counter 조합
 let _historyCounter = 0
@@ -174,7 +176,8 @@ const finishFailure = (input, error, response) =>
     .chain(() => Free.of(response))
 
 // --- 에러 → 실패 턴 종료 (공통 패턴) ---
-const respondAndFail = (input, error) =>
+// t: 번역 함수 (주입 없으면 identity fallback)
+const respondAndFail = (input, error, t = _identityT) =>
   respond(t('error.agent_error', { message: error.message }))
     .chain(msg => finishFailure(input, error, msg))
 
@@ -186,7 +189,7 @@ const respondAndFail = (input, error) =>
 //   plan + RESPOND      → execute → finishSuccess (RESPOND이 빠른 종료)
 //   plan - RESPOND      → execute → 결과를 rolling context에 추가 → 다음 iteration
 
-const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget } = {}) => {
+const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget, t = _identityT } = {}) => {
   return (input, { source } = {}) =>
     getState('context.memories')
       .chain(memories => getState('context.conversationHistory').chain(history => {
@@ -203,7 +206,7 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
             return respondAndFail(input, ErrorInfo(
               `Max iterations (${maxIterations}) exceeded`,
               ERROR_KIND.MAX_ITERATIONS,
-            ))
+            ), t)
           }
 
           const iterationContext = context.previousPlan
@@ -268,7 +271,7 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
                 }))
                 .chain(() => Either.fold(
                 error => {
-                  if (retriesLeft <= 0) return respondAndFail(input, error)
+                  if (retriesLeft <= 0) return respondAndFail(input, error, t)
                   return updateState('_retry', {
                     attempt: maxRetries - retriesLeft + 1,
                     maxRetries,
@@ -285,7 +288,7 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
                   const hasRespond = plan.steps.some(s => s.op === 'RESPOND')
 
                   return parsePlan(plan).chain(either => Either.fold(
-                    err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE)),
+                    err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE), t),
                     results => {
                       if (hasRespond) {
                         // RESPOND가 이미 respond() op을 실행함 → 바로 종료
@@ -439,8 +442,8 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
   }
 
 // --- 조립된 에이전트 ---
-const createAgent = ({ buildTurn, tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, interpret, ST, state, budget, execute: injectedExecute }) => {
-  const turnBuilder = buildTurn || createAgentTurn({ tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, budget })
+const createAgent = ({ buildTurn, tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, interpret, ST, state, budget, execute: injectedExecute, t = _identityT }) => {
+  const turnBuilder = buildTurn || createAgentTurn({ tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, budget, t })
   const execute = injectedExecute || safeRunTurn({ interpret, ST }, state)
 
   const run = (input, opts) => execute(turnBuilder(input, opts), input)

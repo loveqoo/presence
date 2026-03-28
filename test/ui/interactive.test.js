@@ -1,10 +1,10 @@
 import React from 'react'
 import { render } from 'ink-testing-library'
-import { StatusBar } from '../../src/ui/components/StatusBar.js'
-import { ChatArea } from '../../src/ui/components/ChatArea.js'
-import { App } from '../../src/ui/App.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
+import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
+import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
+import { App } from '@presence/tui/ui/App.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
 import { assert, summary } from '../lib/assert.js'
 
 const h = React.createElement

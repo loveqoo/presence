@@ -3,14 +3,14 @@
  * 수동 테스트에서 발견된 실제 버그 패턴을 mock LLM으로 재현.
  * 전체 파이프라인: planner → parse → validate → (retry) → execute → format → finish
  */
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { createAgent, createAgentTurn, applyFinalState, PHASE, RESULT, ERROR_KIND, Phase } from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createLocalTools } from '../../src/infra/local-tools.js'
-import { createToolRegistry } from '../../src/infra/tools.js'
-import { runFreeWithStateT } from '../../src/core/op.js'
+import { createAgent, createAgentTurn, applyFinalState, PHASE, RESULT, ERROR_KIND, Phase } from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createLocalTools } from '@presence/infra/infra/local-tools.js'
+import { createToolRegistry } from '@presence/infra/infra/tools.js'
+import { runFreeWithStateT } from '@presence/core/core/op.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

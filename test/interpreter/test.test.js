@@ -1,10 +1,10 @@
 import fp from '../../src/lib/fun-fp.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { getByPath } from '../../src/infra/state.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { getByPath } from '@presence/infra/infra/state.js'
 import {
   askLLM, executeTool, respond, updateState, getState, Free,
   runFreeWithStateT
-} from '../../src/core/op.js'
+} from '@presence/core/core/op.js'
 import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp

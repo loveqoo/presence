@@ -1,14 +1,14 @@
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import {
   createAgentTurn, safeRunTurn, createAgent,
   PHASE, RESULT, Phase,
-} from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createTurnActor, createMemoryActor, createEventActor, createEmit, forkTask } from '../../src/infra/actors.js'
-import { createMemoryGraph } from '../../src/infra/memory.js'
-import { withEventMeta } from '../../src/infra/events.js'
+} from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createTurnActor, createMemoryActor, createEventActor, createEmit, forkTask } from '@presence/infra/infra/actors.js'
+import { createMemoryGraph } from '@presence/infra/infra/memory.js'
+import { withEventMeta } from '@presence/infra/infra/events.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -79,7 +79,7 @@ async function run() {
     ])
 
     assert(state.get('turn') === 2, 'C2: both turns ran')
-    assert(r1?._turnError || (typeof r1 === 'string' && r1.includes('오류')), 'C2: 1st turn error captured')
+    assert(r1?._turnError || (typeof r1 === 'string' && (r1.includes('오류') || r1.includes('error'))), 'C2: 1st turn error captured')
     assert(r2 === 'recovered', 'C2: 2nd turn succeeded')
   }
 

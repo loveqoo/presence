@@ -21,8 +21,8 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir, homedir } from 'node:os'
 import { WebSocket } from 'ws'
-import { startServer } from '../../src/server/index.js'
-import { bootstrap } from '../../src/main.js'
+import { startServer } from '@presence/server'
+import { bootstrap } from '@presence/tui'
 import { assert, summary } from '../lib/assert.js'
 
 // ---------------------------------------------------------------------------

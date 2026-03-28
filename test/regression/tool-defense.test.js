@@ -3,9 +3,9 @@
  * 모든 핸들러에 null, undefined, 빈 객체, 잘못된 타입을 전달.
  * 크래시 없이 에러를 던져야 함.
  */
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools } from '../../src/infra/local-tools.js'
+import { createLocalTools } from '@presence/infra/infra/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

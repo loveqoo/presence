@@ -1,5 +1,5 @@
-import { createMemoryGraph, MemoryGraph, InMemoryStore, LowdbStore, TIERS } from '../../src/infra/memory.js'
-import { createMemoryEmbedder } from '../../src/infra/memory-embedder.js'
+import { createMemoryGraph, MemoryGraph, InMemoryStore, LowdbStore, TIERS } from '@presence/infra/infra/memory.js'
+import { createMemoryEmbedder } from '@presence/infra/infra/memory-embedder.js'
 import { existsSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
@@ -403,7 +403,7 @@ async function run() {
     node.embeddingDimensions = 1
 
     // toEmbeddingText(node) = 'stable' → 그에 맞는 hash 설정
-    const { textHash: th } = await import('../../src/infra/embedding.js')
+    const { textHash: th } = await import('@presence/infra/infra/embedding.js')
     node.embeddingTextHash = th('stable')
 
     let called = false

@@ -1,4 +1,4 @@
-import { createHooks, createState } from '../../src/infra/state.js'
+import { createHooks, createState } from '@presence/infra/infra/state.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {

@@ -1,13 +1,13 @@
 import {
   withEventMeta, eventToPrompt, todoFromEvent, isDuplicate,
-} from '../../src/infra/events.js'
+} from '@presence/infra/infra/events.js'
 import {
   createEventActor, createEmit, applyTodo, forkTask, createTurnActor,
-} from '../../src/infra/actors.js'
+} from '@presence/infra/infra/actors.js'
 import fp from '../../src/lib/fun-fp.js'
 const { Maybe } = fp
-import { createReactiveState } from '../../src/infra/state.js'
-import { Phase } from '../../src/core/agent.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { Phase } from '@presence/core/core/agent.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {

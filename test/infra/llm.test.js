@@ -1,4 +1,4 @@
-import { LLMClient } from '../../src/infra/llm.js'
+import { LLMClient } from '@presence/infra/infra/llm.js'
 import { assert, summary } from '../lib/assert.js'
 
 // Mock fetch factory

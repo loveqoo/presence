@@ -4,7 +4,7 @@ import {
   summarizeResults,
   planSchema,
   PROMPT_SECTIONS,
-} from '../../src/core/prompt.js'
+} from '@presence/core/core/prompt.js'
 
 import { assert, summary } from '../lib/assert.js'
 

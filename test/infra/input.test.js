@@ -1,4 +1,4 @@
-import { InputHandler, PASTE_START, PASTE_END } from '../../src/infra/input.js'
+import { InputHandler, PASTE_START, PASTE_END } from '@presence/infra/infra/input.js'
 import { assert, summary } from '../lib/assert.js'
 
 console.log('InputHandler tests')

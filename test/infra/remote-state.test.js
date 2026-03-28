@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
-import { createRemoteState } from '../../src/infra/remote-state.js'
+import { createRemoteState } from '@presence/infra/infra/remote-state.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))

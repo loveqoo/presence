@@ -3,14 +3,14 @@
  * 실제 로컬 모델 테스트 중 발견된 패턴들.
  * 각 케이스는 시스템이 크래시 없이 실패 처리해야 함.
  */
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { createAgentTurn, createAgent, PHASE, RESULT, Phase } from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createLocalTools } from '../../src/infra/local-tools.js'
-import { createToolRegistry } from '../../src/infra/tools.js'
-import { runFreeWithStateT } from '../../src/core/op.js'
+import { createAgentTurn, createAgent, PHASE, RESULT, Phase } from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createLocalTools } from '@presence/infra/infra/local-tools.js'
+import { createToolRegistry } from '@presence/infra/infra/tools.js'
+import { runFreeWithStateT } from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
 

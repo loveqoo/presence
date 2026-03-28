@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createSession } from '../main.js'
+import { createSession } from './session-factory.js'
 import { SESSION_TYPE } from '../core/policies.js'
 
 // =============================================================================

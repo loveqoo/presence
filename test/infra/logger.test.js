@@ -1,4 +1,4 @@
-import { createLogger } from '../../src/infra/logger.js'
+import { createLogger } from '@presence/infra/infra/logger.js'
 import { readFileSync, rmSync, existsSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

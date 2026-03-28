@@ -1,12 +1,12 @@
-import { createProdInterpreter } from '../../src/interpreter/prod.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createToolRegistry } from '../../src/infra/tools.js'
-import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
+import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createToolRegistry } from '@presence/infra/infra/tools.js'
+import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import {
   askLLM, executeTool, respond, approve, delegate,
   observe, updateState, getState, parallel, Free,
   runFreeWithStateT,
-} from '../../src/core/op.js'
+} from '@presence/core/core/op.js'
 import { assert, summary } from '../lib/assert.js'
 
 const msg = (text) => [{ role: 'user', content: text }]
@@ -380,7 +380,7 @@ async function run() {
 
     const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg })
 
-    const { createAgentTurn } = await import('../../src/core/agent.js')
+    const { createAgentTurn } = await import('@presence/core/core/agent.js')
     const turn = createAgentTurn({ tools: [], agents: agentReg.list() })
     const [result] = await runFreeWithStateT(interpret, ST)(turn('보고서 요약해줘'))({})
 

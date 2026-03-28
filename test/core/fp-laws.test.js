@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import fp from '../../src/lib/fun-fp.js'
-import { MemoryGraph, TIERS } from '../../src/infra/memory.js'
+import { MemoryGraph, TIERS } from '@presence/infra/infra/memory.js'
 import { assert, check, summary, eqMaybe, eqEither, runTask, eqTask } from '../lib/assert.js'
 
 const { Maybe, Either, Task, Free } = fp

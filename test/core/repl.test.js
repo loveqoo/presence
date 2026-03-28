@@ -1,8 +1,8 @@
-import { createRepl, COMMANDS } from '../../src/core/repl.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { createToolRegistry } from '../../src/infra/tools.js'
-import { createAgentRegistry } from '../../src/infra/agent-registry.js'
-import { Phase } from '../../src/core/agent.js'
+import { createRepl, COMMANDS } from '@presence/core/core/repl.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createToolRegistry } from '@presence/infra/infra/tools.js'
+import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
+import { Phase } from '@presence/core/core/agent.js'
 
 import { assert, summary } from '../lib/assert.js'
 

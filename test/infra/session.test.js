@@ -2,8 +2,8 @@ import http from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createGlobalContext, createSession } from '../../src/main.js'
-import { Phase } from '../../src/core/agent.js'
+import { createGlobalContext, createSession } from '@presence/tui'
+import { Phase } from '@presence/core/core/agent.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))

@@ -1,8 +1,8 @@
-import { createDryRunInterpreter } from '../../src/interpreter/dryrun.js'
+import { createDryRunInterpreter } from '@presence/core/interpreter/dryrun.js'
 import {
   askLLM, executeTool, respond, approve,
   updateState, getState, runFreeWithStateT
-} from '../../src/core/op.js'
+} from '@presence/core/core/op.js'
 import { assert, summary } from '../lib/assert.js'
 
 const msg = (t) => [{ role: 'user', content: t }]

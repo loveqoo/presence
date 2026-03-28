@@ -1,11 +1,11 @@
 import {
   sendA2ATask, getA2ATaskStatus, extractArtifactText,
   buildTaskSendRequest, buildTaskGetRequest, responseToResult,
-} from '../../src/infra/a2a-client.js'
-import { createAgentRegistry, DelegateResult } from '../../src/infra/agent-registry.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { Phase } from '../../src/core/agent.js'
-import { createDelegateActor, createEventActor, createTurnActor, forkTask } from '../../src/infra/actors.js'
+} from '@presence/infra/infra/a2a-client.js'
+import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { Phase } from '@presence/core/core/agent.js'
+import { createDelegateActor, createEventActor, createTurnActor, forkTask } from '@presence/infra/infra/actors.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {

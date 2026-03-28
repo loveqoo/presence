@@ -1,4 +1,4 @@
-import { makeOp, FUNCTOR, Free } from '../../src/core/op.js'
+import { makeOp, FUNCTOR, Free } from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
 

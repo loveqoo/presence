@@ -8,7 +8,11 @@
   },
   "exports": {
     ".": "./src/main.js",
-    "./main": "./src/main.js"
+    "./main": "./src/main.js",
+    "./ui/*.js": "./src/ui/*.js",
+    "./ui/components/*.js": "./src/ui/components/*.js",
+    "./ui/hooks/*.js": "./src/ui/hooks/*.js",
+    "./ui/report.js": "./src/ui/report.js"
   },
   "dependencies": {
     "@presence/core": "*",

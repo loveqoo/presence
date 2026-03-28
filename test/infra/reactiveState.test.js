@@ -1,4 +1,4 @@
-import { createReactiveState } from '../../src/infra/state.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
 import { assert, summary } from '../lib/assert.js'
 
 function run() {

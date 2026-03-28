@@ -2,8 +2,8 @@ import http from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { bootstrap } from '../../src/main.js'
-import { PHASE, RESULT } from '../../src/core/agent.js'
+import { bootstrap } from '@presence/tui'
+import { PHASE, RESULT } from '@presence/core/core/agent.js'
 
 import { assert, summary } from '../lib/assert.js'
 

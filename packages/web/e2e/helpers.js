@@ -49,10 +49,11 @@ export const startTestServer = async (mockLLM, { port = 3200 } = {}) => {
     mcp: [],
     heartbeat: { enabled: false, intervalMs: 300000, prompt: '' },
     delegatePolling: { intervalMs: 60000 },
+    scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
     prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
   }
 
-  const { startServer } = await import('../../src/server/index.js')
+  const { startServer } = await import('@presence/server')
   const { server, shutdown } = await startServer(config, { port, persistenceCwd: tmpDir })
 
   return {

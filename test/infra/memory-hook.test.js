@@ -1,6 +1,6 @@
-import { createMemoryGraph, TIERS } from '../../src/infra/memory.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { PHASE, RESULT, Phase, TurnResult, ErrorInfo, ERROR_KIND } from '../../src/core/agent.js'
+import { createMemoryGraph, TIERS } from '@presence/infra/infra/memory.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { PHASE, RESULT, Phase, TurnResult, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
 import { assert, summary } from '../lib/assert.js'
 
 // Wire up memory hooks (same logic that main.js uses)

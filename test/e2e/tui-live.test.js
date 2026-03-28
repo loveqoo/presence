@@ -10,8 +10,8 @@
 import React from 'react'
 import { render } from 'ink-testing-library'
 import http from 'node:http'
-import { createRemoteState } from '../../src/infra/remote-state.js'
-import { App } from '../../src/ui/App.js'
+import { createRemoteState } from '@presence/infra/infra/remote-state.js'
+import { App } from '@presence/tui/ui/App.js'
 import { assert, summary } from '../lib/assert.js'
 
 const h = React.createElement

@@ -1,15 +1,15 @@
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import fp from '../../src/lib/fun-fp.js'
-import { createReactiveState } from '../../src/infra/state.js'
-import { HISTORY } from '../../src/core/policies.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
+import { HISTORY } from '@presence/core/core/policies.js'
 import {
   createMemoryActor, createCompactionActor, createPersistenceActor,
   applyCompaction, forkTask,
-} from '../../src/infra/actors.js'
+} from '@presence/infra/infra/actors.js'
 import {
   extractForCompaction, createSummaryEntry, SUMMARY_MARKER,
-} from '../../src/infra/history-compaction.js'
+} from '@presence/infra/infra/history-compaction.js'
 import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp
@@ -463,8 +463,8 @@ async function run() {
 
   // I1. recall 성공 → context.memories 반영
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('../../src/core/agent.js')
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
+    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const mockMem0 = makeMockMem0({ searchResult: [{ memory: 'recall target' }] })
     const memActor = createMemoryActor({ mem0: mockMem0, adapter: null, logger: null })
@@ -487,8 +487,8 @@ async function run() {
 
   // I2. recall 실패 → context.memories=[], 턴 계속
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('../../src/core/agent.js')
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
+    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     // Create a mock actor that fails on recall
     const failActor = fp.Actor({
@@ -522,8 +522,8 @@ async function run() {
 
   // I3. 후처리 순서: save → removeWorking → embed → prune → promote → saveDisk
   {
-    const { safeRunTurn, createAgentTurn, Phase, TurnResult, RESULT } = await import('../../src/core/agent.js')
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
+    const { safeRunTurn, createAgentTurn, Phase, TurnResult, RESULT } = await import('@presence/core/core/agent.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const order = []
     const mockActor = fp.Actor({
@@ -562,8 +562,8 @@ async function run() {
 
   // I4. 실패 턴 → save 메시지 안 보냄 (node save), 나머지 후처리 실행
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('../../src/core/agent.js')
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
+    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const messages = []
     const mockActor = fp.Actor({
@@ -595,8 +595,8 @@ async function run() {
 
   // I5. persistenceActor: 성공 턴 후 save 메시지
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('../../src/core/agent.js')
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
+    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
@@ -621,8 +621,8 @@ async function run() {
 
   // I6. persistenceActor: 에러 턴 후에도 save
   {
-    const { safeRunTurn, createAgentTurn, Phase, PHASE } = await import('../../src/core/agent.js')
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
+    const { safeRunTurn, createAgentTurn, Phase, PHASE } = await import('@presence/core/core/agent.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }

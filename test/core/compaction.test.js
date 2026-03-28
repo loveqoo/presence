@@ -1,10 +1,10 @@
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import {
   extractForCompaction, buildCompactionPrompt, createSummaryEntry, SUMMARY_MARKER,
-} from '../../src/infra/history-compaction.js'
-import { migrateHistoryIds } from '../../src/infra/persistence.js'
-import { createReactiveState } from '../../src/infra/state.js'
+} from '@presence/infra/infra/history-compaction.js'
+import { migrateHistoryIds } from '@presence/infra/infra/persistence.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
 
 import { assert, assertDeepEqual, summary } from '../lib/assert.js'
 

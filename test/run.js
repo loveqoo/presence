@@ -155,7 +155,7 @@ if (!noNetwork) {
   console.log('\n--- Playwright (web browser E2E) ---')
   try {
     const pwOutput = execSync('npx playwright test --reporter=list', {
-      cwd: join(root, 'web'),
+      cwd: join(root, 'packages/web'),
       encoding: 'utf-8',
       timeout: 120000,
     })

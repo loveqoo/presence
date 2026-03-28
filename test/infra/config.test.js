@@ -1,4 +1,4 @@
-import { loadConfig, mergeConfig, readConfigFile, DEFAULTS } from '../../src/infra/config.js'
+import { loadConfig, mergeConfig, readConfigFile, DEFAULTS } from '@presence/infra/infra/config.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

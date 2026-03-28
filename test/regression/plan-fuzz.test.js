@@ -3,10 +3,10 @@
  * 무작위 plan 구조를 validatePlan에 던져 크래시 여부 확인.
  * 모든 입력에 대해 Either.Left 또는 Either.Right를 반환해야 함 (throw 금지).
  */
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { validatePlan, safeJsonParse } from '../../src/core/agent.js'
-import { Free, Either } from '../../src/core/op.js'
+import { validatePlan, safeJsonParse } from '@presence/core/core/agent.js'
+import { Free, Either } from '@presence/core/core/op.js'
 import { assert, summary } from '../lib/assert.js'
 
 function run() {

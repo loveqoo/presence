@@ -1,14 +1,14 @@
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import {
   createAgentTurn, safeRunTurn, createAgent, applyFinalState,
   beginTurn, finishSuccess, finishFailure,
   safeJsonParse, extractJson, validatePlan,
   PHASE, RESULT, ERROR_KIND, Phase, TurnResult, ErrorInfo, MANAGED_PATHS,
-} from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState, getByPath } from '../../src/infra/state.js'
-import { Free, Either, runFreeWithStateT } from '../../src/core/op.js'
+} from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState, getByPath } from '@presence/infra/infra/state.js'
+import { Free, Either, runFreeWithStateT } from '@presence/core/core/op.js'
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -184,7 +184,7 @@ async function run() {
 
   // T8. 구조 검증
   {
-    const src = readFileSync(join(__dirname, '../../src/core/agent.js'), 'utf-8')
+    const src = readFileSync(join(__dirname, '../../packages/core/src/core/agent.js'), 'utf-8')
 
     assert(!src.includes('settleError'), 'structural: settleError removed')
     assert(!src.includes('turnTransitions'), 'structural: turnTransitions removed')
@@ -435,7 +435,7 @@ async function run() {
 
     assert(finalState.turnState.tag === PHASE.IDLE, 'parse failure: turnState idle')
     assert(finalState.lastTurn.tag === RESULT.FAILURE, 'parse failure: lastTurn failure')
-    assert(typeof result === 'string' && result.includes('오류'), 'parse failure: error response')
+    assert(typeof result === 'string' && (result.includes('오류') || result.includes('error')), 'parse failure: error response')
   }
 
   // Iteration: rolling context in 2nd planner call
@@ -570,7 +570,7 @@ async function run() {
 
     const lt = finalState.lastTurn
     assert(lt.error.message.length > 0, 'parse error detail: error.message is descriptive')
-    assert(lt.response.includes('오류'), 'parse error detail: response has error text')
+    assert(lt.response.includes('오류') || lt.response.includes('error'), 'parse error detail: response has error text')
   }
 
   // Bare runFreeWithStateT: turnState stays idle (Free is pure, no safeRunTurn lifecycle)

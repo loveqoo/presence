@@ -2,10 +2,10 @@ import {
   parsePlan, normalizeStep, defaultRules,
   normalizeExecToDelegate, normalizeExecToApprove,
   validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs,
-} from '../../src/core/plan.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { runFreeWithStateT } from '../../src/core/op.js'
-import { Either } from '../../src/core/op.js'
+} from '@presence/core/core/plan.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { runFreeWithStateT } from '@presence/core/core/op.js'
+import { Either } from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
 

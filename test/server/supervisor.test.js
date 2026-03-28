@@ -2,7 +2,7 @@ import http from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { startServer } from '../../src/server/index.js'
+import { startServer } from '@presence/server'
 import { assert, summary } from '../lib/assert.js'
 
 // --- 헬퍼 ---

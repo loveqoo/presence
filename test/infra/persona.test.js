@@ -1,5 +1,5 @@
-import { createPersona, DEFAULT_PERSONA } from '../../src/infra/persona.js'
-import { buildIterationPrompt } from '../../src/core/prompt.js'
+import { createPersona, DEFAULT_PERSONA } from '@presence/infra/infra/persona.js'
+import { buildIterationPrompt } from '@presence/core/core/prompt.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

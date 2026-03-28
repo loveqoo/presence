@@ -1,8 +1,8 @@
-import { createTestInterpreter } from '../../src/interpreter/test.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import {
   askLLM, executeTool, respond, approve,
   updateState, getState, Free, runFreeWithStateT
-} from '../../src/core/op.js'
+} from '@presence/core/core/op.js'
 
 const msg = (text) => [{ role: 'user', content: text }]
 

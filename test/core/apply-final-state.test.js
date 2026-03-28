@@ -1,12 +1,12 @@
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import {
   applyFinalState, safeRunTurn, createAgentTurn, createAgent,
   PHASE, RESULT, Phase, TurnResult, MANAGED_PATHS,
-} from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState, getByPath } from '../../src/infra/state.js'
-import { runFreeWithStateT } from '../../src/core/op.js'
+} from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState, getByPath } from '@presence/infra/infra/state.js'
+import { runFreeWithStateT } from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
 

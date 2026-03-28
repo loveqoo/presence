@@ -1,4 +1,4 @@
-import { initI18n } from '../../src/i18n/index.js'
+import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import {
   assemblePrompt,
@@ -8,13 +8,13 @@ import {
   fitHistory,
   fitMemories,
   buildIterationBlock,
-} from '../../src/core/prompt.js'
+} from '@presence/core/core/prompt.js'
 import {
   createAgent, createAgentTurn, finishSuccess, beginTurn,
   PHASE, RESULT, Phase,
-} from '../../src/core/agent.js'
-import { createTestInterpreter } from '../../src/interpreter/test.js'
-import { createReactiveState } from '../../src/infra/state.js'
+} from '@presence/core/core/agent.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import { createReactiveState } from '@presence/infra/infra/state.js'
 
 const initState = (overrides = {}) =>
   createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })

@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { WebSocket } from 'ws'
-import { startServer } from '../../src/server/index.js'
+import { startServer } from '@presence/server'
 import { assert, summary } from '../lib/assert.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
