@@ -47,17 +47,17 @@
 
 #### Phase B: SessionManager + 멀티 세션 서버 ✅
 
-- [x] `src/infra/session-manager.js` 신규 — `create / get / list / destroy`
+- [x] `packages/infra/src/infra/session-manager.js` 신규 — `create / get / list / destroy`
 - [x] `SchedulerActor`: `eventActor` 직접 참조 → `onDispatch(jobEvent)` 콜백으로 교체
-- [x] `src/server/index.js` — session-aware 라우팅, `createSessionBridge(sessionManager, wss)`
+- [x] `packages/server/src/server/index.js` — session-aware 라우팅, `createSessionBridge(sessionManager, wss)`
 - [x] REST: `/api/sessions/:id/chat|state|approve|cancel` (기존 `/api/chat` 하위 호환 유지)
 - [x] 서버 기동 시 `user-default` 세션 자동 생성 + persistence restore
 - [x] 테스트: 세션 생성/소멸, 세션 격리 (2030 passed, 0 failed)
 
 #### Phase C: Ink 씬 클라이언트 ✅
 
-- [x] `src/infra/remote-state.js` — WS 기반 상태 어댑터 (get/hooks.on/off 인터페이스, useAgentState 그대로 동작)
-- [x] `src/main.js` — 서버 자동 감지 → 없으면 spawn → `runRemote()` (WS 상태 + REST 커맨드)
+- [x] `packages/infra/src/infra/remote-state.js` — WS 기반 상태 어댑터 (get/hooks.on/off 인터페이스, useAgentState 그대로 동작)
+- [x] `packages/tui/src/main.js` — 서버 자동 감지 → 없으면 spawn → `runRemote()` (WS 상태 + REST 커맨드)
 - [x] `handleInput/approve/cancel` → REST POST 경유
 - [x] `--local` 플래그: in-process `runLocal()` 모드 유지
 - [x] 테스트 전체 통과 (2030 passed, 0 failed)
@@ -73,11 +73,19 @@
 
 ## 완료된 Phase
 
+### npm workspaces 마이그레이션 ✅
+
+- [x] 5개 패키지 분리: `@presence/core`, `@presence/infra`, `@presence/server`, `@presence/tui`, `@presence/web`
+- [x] 패키지 간 의존성: `@presence/infra` → `@presence/core`, `@presence/server/@presence/tui` → 둘 다
+- [x] subpath exports: `"./core/*.js"`, `"./infra/*.js"`, `"./ui/*.js"` 등 와일드카드 패턴
+- [x] 테스트 전체 workspace imports로 전환 (51개 파일, `../../src/` → `@presence/*`)
+- [x] Playwright E2E → `packages/web/` 기준으로 전환
+
 ### Phase 8: 계층적 에이전트 (Supervisor 패턴) ✅
 
 - [x] `SESSION_TYPE.AGENT` — 영속성 없음, schedulerActor 없음, job 툴 없음
 - [x] `config.agents` — 서브 에이전트 선언적 정의 (name, description, capabilities)
-- [x] `src/server/index.js` — config.agents → AGENT 세션 생성 + agentRegistry 등록
+- [x] `packages/server/src/server/index.js` — config.agents → AGENT 세션 생성 + agentRegistry 등록
 - [x] `Delegate` Op — Free Monad DSL, DelegateInterpreter (local/remote)
 - [x] `agentRegistry.list()` lazy — 세션 생성 후 등록된 에이전트도 프롬프트에 포함
 - [x] 테스트: delegate.test.js (29), supervisor-session.test.js (24), supervisor.test.js (60) — 총 113 assertions
@@ -153,7 +161,8 @@
 ## 검증 방법
 
 ```bash
-node test/run.js                    # 전체 테스트 (mock 기반, LLM 불필요)
-node test/manual/live-llm.test.js   # 실제 LLM 테스트 (로컬 MLX 서버 필요)
-node src/main.js                    # 앱 실행
+node test/run.js                                    # 전체 테스트 (mock 기반, LLM 불필요)
+node test/e2e/tui-live.test.js                      # 실제 LLM TUI E2E (서버 먼저 실행 필요)
+node packages/tui/src/main.js                       # TUI 앱 실행 (서버 자동 감지 + spawn)
+node packages/server/src/server/index.js            # 서버 단독 실행
 ```

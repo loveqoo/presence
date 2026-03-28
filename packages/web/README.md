@@ -1,16 +1,65 @@
-# React + Vite
+# @presence/web — 브라우저 클라이언트
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Presence 에이전트 서버와 연결되는 React 웹 UI 패키지입니다.
 
-Currently, two official plugins are available:
+## 구조
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+packages/web/
+├── src/
+│   ├── App.jsx          ← 루트 컴포넌트 (WebSocket 연결 + 채팅 UI)
+│   ├── components/      ← StatusBar, ChatArea, InputBar 등
+│   └── hooks/           ← useAgentState (RemoteState 연동)
+├── e2e/
+│   ├── chat.spec.js     ← Playwright E2E (mock 서버)
+│   ├── live.spec.js     ← Playwright E2E (실제 LLM 서버)
+│   └── helpers.js       ← 테스트 헬퍼 (mock LLM + 서버 기동)
+├── playwright.config.js         ← mock E2E 설정 (포트 3200)
+└── playwright.live.config.js    ← live E2E 설정 (포트 3000)
+```
 
-## React Compiler
+## 실행
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 개발 서버
 
-## Expanding the ESLint configuration
+```bash
+# 서버 먼저 실행
+node packages/server/src/server/index.js
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+# 웹 개발 서버 (별도 터미널, 포트 5173)
+npm run dev --workspace=@presence/web
+```
+
+브라우저에서 `http://localhost:5173` 접속.
+
+### 프로덕션 빌드
+
+```bash
+npm run build --workspace=@presence/web
+# 빌드 결과: packages/web/dist/
+# 서버가 자동으로 dist/ 정적 파일을 서빙함
+```
+
+## 서버 연결
+
+웹 클라이언트는 서버와 두 가지 채널로 통신합니다:
+
+| 채널 | 용도 |
+|------|------|
+| WebSocket (`ws://`) | 서버 상태 실시간 수신 (turnState, turn 카운터 등) |
+| REST API (`/api/chat`, `/api/approve` 등) | 입력 전송, 승인/취소 |
+
+서버 URL은 환경 변수 또는 동일 origin으로 자동 감지됩니다.
+
+## E2E 테스트
+
+```bash
+# mock LLM 서버 사용 (API 키 불필요)
+cd packages/web && npx playwright test
+
+# 실제 LLM 서버 사용 (서버 먼저 실행 필요)
+node packages/server/src/server/index.js &
+cd packages/web && npx playwright test --config=playwright.live.config.js
+```
+
+`node test/run.js` 실행 시 mock E2E 테스트가 자동으로 포함됩니다.
