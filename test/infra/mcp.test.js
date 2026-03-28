@@ -2,7 +2,7 @@ import { connectMCPServer, extractContent, ensureObjectSchema, validateSchema, c
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import fp from '../../src/lib/fun-fp.js'
+import fp from '@presence/core/lib/fun-fp.js'
 const { Either } = fp
 import { assert, summary } from '../lib/assert.js'
 

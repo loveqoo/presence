@@ -70,7 +70,7 @@ const composed = askLLM({ messages: [{ role: 'user', content: 'hello' }] })
 assert(Free.isImpure(composed), 'askLLM.chain(respond) returns Impure')
 
 // Verify full chain with mock runner
-import fp from '../../src/lib/fun-fp.js'
+import fp from '@presence/core/lib/fun-fp.js'
 const { Task } = fp
 
 const runner = (functor) => {

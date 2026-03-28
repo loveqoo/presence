@@ -1,4 +1,4 @@
-import fp from '../../src/lib/fun-fp.js'
+import fp from '@presence/core/lib/fun-fp.js'
 
 const { Maybe, Either, Task } = fp
 

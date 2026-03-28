@@ -1,4 +1,4 @@
-import fp from '../../src/lib/fun-fp.js'
+import fp from '@presence/core/lib/fun-fp.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { getByPath } from '@presence/infra/infra/state.js'
 import {

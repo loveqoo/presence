@@ -1,6 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import fp from '../../src/lib/fun-fp.js'
+import fp from '@presence/core/lib/fun-fp.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { HISTORY } from '@presence/core/core/policies.js'
 import {

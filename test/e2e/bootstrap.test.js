@@ -258,9 +258,9 @@ async function run() {
   // 6. partial failure: 3 tool steps, 1 fails → 에러 캡처 + LLM re-plan
   // ===========================================
   {
-    const { createTestInterpreter } = await import('../../src/interpreter/test.js')
-    const { createAgentTurn } = await import('../../src/core/agent.js')
-    const { runFreeWithStateT } = await import('../../src/core/op.js')
+    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
+    const { createAgentTurn } = await import('@presence/core/core/agent.js')
+    const { runFreeWithStateT } = await import('@presence/core/core/op.js')
 
     let llmCall = 0
     let capturedRollingContext = null

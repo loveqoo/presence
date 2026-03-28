@@ -34,7 +34,7 @@ const chained = lifted.chain(r => Free.of(r + 100))
 assert(Free.isImpure(chained), 'chain returns Impure (still has work to do)')
 
 // 7. Run through Free.runWithTask to verify full round-trip
-import fp from '../../src/lib/fun-fp.js'
+import fp from '@presence/core/lib/fun-fp.js'
 const { Task } = fp
 
 const runner = (functor) => Task.of(functor.next('result'))

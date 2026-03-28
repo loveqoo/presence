@@ -1,9 +1,9 @@
 /**
  * TUI live e2e — 실제 실행 중인 서버(실제 LLM)를 대상으로 TUI 흐름 검증.
- * 서버를 직접 띄우지 않음. 먼저 `node src/server/index.js`를 실행해야 한다.
+ * 서버를 직접 띄우지 않음. 먼저 `node packages/server/src/server/index.js`를 실행해야 한다.
  *
  * 사용법:
- *   node src/server/index.js &
+ *   node packages/server/src/server/index.js &
  *   node test/e2e/tui-live.test.js [--url http://127.0.0.1:3000]
  */
 
@@ -90,7 +90,7 @@ try {
   await request('GET', '/api/tools')
 } catch {
   console.error(`서버에 연결할 수 없습니다: ${baseUrl}`)
-  console.error('먼저 node src/server/index.js 를 실행하세요.')
+  console.error('먼저 node packages/server/src/server/index.js 를 실행하세요.')
   process.exit(1)
 }
 
