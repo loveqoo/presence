@@ -23,6 +23,62 @@
 - **ESM**: `type: "module"`, import/export 사용
 - **테스트 우선**: mock 인터프리터를 먼저 만들어 LLM 없이 테스트 가능하게
 
+## 모나드 역할 경계 (강제 규칙)
+
+각 모나드는 하나의 관심사만 담당한다. 역할을 혼용하지 않는다.
+
+| 모나드 | 역할 | 사용처 | 금지 |
+|--------|------|--------|------|
+| **Reader** | 의존성 전파 | factory의 deps 합성·전달 | 상태 변경, 부수 출력 |
+| **Writer** | 관찰 정보 축적 | trace, audit log append | 의존성 주입, 상태 변경 |
+| **State** | 순수 설정/빌더 | config merge 파이프라인 | 비동기 효과, 리액티브 hooks |
+| **StateT(Task)** | 턴 실행 상태 + 비동기 | Free 인터프리터 상태 스레딩 | 의존성 주입, 관찰 축적 |
+| **Either** | 동기 에러 분기 | 검증, 파싱, 분기 | 비동기, 상태 |
+| **Task** | 비동기 실행 | 지연 실행, 합성 async | 상태 스레딩 |
+
+### 의존성 주입: Reader만 사용
+
+```javascript
+// ✅ Reader.asks로 deps 추출
+const handler = Reader.asks(({ tokenService, userStore }) => (req, res) => { ... })
+
+// ❌ 클로저 DI 신규 작성 금지
+const createHandler = (tokenService, userStore) => (req, res) => { ... }
+```
+
+- 모든 factory는 `xR = Reader.asks(...)` 패턴
+- 레거시 브릿지: `const createX = (deps) => xR.run(deps)` — 단일 라인 위임만 허용
+- 신규 클로저 DI(`const createX = (deps) => { ... }`) 작성 금지
+
+### 상태 전파: StateT 또는 State.modify만 사용
+
+```javascript
+// ✅ State.modify chain
+const merged = buildConfig([layer1, layer2]).run(DEFAULTS)[0]
+
+// ❌ 중첩 호출, 직접 변이
+const merged = mergeConfig(mergeConfig(base, a), b)
+obj.history.push(entry)
+```
+
+### 관찰 축적: Writer.tell만 사용
+
+```javascript
+// ✅ Writer.tell로 append
+traceWriter = traceWriter.chain(() => Writer.tell([entry]))
+
+// ❌ 가변 배열 push
+trace.push(entry)
+trace.length = 0
+```
+
+### 횡단 관심사 체크리스트
+
+새 기능 구현 시 반드시 확인:
+- 쿠키/인증: 이 변경이 WS, API, 브라우저 모든 경로에서 동작하는가?
+- 상태 초기화: 비동기 상태 변경이 렌더링 순서에 영향을 주는가?
+- 토큰: refresh rotation이 다른 클라이언트/테스트에 영향을 주는가?
+
 ## 패키지 구조 (npm workspaces)
 
 ```
