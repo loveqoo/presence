@@ -183,16 +183,16 @@ test('/clear → 대화 내역 삭제', async ({ livePage: page }) => {
 // ===========================================
 
 test('빈 입력 → 전송 안됨', async ({ livePage: page }) => {
-  // 이전 테스트의 /clear WS push가 완료될 때까지 안정화
   const input = page.locator('.input-bar input')
   await input.fill('/clear')
   await input.press('Enter')
   await expect(page.locator('.msg-system').first()).toContainText('clear', { ignoreCase: true, timeout: 5000 })
-  await page.waitForTimeout(500)
+  // /clear WS push로 history가 비워지고 pending도 제거될 때까지 대기
+  await expect(page.locator('.msg-user')).toHaveCount(0, { timeout: 5000 })
 
   const userMsgsBefore = await page.locator('.msg-user').count()
   await input.press('Enter')
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(300)
   expect(await page.locator('.msg-user').count()).toBe(userMsgsBefore)
 })
 
