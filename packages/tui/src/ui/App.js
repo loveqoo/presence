@@ -124,7 +124,7 @@ const handleMemoryCommand = (input, memory, addMessage) => {
   addMessage({ role: 'system', content: t('memory_cmd.unknown_sub') })
 }
 
-const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tools = [], agents = [], initialMessages = [], cwd = '', gitBranch = '', model: initialModel = '', config = null, memory = null, llm = null, mcpControl = null }) => {
+const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tools = [], agents = [], initialMessages = [], cwd = '', gitBranch = '', model: initialModel = '', config = null, memory = null, llm = null, mcpControl = null, sessionId = 'user-default', onListSessions = null, onCreateSession = null, onDeleteSession = null, onSwitchSession = null }) => {
   const { exit } = useApp()
   const agentState = useAgentState(state)
   const [messages, setMessages] = useState(initialMessages)
@@ -155,6 +155,22 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
   const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg])
   }, [])
+
+  // conversationHistory → messages 동기화 (다른 클라이언트에서 입력된 대화 반영)
+  useEffect(() => {
+    const history = agentState.conversationHistory
+    if (!Array.isArray(history)) return
+    const historyMsgs = []
+    for (const entry of history) {
+      if (entry.input) historyMsgs.push({ role: 'user', content: entry.input })
+      if (entry.output) historyMsgs.push({ role: entry.failed ? 'error' : 'agent', content: entry.output })
+    }
+    // system/tool 등 로컬 전용 메시지 보존, user/agent/error만 히스토리에서 교체
+    setMessages(prev => {
+      const localOnly = prev.filter(m => m.role !== 'user' && m.role !== 'agent' && m.role !== 'error')
+      return [...historyMsgs, ...localOnly]
+    })
+  }, [agentState.conversationHistory])
 
   // Budget warning → system message
   useEffect(() => {
@@ -312,6 +328,57 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
       return
     }
 
+    // /sessions 커맨드
+    if (input === '/sessions' || input.startsWith('/sessions ')) {
+      const args = input.slice('/sessions'.length).trim().split(/\s+/).filter(Boolean)
+      const sub = args[0] || 'list'
+
+      if (sub === 'list') {
+        if (!onListSessions) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
+        onListSessions().then(sessions => {
+          const lines = sessions.map(s => {
+            const marker = s.id === sessionId ? '●' : ' '
+            const current = s.id === sessionId ? ` ${t('sessions_cmd.current_marker')}` : ''
+            return `${marker} ${s.id}  [${s.type}]${current}`
+          })
+          addMessage({ role: 'system', content: `${t('sessions_cmd.list_header')}\n${lines.join('\n')}` })
+        }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+        return
+      }
+
+      if (sub === 'new') {
+        const name = args[1] || null
+        if (!onCreateSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
+        onCreateSession(name).then(s => {
+          addMessage({ role: 'system', content: t('sessions_cmd.created', { id: s.id }) })
+        }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+        return
+      }
+
+      if (sub === 'switch') {
+        const id = args[1]
+        if (!id) { addMessage({ role: 'system', content: t('sessions_cmd.usage_switch') }); return }
+        if (!onSwitchSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
+        addMessage({ role: 'system', content: t('sessions_cmd.switching', { id }) })
+        onSwitchSession(id).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+        return
+      }
+
+      if (sub === 'delete') {
+        const id = args[1]
+        if (!id) { addMessage({ role: 'system', content: t('sessions_cmd.usage_delete') }); return }
+        if (id === sessionId) { addMessage({ role: 'system', content: t('sessions_cmd.cannot_delete_current') }); return }
+        if (!onDeleteSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
+        onDeleteSession(id).then(() => {
+          addMessage({ role: 'system', content: t('sessions_cmd.deleted', { id }) })
+        }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+        return
+      }
+
+      addMessage({ role: 'system', content: t('sessions_cmd.usage') })
+      return
+    }
+
     // /statusline command
     if (input.startsWith('/statusline')) {
       const arg = input.slice('/statusline'.length).trim()
@@ -363,15 +430,9 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
       return
     }
 
-    // 일반 입력 → 에이전트 실행
-    addMessage({ role: 'user', content: input })
-
+    // 일반 입력 → 에이전트 실행 (user/agent 메시지는 conversationHistory push에서 반영)
     if (onInput) {
-      onInput(input).then(result => {
-        if (result != null) {
-          addMessage({ role: 'agent', content: String(result) })
-        }
-      }).catch(err => {
+      onInput(input).then(() => {}).catch(err => {
         const isAbort = err.name === 'AbortError' || err.message?.includes('aborted')
         addMessage({
           role: 'system',

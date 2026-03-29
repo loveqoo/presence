@@ -13,11 +13,17 @@ test.afterAll(async () => {
   await server.cleanup()
 })
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   mockLLM.resetCalls()
   mockLLM.setHandler((_req, n) =>
     JSON.stringify({ type: 'direct_response', message: `응답 ${n}` })
   )
+  // 서버 conversationHistory 초기화 (테스트 간 히스토리 누적 방지)
+  await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ input: '/clear' }),
+  }).catch(() => {})
 })
 
 // ===========================================
@@ -316,10 +322,10 @@ test('LLM 응답 파싱 실패 → 에러 메시지 표시', async ({ page }) =>
   await page.locator('.input-bar input').fill('파싱 실패 유도')
   await page.locator('.input-bar input').press('Enter')
 
-  // 에이전트 응답 (에러 메시지 포함)
-  const agentMsg = page.locator('.msg-agent').first()
-  await expect(agentMsg).toBeVisible({ timeout: 10000 })
-  await expect(agentMsg).toContainText('오류')
+  // 실패 턴은 history에 failed: true로 기록 → .msg-error로 렌더링
+  const errorMsg = page.locator('.msg-error').first()
+  await expect(errorMsg).toBeVisible({ timeout: 10000 })
+  await expect(errorMsg).toContainText('오류')
 })
 
 test('LLM 파싱 실패 후 error 상태 + 입력 가능', async ({ page }) => {
@@ -331,7 +337,7 @@ test('LLM 파싱 실패 후 error 상태 + 입력 가능', async ({ page }) => {
   await page.locator('.input-bar input').fill('에러')
   await page.locator('.input-bar input').press('Enter')
 
-  await expect(page.locator('.msg-agent').first()).toBeVisible({ timeout: 10000 })
+  await expect(page.locator('.msg-error').first()).toBeVisible({ timeout: 10000 })
   // 실패 후 status는 'error' (lastTurn.tag === failure → deriveStatus 결과)
   await expect(page.locator('.status-indicator')).toContainText('error', { timeout: 5000 })
   // 하지만 입력은 가능 (working이 아니므로)

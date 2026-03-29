@@ -44,7 +44,7 @@ export const startTestServer = async (mockLLM, { port = 3200 } = {}) => {
   const config = {
     llm: { baseUrl: `http://127.0.0.1:${llmPort}/v1`, model: 'test', apiKey: 'k', responseFormat: 'json_object', maxRetries: 0, timeoutMs: 10000 },
     embed: { provider: 'openai', baseUrl: null, apiKey: null, model: null, dimensions: 256 },
-    locale: 'ko', maxIterations: 5,
+    locale: 'ko', maxIterations: 2,
     memory: { path: join(tmpDir, 'memory') },
     mcp: [],
     heartbeat: { enabled: false, intervalMs: 300000, prompt: '' },

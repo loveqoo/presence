@@ -169,17 +169,38 @@ const finishSuccess = (input, result, { source } = {}) =>
     .chain(() => updateState('turnState', Phase.idle()))
     .chain(() => Free.of(result))
 
-const finishFailure = (input, error, response) =>
+const finishFailure = (input, error, response, { source } = {}) =>
   updateState('_streaming', null)
+    .chain(() => {
+      if (source === 'user') {
+        return getState('context.conversationHistory').chain(history => {
+          const entry = {
+            id: nextHistoryId(),
+            input: truncate(String(input), HISTORY.MAX_INPUT_CHARS),
+            output: truncate(String(response), HISTORY.MAX_OUTPUT_CHARS),
+            failed: true,
+            errorKind: error.kind || 'unknown',
+            errorMessage: error.message || String(error),
+            ts: Date.now(),
+          }
+          const updated = [...(history || []), entry]
+          const trimmed = updated.length > HISTORY.MAX_CONVERSATION
+            ? updated.slice(-HISTORY.MAX_CONVERSATION)
+            : updated
+          return updateState('context.conversationHistory', trimmed)
+        })
+      }
+      return Free.of(null)
+    })
     .chain(() => updateState('lastTurn', TurnResult.failure(input, error, response)))
     .chain(() => updateState('turnState', Phase.idle()))
     .chain(() => Free.of(response))
 
 // --- 에러 → 실패 턴 종료 (공통 패턴) ---
 // t: 번역 함수 (주입 없으면 identity fallback)
-const respondAndFail = (input, error, t = _identityT) =>
+const respondAndFail = (input, error, t = _identityT, { source } = {}) =>
   respond(t('error.agent_error', { message: error.message }))
-    .chain(msg => finishFailure(input, error, msg))
+    .chain(msg => finishFailure(input, error, msg, { source }))
 
 // --- Incremental Planning Engine ---
 // Plan-Validate-Execute-Observe-Repeat
@@ -206,7 +227,7 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
             return respondAndFail(input, ErrorInfo(
               `Max iterations (${maxIterations}) exceeded`,
               ERROR_KIND.MAX_ITERATIONS,
-            ), t)
+            ), t, { source })
           }
 
           const iterationContext = context.previousPlan
@@ -271,7 +292,7 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
                 }))
                 .chain(() => Either.fold(
                 error => {
-                  if (retriesLeft <= 0) return respondAndFail(input, error, t)
+                  if (retriesLeft <= 0) return respondAndFail(input, error, t, { source })
                   return updateState('_retry', {
                     attempt: maxRetries - retriesLeft + 1,
                     maxRetries,
@@ -288,7 +309,7 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
                   const hasRespond = plan.steps.some(s => s.op === 'RESPOND')
 
                   return parsePlan(plan).chain(either => Either.fold(
-                    err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE), t),
+                    err => respondAndFail(input, ErrorInfo(err, ERROR_KIND.PLANNER_SHAPE), t, { source }),
                     results => {
                       if (hasRespond) {
                         // RESPOND가 이미 respond() op을 실행함 → 바로 종료

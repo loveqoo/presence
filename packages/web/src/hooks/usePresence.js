@@ -1,10 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 
 // WebSocket 기반 presence 서버 연결 hook
 // sessionId: 구독할 세션 (기본 'user-default')
-// - WS 메시지는 session_id가 일치하는 것만 반영 (타 세션 오염 방지)
-// - onclose에서 3초 후 실제 재연결
-// - tools는 세션별 엔드포인트로 로드, 턴 완료 시 갱신
 
 const deriveStatus = (state) => {
   if (state.turnState?.tag === 'working') return 'working'
@@ -12,11 +9,23 @@ const deriveStatus = (state) => {
   return 'idle'
 }
 
-const usePresence = (sessionId = 'user-default') => {
+// conversationHistory → messages 변환
+const historyToMessages = (history) => {
+  if (!Array.isArray(history)) return []
+  const msgs = []
+  for (const entry of history) {
+    if (entry.input) msgs.push({ role: 'user', content: entry.input })
+    if (entry.output) msgs.push({ role: entry.failed ? 'error' : 'agent', content: entry.output })
+  }
+  return msgs
+}
+
+const usePresence = (sessionId = 'user-default', { authFetch, accessToken } = {}) => {
+  const fetchFn = authFetch || fetch
+
   const [connected, setConnected] = useState(false)
   const [status, setStatus] = useState('idle')
   const [turn, setTurn] = useState(0)
-  const [messages, setMessages] = useState([])
   const [streaming, setStreaming] = useState(null)
   const [approve, setApprove] = useState(null)
   const [tools, setTools] = useState([])
@@ -24,15 +33,25 @@ const usePresence = (sessionId = 'user-default') => {
   const wsRef = useRef(null)
   const stateRef = useRef({})
 
-  // tools 로드: 세션별 엔드포인트 사용
+  // 3-채널 메시지 모델
+  const [historyMessages, setHistoryMessages] = useState([])     // 서버 truth (conversationHistory)
+  const [pendingMessages, setPendingMessages] = useState([])     // 로컬 optimistic (user 입력, 에러 응답)
+  const [localMessages, setLocalMessages] = useState([])         // system 메시지 (히스토리 밖)
+
+  // 합성: history (서버 truth) + pending (optimistic) + local (system/error)
+  const messages = useMemo(() =>
+    [...historyMessages, ...pendingMessages, ...localMessages]
+  , [historyMessages, pendingMessages, localMessages])
+
+  // tools 로드
   const loadTools = useCallback(() => {
     const url = sessionId === 'user-default'
       ? '/api/tools'
       : `/api/sessions/${sessionId}/tools`
-    fetch(url).then(r => r.json()).then(setTools).catch(() => {})
-  }, [sessionId])
+    fetchFn(url).then(r => r.json()).then(setTools).catch(() => {})
+  }, [sessionId, fetchFn])
 
-  // WebSocket 연결 (sessionId 변경 시 재구독)
+  // WebSocket 연결
   useEffect(() => {
     let mounted = true
     let reconnectTimer = null
@@ -55,12 +74,11 @@ const usePresence = (sessionId = 'user-default') => {
         reconnectTimer = setTimeout(connect, 3000)
       }
 
-      ws.onerror = () => {}  // onclose에서 재연결 처리
+      ws.onerror = () => {}
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
-          // 현재 구독 세션과 다른 session_id 무시
           if (data.session_id && data.session_id !== sessionId) return
 
           if (data.type === 'init') {
@@ -70,6 +88,9 @@ const usePresence = (sessionId = 'user-default') => {
             setStreaming(data.state._streaming || null)
             setApprove(data.state._approve || null)
             setOpTrace(data.state._debug?.opTrace || [])
+            setHistoryMessages(historyToMessages(data.state.context?.conversationHistory))
+            setPendingMessages([])
+            setLocalMessages([])
             return
           }
 
@@ -96,14 +117,22 @@ const usePresence = (sessionId = 'user-default') => {
               case '_debug.opTrace':
                 setOpTrace(Array.isArray(value) ? value : [])
                 break
+              case 'context.conversationHistory':
+                setHistoryMessages(historyToMessages(value))
+                // history push = 서버 truth 갱신. pending을 모두 비움.
+                // finishFailure는 history push가 안 오므로 이 코드가 실행 안 됨 → pending 유지.
+                setPendingMessages([])
+                break
             }
           }
         } catch (_) {}
       }
     }
 
-    // 세션 전환 시 이전 세션의 메시지가 남지 않도록 초기화
-    setMessages([])
+    // 세션 전환 시 초기화
+    setHistoryMessages([])
+    setPendingMessages([])
+    setLocalMessages([])
     connect()
     loadTools()
 
@@ -113,43 +142,52 @@ const usePresence = (sessionId = 'user-default') => {
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [sessionId, loadTools])
+  }, [sessionId, loadTools, accessToken])
 
-  // API base: 세션별 라우트 사용
   const apiBase = sessionId === 'user-default' ? '/api' : `/api/sessions/${sessionId}`
 
   const sendMessage = useCallback(async (input) => {
-    setMessages(prev => [...prev, { role: 'user', content: input }])
+    // user 메시지를 pending에 추가 (서버 history 반영 전까지 보임)
+    const clientId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    setPendingMessages(prev => [...prev, { role: 'user', content: input, _clientId: clientId }])
+
     try {
-      const res = await fetch(`${apiBase}/chat`, {
+      const res = await fetchFn(`${apiBase}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input }),
       })
       const data = await res.json()
-      setMessages(prev => [...prev, { role: data.type === 'system' ? 'system' : 'agent', content: data.content }])
-      // 슬래시 명령(/mcp enable|disable 등)은 agent turn 없이 즉시 반환되므로
-      // lastTurn WS push를 기다리지 않고 여기서 tools를 갱신
+
+      // system만 local 채널. agent 성공/실패 모두 history push로 반영.
+      if (data.type === 'system') {
+        setLocalMessages(prev => [...prev, { role: 'system', content: data.content }])
+      }
+
       loadTools()
       return data
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'error', content: err.message }])
+      setLocalMessages(prev => [...prev, { role: 'error', content: err.message }])
     }
-  }, [apiBase, loadTools])
+  }, [apiBase, loadTools, fetchFn])
 
-  const clearMessages = useCallback(() => setMessages([]), [])
+  const clearMessages = useCallback(() => {
+    setHistoryMessages([])
+    setPendingMessages([])
+    setLocalMessages([])
+  }, [])
 
   const respondApprove = useCallback(async (approved) => {
-    await fetch(`${apiBase}/approve`, {
+    await fetchFn(`${apiBase}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ approved }),
     })
-  }, [apiBase])
+  }, [apiBase, fetchFn])
 
   const cancel = useCallback(async () => {
-    await fetch(`${apiBase}/cancel`, { method: 'POST' })
-  }, [apiBase])
+    await fetchFn(`${apiBase}/cancel`, { method: 'POST' })
+  }, [apiBase, fetchFn])
 
   return {
     connected, status, turn, messages, streaming, approve, tools, opTrace,

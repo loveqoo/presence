@@ -36,6 +36,7 @@ const useAgentState = (state) => {
   const [iterationHistory, setIterationHistory] = useState([])
   const [budgetWarning, setBudgetWarning] = useState(null)
   const [toolResults, setToolResults] = useState([])
+  const [conversationHistory, setConversationHistory] = useState([])
 
   useEffect(() => {
     if (!state) return
@@ -56,6 +57,9 @@ const useAgentState = (state) => {
       turn: (val) => setTurn(val),
       'context.memories': (val) => {
         setMemoryCount(Array.isArray(val) ? val.length : 0)
+      },
+      'context.conversationHistory': (val) => {
+        setConversationHistory(Array.isArray(val) ? val : [])
       },
       _retry: (info) => {
         setRetryInfo(info)
@@ -86,6 +90,7 @@ const useAgentState = (state) => {
     setStatus(deriveStatus(state))
     setTurn(state.get('turn') || 0)
     setMemoryCount(Array.isArray(state.get('context.memories')) ? state.get('context.memories').length : 0)
+    setConversationHistory(state.get('context.conversationHistory') || [])
     setLastTurn(state.get('lastTurn'))
     setTodos(state.get('todos') || [])
     setApprove(state.get('_approve') || null)
@@ -107,7 +112,7 @@ const useAgentState = (state) => {
 
   return {
     status, turn, memoryCount, activity, lastTurn,
-    todos, events, delegates, retryInfo, approve, streaming, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolResults,
+    todos, events, delegates, retryInfo, approve, streaming, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolResults, conversationHistory,
   }
 }
 
