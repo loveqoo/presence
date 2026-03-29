@@ -41,18 +41,23 @@ const startOrchestrator = async ({ presenceDir } = {}) => {
   // 관리 API
   const app = express()
 
-  // CORS — cross-origin web client support (opt-in via CORS_ORIGIN env var)
-  const corsOrigin = process.env.CORS_ORIGIN
-  if (corsOrigin) {
-    app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Origin', corsOrigin)
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-      res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-      res.header('Access-Control-Allow-Credentials', 'true')
-      if (req.method === 'OPTIONS') return res.sendStatus(204)
-      next()
-    })
-  }
+  // CORS — localhost 간 cross-origin 기본 허용
+  app.use((req, res, next) => {
+    const origin = req.headers.origin
+    if (origin) {
+      try {
+        const h = new URL(origin).hostname
+        if (h === 'localhost' || h === '127.0.0.1') {
+          res.header('Access-Control-Allow-Origin', origin)
+          res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+          res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+          res.header('Access-Control-Allow-Credentials', 'true')
+        }
+      } catch {}
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204)
+    next()
+  })
 
   app.use(express.json())
 

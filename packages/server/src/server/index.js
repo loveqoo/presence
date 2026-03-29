@@ -190,18 +190,23 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   const server = createServer(expressApp)
   const wss = new WebSocketServer({ server })
 
-  // CORS — cross-origin web client support (opt-in via CORS_ORIGIN env var)
-  const corsOrigin = process.env.CORS_ORIGIN
-  if (corsOrigin) {
-    expressApp.use((req, res, next) => {
-      res.header('Access-Control-Allow-Origin', corsOrigin)
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-      res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-      res.header('Access-Control-Allow-Credentials', 'true')
-      if (req.method === 'OPTIONS') return res.sendStatus(204)
-      next()
-    })
-  }
+  // CORS — localhost 간 cross-origin 기본 허용
+  expressApp.use((req, res, next) => {
+    const origin = req.headers.origin
+    if (origin) {
+      try {
+        const h = new URL(origin).hostname
+        if (h === 'localhost' || h === '127.0.0.1') {
+          res.header('Access-Control-Allow-Origin', origin)
+          res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+          res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+          res.header('Access-Control-Allow-Credentials', 'true')
+        }
+      } catch {}
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(204)
+    next()
+  })
 
   const bridge = sessionBridgeR.run({ wss })
 
@@ -381,8 +386,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
         try {
           const parsed = new URL(origin)
           const hostname = parsed.hostname
-          const corsHostname = corsOrigin ? (() => { try { return new URL(corsOrigin).hostname } catch { return null } })() : null
-          const allowed = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === host || (corsHostname && hostname === corsHostname)
+          const allowed = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === host
           if (!allowed) {
             ws.close(4003, 'Origin not allowed')
             return
