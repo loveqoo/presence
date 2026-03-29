@@ -69,7 +69,7 @@ const parseCookies = (cookieStr) => {
  */
 const issueTokensR = (user) =>
   Reader.asks(({ tokenService, userStore }) => {
-    const accessToken = tokenService.signAccessToken({ sub: user.username, roles: user.roles })
+    const accessToken = tokenService.signAccessToken({ sub: user.username, roles: user.roles, mustChangePassword: user.mustChangePassword || false })
     const { token: refreshToken, jti } = tokenService.signRefreshToken({
       sub: user.username,
       tokenVersion: user.tokenVersion,
@@ -129,6 +129,8 @@ const rotateRefreshTokenR = ({ user, jti }) =>
  * Express middleware that verifies Bearer access tokens, bypassing publicPaths.
  * @type {Reader} Reader({ tokenService, publicPaths? } → ExpressMiddleware)
  */
+const MUST_CHANGE_PASSWORD_ALLOWLIST = ['/auth/change-password', '/auth/refresh', '/auth/logout']
+
 const authMiddlewareR = Reader.asks(({ tokenService, publicPaths = [] }) =>
   (req, res, next) => {
     if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) return next()
@@ -140,7 +142,16 @@ const authMiddlewareR = Reader.asks(({ tokenService, publicPaths = [] }) =>
 
     Either.fold(
       () => res.status(401).json({ error: 'Invalid or expired token' }),
-      payload => { req.user = payload; next() },
+      payload => {
+        req.user = payload
+        if (payload.mustChangePassword === true) {
+          const allowed = MUST_CHANGE_PASSWORD_ALLOWLIST.some(
+            p => req.path === p || req.path.startsWith(p + '/')
+          )
+          if (!allowed) return res.status(403).json({ error: 'Password change required' })
+        }
+        next()
+      },
       tokenService.verifyAccessToken(authHeader.slice(7)),
     )
   }
@@ -182,7 +193,7 @@ const loginHandlerR = Reader.ask.map(env => {
               if (result.left) return res.status(401).json({ error: result.left })
               const { accessToken, refreshToken, user } = result.right
               setRefreshCookie(res, refreshToken)
-              res.json({ accessToken, refreshToken, username: user.username, roles: user.roles })
+              res.json({ accessToken, refreshToken, username: user.username, roles: user.roles, mustChangePassword: user.mustChangePassword || false })
             },
           )
       },
@@ -206,7 +217,7 @@ const refreshHandlerR = Reader.ask.map(env =>
       validated => {
         const { accessToken, refreshToken: newRefreshToken, user } = rotateRefreshTokenR(validated).run(env)
         setRefreshCookie(res, newRefreshToken)
-        res.json({ accessToken, refreshToken: newRefreshToken, username: user.username, roles: user.roles })
+        res.json({ accessToken, refreshToken: newRefreshToken, username: user.username, roles: user.roles, mustChangePassword: user.mustChangePassword || false })
       },
       validateRefreshChainR(refreshToken).run(env),
     )
@@ -292,6 +303,15 @@ const authenticateViaCookieR = (req) =>
  * @param {object} req - HTTP upgrade request
  * @returns {Reader} Reader(AuthEnv → Either<error, payload>)
  */
+const rejectIfMustChangePassword = (result) =>
+  Either.fold(
+    err => Either.Left(err),
+    payload => payload.mustChangePassword === true
+      ? Either.Left('Password change required')
+      : Either.Right(payload),
+    result,
+  )
+
 const authenticateWsR = (req) =>
   Reader.asks(env => {
     const headerResult = authenticateViaHeaderR(req).run(env)
@@ -299,12 +319,15 @@ const authenticateWsR = (req) =>
       () => {
         const queryResult = authenticateViaQueryR(req).run(env)
         return Either.fold(
-          () => env.userStore ? authenticateViaCookieR(req).run(env) : Either.Left('No valid authentication'),
-          payload => Either.Right(payload),
+          () => {
+            const cookieResult = env.userStore ? authenticateViaCookieR(req).run(env) : Either.Left('No valid authentication')
+            return rejectIfMustChangePassword(cookieResult)
+          },
+          payload => rejectIfMustChangePassword(Either.Right(payload)),
           queryResult,
         )
       },
-      payload => Either.Right(payload),
+      payload => rejectIfMustChangePassword(Either.Right(payload)),
       headerResult,
     )
   })

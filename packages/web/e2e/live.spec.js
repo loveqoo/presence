@@ -46,14 +46,20 @@ base.beforeAll(async ({ browser }, testInfo) => {
 
   await sharedPage.goto('/')
 
-  const loginForm = sharedPage.locator('#username')
+  const instanceSelect = sharedPage.locator('.instance-select-btn').first()
+  const passwordInput = sharedPage.locator('#password')
   const statusBar = sharedPage.locator('.status-bar')
 
-  await expect(loginForm.or(statusBar)).toBeVisible({ timeout: 15000 })
+  await expect(instanceSelect.or(passwordInput).or(statusBar)).toBeVisible({ timeout: 15000 })
 
-  // 로그인 필요하면 로그인 (오케스트레이터가 인스턴스를 자동 결정)
-  if (await loginForm.isVisible()) {
-    await sharedPage.locator('#username').fill(TEST_USERNAME)
+  // 인스턴스 선택 화면이면 첫 번째 인스턴스 선택
+  if (await instanceSelect.isVisible()) {
+    await instanceSelect.click()
+    await expect(passwordInput.or(statusBar)).toBeVisible({ timeout: 10000 })
+  }
+
+  // 로그인 필요하면 로그인 (password만 입력)
+  if (await passwordInput.isVisible()) {
     await sharedPage.locator('#password').fill(TEST_PASSWORD)
     await sharedPage.locator('.login-container button[type="submit"]').click()
   }

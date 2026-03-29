@@ -293,12 +293,37 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     // auth 라우트 + 미들웨어: Reader(AuthEnv) → .run(authEnv)
     const authEnv = {
       authProvider, tokenService, userStore,
-      publicPaths: ['/auth/login', '/auth/refresh', '/auth/logout', '/instance'],
+      publicPaths: ['/auth/login', '/auth/refresh', '/auth/logout', '/instance', '/auth/status'],
     }
     expressApp.post('/api/auth/login', express.json(), loginHandlerR.run(authEnv))
     expressApp.post('/api/auth/refresh', express.json(), refreshHandlerR.run(authEnv))
     expressApp.post('/api/auth/logout', express.json(), logoutHandlerR.run(authEnv))
+    expressApp.get('/api/auth/status', (_req, res) => {
+      const users = userStore?.listUsers() || []
+      res.json({ username: users.length > 0 ? users[0].username : null })
+    })
     expressApp.use('/api', authMiddlewareR.run(authEnv))
+
+    // POST /api/auth/change-password (authenticated)
+    expressApp.post('/api/auth/change-password', express.json(), async (req, res) => {
+      const username = req.user?.username
+      if (!username) return res.status(401).json({ error: 'Unauthorized' })
+      const { currentPassword, newPassword } = req.body || {}
+      if (!currentPassword || !newPassword) return res.status(400).json({ error: 'currentPassword and newPassword required' })
+      if (typeof newPassword !== 'string' || newPassword.length < 8) return res.status(400).json({ error: 'newPassword must be at least 8 characters' })
+      const authResult = await new Promise(resolve => {
+        authProvider.authenticate(username, currentPassword).fork(
+          () => resolve(null),
+          user => resolve(user),
+        )
+      })
+      if (!authResult) return res.status(401).json({ error: 'Invalid credentials' })
+      userStore.changePassword(username, newPassword)
+      const newUser = userStore.findByUsername(username)
+      const accessToken = tokenService.signAccessToken({ username: newUser.username, roles: newUser.roles, mustChangePassword: false, tokenVersion: newUser.tokenVersion })
+      const refreshToken = tokenService.signRefreshToken({ username: newUser.username, tokenVersion: newUser.tokenVersion })
+      res.json({ accessToken, refreshToken, username: newUser.username, roles: newUser.roles, mustChangePassword: false })
+    })
   }
 
   // 인스턴스 헬스 엔드포인트 (public)
@@ -407,6 +432,10 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
         authenticateWsR(req).run({ tokenService, userStore }),
       )
       if (rejected) return
+      if (ws.user?.mustChangePassword) {
+        ws.close(4002, 'Password change required')
+        return
+      }
     }
 
     ws.send(JSON.stringify({ type: 'init', session_id: 'user-default', state: defaultSession.state.snapshot() }))

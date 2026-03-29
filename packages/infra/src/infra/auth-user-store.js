@@ -19,6 +19,7 @@ const UserSchema = z.object({
   tokenVersion: z.number().int().default(0),
   refreshSessions: z.array(z.string()).default([]),
   createdAt: z.string(),
+  mustChangePassword: z.boolean().optional(),
 })
 
 const UserStoreFileSchema = z.object({
@@ -63,7 +64,11 @@ const createUserStore = (instanceId, { basePath } = {}) => {
 
   const findUser = (username) => {
     const store = load()
-    return store.users.find(u => u.username === username) || null
+    const user = store.users.find(u => u.username === username) || null
+    if (!user) return null
+    // Backward compatibility: old records without mustChangePassword default to false
+    if (user.mustChangePassword === undefined) user.mustChangePassword = false
+    return user
   }
 
   const listUsers = () => {
@@ -92,6 +97,7 @@ const createUserStore = (instanceId, { basePath } = {}) => {
       tokenVersion: 0,
       refreshSessions: [],
       createdAt: new Date().toISOString(),
+      mustChangePassword: true,
     }
 
     store.users.push(user)
@@ -119,6 +125,7 @@ const createUserStore = (instanceId, { basePath } = {}) => {
     user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
     user.tokenVersion += 1
     user.refreshSessions = [] // 모든 세션 무효화
+    user.mustChangePassword = false
     save(store)
   }
 

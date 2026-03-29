@@ -61,31 +61,62 @@ const startOrchestrator = async ({ presenceDir } = {}) => {
 
   app.use(express.json())
 
-  app.get('/api/instances', (_req, res) => {
-    res.json(childManager.listStatus())
-  })
-
-  // 로그인 프록시 — 각 인스턴스에 순차 시도, 성공한 인스턴스의 토큰 + URL 반환
-  app.post('/api/auth/login', async (req, res) => {
-    const { username, password } = req.body || {}
-    if (!username || !password) return res.status(400).json({ error: 'username and password required' })
-
-    const running = childManager.listStatus().filter(s => s.status === 'running')
-    for (const inst of running) {
+  app.get('/api/instances', async (_req, res) => {
+    const statuses = childManager.listStatus()
+    const enriched = await Promise.all(statuses.map(async (inst) => {
+      if (inst.status !== 'running') return { ...inst, username: null }
       const url = `http://${inst.host === '0.0.0.0' ? '127.0.0.1' : inst.host}:${inst.port}`
       try {
-        const r = await fetch(`${url}/api/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
-        })
+        const r = await fetch(`${url}/api/auth/status`)
         if (r.ok) {
           const data = await r.json()
-          return res.json({ ...data, instanceId: inst.id, instanceUrl: url })
+          return { ...inst, username: data.username }
         }
       } catch {}
+      return { ...inst, username: null }
+    }))
+    res.json(enriched)
+  })
+
+  // 로그인 프록시 — instanceId로 인스턴스 특정, username = instanceId
+  app.post('/api/auth/login', async (req, res) => {
+    const { instanceId, password } = req.body || {}
+    if (!password) return res.status(400).json({ error: 'password required' })
+
+    const running = childManager.listStatus().filter(s => s.status === 'running')
+    let target = instanceId
+      ? running.find(s => s.id === instanceId)
+      : running.length === 1 ? running[0] : null
+
+    if (!target) return res.status(400).json({ error: 'Instance not found or ambiguous' })
+
+    const url = `http://${target.host === '0.0.0.0' ? '127.0.0.1' : target.host}:${target.port}`
+
+    // 인스턴스의 실제 username 조회
+    let username = target.id
+    try {
+      const statusRes = await fetch(`${url}/api/auth/status`)
+      if (statusRes.ok) {
+        const statusData = await statusRes.json()
+        if (statusData.username) username = statusData.username
+      }
+    } catch {}
+
+    try {
+      const r = await fetch(`${url}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      if (r.ok) {
+        const data = await r.json()
+        return res.json({ ...data, instanceId: target.id, instanceUrl: url })
+      }
+      const errData = await r.json().catch(() => ({}))
+      return res.status(r.status).json({ error: errData.error || 'Invalid credentials' })
+    } catch {
+      res.status(502).json({ error: 'Failed to reach instance' })
     }
-    res.status(401).json({ error: 'Invalid credentials' })
   })
 
   app.post('/api/instances/:id/start', (req, res) => {

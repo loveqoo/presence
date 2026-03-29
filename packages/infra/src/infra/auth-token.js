@@ -147,10 +147,11 @@ const createTokenService = (instanceId, { basePath } = {}) => {
   const secret = ensureSecret(instanceId, { basePath })
   const audience = `presence:${instanceId}`
 
-  const signAccessToken = ({ sub, roles }) => {
+  const signAccessToken = ({ sub, roles, mustChangePassword }) => {
     const now = Math.floor(Date.now() / 1000)
     return sign({
       sub, roles,
+      mustChangePassword: mustChangePassword || false,
       iss: ISSUER,
       aud: audience,
       iat: now,

@@ -12,18 +12,18 @@ import { useState, useCallback, useRef } from 'react'
  * React hook that manages authentication state for a specific instance.
  * Tokens are stored in sessionStorage keyed by instance URL for page refresh survival.
  * @param {string|null} instanceUrl - The base URL of the target instance
- * @returns {{accessToken: string|null, user: object|null, authRequired: boolean|null, isAuthenticated: boolean, checkAuthRequired: Function, login: Function, logout: Function, refresh: Function, authFetch: Function}}
+ * @returns {{accessToken: string|null, user: object|null, authRequired: boolean|null, isAuthenticated: boolean, mustChangePassword: boolean, checkAuthRequired: Function, login: Function, logout: Function, refresh: Function, authFetch: Function, changePassword: Function}}
  */
 const useAuth = (instanceUrl) => {
   const storageKey = instanceUrl ? `presence:auth:${instanceUrl}` : null
 
   const restoreTokens = () => {
-    if (!storageKey) return { accessToken: null, refreshToken: null, user: null }
+    if (!storageKey) return { accessToken: null, refreshToken: null, user: null, mustChangePassword: false }
     try {
       const saved = sessionStorage.getItem(storageKey)
       if (saved) return JSON.parse(saved)
     } catch {}
-    return { accessToken: null, refreshToken: null, user: null }
+    return { accessToken: null, refreshToken: null, user: null, mustChangePassword: false }
   }
 
   const saved = restoreTokens()
@@ -31,17 +31,44 @@ const useAuth = (instanceUrl) => {
   const [refreshToken, setRefreshToken] = useState(saved.refreshToken)
   const [user, setUser] = useState(saved.user)
   const [authRequired, setAuthRequired] = useState(null) // null = 확인 중
+  const [mustChangePassword, setMustChangePassword] = useState(saved.mustChangePassword || false)
   const refreshPromiseRef = useRef(null)
 
-  const saveTokens = useCallback((at, rt, u) => {
+  const saveTokens = useCallback((at, rt, u, mcp = false) => {
     if (!storageKey) return
-    sessionStorage.setItem(storageKey, JSON.stringify({ accessToken: at, refreshToken: rt, user: u }))
+    sessionStorage.setItem(storageKey, JSON.stringify({ accessToken: at, refreshToken: rt, user: u, mustChangePassword: mcp }))
   }, [storageKey])
 
   const clearTokens = useCallback(() => {
     if (!storageKey) return
     sessionStorage.removeItem(storageKey)
   }, [storageKey])
+
+  // changePassword — POST /api/auth/change-password with Authorization header
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
+    if (!instanceUrl) return
+    const res = await fetch(`${instanceUrl}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'Change password failed')
+    }
+    const data = await res.json()
+    const newUser = { username: data.username, roles: data.roles || [] }
+    const mcp = data.mustChangePassword || false
+    setAccessToken(data.accessToken)
+    setRefreshToken(data.refreshToken || null)
+    setUser(newUser)
+    setMustChangePassword(mcp)
+    saveTokens(data.accessToken, data.refreshToken || null, newUser, mcp)
+    return data
+  }, [instanceUrl, accessToken, saveTokens])
 
   // 서버 인증 요구 여부 확인 + 저장된 refresh token으로 자동 복원 시도
   // authRequired를 설정하기 전에 refresh를 시도 → LoginPage 깜빡임 방지
@@ -87,14 +114,16 @@ const useAuth = (instanceUrl) => {
 
   // 로그인 — 인스턴스에 직접 요청 또는 토큰 직접 설정
   // login(username, password): 인스턴스에 직접 로그인
-  // login(accessToken, refreshToken, user): 오케스트레이터가 반환한 토큰 직접 설정
-  const login = useCallback(async (usernameOrToken, passwordOrRefresh, userObj) => {
+  // login(accessToken, refreshToken, user, mustChangePw): 오케스트레이터가 반환한 토큰 직접 설정
+  const login = useCallback(async (usernameOrToken, passwordOrRefresh, userObj, mustChangePw) => {
     if (userObj) {
       // 토큰 직접 설정 (오케스트레이터 경유 로그인)
+      const mcp = mustChangePw || false
       setAccessToken(usernameOrToken)
       setRefreshToken(passwordOrRefresh || null)
       setUser(userObj)
-      saveTokens(usernameOrToken, passwordOrRefresh || null, userObj)
+      setMustChangePassword(mcp)
+      saveTokens(usernameOrToken, passwordOrRefresh || null, userObj, mcp)
       return
     }
     // 인스턴스에 직접 로그인
@@ -110,10 +139,12 @@ const useAuth = (instanceUrl) => {
     }
     const data = await res.json()
     const newUser = { username: data.username, roles: data.roles }
+    const mcp = data.mustChangePassword || false
     setAccessToken(data.accessToken)
     setRefreshToken(data.refreshToken || null)
     setUser(newUser)
-    saveTokens(data.accessToken, data.refreshToken || null, newUser)
+    setMustChangePassword(mcp)
+    saveTokens(data.accessToken, data.refreshToken || null, newUser, mcp)
     return data
   }, [instanceUrl, saveTokens])
 
@@ -130,6 +161,7 @@ const useAuth = (instanceUrl) => {
     setAccessToken(null)
     setRefreshToken(null)
     setUser(null)
+    setMustChangePassword(false)
     clearTokens()
   }, [instanceUrl, refreshToken, clearTokens])
 
@@ -196,11 +228,13 @@ const useAuth = (instanceUrl) => {
     user,
     authRequired,
     isAuthenticated: !!accessToken,
+    mustChangePassword,
     checkAuthRequired,
     login,
     logout,
     refresh,
     authFetch,
+    changePassword,
   }
 }
 

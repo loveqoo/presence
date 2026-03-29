@@ -8,6 +8,7 @@ import StatusBar from './components/StatusBar'
 import ApproveDialog from './components/ApproveDialog'
 import SessionPanel from './components/SessionPanel'
 import LoginPage from './components/LoginPage'
+import ChangePasswordPage from './components/ChangePasswordPage'
 
 function App() {
   const [currentSessionId, setCurrentSessionId] = useState('user-default')
@@ -15,16 +16,17 @@ function App() {
 
   const {
     orchestratorUrl,
+    instances,
     selectedInstance,
     instanceUrl,
     loading: instanceLoading,
-    login: orchestratorLogin,
+    selectInstance,
     clearInstance,
   } = useInstance()
 
   const {
-    accessToken, user, authRequired, isAuthenticated,
-    checkAuthRequired, login: instanceLogin, logout, authFetch,
+    accessToken, user, authRequired, isAuthenticated, mustChangePassword,
+    checkAuthRequired, login: instanceLogin, logout, authFetch, changePassword,
   } = useAuth(instanceUrl)
 
   // 인증 요구 여부 확인 (instanceUrl 결정 후)
@@ -32,26 +34,40 @@ function App() {
     if (instanceUrl) checkAuthRequired()
   }, [instanceUrl, checkAuthRequired])
 
-  const canConnect = authRequired === false || isAuthenticated
+  const canConnect = authRequired === false || (isAuthenticated && !mustChangePassword)
 
   const {
     connected, status, turn, messages, streaming, approve, tools,
     sendMessage, respondApprove, cancel,
   } = usePresence(currentSessionId, { instanceUrl, authFetch, accessToken, enabled: canConnect })
 
-  // 로그인: 오케스트레이터 경유 → 인스턴스 자동 결정 → 인스턴스에 토큰 설정
-  const handleLogin = async (username, password) => {
-    if (orchestratorUrl) {
-      // 오케스트레이터가 인스턴스를 찾고 토큰을 반환
-      const data = await orchestratorLogin(username, password)
-      if (data?.accessToken) {
-        // useAuth에 토큰 직접 설정
-        instanceLogin(data.accessToken, data.refreshToken, { username: data.username, roles: data.roles })
+  // 로그인 핸들러:
+  // - 오케스트레이터 모드: POST {orchestratorUrl}/api/auth/login with { instanceId, password }
+  // - 프로덕션 모드: POST {instanceUrl}/api/auth/login directly
+  const handleLogin = async (password) => {
+    if (orchestratorUrl && selectedInstance) {
+      // 오케스트레이터 경유: instanceId + password
+      const res = await fetch(`${orchestratorUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceId: selectedInstance.id, password }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Login failed')
       }
+      const data = await res.json()
+      const newUser = { username: data.username, roles: data.roles || [] }
+      instanceLogin(data.accessToken, data.refreshToken, newUser, data.mustChangePassword || false)
     } else {
-      // 프로덕션: 인스턴스에 직접 로그인
+      // 프로덕션: 인스턴스에 직접 로그인 (username은 selectedInstance.username)
+      const username = selectedInstance?.username || ''
       await instanceLogin(username, password)
     }
+  }
+
+  const handleChangePassword = async (currentPassword, newPassword) => {
+    await changePassword(currentPassword, newPassword)
   }
 
   const handleLogout = async () => {
@@ -68,9 +84,21 @@ function App() {
     return <div className="app loading">Loading...</div>
   }
 
-  // 인스턴스 미결정 + 인증 필요 (오케스트레이터 모드)
+  // 여러 인스턴스 + 미선택 → 인스턴스 선택 모드
+  if (!selectedInstance && instances.length > 1) {
+    return (
+      <LoginPage
+        instances={instances}
+        selectedInstance={null}
+        onSelectInstance={selectInstance}
+        onLogin={handleLogin}
+      />
+    )
+  }
+
+  // 오케스트레이터 모드이지만 인스턴스 미결정 (단일 인스턴스 자동 선택 중 등)
   if (!instanceUrl && orchestratorUrl) {
-    return <LoginPage onLogin={handleLogin} />
+    return <div className="app loading">Loading...</div>
   }
 
   // 인증 확인 중
@@ -78,9 +106,26 @@ function App() {
     return <div className="app loading">Loading...</div>
   }
 
-  // 인증 필요 + 미인증
+  // 인증 필요 + 미인증 → 로그인 모드
   if (authRequired && !isAuthenticated) {
-    return <LoginPage onLogin={handleLogin} />
+    return (
+      <LoginPage
+        instances={instances}
+        selectedInstance={selectedInstance}
+        onSelectInstance={instances.length > 1 ? selectInstance : null}
+        onLogin={handleLogin}
+      />
+    )
+  }
+
+  // 인증됨 + 비밀번호 변경 필요
+  if (isAuthenticated && mustChangePassword) {
+    return (
+      <ChangePasswordPage
+        username={user?.username || ''}
+        onChangePassword={handleChangePassword}
+      />
+    )
   }
 
   return (
