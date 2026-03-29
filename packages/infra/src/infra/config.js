@@ -196,18 +196,73 @@ const validateConfig = (config) => {
 
 // --- 기본 경로 ---
 
-const defaultConfigPath = () => {
+const defaultPresenceDir = () => {
   const home = process.env.HOME || process.env.USERPROFILE || '.'
-  return join(home, '.presence', 'config.json')
+  return join(home, '.presence')
 }
 
-// --- 설정 로드: defaults → 파일 → 환경변수 ---
+// --- 인스턴스 스키마 ---
 
-const loadConfig = (configPath) => {
-  const path = configPath || process.env.PRESENCE_CONFIG || defaultConfigPath()
-  const fromFile = readConfigFile(path)
+const InstanceDefSchema = z.object({
+  id: z.string().regex(/^[a-z0-9_-]+$/),
+  port: z.number().int().min(1024).max(65535),
+  host: z.string().default('127.0.0.1'),
+  enabled: z.boolean().default(true),
+  autoStart: z.boolean().default(true),
+})
+
+const InstancesFileSchema = z.object({
+  orchestrator: z.object({
+    port: z.number().int().min(0).default(3000),
+    host: z.string().default('127.0.0.1'),
+  }),
+  instances: z.array(InstanceDefSchema).min(1),
+})
+
+const ClientConfigSchema = z.object({
+  instanceId: z.string(),
+  server: z.object({
+    url: z.string().url(),
+  }),
+  ui: z.object({
+    locale: z.string().default('ko'),
+  }).default({ locale: 'ko' }),
+})
+
+// --- instances.json 로드 (Either) ---
+// Either.Right(data) | Either.Left(errorMessage)
+
+const validateWithSchema = (schema, raw, label) => {
+  const result = schema.safeParse(raw)
+  return result.success
+    ? Either.Right(result.data)
+    : Either.Left(`${label} validation failed: ${(result.error.issues || []).map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`)
+}
+
+const loadInstancesFile = (presenceDir) => {
+  const dir = presenceDir || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const filePath = join(dir, 'instances.json')
+  const raw = readConfigFile(filePath)
+  if (Object.keys(raw).length === 0) return Either.Left(`instances.json not found or empty: ${filePath}`)
+  return validateWithSchema(InstancesFileSchema, raw, 'instances.json')
+}
+
+// --- 인스턴스별 설정 로드: DEFAULTS → server.json → instances/{id}.json → env ---
+
+const loadInstanceConfig = (instanceId, { basePath } = {}) => {
+  if (!instanceId) throw new Error('instanceId is required for loadInstanceConfig')
+  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const serverFile = join(dir, 'server.json')
+  const instanceFile = join(dir, 'instances', `${instanceId}.json`)
+
+  const fromServer = readConfigFile(serverFile)
+  const fromInstance = readConfigFile(instanceFile)
   const fromEnv = envOverrides()
-  const merged = mergeConfig(mergeConfig(DEFAULTS, fromFile), fromEnv)
+
+  const merged = mergeConfig(
+    mergeConfig(mergeConfig(DEFAULTS, fromServer), fromInstance),
+    fromEnv,
+  )
 
   const result = ConfigSchema.safeParse(merged)
   if (!result.success) {
@@ -219,4 +274,20 @@ const loadConfig = (configPath) => {
   return result.data
 }
 
-export { loadConfig, mergeConfig, envOverrides, readConfigFile, validateConfig, defaultConfigPath, DEFAULTS, ConfigSchema }
+// --- 클라이언트 설정 로드 (Either) ---
+// Either.Right(data) | Either.Left(errorMessage)
+
+const loadClientConfig = (userId, { basePath } = {}) => {
+  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const filePath = join(dir, 'clients', `${userId}.json`)
+  const raw = readConfigFile(filePath)
+  if (Object.keys(raw).length === 0) return Either.Left(`Client config not found: ${filePath}`)
+  return validateWithSchema(ClientConfigSchema, raw, 'Client config')
+}
+
+export {
+  loadInstanceConfig, loadInstancesFile, loadClientConfig,
+  mergeConfig, envOverrides, readConfigFile, validateConfig,
+  defaultPresenceDir, DEFAULTS, ConfigSchema,
+  InstancesFileSchema, InstanceDefSchema, ClientConfigSchema,
+}

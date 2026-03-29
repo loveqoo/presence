@@ -2,10 +2,20 @@ import { createServer } from 'node:http'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import { createGlobalContext } from '@presence/infra/infra/global-context.js'
+import { loadInstanceConfig } from '@presence/infra/infra/config.js'
 import { createSessionManager } from '@presence/infra/infra/session-manager.js'
 import { createSchedulerActor } from '@presence/infra/infra/scheduler-actor.js'
 import { clearDebugState } from '@presence/core/core/agent.js'
 import { SESSION_TYPE } from '@presence/core/core/policies.js'
+import { createUserStore } from '@presence/infra/infra/auth-user-store.js'
+import { createTokenService } from '@presence/infra/infra/auth-token.js'
+import { createLocalAuthProvider } from '@presence/infra/infra/auth-provider.js'
+import {
+  createAuthMiddleware, createLoginHandler, createRefreshHandler,
+  createLogoutHandler, authenticateWs,
+} from '@presence/infra/infra/auth-middleware.js'
+import fp from '@presence/core/lib/fun-fp.js'
+const { Either } = fp
 
 // =============================================================================
 // State → WebSocket Bridge (세션 인식)
@@ -160,8 +170,9 @@ const createSessionRoutes = (session, globalCtx) => {
 // Server 시작
 // =============================================================================
 
-const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', persistenceCwd } = {}) => {
-  const globalCtx = await createGlobalContext(configOverride)
+const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', persistenceCwd, instanceId } = {}) => {
+  const globalCtx = await createGlobalContext(configOverride, { instanceId })
+  const serverStartedAt = Date.now()
 
   const expressApp = express()
   const server = createServer(expressApp)
@@ -222,7 +233,55 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     agentEntry.session.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
   }
 
-  // 레거시 라우트 (user-default, 하위 호환)
+  // --- 인증 ---
+  const userStore = instanceId ? createUserStore(instanceId) : null
+
+  // instanceId가 있으면 인증 필수 — 사용자 없으면 시작 불가
+  if (instanceId && !userStore?.hasUsers()) {
+    throw new Error(`No users configured for instance '${instanceId}'. Run: npm run user -- init --instance ${instanceId}`)
+  }
+
+  const authEnabled = userStore?.hasUsers() ?? false
+  let tokenService = null
+  let authProvider = null
+
+  if (authEnabled) {
+    tokenService = createTokenService(instanceId)
+    authProvider = createLocalAuthProvider(userStore)
+
+    // cookie-parser (쿠키에서 refreshToken 추출용)
+    expressApp.use((req, _res, next) => {
+      req.cookies = {}
+      const cookieStr = req.headers.cookie || ''
+      for (const pair of cookieStr.split(';')) {
+        const [key, ...rest] = pair.trim().split('=')
+        if (key) req.cookies[key] = rest.join('=')
+      }
+      next()
+    })
+
+    // auth 라우트 (public)
+    expressApp.post('/api/auth/login', express.json(), createLoginHandler(authProvider, tokenService, userStore, instanceId))
+    expressApp.post('/api/auth/refresh', express.json(), createRefreshHandler(tokenService, userStore))
+    expressApp.post('/api/auth/logout', express.json(), createLogoutHandler(tokenService, userStore))
+
+    // auth 미들웨어 (login/refresh/logout/instance 이후 모든 /api/* 보호)
+    expressApp.use('/api', createAuthMiddleware(tokenService, {
+      publicPaths: ['/auth/login', '/auth/refresh', '/auth/logout', '/instance'],
+    }))
+  }
+
+  // 인스턴스 헬스 엔드포인트 (public)
+  expressApp.get('/api/instance', (_req, res) => {
+    res.json({
+      id: instanceId || 'standalone',
+      status: 'running',
+      uptime: Math.floor((Date.now() - serverStartedAt) / 1000),
+      authRequired: authEnabled,
+    })
+  })
+
+  // 레거시 라우트 (user-default)
   expressApp.use('/api', createSessionRoutes(defaultSession, globalCtx))
 
   // 세션별 라우트: /api/sessions/:sessionId/*
@@ -288,7 +347,33 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   })
 
   // WebSocket: 연결 시 user-default 초기 상태 전송, join 메시지 처리
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    // Origin 검사 — 쿠키 기반 WS 인증 시 CSRF 방지
+    // Authorization 헤더가 없으면 브라우저 연결 → Origin 필수 확인
+    if (authEnabled && !req.headers.authorization) {
+      const origin = req.headers.origin
+      if (origin) {
+        const expectedHost = `${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`
+        const allowed = origin === `http://${expectedHost}` || origin === `https://${expectedHost}`
+          || origin === `http://localhost:${port}` || origin === `http://127.0.0.1:${port}`
+        if (!allowed) {
+          ws.close(4003, 'Origin not allowed')
+          return
+        }
+      }
+    }
+
+    // WS 인증: Authorization 헤더 (TUI) 또는 쿠키 (브라우저)
+    if (authEnabled) {
+      let rejected = false
+      Either.fold(
+        () => { ws.close(4001, 'Unauthorized'); rejected = true },
+        payload => { ws.user = payload },
+        authenticateWs(req, tokenService, { userStore }),
+      )
+      if (rejected) return
+    }
+
     ws.send(JSON.stringify({ type: 'init', session_id: 'user-default', state: defaultSession.state.snapshot() }))
 
     ws.on('message', (data) => {
@@ -347,6 +432,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   const jobCount = jobStore.listJobs().filter(j => j.enabled).length
 
   console.log(`\nPresence server ready`)
+  if (instanceId) console.log(`  Instance   : ${instanceId}`)
   console.log(`  URL        : http://${host}:${port}`)
   console.log(`  WebSocket  : ws://${host}:${port}`)
   console.log(`  Model      : ${cfg.llm.model}`)
@@ -387,12 +473,28 @@ export { startServer, createSessionRoutes, createSessionBridge, handleSlashComma
 
 // CLI 실행
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
+  const instanceId = process.env.PRESENCE_INSTANCE_ID
+  if (!instanceId) {
+    console.error('PRESENCE_INSTANCE_ID environment variable is required.')
+    console.error('Usage: PRESENCE_INSTANCE_ID=<id> PORT=<port> node packages/server/src/server/index.js')
+    process.exit(1)
+  }
+  // 사용자 확인 (인증 필수)
+  const userStore = createUserStore(instanceId)
+  if (!userStore.hasUsers()) {
+    console.error(`No users configured for instance '${instanceId}'.`)
+    console.error(`Run: npm run user -- init --instance ${instanceId}`)
+    process.exit(1)
+  }
+
   const port = Number(process.env.PORT) || 3000
-  console.log(`Starting Presence server on port ${port}...`)
-  startServer(undefined, { port }).catch(err => {
-    console.error(`\nFailed to start server: ${err.message}`)
+  const host = process.env.HOST || '127.0.0.1'
+  const config = loadInstanceConfig(instanceId)
+  console.log(`Starting Presence server [${instanceId}] on ${host}:${port}...`)
+  startServer(config, { port, host, instanceId }).catch(err => {
+    console.error(`\nFailed to start server [${instanceId}]: ${err.message}`)
     if (err.code === 'EADDRINUSE') {
-      console.error(`  Port ${port} is already in use. Set a different port with PORT=<n> npm run start`)
+      console.error(`  Port ${port} is already in use. Set a different port with PORT=<n>`)
     } else if (err.code === 'EACCES') {
       console.error(`  Permission denied. Try a port above 1024.`)
     }

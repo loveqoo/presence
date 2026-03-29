@@ -1,0 +1,17 @@
+{
+  "name": "@presence/orchestrator",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/orchestrator/index.js"
+  },
+  "exports": {
+    ".": "./src/orchestrator/index.js",
+    "./child-manager": "./src/orchestrator/child-manager.js"
+  },
+  "dependencies": {
+    "@presence/infra": "*",
+    "express": "^5.2.1"
+  }
+}

@@ -8,7 +8,7 @@ import { createAgentRegistry } from './agent-registry.js'
 import { connectMCPServer } from './mcp.js'
 import { createEmbedder } from './embedding.js'
 import { createJobStore, defaultJobDbPath } from './job-store.js'
-import { loadConfig, validateConfig } from './config.js'
+import { loadInstanceConfig, validateConfig } from './config.js'
 import { createLocalTools } from './local-tools.js'
 import { initI18n, t } from '../i18n/index.js'
 
@@ -17,8 +17,8 @@ import { initI18n, t } from '../i18n/index.js'
 // LLM, 메모리, MCP, JobStore, AgentRegistry 등 세션 간 공유 자원.
 // =============================================================================
 
-const createGlobalContext = async (configOverride) => {
-  const config = configOverride || loadConfig()
+const createGlobalContext = async (configOverride, { instanceId } = {}) => {
+  const config = configOverride || loadInstanceConfig(instanceId)
   initI18n(config.locale)
   const { logger } = createLogger()
 

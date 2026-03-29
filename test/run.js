@@ -19,8 +19,11 @@ const NETWORK_TESTS = new Set([
   'test/e2e/bootstrap.test.js',
   'test/e2e/server-e2e.test.js',
   'test/e2e/tui-e2e.test.js',
+  'test/e2e/client-sync.test.js',
   'test/server/server.test.js',
   'test/server/supervisor.test.js',
+  'test/server/auth-e2e.test.js',
+  'test/orchestrator/orchestrator-e2e.test.js',
 ])
 
 const tests = [
@@ -56,9 +59,13 @@ const tests = [
   'test/infra/remote-state.test.js',
   'test/infra/local-tools.test.js',
   'test/infra/config.test.js',
+  'test/infra/auth-user-store.test.js',
+  'test/infra/auth-token.test.js',
+  'test/infra/auth-provider.test.js',
   'test/infra/persona.test.js',
   'test/ui/app.test.js',
   'test/ui/interactive.test.js',
+  'test/ui/session-commands.test.js',
   // History compaction
   'test/core/compaction.test.js',
   // Phase 2
@@ -83,6 +90,7 @@ const tests = [
   'test/e2e/bootstrap.test.js',
   'test/e2e/server-e2e.test.js',
   'test/e2e/tui-e2e.test.js',
+  'test/e2e/client-sync.test.js',
   // Interpreter
   'test/interpreter/delegate.test.js',
   // Infra
@@ -90,6 +98,10 @@ const tests = [
   // Server
   'test/server/server.test.js',
   'test/server/supervisor.test.js',
+  'test/server/auth-e2e.test.js',
+  // Orchestrator
+  'test/orchestrator/child-manager.test.js',
+  'test/orchestrator/orchestrator-e2e.test.js',
 ]
 
 const noNetwork = process.argv.includes('--no-network')
@@ -154,7 +166,7 @@ if (noNetwork && skipped > 0) {
 if (!noNetwork) {
   console.log('\n--- Playwright (web browser E2E) ---')
   try {
-    const pwOutput = execSync('npx playwright test --reporter=list', {
+    const pwOutput = execSync('npx playwright test e2e/chat.spec.js e2e/sessions.spec.js --reporter=list', {
       cwd: join(root, 'packages/web'),
       encoding: 'utf-8',
       timeout: 120000,
@@ -164,7 +176,7 @@ if (!noNetwork) {
     totalPassed += Number(pwPassed)
     totalFailed += Number(pwFailed)
     if (Number(pwFailed) > 0) allPassed = false
-    console.log(`  ✓ web/e2e/chat.spec.js — ${pwPassed} passed, ${pwFailed} failed`)
+    console.log(`  ✓ web/e2e/ — ${pwPassed} passed, ${pwFailed} failed`)
   } catch (e) {
     allPassed = false
     filesFailed++

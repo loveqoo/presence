@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@presence/core": "*",
+    "bcryptjs": "^2.4.3",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "conf": "^15.1.0",
     "croner": "^10.0.1",
