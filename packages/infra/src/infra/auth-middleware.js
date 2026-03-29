@@ -182,7 +182,7 @@ const loginHandlerR = Reader.ask.map(env => {
               if (result.left) return res.status(401).json({ error: result.left })
               const { accessToken, refreshToken, user } = result.right
               setRefreshCookie(res, refreshToken)
-              res.json({ accessToken, username: user.username, roles: user.roles })
+              res.json({ accessToken, refreshToken, username: user.username, roles: user.roles })
             },
           )
       },
@@ -249,6 +249,22 @@ const authenticateViaHeaderR = (req) =>
   })
 
 /**
+ * Authenticates a WebSocket upgrade request via `token` query parameter (access token).
+ * @param {object} req - HTTP upgrade request
+ * @returns {Reader} Reader({ tokenService } → Either<error, payload>)
+ */
+const authenticateViaQueryR = (req) =>
+  Reader.asks(({ tokenService }) => {
+    const url = req.url || ''
+    const idx = url.indexOf('?')
+    if (idx === -1) return Either.Left('no token query param')
+    const params = new URLSearchParams(url.slice(idx + 1))
+    const token = params.get('token')
+    if (!token) return Either.Left('no token query param')
+    return tokenService.verifyAccessToken(token)
+  })
+
+/**
  * Authenticates a WebSocket upgrade request via HttpOnly refreshToken cookie.
  * @param {object} req - HTTP upgrade request
  * @returns {Reader} Reader({ tokenService, userStore } → Either<error, { sub }>)
@@ -272,7 +288,7 @@ const authenticateViaCookieR = (req) =>
   })
 
 /**
- * Authenticates a WebSocket request: tries Bearer header first, falls back to cookie.
+ * Authenticates a WebSocket request: tries Bearer header → query param → cookie, in that order.
  * @param {object} req - HTTP upgrade request
  * @returns {Reader} Reader(AuthEnv → Either<error, payload>)
  */
@@ -280,7 +296,14 @@ const authenticateWsR = (req) =>
   Reader.asks(env => {
     const headerResult = authenticateViaHeaderR(req).run(env)
     return Either.fold(
-      () => env.userStore ? authenticateViaCookieR(req).run(env) : Either.Left('No valid authentication'),
+      () => {
+        const queryResult = authenticateViaQueryR(req).run(env)
+        return Either.fold(
+          () => env.userStore ? authenticateViaCookieR(req).run(env) : Either.Left('No valid authentication'),
+          payload => Either.Right(payload),
+          queryResult,
+        )
+      },
       payload => Either.Right(payload),
       headerResult,
     )
@@ -296,6 +319,7 @@ export {
   logoutHandlerR,
   authMiddlewareR,
   authenticateWsR,
+  authenticateViaQueryR,
   issueTokensR,
   validateRefreshChainR,
   rotateRefreshTokenR,

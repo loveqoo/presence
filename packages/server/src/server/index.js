@@ -190,6 +190,19 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   const server = createServer(expressApp)
   const wss = new WebSocketServer({ server })
 
+  // CORS — cross-origin web client support (opt-in via CORS_ORIGIN env var)
+  const corsOrigin = process.env.CORS_ORIGIN
+  if (corsOrigin) {
+    expressApp.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', corsOrigin)
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+      res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+      res.header('Access-Control-Allow-Credentials', 'true')
+      if (req.method === 'OPTIONS') return res.sendStatus(204)
+      next()
+    })
+  }
+
   const bridge = sessionBridgeR.run({ wss })
 
   const sessionManager = createSessionManager(globalCtx, {
@@ -365,10 +378,16 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     if (authEnabled && !req.headers.authorization) {
       const origin = req.headers.origin
       if (origin) {
-        const expectedHost = `${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`
-        const allowed = origin === `http://${expectedHost}` || origin === `https://${expectedHost}`
-          || origin === `http://localhost:${port}` || origin === `http://127.0.0.1:${port}`
-        if (!allowed) {
+        try {
+          const parsed = new URL(origin)
+          const hostname = parsed.hostname
+          const corsHostname = corsOrigin ? (() => { try { return new URL(corsOrigin).hostname } catch { return null } })() : null
+          const allowed = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === host || (corsHostname && hostname === corsHostname)
+          if (!allowed) {
+            ws.close(4003, 'Origin not allowed')
+            return
+          }
+        } catch {
           ws.close(4003, 'Origin not allowed')
           return
         }

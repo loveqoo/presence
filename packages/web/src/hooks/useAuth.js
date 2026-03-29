@@ -2,27 +2,53 @@ import { useState, useCallback, useRef } from 'react'
 
 // =============================================================================
 // useAuth: 인증 상태 관리
-// - accessToken: 메모리 (React state)
-// - refreshToken: HttpOnly 쿠키 (서버가 설정, JS 접근 불가)
+// - accessToken: 메모리 (React state) + sessionStorage (페이지 새로고침 복원)
+// - refreshToken: 메모리 (React state) + sessionStorage
+// - instanceUrl: 인스턴스별로 토큰 분리
 // - 401 시 단일 refreshPromise로 동시성 제어
 // =============================================================================
 
 /**
- * React hook that manages authentication state (access token in memory, refresh token in HttpOnly cookie).
- * Provides login/logout/refresh helpers and an `authFetch` wrapper that auto-retries on 401.
+ * React hook that manages authentication state for a specific instance.
+ * Tokens are stored in sessionStorage keyed by instance URL for page refresh survival.
+ * @param {string|null} instanceUrl - The base URL of the target instance
  * @returns {{accessToken: string|null, user: object|null, authRequired: boolean|null, isAuthenticated: boolean, checkAuthRequired: Function, login: Function, logout: Function, refresh: Function, authFetch: Function}}
  */
-const useAuth = () => {
-  const [accessToken, setAccessToken] = useState(null)
-  const [user, setUser] = useState(null)
+const useAuth = (instanceUrl) => {
+  const storageKey = instanceUrl ? `presence:auth:${instanceUrl}` : null
+
+  const restoreTokens = () => {
+    if (!storageKey) return { accessToken: null, refreshToken: null, user: null }
+    try {
+      const saved = sessionStorage.getItem(storageKey)
+      if (saved) return JSON.parse(saved)
+    } catch {}
+    return { accessToken: null, refreshToken: null, user: null }
+  }
+
+  const saved = restoreTokens()
+  const [accessToken, setAccessToken] = useState(saved.accessToken)
+  const [refreshToken, setRefreshToken] = useState(saved.refreshToken)
+  const [user, setUser] = useState(saved.user)
   const [authRequired, setAuthRequired] = useState(null) // null = 확인 중
   const refreshPromiseRef = useRef(null)
 
-  // 서버 인증 요구 여부 확인 + 쿠키의 refresh token으로 자동 복원 시도
+  const saveTokens = useCallback((at, rt, u) => {
+    if (!storageKey) return
+    sessionStorage.setItem(storageKey, JSON.stringify({ accessToken: at, refreshToken: rt, user: u }))
+  }, [storageKey])
+
+  const clearTokens = useCallback(() => {
+    if (!storageKey) return
+    sessionStorage.removeItem(storageKey)
+  }, [storageKey])
+
+  // 서버 인증 요구 여부 확인 + 저장된 refresh token으로 자동 복원 시도
   // authRequired를 설정하기 전에 refresh를 시도 → LoginPage 깜빡임 방지
   const checkAuthRequired = useCallback(async () => {
+    if (!instanceUrl) return
     try {
-      const res = await fetch('/api/instance')
+      const res = await fetch(`${instanceUrl}/api/instance`)
       const data = await res.json()
       const required = !!data.authRequired
 
@@ -31,19 +57,25 @@ const useAuth = () => {
         return false
       }
 
-      // 인증 필요 → refresh 쿠키로 자동 복원 시도 (authRequired 설정 전)
-      try {
-        const refreshRes = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-        })
-        if (refreshRes.ok) {
-          const refreshData = await refreshRes.json()
-          setAccessToken(refreshData.accessToken)
-          setUser({ username: refreshData.username, roles: refreshData.roles || [] })
-        }
-      } catch {}
+      // 인증 필요 → 저장된 refresh token으로 자동 복원 시도 (authRequired 설정 전)
+      const storedTokens = restoreTokens()
+      if (storedTokens.refreshToken) {
+        try {
+          const refreshRes = await fetch(`${instanceUrl}/api/auth/refresh`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: storedTokens.refreshToken }),
+          })
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json()
+            const newUser = { username: refreshData.username, roles: refreshData.roles || [] }
+            setAccessToken(refreshData.accessToken)
+            setRefreshToken(refreshData.refreshToken || storedTokens.refreshToken)
+            setUser(newUser)
+            saveTokens(refreshData.accessToken, refreshData.refreshToken || storedTokens.refreshToken, newUser)
+          }
+        } catch {}
+      }
 
       setAuthRequired(true)
       return true
@@ -51,59 +83,72 @@ const useAuth = () => {
       setAuthRequired(false)
       return false
     }
-  }, [])
+  }, [instanceUrl, saveTokens])
 
   // 로그인
   const login = useCallback(async (username, password) => {
-    const res = await fetch('/api/auth/login', {
+    if (!instanceUrl) return
+    const res = await fetch(`${instanceUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
-      credentials: 'include', // 쿠키 수신
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
       throw new Error(data.error || 'Login failed')
     }
     const data = await res.json()
+    const newUser = { username: data.username, roles: data.roles }
     setAccessToken(data.accessToken)
-    setUser({ username: data.username, roles: data.roles })
+    setRefreshToken(data.refreshToken || null)
+    setUser(newUser)
+    saveTokens(data.accessToken, data.refreshToken || null, newUser)
     return data
-  }, [])
+  }, [instanceUrl, saveTokens])
 
   // 로그아웃
-  // logout은 public 경로 — access token 불필요, refresh 쿠키만으로 서버 정리
   const logout = useCallback(async () => {
+    if (!instanceUrl) return
     try {
-      await fetch('/api/auth/logout', {
+      await fetch(`${instanceUrl}/api/auth/logout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // refresh 쿠키 전송
+        body: JSON.stringify({ refreshToken }),
       })
     } catch {}
     setAccessToken(null)
+    setRefreshToken(null)
     setUser(null)
-  }, [])
+    clearTokens()
+  }, [instanceUrl, refreshToken, clearTokens])
 
   // Refresh (단일 promise 동시성 제어)
   const refresh = useCallback(async () => {
+    if (!instanceUrl) return null
     if (refreshPromiseRef.current) return refreshPromiseRef.current
 
     refreshPromiseRef.current = (async () => {
       try {
-        const res = await fetch('/api/auth/refresh', {
+        const currentRefreshToken = refreshToken
+        if (!currentRefreshToken) throw new Error('No refresh token')
+        const res = await fetch(`${instanceUrl}/api/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include', // HttpOnly 쿠키 전송
+          body: JSON.stringify({ refreshToken: currentRefreshToken }),
         })
         if (!res.ok) throw new Error('Refresh failed')
         const data = await res.json()
+        const newRefreshToken = data.refreshToken || currentRefreshToken
         setAccessToken(data.accessToken)
+        setRefreshToken(newRefreshToken)
+        saveTokens(data.accessToken, newRefreshToken, user)
         return data.accessToken
       } catch {
         // refresh 실패 → auth state 전체 clear
         setAccessToken(null)
+        setRefreshToken(null)
         setUser(null)
+        clearTokens()
         return null
       } finally {
         refreshPromiseRef.current = null
@@ -111,15 +156,16 @@ const useAuth = () => {
     })()
 
     return refreshPromiseRef.current
-  }, [])
+  }, [instanceUrl, refreshToken, user, saveTokens, clearTokens])
 
   // 인증된 fetch (401 시 자동 refresh)
   const authFetch = useCallback(async (url, options = {}) => {
+    if (!instanceUrl) return
     const headers = {
       ...options.headers,
       ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {}),
     }
-    const res = await fetch(url, { ...options, headers, credentials: 'include' })
+    const res = await fetch(url, { ...options, headers })
 
     if (res.status === 401 && accessToken) {
       const newToken = await refresh()
@@ -127,13 +173,12 @@ const useAuth = () => {
         return fetch(url, {
           ...options,
           headers: { ...options.headers, 'Authorization': `Bearer ${newToken}` },
-          credentials: 'include',
         })
       }
     }
 
     return res
-  }, [accessToken, refresh])
+  }, [instanceUrl, accessToken, refresh])
 
   return {
     accessToken,

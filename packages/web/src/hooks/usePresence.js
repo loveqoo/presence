@@ -14,9 +14,9 @@ const deriveStatus = (state) => {
  * React hook that connects to the Presence server via WebSocket and mirrors session state.
  * IO only — message state is owned by MessageActor (Actor pattern).
  * @param {string} [sessionId='user-default']
- * @param {{authFetch?: Function, accessToken?: string|null, enabled?: boolean}} [options]
+ * @param {{instanceUrl?: string|null, authFetch?: Function, accessToken?: string|null, enabled?: boolean}} [options]
  */
-const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabled = true } = {}) => {
+const usePresence = (sessionId = 'user-default', { instanceUrl, authFetch, accessToken, enabled = true } = {}) => {
   const fetchFn = authFetch || fetch
 
   const [connected, setConnected] = useState(false)
@@ -52,11 +52,12 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
 
   // tools 로드
   const loadTools = useCallback(() => {
+    if (!instanceUrl) return
     const url = sessionId === 'user-default'
-      ? '/api/tools'
-      : `/api/sessions/${sessionId}/tools`
+      ? `${instanceUrl}/api/tools`
+      : `${instanceUrl}/api/sessions/${sessionId}/tools`
     fetchFn(url).then(r => r.json()).then(setTools).catch(() => {})
-  }, [sessionId, fetchFn])
+  }, [sessionId, fetchFn, instanceUrl])
 
   // WebSocket 연결
   useEffect(() => {
@@ -64,9 +65,10 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
     let reconnectTimer = null
 
     const connect = () => {
-      if (!mounted) return
-      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const ws = new WebSocket(`${protocol}//${location.host}`)
+      if (!mounted || !instanceUrl) return
+      const wsBase = instanceUrl.replace(/^http/, 'ws')
+      const tokenParam = accessToken ? `?token=${encodeURIComponent(accessToken)}` : ''
+      const ws = new WebSocket(`${wsBase}/ws${tokenParam}`)
       wsRef.current = ws
 
       ws.onopen = () => {
@@ -131,7 +133,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
       }
     }
 
-    if (!enabled) return () => { mounted = false }
+    if (!enabled || !instanceUrl) return () => { mounted = false }
 
     connect()
     loadTools()
@@ -142,11 +144,14 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [sessionId, loadTools, accessToken, enabled, send])
+  }, [sessionId, loadTools, accessToken, enabled, instanceUrl, send])
 
-  const apiBase = sessionId === 'user-default' ? '/api' : `/api/sessions/${sessionId}`
+  const apiBase = instanceUrl
+    ? (sessionId === 'user-default' ? `${instanceUrl}/api` : `${instanceUrl}/api/sessions/${sessionId}`)
+    : null
 
   const sendMessage = useCallback(async (input) => {
+    if (!apiBase) return
     const isSlash = input.startsWith('/')
     const isClear = /^\/clear\b/.test(input)
 
@@ -183,6 +188,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   }, [send])
 
   const respondApprove = useCallback(async (approved) => {
+    if (!apiBase) return
     await fetchFn(`${apiBase}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -191,6 +197,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   }, [apiBase, fetchFn])
 
   const cancel = useCallback(async () => {
+    if (!apiBase) return
     await fetchFn(`${apiBase}/cancel`, { method: 'POST' })
   }, [apiBase, fetchFn])
 

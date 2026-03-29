@@ -6,14 +6,16 @@ import { test as base, expect } from '@playwright/test'
 
 const TEST_USERNAME = process.env.TEST_USERNAME || 'testuser'
 const TEST_PASSWORD = process.env.TEST_PASSWORD || 'testpass123'
+// 인스턴스에 직접 API 호출 (Vite 프록시 경유하지 않음)
+const INSTANCE_URL = process.env.INSTANCE_URL || 'http://127.0.0.1:3001'
 
 // API 요청용 access token
 let apiAccessToken = null
 
-async function getApiToken(baseURL) {
+async function getApiToken() {
   if (apiAccessToken) return apiAccessToken
   try {
-    const res = await fetch(`${baseURL}/api/auth/login`, {
+    const res = await fetch(`${INSTANCE_URL}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: TEST_USERNAME, password: TEST_PASSWORD }),
@@ -23,13 +25,13 @@ async function getApiToken(baseURL) {
   return apiAccessToken
 }
 
-async function authRequest(baseURL, method, path, data) {
-  const token = await getApiToken(baseURL)
+async function authRequest(method, path, data) {
+  const token = await getApiToken()
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
   const opts = { method, headers }
   if (data) opts.body = JSON.stringify(data)
-  return fetch(`${baseURL}${path}`, opts)
+  return fetch(`${INSTANCE_URL}${path}`, opts)
 }
 
 // 공유 context + page: 로그인 1회, refresh token rotation 없음
@@ -37,26 +39,36 @@ let sharedContext = null
 let sharedPage = null
 
 base.beforeAll(async ({ browser }, testInfo) => {
-  const baseURL = testInfo.project.use?.baseURL || 'http://127.0.0.1:3001'
+  const baseURL = testInfo.project.use?.baseURL || 'http://localhost:5173'
 
   sharedContext = await browser.newContext({ baseURL })
   sharedPage = await sharedContext.newPage()
 
   await sharedPage.goto('/')
 
-  const loginPage = sharedPage.locator('.login-page')
+  // 인스턴스 선택 (멀티 인스턴스 환경) 또는 로그인 직행
+  const instanceItem = sharedPage.locator('.instance-item').first()
+  const loginForm = sharedPage.locator('#username')
   const statusBar = sharedPage.locator('.status-bar')
-  await expect(loginPage.or(statusBar)).toBeVisible({ timeout: 10000 })
 
-  if (await loginPage.isVisible()) {
+  await expect(instanceItem.or(loginForm).or(statusBar)).toBeVisible({ timeout: 15000 })
+
+  // 인스턴스 선택 화면이면 첫 번째 인스턴스 선택
+  if (await instanceItem.isVisible()) {
+    await instanceItem.click()
+    await expect(loginForm.or(statusBar)).toBeVisible({ timeout: 10000 })
+  }
+
+  // 로그인 필요하면 로그인
+  if (await loginForm.isVisible()) {
     await sharedPage.locator('#username').fill(TEST_USERNAME)
     await sharedPage.locator('#password').fill(TEST_PASSWORD)
     await sharedPage.locator('.login-container button[type="submit"]').click()
   }
 
-  await sharedPage.waitForSelector('.status-conn.on', { timeout: 20000 })
+  await sharedPage.waitForSelector('.status-conn.on', { timeout: 30000 })
 
-  // 서버가 idle 상태가 될 때까지 대기 (다른 테스트의 잔여 working 상태 방지)
+  // 서버가 idle 상태가 될 때까지 대기
   await sharedPage.waitForFunction(
     () => document.querySelector('.status-indicator')?.textContent?.includes('idle'),
     { timeout: 30000 }
@@ -75,7 +87,7 @@ const test = base.extend({
     await use(sharedPage)
   },
   liveBaseURL: async ({}, use, testInfo) => {
-    await use(testInfo.project.use?.baseURL || 'http://127.0.0.1:3001')
+    await use(testInfo.project.use?.baseURL || 'http://localhost:5173')
   },
 })
 
@@ -253,7 +265,7 @@ test('WL-S2: SessionPanel 열기 → user-default 목록 표시', async ({ liveP
   await expect(page.locator('.session-panel')).not.toBeVisible()
 })
 
-test('WL-S3: 새 세션 생성 → 목록에 추가됨', async ({ livePage: page, liveBaseURL: baseURL }) => {
+test('WL-S3: 새 세션 생성 → 목록에 추가됨', async ({ livePage: page}) => {
   const testId = `wl-live-${Date.now()}`
 
   await page.locator('.session-btn').click()
@@ -265,12 +277,12 @@ test('WL-S3: 새 세션 생성 → 목록에 추가됨', async ({ livePage: page
   await expect(page.locator('.session-item').filter({ hasText: testId })).toBeVisible({ timeout: 5000 })
 
   await page.locator('.session-panel-close').click()
-  await authRequest(baseURL, 'DELETE', `/api/sessions/${testId}`)
+  await authRequest('DELETE', `/api/sessions/${testId}`)
 })
 
-test('WL-S4: 세션 전환 → StatusBar 갱신 + 메시지 초기화', async ({ livePage: page, liveBaseURL: baseURL }) => {
+test('WL-S4: 세션 전환 → StatusBar 갱신 + 메시지 초기화', async ({ livePage: page}) => {
   const testId = `wl-switch-${Date.now()}`
-  await authRequest(baseURL, 'POST', '/api/sessions', { id: testId, type: 'user' })
+  await authRequest('POST', '/api/sessions', { id: testId, type: 'user' })
 
   await page.locator('.input-bar input').fill('안녕')
   await page.locator('.input-bar input').press('Enter')
@@ -285,16 +297,16 @@ test('WL-S4: 세션 전환 → StatusBar 갱신 + 메시지 초기화', async ({
   await expect(page.locator('.session-btn')).toContainText(testId, { timeout: 5000 })
 
   // 정리: 세션 삭제 → user-default로 자동 복귀
-  await authRequest(baseURL, 'DELETE', `/api/sessions/${testId}`)
+  await authRequest('DELETE', `/api/sessions/${testId}`)
   // 세션 삭제 후 패널 닫기 (이미 닫혀있으면 무시)
   if (await page.locator('.session-panel').isVisible()) {
     await page.locator('.session-panel-close').click()
   }
 })
 
-test('WL-S5: 새 세션에서 LLM 응답 (turn 증가)', async ({ livePage: page, liveBaseURL: baseURL }) => {
+test('WL-S5: 새 세션에서 LLM 응답 (turn 증가)', async ({ livePage: page}) => {
   const testId = `wl-llm-${Date.now()}`
-  await authRequest(baseURL, 'POST', '/api/sessions', { id: testId, type: 'user' })
+  await authRequest('POST', '/api/sessions', { id: testId, type: 'user' })
 
   await page.locator('.session-btn').click()
   await page.waitForSelector('.session-panel')
@@ -310,12 +322,12 @@ test('WL-S5: 새 세션에서 LLM 응답 (turn 증가)', async ({ livePage: page
   await expect(page.locator('.status-indicator')).not.toContainText('working', { timeout: 15000 })
 
   // 정리: 세션 삭제 → user-default로 자동 복귀
-  await authRequest(baseURL, 'DELETE', `/api/sessions/${testId}`)
+  await authRequest('DELETE', `/api/sessions/${testId}`)
 })
 
-test('WL-S6: 세션 삭제 → 목록에서 제거', async ({ livePage: page, liveBaseURL: baseURL }) => {
+test('WL-S6: 세션 삭제 → 목록에서 제거', async ({ livePage: page}) => {
   const testId = `wl-del-${Date.now()}`
-  await authRequest(baseURL, 'POST', '/api/sessions', { id: testId, type: 'user' })
+  await authRequest('POST', '/api/sessions', { id: testId, type: 'user' })
 
   await page.locator('.session-btn').click()
   await page.waitForSelector('.session-panel')

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 
-function SessionPanel({ currentSessionId, onSwitch, onClose, authFetch }) {
+function SessionPanel({ currentSessionId, onSwitch, onClose, authFetch, instanceUrl }) {
   const fetchFn = authFetch || fetch
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(false)
@@ -8,22 +8,24 @@ function SessionPanel({ currentSessionId, onSwitch, onClose, authFetch }) {
   const [error, setError] = useState(null)
 
   const loadSessions = useCallback(() => {
+    if (!instanceUrl) return
     setLoading(true)
     setError(null)
-    fetchFn('/api/sessions')
+    fetchFn(`${instanceUrl}/api/sessions`)
       .then(r => r.json())
       .then(setSessions)
       .catch(() => setError('세션 목록을 불러올 수 없습니다.'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [instanceUrl, fetchFn])
 
   useEffect(() => { loadSessions() }, [loadSessions])
 
   const createSession = async () => {
+    if (!instanceUrl) return
     const id = newName.trim() || null
     setError(null)
     try {
-      await fetchFn('/api/sessions', {
+      await fetchFn(`${instanceUrl}/api/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, type: 'user' }),
@@ -36,10 +38,11 @@ function SessionPanel({ currentSessionId, onSwitch, onClose, authFetch }) {
   }
 
   const deleteSession = async (id) => {
+    if (!instanceUrl) return
     if (!window.confirm(`세션 '${id}'을 삭제하시겠습니까?`)) return
     setError(null)
     try {
-      const res = await fetchFn(`/api/sessions/${id}`, { method: 'DELETE' })
+      const res = await fetchFn(`${instanceUrl}/api/sessions/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       if (id === currentSessionId) onSwitch('user-default')
       loadSessions()

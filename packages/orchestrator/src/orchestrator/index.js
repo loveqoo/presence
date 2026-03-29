@@ -40,6 +40,20 @@ const startOrchestrator = async ({ presenceDir } = {}) => {
 
   // 관리 API
   const app = express()
+
+  // CORS — cross-origin web client support (opt-in via CORS_ORIGIN env var)
+  const corsOrigin = process.env.CORS_ORIGIN
+  if (corsOrigin) {
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', corsOrigin)
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+      res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+      res.header('Access-Control-Allow-Credentials', 'true')
+      if (req.method === 'OPTIONS') return res.sendStatus(204)
+      next()
+    })
+  }
+
   app.use(express.json())
 
   app.get('/api/instances', (_req, res) => {
