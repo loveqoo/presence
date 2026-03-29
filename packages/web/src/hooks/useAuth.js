@@ -13,13 +13,35 @@ const useAuth = () => {
   const [authRequired, setAuthRequired] = useState(null) // null = 확인 중
   const refreshPromiseRef = useRef(null)
 
-  // 서버 인증 요구 여부 확인
+  // 서버 인증 요구 여부 확인 + 쿠키의 refresh token으로 자동 복원 시도
+  // authRequired를 설정하기 전에 refresh를 시도 → LoginPage 깜빡임 방지
   const checkAuthRequired = useCallback(async () => {
     try {
       const res = await fetch('/api/instance')
       const data = await res.json()
-      setAuthRequired(!!data.authRequired)
-      return !!data.authRequired
+      const required = !!data.authRequired
+
+      if (!required) {
+        setAuthRequired(false)
+        return false
+      }
+
+      // 인증 필요 → refresh 쿠키로 자동 복원 시도 (authRequired 설정 전)
+      try {
+        const refreshRes = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+        })
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json()
+          setAccessToken(refreshData.accessToken)
+          setUser({ username: refreshData.username, roles: refreshData.roles || [] })
+        }
+      } catch {}
+
+      setAuthRequired(true)
+      return true
     } catch {
       setAuthRequired(false)
       return false

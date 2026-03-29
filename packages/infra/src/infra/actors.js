@@ -8,17 +8,48 @@ import {
 import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, todoFromEvent, isDuplicate } from './events.js'
 import { getA2ATaskStatus } from './a2a-client.js'
 
-const { Actor, Task, Maybe } = fp
+const { Actor, Task, Maybe, Reader } = fp
 
-// --- Helpers ---
+// --- Helpers (순수, Reader 대상 아님) ---
 
 const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, resolve))
 
-// --- MemoryActor ---
-// mem0 기반: recall → mem0.search, save → mem0.add
-// embed/prune/promote/removeWorking/saveDisk → no-op (mem0가 내부적으로 처리)
+const applyCompaction = (reactiveState, { summary, extractedIds }) => {
+  const current = reactiveState.get('context.conversationHistory') || []
+  const filtered = current.filter(h => !h.id || !extractedIds.has(h.id))
+  const merged = [summary, ...filtered]
+  const trimmed = merged.length > HISTORY.MAX_CONVERSATION
+    ? [merged[0], ...merged.slice(-(HISTORY.MAX_CONVERSATION - 1))]
+    : merged
+  reactiveState.set('context.conversationHistory', trimmed)
+}
 
-const createMemoryActor = ({ mem0, adapter, logger }) => Actor({
+const applyTodo = (state, event) => {
+  Maybe.fold(
+    () => {},
+    todo => {
+      const todos = state.get('todos') || []
+      if (isDuplicate(todos, event.id)) return
+      state.set('todos', [...todos, todo])
+    },
+    todoFromEvent(event),
+  )
+}
+
+const projectEvents = (state, { queue, inFlight, deadLetter, lastProcessed }) => {
+  state.set('events.queue', queue.map(e => ({ ...e })))
+  state.set('events.inFlight', inFlight ? { ...inFlight } : null)
+  state.set('events.deadLetter', deadLetter.map(e => ({ ...e })))
+  if (lastProcessed !== undefined) state.set('events.lastProcessed', lastProcessed)
+}
+
+// =============================================================================
+// Reader 기반 Actor Factory
+// =============================================================================
+
+// --- MemoryActor: Reader({ mem0, adapter, logger } → Actor) ---
+
+const memoryActorR = Reader.asks(({ mem0, adapter, logger }) => Actor({
   init: { mem0, adapter, logger },
   handle: (state, msg) => {
     const { mem0, adapter, logger } = state
@@ -59,17 +90,15 @@ const createMemoryActor = ({ mem0, adapter, logger }) => Actor({
         )
       }
 
-      // mem0가 내부적으로 처리하는 작업들 — no-op
       default:
         return ['no-op', state]
     }
   },
-})
+}))
 
-// --- CompactionActor ---
-// 히스토리 요약. Task 반환 시 fork 완료까지 다음 메시지 대기 (큐 직렬화).
+// --- CompactionActor: Reader({ llm, logger } → Actor) ---
 
-const createCompactionActor = ({ llm, logger }) => Actor({
+const compactionActorR = Reader.asks(({ llm, logger }) => Actor({
   init: {},
   handle: (state, msg) => {
     if (msg.type !== 'check') return ['skip', state]
@@ -94,13 +123,12 @@ const createCompactionActor = ({ llm, logger }) => Actor({
         })
     })
   },
-})
+}))
 
-// --- PersistenceActor ---
-// self-send trailing flush 패턴: save → debounce → flush
-// timer callback이 actor state를 직접 변경하지 않고 flush 메시지를 self-send
+// --- PersistenceActor: Reader({ store, debounceMs } → Actor) ---
+// self-referential closure는 Reader.asks 내부에 유지
 
-const createPersistenceActor = ({ store, debounceMs = 500 }) => {
+const persistenceActorR = Reader.asks(({ store, debounceMs = 500 }) => {
   let actor
   let timer = null
 
@@ -126,26 +154,11 @@ const createPersistenceActor = ({ store, debounceMs = 500 }) => {
   })
 
   return actor
-}
+})
 
-// --- applyCompaction ---
-// CompactionActor 결과를 현재 history와 merge (caller에서 호출)
+// --- TurnActor: Reader({ runTurn } → Actor) ---
 
-const applyCompaction = (reactiveState, { summary, extractedIds }) => {
-  const current = reactiveState.get('context.conversationHistory') || []
-  const filtered = current.filter(h => !h.id || !extractedIds.has(h.id))
-  const merged = [summary, ...filtered]
-  const trimmed = merged.length > HISTORY.MAX_CONVERSATION
-    ? [merged[0], ...merged.slice(-(HISTORY.MAX_CONVERSATION - 1))]
-    : merged
-  reactiveState.set('context.conversationHistory', trimmed)
-}
-
-// --- TurnActor ---
-// 모든 소스(user, event, heartbeat)의 턴 요청을 직렬화.
-// 동시 agent.run() 방지 — Actor 큐가 순서 보장.
-
-const createTurnActor = (runTurn) => Actor({
+const turnActorR = Reader.asks(({ runTurn }) => Actor({
   init: {},
   handle: (_state, { input, source, allowedTools }) =>
     new Task((reject, resolve) => {
@@ -153,35 +166,12 @@ const createTurnActor = (runTurn) => Actor({
         .then(result => resolve([result, _state]))
         .catch(err => resolve([{ _turnError: true, message: err.message }, _state]))
     }),
-})
+}))
 
-// --- applyTodo ---
-// 순수 함수: 이벤트에서 TODO 생성 + state 반영 (isDuplicate 멱등성)
-const applyTodo = (state, event) => {
-  Maybe.fold(
-    () => {},
-    todo => {
-      const todos = state.get('todos') || []
-      if (isDuplicate(todos, event.id)) return
-      state.set('todos', [...todos, todo])
-    },
-    todoFromEvent(event),
-  )
-}
+// --- EventActor: Reader({ turnActor, state, logger, onEventDone, todoReviewJobName } → Actor) ---
+// self-referential closure는 Reader.asks 내부에 유지
 
-// --- EventActor ---
-// wireEventHooks + wireTodoHooks + createEventReceiver 흡수.
-// Actor 큐가 processing 플래그를 대체 (직렬화 보장).
-// Source of truth: Actor 내부 상태. ReactiveState.events.*는 projection/cache.
-
-const projectEvents = (state, { queue, inFlight, deadLetter, lastProcessed }) => {
-  state.set('events.queue', queue.map(e => ({ ...e })))
-  state.set('events.inFlight', inFlight ? { ...inFlight } : null)
-  state.set('events.deadLetter', deadLetter.map(e => ({ ...e })))
-  if (lastProcessed !== undefined) state.set('events.lastProcessed', lastProcessed)
-}
-
-const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJobName }) => {
+const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoReviewJobName }) => {
   let actor
 
   actor = Actor({
@@ -191,7 +181,6 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
         case 'enqueue': {
           const next = { ...s, queue: [...s.queue, msg.event] }
           projectEvents(state, next)
-          // idle이면 자체 drain 전송
           const ts = state.get('turnState')
           if (ts && ts.tag === 'idle' && !s.inFlight) {
             actor.send({ type: 'drain' }).fork(() => {}, () => {})
@@ -200,7 +189,6 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
         }
 
         case 'drain': {
-          // idempotency: 큐 비었거나 inFlight이거나 not-idle → no-op
           if (s.queue.length === 0) return ['no-op:empty', s]
           if (s.inFlight !== null) return ['no-op:inFlight', s]
           const ts = state.get('turnState')
@@ -208,7 +196,6 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
 
           let [event, ...rest] = s.queue
 
-          // todo_review: 대기 중 todos가 없으면 turn 시작 없이 skip
           const isTodoReview = event.type === 'todo_review' ||
             (todoReviewJobName && event.jobName === todoReviewJobName)
           if (isTodoReview) {
@@ -219,7 +206,6 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
               if (rest.length > 0) actor.send({ type: 'drain' }).fork(() => {}, () => {})
               return ['no-op:no-todos', skipped]
             }
-            // todos 있으면 동적 프롬프트 주입
             event = { ...event, prompt: buildTodoReviewPrompt(pending) }
           }
 
@@ -233,10 +219,7 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
                 applyTodo(state, event)
                 if (onEventDone) onEventDone(event, { success: true, result })
                 const done = { ...draining, queue: [...draining.queue], inFlight: null, lastProcessed: event }
-                // queue는 drain 중에 enqueue로 변경되었을 수 있으므로 Actor state에서 읽지 않음
-                // (Actor 직렬화이므로 drain 완료 전 enqueue는 큐에 대기)
                 projectEvents(state, done)
-                // 큐에 남아있으면 자체 drain
                 if (done.queue.length > 0) {
                   actor.send({ type: 'drain' }).fork(() => {}, () => {})
                 }
@@ -257,7 +240,6 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
                 projectEvents(state, failed)
                 if (onEventDone) onEventDone(event, { success: false, error: err.message })
                 ;(logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
-                // 실패해도 큐에 남은 이벤트 계속 처리
                 if (failed.queue.length > 0) {
                   actor.send({ type: 'drain' }).fork(() => {}, () => {})
                 }
@@ -273,20 +255,19 @@ const createEventActor = ({ turnActor, state, logger, onEventDone, todoReviewJob
   })
 
   return actor
-}
+})
 
-// --- createEmit ---
-// fire-and-forget wrapper. enriched event를 동기 반환.
-const createEmit = (eventActor) => (event) => {
+// --- createEmit: Reader({ eventActor } → (event) → enrichedEvent) ---
+
+const emitR = Reader.asks(({ eventActor }) => (event) => {
   const enriched = withEventMeta(event)
   eventActor.send({ type: 'enqueue', event: enriched }).fork(() => {}, () => {})
   return enriched
-}
+})
 
-// --- BudgetActor ---
-// wireBudgetWarning 흡수. 가장 얇은 Actor.
+// --- BudgetActor: Reader({ state } → Actor) ---
 
-const createBudgetActor = ({ state }) => Actor({
+const budgetActorR = Reader.asks(({ state }) => Actor({
   init: { lastWarnedTurn: -1 },
   handle: (s, msg) => {
     if (msg.type !== 'check') return ['skip', s]
@@ -306,16 +287,15 @@ const createBudgetActor = ({ state }) => Actor({
       state.set('_budgetWarning', { type: 'high_usage', pct })
       return ['warned', { lastWarnedTurn: turn }]
     }
-    // 정상 턴 → 이전 경고 해제
     if (state.get('_budgetWarning') != null) state.set('_budgetWarning', null)
     return ['ok', s]
   },
-})
+}))
 
-// --- DelegateActor ---
-// wireDelegatePolling 흡수. self-send 타이머 패턴 (PersistenceActor와 동일).
+// --- DelegateActor: Reader({ state, eventActor, agentRegistry, logger, fetchFn, pollIntervalMs } → Actor) ---
+// self-referential closure + timer는 Reader.asks 내부에 유지
 
-const createDelegateActor = ({ state, eventActor, agentRegistry, logger, fetchFn, pollIntervalMs = 10_000 }) => {
+const delegateActorR = Reader.asks(({ state, eventActor, agentRegistry, logger, fetchFn, pollIntervalMs = 10_000 }) => {
   let actor
   let timer = null
 
@@ -333,7 +313,6 @@ const createDelegateActor = ({ state, eventActor, agentRegistry, logger, fetchFn
         case 'start': {
           if (s.running) return ['already-running', s]
           const next = { ...s, running: true }
-          // 최초 tick 예약
           timer = setTimeout(() => {
             actor.send({ type: 'tick' }).fork(() => {}, () => {})
           }, pollIntervalMs)
@@ -347,12 +326,10 @@ const createDelegateActor = ({ state, eventActor, agentRegistry, logger, fetchFn
 
         case 'tick': {
           if (!s.running) return ['no-op:stopped', s]
-          // 다음 타이머 예약
           if (timer) clearTimeout(timer)
           timer = setTimeout(() => {
             actor.send({ type: 'tick' }).fork(() => {}, () => {})
           }, pollIntervalMs)
-          // poll 호출 (Actor 큐 경유)
           actor.send({ type: 'poll' }).fork(() => {}, () => {})
           return ['ticked', s]
         }
@@ -404,18 +381,44 @@ const createDelegateActor = ({ state, eventActor, agentRegistry, logger, fetchFn
   })
 
   return actor
-}
+})
+
+// =============================================================================
+// 레거시 브릿지: createX(deps) === xR.run(deps)
+// =============================================================================
+
+const createMemoryActor = (deps) => memoryActorR.run(deps)
+const createCompactionActor = (deps) => compactionActorR.run(deps)
+const createPersistenceActor = (deps) => persistenceActorR.run(deps)
+const createTurnActor = (runTurn) => turnActorR.run({ runTurn })
+const createEventActor = (deps) => eventActorR.run(deps)
+const createEmit = (eventActor) => emitR.run({ eventActor })
+const createBudgetActor = (deps) => budgetActorR.run(deps)
+const createDelegateActor = (deps) => delegateActorR.run(deps)
 
 export {
+  // Reader 기반 (신규)
+  memoryActorR,
+  compactionActorR,
+  persistenceActorR,
+  turnActorR,
+  eventActorR,
+  emitR,
+  budgetActorR,
+  delegateActorR,
+
+  // 순수 헬퍼 (변경 없음)
   forkTask,
+  applyCompaction,
+  applyTodo,
+
+  // 레거시 브릿지
   createMemoryActor,
   createCompactionActor,
   createPersistenceActor,
   createTurnActor,
-  applyCompaction,
   createEventActor,
   createEmit,
-  applyTodo,
   createBudgetActor,
   createDelegateActor,
 }

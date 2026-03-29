@@ -11,11 +11,11 @@ import { createUserStore } from '@presence/infra/infra/auth-user-store.js'
 import { createTokenService } from '@presence/infra/infra/auth-token.js'
 import { createLocalAuthProvider } from '@presence/infra/infra/auth-provider.js'
 import {
-  createAuthMiddleware, createLoginHandler, createRefreshHandler,
-  createLogoutHandler, authenticateWs,
+  loginHandlerR, refreshHandlerR, logoutHandlerR,
+  authMiddlewareR, authenticateWsR,
 } from '@presence/infra/infra/auth-middleware.js'
 import fp from '@presence/core/lib/fun-fp.js'
-const { Either } = fp
+const { Either, Reader } = fp
 
 // =============================================================================
 // State → WebSocket Bridge (세션 인식)
@@ -32,7 +32,9 @@ const WATCHED_PATHS = [
   'todos', 'events', 'events.*', 'delegates', 'delegates.*',
 ]
 
-const createSessionBridge = (wss) => {
+// --- SessionBridge: Reader({ wss } → { broadcast, watchSession }) ---
+
+const sessionBridgeR = Reader.asks(({ wss }) => {
   const broadcast = (data) => {
     const msg = JSON.stringify(data)
     for (const ws of wss.clients) {
@@ -43,7 +45,6 @@ const createSessionBridge = (wss) => {
   const watchSession = (sessionId, state) => {
     for (const path of WATCHED_PATHS) {
       const broadcastPath = path.replace('.*', '')
-      // wildcard 경로(events.*)는 sub-value가 아닌 부모 전체를 전송
       state.hooks.on(path, () => {
         broadcast({ type: 'state', session_id: sessionId, path: broadcastPath, value: state.get(broadcastPath) })
       })
@@ -51,7 +52,7 @@ const createSessionBridge = (wss) => {
   }
 
   return { broadcast, watchSession }
-}
+})
 
 // =============================================================================
 // Slash commands
@@ -106,12 +107,13 @@ const handleSlashCommand = (input, { state, tools, memory, mcpControl }) => {
 // globalCtx: createGlobalContext() 반환값 (mcpControl, memory, config 등)
 // =============================================================================
 
-const createSessionRoutes = (session, globalCtx) => {
+// --- SessionRoutes: Reader({ session, globalCtx } → Express Router) ---
+
+const sessionRoutesR = Reader.asks(({ session, globalCtx }) => {
   const { mcpControl, memory, config } = globalCtx
   const router = express.Router()
   router.use(express.json())
 
-  // POST /chat — 사용자 입력 → 에이전트 턴 실행
   router.post('/chat', async (req, res) => {
     const { input } = req.body
     if (!input || typeof input !== 'string') {
@@ -129,34 +131,28 @@ const createSessionRoutes = (session, globalCtx) => {
     }
   })
 
-  // GET /state — 현재 상태 스냅샷
   router.get('/state', (_req, res) => {
     res.json(session.state.snapshot())
   })
 
-  // POST /approve — 도구 사용 승인/거부
   router.post('/approve', (req, res) => {
     session.handleApproveResponse(!!req.body.approved)
     res.json({ ok: true })
   })
 
-  // POST /cancel — 현재 턴 취소
   router.post('/cancel', (_req, res) => {
     session.handleCancel()
     res.json({ ok: true })
   })
 
-  // GET /tools — 도구 목록
   router.get('/tools', (_req, res) => {
     res.json(session.tools.map(t => ({ name: t.name, description: t.description, source: t.source })))
   })
 
-  // GET /agents — 에이전트 목록
   router.get('/agents', (_req, res) => {
     res.json(session.agents)
   })
 
-  // GET /config — 설정 (apiKey 제외)
   router.get('/config', (_req, res) => {
     const { llm, ...rest } = config
     const { apiKey, ...safeLlm } = llm
@@ -164,7 +160,7 @@ const createSessionRoutes = (session, globalCtx) => {
   })
 
   return router
-}
+})
 
 // =============================================================================
 // Server 시작
@@ -178,7 +174,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   const server = createServer(expressApp)
   const wss = new WebSocketServer({ server })
 
-  const bridge = createSessionBridge(wss)
+  const bridge = sessionBridgeR.run({ wss })
 
   const sessionManager = createSessionManager(globalCtx, {
     // ephemeral(scheduled) 세션은 WS 브릿지 구독 제외
@@ -260,15 +256,15 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
       next()
     })
 
-    // auth 라우트 (public)
-    expressApp.post('/api/auth/login', express.json(), createLoginHandler(authProvider, tokenService, userStore, instanceId))
-    expressApp.post('/api/auth/refresh', express.json(), createRefreshHandler(tokenService, userStore))
-    expressApp.post('/api/auth/logout', express.json(), createLogoutHandler(tokenService, userStore))
-
-    // auth 미들웨어 (login/refresh/logout/instance 이후 모든 /api/* 보호)
-    expressApp.use('/api', createAuthMiddleware(tokenService, {
+    // auth 라우트 + 미들웨어: Reader(AuthEnv) → .run(authEnv)
+    const authEnv = {
+      authProvider, tokenService, userStore,
       publicPaths: ['/auth/login', '/auth/refresh', '/auth/logout', '/instance'],
-    }))
+    }
+    expressApp.post('/api/auth/login', express.json(), loginHandlerR.run(authEnv))
+    expressApp.post('/api/auth/refresh', express.json(), refreshHandlerR.run(authEnv))
+    expressApp.post('/api/auth/logout', express.json(), logoutHandlerR.run(authEnv))
+    expressApp.use('/api', authMiddlewareR.run(authEnv))
   }
 
   // 인스턴스 헬스 엔드포인트 (public)
@@ -282,7 +278,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   })
 
   // 레거시 라우트 (user-default)
-  expressApp.use('/api', createSessionRoutes(defaultSession, globalCtx))
+  expressApp.use('/api', sessionRoutesR.run({ session: defaultSession, globalCtx }))
 
   // 세션별 라우트: /api/sessions/:sessionId/*
   expressApp.use('/api/sessions/:sessionId', express.json(), (req, res, next) => {
@@ -369,7 +365,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
       Either.fold(
         () => { ws.close(4001, 'Unauthorized'); rejected = true },
         payload => { ws.user = payload },
-        authenticateWs(req, tokenService, { userStore }),
+        authenticateWsR(req).run({ tokenService, userStore }),
       )
       if (rejected) return
     }
@@ -469,7 +465,11 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   return { server, wss, app, sessionManager, globalCtx, shutdown }
 }
 
-export { startServer, createSessionRoutes, createSessionBridge, handleSlashCommand }
+// 레거시 브릿지
+const createSessionRoutes = (session, globalCtx) => sessionRoutesR.run({ session, globalCtx })
+const createSessionBridge = (wss) => sessionBridgeR.run({ wss })
+
+export { startServer, sessionRoutesR, sessionBridgeR, createSessionRoutes, createSessionBridge, handleSlashCommand }
 
 // CLI 실행
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {

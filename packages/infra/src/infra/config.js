@@ -3,7 +3,7 @@ import { join } from 'path'
 import { z } from 'zod'
 import fp from '@presence/core/lib/fun-fp.js'
 
-const { Either, Maybe } = fp
+const { Either, Maybe, State } = fp
 
 // --- Config 스키마 ---
 
@@ -107,6 +107,14 @@ const mergeConfig = (base, override) => {
   }
   return result
 }
+
+// --- State 기반 config 빌드 파이프라인 ---
+
+const buildConfig = (layers) =>
+  layers.reduce(
+    (st, layer) => st.chain(() => State.modify(cfg => mergeConfig(cfg, layer))),
+    State.of(null)
+  ).chain(() => State.get)
 
 // --- 환경변수 오버라이드 (기존 호환) ---
 
@@ -259,10 +267,7 @@ const loadInstanceConfig = (instanceId, { basePath } = {}) => {
   const fromInstance = readConfigFile(instanceFile)
   const fromEnv = envOverrides()
 
-  const merged = mergeConfig(
-    mergeConfig(mergeConfig(DEFAULTS, fromServer), fromInstance),
-    fromEnv,
-  )
+  const merged = buildConfig([fromServer, fromInstance, fromEnv]).run(DEFAULTS)[0]
 
   const result = ConfigSchema.safeParse(merged)
   if (!result.success) {

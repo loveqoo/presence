@@ -1,11 +1,16 @@
 import fp from '../lib/fun-fp.js'
 
-const { Task } = fp
+const { Task, Writer } = fp
 
-// trace 축적은 관찰 전용 부수효과.
-// 도메인 상태는 UpdateState/GetState + Hook 경로로만 변경한다.
-// trace shape 변경은 이 헬퍼를 통해서만 수행.
-const appendTrace = (trace, entry) => { trace.push(entry); return entry }
+// =============================================================================
+// Traced Interpreter: Writer 기반 불변 trace 축적
+//
+// traceWriter는 내부 mutable accumulator이다.
+// Writer는 append protocol과 log shape를 표준화하는 목적으로 사용한다.
+// 외부에는 getTrace() / resetTrace() 함수 인터페이스만 노출.
+//
+// TraceEntry = { tag, detail, timestamp, duration?, error?, result? }
+// =============================================================================
 
 // Op에서 트리 표시용 detail 추출
 const extractDetail = (f) => {
@@ -27,13 +32,18 @@ const extractDetail = (f) => {
 
 // inner: { interpret, ST } — StateT(Task) 인터프리터 번들
 const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}) => {
-  const trace = []
+  // Writer mutable accumulator — 턴 시작 시 resetTrace()로 초기화
+  let traceWriter = Writer.of(null)
+
+  const getTrace = () => traceWriter.run()[1].map(e => ({ ...e }))
+  const resetTrace = () => { traceWriter = Writer.of(null) }
 
   const interpret = (functor) => {
     const { tag } = functor
     const detail = extractDetail(functor)
-    const entry = appendTrace(trace, { tag, detail, timestamp: Date.now() })
+    const entry = { tag, detail, timestamp: Date.now() }
 
+    // Writer.tell로 시작 시점 entry 축적 (duration 없음, 나중에 완료 entry로 교체)
     if (logger) logger.debug(`[op:start] ${tag}`, { tag })
     if (onOp) onOp('start', entry)
 
@@ -56,12 +66,14 @@ const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}
           err => {
             entry.duration = Date.now() - entry.timestamp
             entry.error = err instanceof Error ? err.message : String(err)
+            traceWriter = traceWriter.chain(() => Writer.tell([{ ...entry }]))
             if (logger) logger.warn(`[op:error] ${tag} (${entry.duration}ms): ${entry.error}`, { tag, error: entry.error })
             if (onOp) onOp('error', entry)
             reject(err)
           },
           ([nextFree, newState]) => {
             entry.duration = Date.now() - entry.timestamp
+            traceWriter = traceWriter.chain(() => Writer.tell([{ ...entry }]))
             if (logger) logger.debug(`[op:done] ${tag} (${entry.duration}ms)`, { tag, duration: entry.duration })
             if (onOp) onOp('done', entry)
             resolve([nextFree, newState])
@@ -73,7 +85,7 @@ const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}
     )
   }
 
-  return { interpret, ST, trace }
+  return { interpret, ST, getTrace, resetTrace }
 }
 
 export { createTracedInterpreter }

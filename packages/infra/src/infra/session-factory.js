@@ -9,9 +9,9 @@ import { createJobTools } from './job-tools.js'
 import { createSchedulerActor, calcNextRun } from './scheduler-actor.js'
 import { charsToTokens } from '@presence/core/lib/tokenizer.js'
 import {
-  createMemoryActor, createCompactionActor, createPersistenceActor,
-  createTurnActor, applyCompaction, forkTask,
-  createEventActor, createEmit, createBudgetActor, createDelegateActor,
+  memoryActorR, compactionActorR, persistenceActorR,
+  turnActorR, eventActorR, emitR, budgetActorR, delegateActorR,
+  applyCompaction, forkTask,
 } from './actors.js'
 import { formatTodosAsLines } from './events.js'
 import { t } from '../i18n/index.js'
@@ -119,21 +119,22 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
 
   // --- Interpreter ---
   const prodInterpreter = createProdInterpreter({ llm, toolRegistry: sessionToolRegistry, reactiveState: state, agentRegistry, onApprove, getAbortSignal })
-  const { interpret: tracedInterpret, ST, trace } = createTracedInterpreter(prodInterpreter, {
+  const { interpret: tracedInterpret, ST, getTrace, resetTrace } = createTracedInterpreter(prodInterpreter, {
     logger,
     onOp: (event, _entry) => {
       if (event !== 'start') {
-        state.set('_debug.opTrace', trace.map(e => ({ ...e })))
+        state.set('_debug.opTrace', getTrace())
       }
     },
   })
 
-  // --- Actors ---
-  const memoryActor = createMemoryActor({ mem0, adapter: memory, logger })
-  const compactionActor = createCompactionActor({ llm, logger })
+  // --- Actors (Reader.run) ---
+  const sessionEnv = { mem0, adapter: memory, logger, llm, state }
+  const memoryActor = memoryActorR.run(sessionEnv)
+  const compactionActor = compactionActorR.run(sessionEnv)
   const persistenceActor = isEphemeral
     ? { send: () => ({ fork: (_e, r) => r('skip') }) }
-    : createPersistenceActor({ store: persistence.store })
+    : persistenceActorR.run({ store: persistence.store })
 
   compactionActor.subscribe((result) => {
     if (result === 'skip') return
@@ -168,8 +169,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     t,
   })
 
-  // --- TurnActor: 모든 턴 요청 직렬화 ---
-  const turnActor = createTurnActor((input, opts) => {
+  // --- TurnActor: 모든 턴 요청 직렬화 (Reader.run) ---
+  const turnActor = turnActorR.run({ runTurn: (input, opts) => {
     const { allowedTools = [] } = opts || {}
     if (allowedTools.length === 0) return agent.run(input, opts)
 
@@ -188,11 +189,11 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
       t,
     })
     return execute(filteredTurn(input, opts), input)
-  })
+  } })
 
   // --- Actors (비동기 비즈니스 로직 통합) ---
   let schedulerActor
-  const eventActor = createEventActor({
+  const eventActor = eventActorR.run({
     turnActor, state, logger,
     todoReviewJobName: SYSTEM_JOBS.TODO_REVIEW,
     onEventDone: (event, { success, result, error }) => {
@@ -211,8 +212,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
       }
     },
   })
-  const budgetActor = createBudgetActor({ state })
-  const delegateActor = createDelegateActor({
+  const budgetActor = budgetActorR.run({ state })
+  const delegateActor = delegateActorR.run({
     state, eventActor, agentRegistry, logger,
     pollIntervalMs: config.delegatePolling.intervalMs,
   })
@@ -256,7 +257,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   }
 
   // --- emit (EventActor 경유) ---
-  const emit = createEmit(eventActor)
+  const emit = emitR.run({ eventActor })
 
   // --- 브릿지 Hook (로직 없음) ---
   let _idleTimer = null
@@ -274,7 +275,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
       if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null }
     }
     if (phase.tag === PHASE.WORKING) {
-      trace.length = 0
+      resetTrace()
       state.set('_debug.opTrace', [])
     }
   })

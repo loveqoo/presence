@@ -20,7 +20,7 @@ const historyToMessages = (history) => {
   return msgs
 }
 
-const usePresence = (sessionId = 'user-default', { authFetch, accessToken } = {}) => {
+const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabled = true } = {}) => {
   const fetchFn = authFetch || fetch
 
   const [connected, setConnected] = useState(false)
@@ -133,6 +133,10 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken } = {}
     setHistoryMessages([])
     setPendingMessages([])
     setLocalMessages([])
+
+    // enabled=false일 때는 WS 연결하지 않음 (인증 완료 전)
+    if (!enabled) return () => { mounted = false }
+
     connect()
     loadTools()
 
@@ -142,7 +146,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken } = {}
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [sessionId, loadTools, accessToken])
+  }, [sessionId, loadTools, accessToken, enabled])
 
   const apiBase = sessionId === 'user-default' ? '/api' : `/api/sessions/${sessionId}`
 

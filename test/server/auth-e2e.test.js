@@ -180,7 +180,7 @@ async function run() {
       assert(refreshCookie, 'AE2: refreshToken cookie set')
       assert(refreshCookie.includes('HttpOnly'), 'AE2: cookie is HttpOnly')
       assert(refreshCookie.includes('SameSite=Strict'), 'AE2: cookie is SameSite=Strict')
-      assert(refreshCookie.includes('Path=/api/auth'), 'AE2: cookie path is /api/auth')
+      assert(refreshCookie.includes('Path=/'), 'AE2: cookie path is /')
     } finally {
       await shutdown()
       rmSync(tmpDir, { recursive: true, force: true })

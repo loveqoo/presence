@@ -48,14 +48,15 @@ const waitFor = (fn, { timeout = 30000, interval = 100 } = {}) =>
     check()
   })
 
+let authToken = null
+
 const request = (method, path, body) =>
   new Promise((resolve, reject) => {
     const url = new URL(path, baseUrl)
     const data = body ? JSON.stringify(body) : null
-    const opts = {
-      hostname: url.hostname, port: url.port, method, path: url.pathname,
-      headers: { 'Content-Type': 'application/json', ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}) },
-    }
+    const headers = { 'Content-Type': 'application/json', ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}) }
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+    const opts = { hostname: url.hostname, port: url.port, method, path: url.pathname, headers }
     const req = http.request(opts, (res) => {
       let buf = ''
       res.on('data', d => { buf += d })
@@ -68,6 +69,22 @@ const request = (method, path, body) =>
     if (data) req.write(data)
     req.end()
   })
+
+// 인증: --username/--password CLI 인자 또는 기본값
+const testUsername = (() => { const idx = process.argv.indexOf('--username'); return idx !== -1 ? process.argv[idx + 1] : 'testuser' })()
+const testPassword = (() => { const idx = process.argv.indexOf('--password'); return idx !== -1 ? process.argv[idx + 1] : 'testpass123' })()
+
+// 서버가 인증을 요구하면 로그인
+const instanceRes = await request('GET', '/api/instance').catch(() => ({ body: {} }))
+if (instanceRes.body?.authRequired) {
+  const loginRes = await request('POST', '/api/auth/login', { username: testUsername, password: testPassword })
+  if (loginRes.body?.accessToken) {
+    authToken = loginRes.body.accessToken
+  } else {
+    console.error('Live test login failed:', loginRes.body)
+    process.exit(1)
+  }
+}
 
 const connectRemoteState = () => new Promise((resolve) => {
   const rs = createRemoteState({ wsUrl, sessionId: 'user-default' })
@@ -115,7 +132,8 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
   await delay(200)
 
   const remoteState = new Promise((resolve) => {
-    const rs = createRemoteState({ wsUrl, sessionId })
+    const wsHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+    const rs = createRemoteState({ wsUrl, sessionId, headers: wsHeaders })
     const check = () => {
       if (rs.get('turnState') !== undefined) { resolve(rs); return }
       setTimeout(check, 20)

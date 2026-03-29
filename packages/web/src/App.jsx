@@ -20,10 +20,13 @@ function App() {
   // 서버 인증 요구 여부 확인 (최초 1회)
   useEffect(() => { checkAuthRequired() }, [checkAuthRequired])
 
+  // 인증 필요 서버: 인증 완료 전에는 WS 연결 안 함 (unauthenticated WS 거부 방지)
+  const canConnect = authRequired === false || isAuthenticated
+
   const {
     connected, status, turn, messages, streaming, approve, tools,
     sendMessage, respondApprove, cancel,
-  } = usePresence(currentSessionId, { authFetch, accessToken })
+  } = usePresence(currentSessionId, { authFetch, accessToken, enabled: canConnect })
 
   const handleSubmit = (input) => {
     if (input === '/cancel') { cancel(); return }
