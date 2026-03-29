@@ -85,13 +85,24 @@ const useAuth = (instanceUrl) => {
     }
   }, [instanceUrl, saveTokens])
 
-  // 로그인
-  const login = useCallback(async (username, password) => {
+  // 로그인 — 인스턴스에 직접 요청 또는 토큰 직접 설정
+  // login(username, password): 인스턴스에 직접 로그인
+  // login(accessToken, refreshToken, user): 오케스트레이터가 반환한 토큰 직접 설정
+  const login = useCallback(async (usernameOrToken, passwordOrRefresh, userObj) => {
+    if (userObj) {
+      // 토큰 직접 설정 (오케스트레이터 경유 로그인)
+      setAccessToken(usernameOrToken)
+      setRefreshToken(passwordOrRefresh || null)
+      setUser(userObj)
+      saveTokens(usernameOrToken, passwordOrRefresh || null, userObj)
+      return
+    }
+    // 인스턴스에 직접 로그인
     if (!instanceUrl) return
     const res = await fetch(`${instanceUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username: usernameOrToken, password: passwordOrRefresh }),
     })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))

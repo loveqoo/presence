@@ -65,6 +65,29 @@ const startOrchestrator = async ({ presenceDir } = {}) => {
     res.json(childManager.listStatus())
   })
 
+  // 로그인 프록시 — 각 인스턴스에 순차 시도, 성공한 인스턴스의 토큰 + URL 반환
+  app.post('/api/auth/login', async (req, res) => {
+    const { username, password } = req.body || {}
+    if (!username || !password) return res.status(400).json({ error: 'username and password required' })
+
+    const running = childManager.listStatus().filter(s => s.status === 'running')
+    for (const inst of running) {
+      const url = `http://${inst.host === '0.0.0.0' ? '127.0.0.1' : inst.host}:${inst.port}`
+      try {
+        const r = await fetch(`${url}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        })
+        if (r.ok) {
+          const data = await r.json()
+          return res.json({ ...data, instanceId: inst.id, instanceUrl: url })
+        }
+      } catch {}
+    }
+    res.status(401).json({ error: 'Invalid credentials' })
+  })
+
   app.post('/api/instances/:id/start', (req, res) => {
     const def = instances.find(i => i.id === req.params.id)
     if (!def) return res.status(404).json({ error: `Instance not found: ${req.params.id}` })

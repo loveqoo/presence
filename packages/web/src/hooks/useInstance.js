@@ -2,49 +2,51 @@ import { useState, useEffect, useCallback } from 'react'
 
 const ORCHESTRATOR_URL = import.meta.env.VITE_ORCHESTRATOR_URL || null
 
+/**
+ * 인스턴스 연결 관리.
+ * - 오케스트레이터 모드: 로그인 시 오케스트레이터가 인스턴스를 자동 결정
+ * - 프로덕션 모드: window.location.origin이 인스턴스 URL
+ */
 const useInstance = () => {
-  const [instances, setInstances] = useState([])
   const [selectedInstance, setSelectedInstance] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Restore from sessionStorage
   useEffect(() => {
+    // sessionStorage에서 복원
     const saved = sessionStorage.getItem('presence:instance')
     if (saved) {
       try { setSelectedInstance(JSON.parse(saved)) } catch {}
     }
 
-    // No orchestrator (production) → use current origin as instance
+    // 프로덕션 (오케스트레이터 없음) → 현재 origin이 인스턴스
     if (!ORCHESTRATOR_URL) {
       setSelectedInstance({ id: 'default', url: window.location.origin })
-      setLoading(false)
-      return
     }
 
-    // Fetch instances from orchestrator
-    fetch(`${ORCHESTRATOR_URL}/api/instances`)
-      .then(r => r.json())
-      .then(list => {
-        const running = list.filter(i => i.status === 'running').map(i => ({
-          id: i.id, host: i.host, port: i.port,
-          url: `http://${i.host === '0.0.0.0' ? '127.0.0.1' : i.host}:${i.port}`,
-        }))
-        setInstances(running)
-        // Auto-select if only 1 instance
-        if (running.length === 1 && !saved) {
-          selectInstance(running[0])
-        }
-      })
-      .catch(() => {
-        // Orchestrator unreachable → fallback to current origin
-        setSelectedInstance({ id: 'default', url: window.location.origin })
-      })
-      .finally(() => setLoading(false))
+    setLoading(false)
   }, [])
 
-  const selectInstance = useCallback((instance) => {
+  // 오케스트레이터 경유 로그인 — 인스턴스 자동 결정
+  const login = useCallback(async (username, password) => {
+    if (!ORCHESTRATOR_URL) {
+      // 프로덕션: 인스턴스에 직접 로그인
+      return null
+    }
+
+    const res = await fetch(`${ORCHESTRATOR_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.error || 'Login failed')
+    }
+    const data = await res.json()
+    const instance = { id: data.instanceId, url: data.instanceUrl }
     setSelectedInstance(instance)
     sessionStorage.setItem('presence:instance', JSON.stringify(instance))
+    return data
   }, [])
 
   const clearInstance = useCallback(() => {
@@ -53,11 +55,11 @@ const useInstance = () => {
   }, [])
 
   return {
-    instances,
+    orchestratorUrl: ORCHESTRATOR_URL,
     selectedInstance,
     instanceUrl: selectedInstance?.url || null,
     loading,
-    selectInstance,
+    login,
     clearInstance,
   }
 }

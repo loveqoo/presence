@@ -5,11 +5,10 @@ import { defineConfig } from '@playwright/test'
 //   Vite(5173) → 인스턴스 선택 → 인증 → 인스턴스 직접 연결
 //
 // 사전 조건:
-//   1. CORS_ORIGIN=http://localhost:5173 으로 오케스트레이터 시작
-//   2. npm start (또는 직접 인스턴스 시작)
+//   npm start (오케스트레이터 + 인스턴스 실행)
 //
 // 사용법:
-//   CORS_ORIGIN=http://localhost:5173 npm start
+//   npm start
 //   cd packages/web && npx playwright test --config=playwright.live.config.js
 
 const orchestratorURL = process.env.ORCHESTRATOR_URL || 'http://127.0.0.1:3010'

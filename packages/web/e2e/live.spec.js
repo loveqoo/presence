@@ -46,20 +46,12 @@ base.beforeAll(async ({ browser }, testInfo) => {
 
   await sharedPage.goto('/')
 
-  // 인스턴스 선택 (멀티 인스턴스 환경) 또는 로그인 직행
-  const instanceItem = sharedPage.locator('.instance-item').first()
   const loginForm = sharedPage.locator('#username')
   const statusBar = sharedPage.locator('.status-bar')
 
-  await expect(instanceItem.or(loginForm).or(statusBar)).toBeVisible({ timeout: 15000 })
+  await expect(loginForm.or(statusBar)).toBeVisible({ timeout: 15000 })
 
-  // 인스턴스 선택 화면이면 첫 번째 인스턴스 선택
-  if (await instanceItem.isVisible()) {
-    await instanceItem.click()
-    await expect(loginForm.or(statusBar)).toBeVisible({ timeout: 10000 })
-  }
-
-  // 로그인 필요하면 로그인
+  // 로그인 필요하면 로그인 (오케스트레이터가 인스턴스를 자동 결정)
   if (await loginForm.isVisible()) {
     await sharedPage.locator('#username').fill(TEST_USERNAME)
     await sharedPage.locator('#password').fill(TEST_PASSWORD)

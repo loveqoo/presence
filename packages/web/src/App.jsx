@@ -14,25 +14,24 @@ function App() {
   const [showSessionPanel, setShowSessionPanel] = useState(false)
 
   const {
-    instances,
+    orchestratorUrl,
     selectedInstance,
     instanceUrl,
     loading: instanceLoading,
-    selectInstance,
+    login: orchestratorLogin,
     clearInstance,
   } = useInstance()
 
   const {
     accessToken, user, authRequired, isAuthenticated,
-    checkAuthRequired, login, logout, authFetch,
+    checkAuthRequired, login: instanceLogin, logout, authFetch,
   } = useAuth(instanceUrl)
 
-  // 서버 인증 요구 여부 확인 (instanceUrl이 결정된 후 최초 1회)
+  // 인증 요구 여부 확인 (instanceUrl 결정 후)
   useEffect(() => {
     if (instanceUrl) checkAuthRequired()
   }, [instanceUrl, checkAuthRequired])
 
-  // 인증 필요 서버: 인증 완료 전에는 WS 연결 안 함 (unauthenticated WS 거부 방지)
   const canConnect = authRequired === false || isAuthenticated
 
   const {
@@ -40,26 +39,38 @@ function App() {
     sendMessage, respondApprove, cancel,
   } = usePresence(currentSessionId, { instanceUrl, authFetch, accessToken, enabled: canConnect })
 
+  // 로그인: 오케스트레이터 경유 → 인스턴스 자동 결정 → 인스턴스에 토큰 설정
+  const handleLogin = async (username, password) => {
+    if (orchestratorUrl) {
+      // 오케스트레이터가 인스턴스를 찾고 토큰을 반환
+      const data = await orchestratorLogin(username, password)
+      if (data?.accessToken) {
+        // useAuth에 토큰 직접 설정
+        instanceLogin(data.accessToken, data.refreshToken, { username: data.username, roles: data.roles })
+      }
+    } else {
+      // 프로덕션: 인스턴스에 직접 로그인
+      await instanceLogin(username, password)
+    }
+  }
+
+  const handleLogout = async () => {
+    await logout()
+    clearInstance()
+  }
+
   const handleSubmit = (input) => {
     if (input === '/cancel') { cancel(); return }
     sendMessage(input)
   }
 
-  // 인스턴스 로딩 중
   if (instanceLoading) {
     return <div className="app loading">Loading...</div>
   }
 
-  // 멀티 인스턴스 + 미선택
-  if (instances.length > 1 && !selectedInstance) {
-    return (
-      <LoginPage
-        instances={instances}
-        selectedInstance={null}
-        onSelectInstance={selectInstance}
-        onLogin={login}
-      />
-    )
+  // 인스턴스 미결정 + 인증 필요 (오케스트레이터 모드)
+  if (!instanceUrl && orchestratorUrl) {
+    return <LoginPage onLogin={handleLogin} />
   }
 
   // 인증 확인 중
@@ -69,15 +80,7 @@ function App() {
 
   // 인증 필요 + 미인증
   if (authRequired && !isAuthenticated) {
-    return (
-      <LoginPage
-        instances={instances}
-        selectedInstance={selectedInstance}
-        onSelectInstance={selectInstance}
-        onChangeInstance={clearInstance}
-        onLogin={login}
-      />
-    )
+    return <LoginPage onLogin={handleLogin} />
   }
 
   return (
@@ -90,7 +93,7 @@ function App() {
         sessionId={currentSessionId}
         onSessionClick={() => setShowSessionPanel(true)}
         user={user}
-        onLogout={authRequired ? logout : null}
+        onLogout={authRequired ? handleLogout : null}
         instanceId={selectedInstance?.id || null}
       />
       <ChatArea messages={messages} streaming={streaming} />
