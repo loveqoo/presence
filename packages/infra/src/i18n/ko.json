@@ -44,7 +44,7 @@
     "warn_no_base_url": "llm.baseUrl이 설정되지 않았습니다"
   },
   "help": {
-    "commands": "── 대화 ──\n/clear        대화 이력 초기화 (메모리는 유지됩니다)\n\n── 정보 ──\n/status       현재 상태 (턴, 모드, 마지막 결과)\n/tools        등록된 도구 목록\n/todos        TODO 목록\n\n── 설정 ──\n/models       모델 조회 및 전환 (예: /models gpt-4)\n/memory       메모리 관리 (예: /memory list, /memory clear 7d)\n/statusline   상태바 표시 항목 설정 (예: /statusline +turn)\n\n── 화면 ──\n/panel        사이드 패널 토글\n/report       디버그 리포트 저장\n\n/quit         종료\n\n── 단축키 ──\nCtrl+T  트랜스크립트    Ctrl+O  상세 보기\nESC     턴 취소 / 도움말 닫기"
+    "commands": "── 대화 ──\n/clear        대화 이력 초기화 (메모리는 유지됩니다)\n\n── 정보 ──\n/status       현재 상태 (턴, 모드, 마지막 결과)\n/tools        등록된 도구 목록\n/todos        TODO 목록\n\n── 설정 ──\n/models       모델 조회 및 전환 (예: /models gpt-4)\n/memory       메모리 관리 (예: /memory list, /memory clear 7d)\n/statusline   상태바 표시 항목 설정 (예: /statusline +turn)\n\n── 세션 ──\n/sessions              세션 목록\n/sessions new [name]   새 세션 생성\n/sessions switch <id>  세션 전환\n/sessions delete <id>  세션 삭제\n\n── 화면 ──\n/panel        사이드 패널 토글\n/report       디버그 리포트 저장\n\n/quit         종료\n\n── 단축키 ──\nCtrl+T  트랜스크립트    Ctrl+O  상세 보기\nESC     턴 취소 / 도움말 닫기"
   },
   "transcript": {
     "header": "── 트랜스크립트 ",
@@ -96,6 +96,18 @@
   },
   "cancel": {
     "cancelled": "취소됨"
+  },
+  "sessions_cmd": {
+    "list_header": "sessions:",
+    "current_marker": "(현재)",
+    "created": "세션 생성됨: {{id}}",
+    "deleted": "세션 삭제됨: {{id}}",
+    "switching": "세션 전환 중: {{id}}...",
+    "cannot_delete_current": "현재 세션은 삭제할 수 없습니다.",
+    "not_available": "세션 관리를 사용할 수 없습니다.",
+    "usage": "사용법: /sessions [list | new [name] | switch <id> | delete <id>]",
+    "usage_switch": "사용법: /sessions switch <id>",
+    "usage_delete": "사용법: /sessions delete <id>"
   },
   "compaction": {
     "completed": "히스토리 압축 완료: {{before}} → {{after}} 턴",

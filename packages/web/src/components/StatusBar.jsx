@@ -1,4 +1,4 @@
-function StatusBar({ connected, status, turn, tools }) {
+function StatusBar({ connected, status, turn, tools, sessionId = 'user-default', onSessionClick, user, onLogout }) {
   const statusIcon = { idle: '\u25CF', working: '\u25C9', error: '\u25CB' }
   const statusColor = { idle: 'var(--status-idle)', working: 'var(--status-working)', error: 'var(--status-error)' }
 
@@ -9,9 +9,18 @@ function StatusBar({ connected, status, turn, tools }) {
       </span>
       <span className="status-item">turn: {turn}</span>
       <span className="status-item">tools: {tools.length}</span>
+      <button className="session-btn" onClick={onSessionClick} title="세션 관리">
+        ⊟ {sessionId}
+      </button>
       <span className={`status-conn ${connected ? 'on' : 'off'}`}>
         {connected ? 'connected' : 'disconnected'}
       </span>
+      {user && (
+        <span className="status-user">
+          {user.username}
+          {onLogout && <button className="logout-btn" onClick={onLogout} title="Logout">logout</button>}
+        </span>
+      )}
     </div>
   )
 }

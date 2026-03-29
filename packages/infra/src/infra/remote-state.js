@@ -22,7 +22,7 @@ const SNAPSHOT_PATHS = [
 const getNestedValue = (obj, path) =>
   path.split('.').reduce((o, k) => o?.[k], obj)
 
-const createRemoteState = ({ wsUrl, sessionId = 'user-default' }) => {
+const createRemoteState = ({ wsUrl, sessionId = 'user-default', headers } = {}) => {
   const cache = {}
   const listeners = new Map()  // path → Set<handler>
 
@@ -74,7 +74,7 @@ const createRemoteState = ({ wsUrl, sessionId = 'user-default' }) => {
 
   const connect = () => {
     if (stopped) return
-    ws = new WebSocket(wsUrl)
+    ws = new WebSocket(wsUrl, headers ? { headers } : undefined)
 
     ws.on('open', () => {
       connectAttempt = 0
