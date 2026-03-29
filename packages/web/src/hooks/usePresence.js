@@ -31,7 +31,9 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   const stateRef = useRef({})
 
   // MessageActor — hook 인스턴스당 1회 생성
-  const [actor] = useState(() => Actor({ init: INITIAL_STATE, handle }))
+  const actorRef = useRef(null)
+  if (!actorRef.current) actorRef.current = Actor({ init: INITIAL_STATE, handle })
+  const actor = actorRef.current
 
   // subscribe — mount 시 1회 연결
   useEffect(() => actor.subscribe((_result, s) => {
