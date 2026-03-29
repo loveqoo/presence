@@ -31,7 +31,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   const stateRef = useRef({})
   const actorRef = useRef(null)
 
-  // MessageActor 초기화 — sessionId 변경 시 새 actor 생성
+  // MessageActor — mount 시 1회 생성, 컴포넌트 생명주기 동안 유지
   useEffect(() => {
     const actor = Actor({ init: INITIAL_STATE, handle })
     actorRef.current = actor
@@ -41,6 +41,11 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
     })
 
     return unsubscribe
+  }, [])
+
+  // 세션 전환은 Actor 재생성이 아니라 메시지로 처리
+  useEffect(() => {
+    actorRef.current?.send({ type: 'sessionReset' }).fork(() => {}, () => {})
   }, [sessionId])
 
   // actor.send 헬퍼 — Task를 fire-and-forget
@@ -128,9 +133,6 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
         } catch (_) {}
       }
     }
-
-    // 세션 전환 시 초기화
-    send({ type: 'sessionReset' })
 
     if (!enabled) return () => { mounted = false }
 
