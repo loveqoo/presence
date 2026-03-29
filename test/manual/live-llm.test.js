@@ -17,7 +17,7 @@ import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
 import { Free } from '@presence/core/core/op.js'
 import { MemoryGraph } from '@presence/infra/infra/memory.js'
 import { createMemoryEmbedder } from '@presence/infra/infra/memory-embedder.js'
-import { createMemoryActor } from '@presence/infra/infra/actors.js'
+import { memoryActorR } from '@presence/infra/infra/actors.js'
 import { safeRunTurn } from '@presence/core/core/agent.js'
 import { createEmbedder } from '@presence/infra/infra/embedding.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
@@ -410,7 +410,7 @@ async function run() {
       data: { content: '프로젝트 X는 2025년 완료 예정' },
     })
 
-    const memActor = createMemoryActor({ graph: memory, embedder: null, logger: null })
+    const memActor = memoryActorR.run({ graph: memory, embedder: null, logger: null })
 
     const interpreter = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,
@@ -500,7 +500,7 @@ async function run() {
       return
     }
 
-    const memActor2 = createMemoryActor({ graph: memory, embedder, logger: null })
+    const memActor2 = memoryActorR.run({ graph: memory, embedder, logger: null })
 
     const interpreter = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,

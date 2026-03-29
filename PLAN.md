@@ -227,6 +227,6 @@
 node test/run.js                                    # 전체 테스트 (mock 기반, LLM 불필요)
 npm start                                           # 오케스트레이터 시작 (instances.json 필요)
 node test/e2e/multi-instance-live.test.js            # 멀티-인스턴스 live E2E (오케스트레이터 실행 필요)
-node test/e2e/tui-live.test.js --url http://...:3001 # 단일 인스턴스 TUI live E2E
+node test/e2e/tui-live.test.js                      # 단일 인스턴스 TUI live E2E (기본 :3001)
 npm run start:cli                                    # TUI 클라이언트 (clients/{userId}.json 필요)
 ```

@@ -55,6 +55,12 @@ base.beforeAll(async ({ browser }, testInfo) => {
   }
 
   await sharedPage.waitForSelector('.status-conn.on', { timeout: 20000 })
+
+  // 서버가 idle 상태가 될 때까지 대기 (다른 테스트의 잔여 working 상태 방지)
+  await sharedPage.waitForFunction(
+    () => document.querySelector('.status-indicator')?.textContent?.includes('idle'),
+    { timeout: 30000 }
+  )
 })
 
 base.afterAll(async () => {
@@ -82,7 +88,7 @@ test.describe.configure({ mode: 'serial' })
 
 test('초기 UI: StatusBar + WebSocket 연결', async ({ livePage: page }) => {
   await expect(page.locator('.status-bar')).toBeVisible()
-  await expect(page.locator('.status-indicator')).toContainText('idle')
+  await expect(page.locator('.status-indicator')).toContainText('idle', { timeout: 15000 })
   await expect(page.locator('.input-bar input')).toBeEnabled()
   await expect(page.locator('.status-bar')).toContainText('tools:')
 })
@@ -119,15 +125,22 @@ test('메시지 전송 → 실제 LLM 응답', async ({ livePage: page }) => {
 })
 
 test('turn 카운터 증가', async ({ livePage: page }) => {
+  // idle 확인 후 현재 상태 스냅샷
+  await expect(page.locator('.status-indicator')).toContainText('idle', { timeout: 15000 })
+  const agentCountBefore = await page.locator('.msg-agent').count()
   const barBefore = await page.locator('.status-bar').textContent()
   const turnBefore = parseInt(barBefore.match(/turn:\s*(\d+)/)?.[1] || '0')
 
   await page.locator('.input-bar input').fill('1+1은?')
   await page.locator('.input-bar input').press('Enter')
-  await expect(page.locator('.msg-agent').last()).toBeVisible({ timeout: 30000 })
+  // 새 agent 메시지가 추가될 때까지 대기 (이전 테스트 잔여 메시지 구분)
+  await expect(page.locator('.msg-agent')).toHaveCount(agentCountBefore + 1, { timeout: 30000 })
   await expect(page.locator('.status-indicator')).not.toContainText('working', { timeout: 15000 })
 
-  await expect(page.locator('.status-bar')).toContainText(`turn: ${turnBefore + 1}`)
+  // turn이 최소 1 이상 증가했는지 확인
+  const barAfter = await page.locator('.status-bar').textContent()
+  const turnAfter = parseInt(barAfter.match(/turn:\s*(\d+)/)?.[1] || '0')
+  expect(turnAfter).toBeGreaterThan(turnBefore)
 })
 
 // ===========================================

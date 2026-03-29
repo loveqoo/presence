@@ -195,8 +195,4 @@ const createTokenService = (instanceId, { basePath } = {}) => {
   }
 }
 
-export {
-  createTokenService, loadSecret, generateSecret, ensureSecret,
-  sign, verify, secretFilePath,
-  ACCESS_TOKEN_EXPIRY_S, REFRESH_TOKEN_EXPIRY_S,
-}
+export { createTokenService, ensureSecret }

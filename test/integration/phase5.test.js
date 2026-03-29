@@ -3,7 +3,7 @@ import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
-import { createEventActor, createEmit, createTurnActor, forkTask } from '@presence/infra/infra/actors.js'
+import { eventActorR, emitR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
 import { runFreeWithStateT } from '@presence/core/core/op.js'
 
 import { assert, summary } from '../lib/assert.js'
@@ -28,12 +28,12 @@ async function run() {
 
     let agentRunCalled = false
     let agentRunPrompt = null
-    const turnActor = createTurnActor(async (input) => {
+    const turnActor = turnActorR.run({ runTurn: async (input) => {
       agentRunCalled = true
       agentRunPrompt = input
       return 'heartbeat result'
-    })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     // 브릿지 hook
     state.hooks.on('turnState', (phase) => {
@@ -63,9 +63,9 @@ async function run() {
     })
 
     let runCount = 0
-    const turnActor = createTurnActor(async () => { runCount++; return 'done' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => { runCount++; return 'done' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
 
     // 브릿지 hook
     state.hooks.on('turnState', (phase) => {
@@ -217,9 +217,9 @@ async function run() {
     })
 
     const processed = []
-    const turnActor = createTurnActor(async (input) => { processed.push(input); return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async (input) => { processed.push(input); return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
 
     // 브릿지 hook
     state.hooks.on('turnState', (phase) => {
@@ -256,9 +256,9 @@ async function run() {
       todos: [],
     })
 
-    const turnActor = createTurnActor(async () => { throw new Error('agent crashed') })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => { throw new Error('agent crashed') } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
 
     emit({ type: 'bad-event', prompt: 'crash' })
 

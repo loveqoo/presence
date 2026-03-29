@@ -417,29 +417,8 @@ const delegateActorR = Reader.asks(({ state, eventActor, agentRegistry, logger, 
   return actor
 })
 
-// =============================================================================
-// 레거시 브릿지: createX(deps) === xR.run(deps)
-// =============================================================================
-
-/** @deprecated Use memoryActorR */
-const createMemoryActor = (deps) => memoryActorR.run(deps)
-/** @deprecated Use compactionActorR */
-const createCompactionActor = (deps) => compactionActorR.run(deps)
-/** @deprecated Use persistenceActorR */
-const createPersistenceActor = (deps) => persistenceActorR.run(deps)
-/** @deprecated Use turnActorR */
-const createTurnActor = (runTurn) => turnActorR.run({ runTurn })
-/** @deprecated Use eventActorR */
-const createEventActor = (deps) => eventActorR.run(deps)
-/** @deprecated Use emitR */
-const createEmit = (eventActor) => emitR.run({ eventActor })
-/** @deprecated Use budgetActorR */
-const createBudgetActor = (deps) => budgetActorR.run(deps)
-/** @deprecated Use delegateActorR */
-const createDelegateActor = (deps) => delegateActorR.run(deps)
-
 export {
-  // Reader 기반 (신규)
+  // Reader 기반
   memoryActorR,
   compactionActorR,
   persistenceActorR,
@@ -453,14 +432,4 @@ export {
   forkTask,
   applyCompaction,
   applyTodo,
-
-  // 레거시 브릿지
-  createMemoryActor,
-  createCompactionActor,
-  createPersistenceActor,
-  createTurnActor,
-  createEventActor,
-  createEmit,
-  createBudgetActor,
-  createDelegateActor,
 }

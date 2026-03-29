@@ -4,7 +4,7 @@
  *
  * 사용법:
  *   node packages/server/src/server/index.js &
- *   node test/e2e/tui-live.test.js [--url http://127.0.0.1:3000]
+ *   node test/e2e/tui-live.test.js [--url http://127.0.0.1:3001]
  */
 
 import React from 'react'
@@ -24,7 +24,7 @@ const h = React.createElement
 
 const baseUrl = (() => {
   const idx = process.argv.indexOf('--url')
-  return idx !== -1 ? process.argv[idx + 1] : 'http://127.0.0.1:3000'
+  return idx !== -1 ? process.argv[idx + 1] : 'http://127.0.0.1:3001'
 })()
 const wsUrl = baseUrl.replace(/^http/, 'ws')
 
@@ -34,7 +34,10 @@ const wsUrl = baseUrl.replace(/^http/, 'ws')
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
-const waitFor = (fn, { timeout = 30000, interval = 100 } = {}) =>
+// LLM 응답 대기 기본 타임아웃 (도구 실행 포함 멀티스텝 고려)
+const LLM_TIMEOUT = 120_000
+
+const waitFor = (fn, { timeout = LLM_TIMEOUT, interval = 100 } = {}) =>
   new Promise((resolve, reject) => {
     const start = Date.now()
     const check = () => {
@@ -142,6 +145,12 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
   })
   const rs = await remoteState
 
+  // 서버가 idle 상태가 될 때까지 대기 (다른 테스트의 잔여 working 상태 방지)
+  await waitFor(() => {
+    const ts = rs.get('turnState')
+    return ts && ts.tag === 'idle'
+  }, { timeout: 15000 }).catch(() => {})
+
   const apiBase = `/api/sessions/${sessionId}`
   const onInput = (input) =>
     request('POST', `${apiBase}/chat`, { input }).then(r => r.body?.content ?? null)
@@ -183,7 +192,7 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
 {
   const { lastFrame, cleanup } = await setupLive()
   try {
-    await delay(200)
+    await waitFor(() => lastFrame().includes('idle'), { timeout: 10000 })
     assert(lastFrame().includes('idle'), 'TL1: 초기 상태 idle')
     assert(lastFrame().includes('>'), 'TL1: 입력 프롬프트 표시')
     assert(lastFrame().includes(config.llm?.model || ''), 'TL1: 모델명 StatusBar 표시')
@@ -202,7 +211,7 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
 
     await waitFor(
       () => !lastFrame().includes('thinking') && lastFrame().includes('idle'),
-      { timeout: 30000 }
+      {}
     )
     assert(lastFrame().includes('idle'), 'TL2: 응답 후 idle 복귀')
     assert((remoteState.get('turn') ?? 0) > turnBefore, 'TL2: turn 증가')
@@ -222,7 +231,7 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
     await waitFor(() => lastFrame().includes('thinking'), { timeout: 5000 })
     await waitFor(
       () => !lastFrame().includes('thinking') && lastFrame().includes('idle'),
-      { timeout: 30000 }
+      {}
     )
 
     const frame = lastFrame()
@@ -272,20 +281,29 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
     // 두 메시지 전송
     await typeInput(stdin, 'FIRST')
     await waitFor(() => lastFrame().includes('thinking'), { timeout: 5000 })
-    await waitFor(() => !lastFrame().includes('thinking'), { timeout: 30000 })
+    await waitFor(() => !lastFrame().includes('thinking'), {})
 
     await typeInput(stdin, 'SECOND')
     await waitFor(() => lastFrame().includes('thinking'), { timeout: 5000 })
-    await waitFor(() => !lastFrame().includes('thinking'), { timeout: 30000 })
+    await waitFor(() => lastFrame().includes('idle'), {})
 
-    // ↑ → SECOND
+    // idle 안정화 대기 후 히스토리 탐색
+    await delay(300)
+
+    // ↑ → SECOND (입력 라인에 표시)
     stdin.write('\x1B[A')
-    await waitFor(() => lastFrame().includes('SECOND'), { timeout: 2000 })
+    await waitFor(() => {
+      const lines = lastFrame().split('\n')
+      return lines.some(l => l.includes('>') && l.includes('SECOND'))
+    }, { timeout: 3000 })
     assert(lastFrame().includes('SECOND'), 'TL7: ↑ → 마지막 입력 복원')
 
-    // ↑ → FIRST
+    // ↑ → FIRST (입력 라인에 표시)
     stdin.write('\x1B[A')
-    await waitFor(() => lastFrame().includes('FIRST'), { timeout: 2000 })
+    await waitFor(() => {
+      const lines = lastFrame().split('\n')
+      return lines.some(l => l.includes('>') && l.includes('FIRST'))
+    }, { timeout: 3000 })
     assert(lastFrame().includes('FIRST'), 'TL7: ↑↑ → 이전 입력 복원')
   } finally { cleanup() }
 }

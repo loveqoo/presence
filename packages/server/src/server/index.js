@@ -481,11 +481,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   return { server, wss, app, sessionManager, globalCtx, shutdown }
 }
 
-// 레거시 브릿지
-const createSessionRoutes = (session, globalCtx) => sessionRoutesR.run({ session, globalCtx })
-const createSessionBridge = (wss) => sessionBridgeR.run({ wss })
-
-export { startServer, sessionRoutesR, sessionBridgeR, createSessionRoutes, createSessionBridge, handleSlashCommand }
+export { startServer, sessionRoutesR, sessionBridgeR, handleSlashCommand }
 
 // CLI 실행
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {

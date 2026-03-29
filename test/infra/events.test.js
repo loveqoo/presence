@@ -2,7 +2,7 @@ import {
   withEventMeta, eventToPrompt, todoFromEvent, isDuplicate,
 } from '@presence/infra/infra/events.js'
 import {
-  createEventActor, createEmit, applyTodo, forkTask, createTurnActor,
+  eventActorR, emitR, applyTodo, forkTask, turnActorR,
 } from '@presence/infra/infra/actors.js'
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
@@ -23,9 +23,9 @@ async function run() {
       turnState: Phase.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
 
     const event = emit({ type: 'test', data: 'hello' })
     assert(event.id !== undefined, 'emit: assigns id')
@@ -43,9 +43,9 @@ async function run() {
       turnState: Phase.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
 
     emit({ type: 'a' })
     emit({ type: 'b' })
@@ -64,9 +64,9 @@ async function run() {
       turnState: Phase.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
     const event = emit({ type: 'x', id: 'custom-id' })
     assert(event.id === 'custom-id', 'emit custom id: preserved')
   }
@@ -86,12 +86,12 @@ async function run() {
 
     let runCalled = false
     let runInput = null
-    const turnActor = createTurnActor(async (input) => {
+    const turnActor = turnActorR.run({ runTurn: async (input) => {
       runCalled = true
       runInput = input
       return 'done'
-    })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({ type: 'heartbeat', prompt: '점검' })
     await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
@@ -111,8 +111,8 @@ async function run() {
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
 
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({ type: 'test' })
     await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
@@ -129,8 +129,8 @@ async function run() {
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
 
-    const turnActor = createTurnActor(async () => { throw new Error('agent crash') })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => { throw new Error('agent crash') } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({ type: 'bad' })
     await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
@@ -153,11 +153,11 @@ async function run() {
     })
 
     const processed = []
-    const turnActor = createTurnActor(async (input) => {
+    const turnActor = turnActorR.run({ runTurn: async (input) => {
       processed.push(input)
       return 'done'
-    })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     // 3개 enqueue (idle이므로 첫 enqueue에서 자동 drain)
     await forkTask(eventActor.send({ type: 'enqueue', event: withEventMeta({ type: 'a', prompt: 'first' }) }))
@@ -180,8 +180,8 @@ async function run() {
       turnState: Phase.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const result = await forkTask(eventActor.send({ type: 'drain' }))
     assert(result === 'no-op:empty', 'drain idempotency: empty queue → no-op')
@@ -193,8 +193,8 @@ async function run() {
       turnState: Phase.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     // enqueue 후 drain 시도 (working이므로 no-op)
     await forkTask(eventActor.send({ type: 'enqueue', event: withEventMeta({ type: 'x' }) }))
@@ -246,8 +246,8 @@ async function run() {
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({
       type: 'pr_assigned',

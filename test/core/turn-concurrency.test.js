@@ -6,7 +6,7 @@ import {
 } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { createTurnActor, createMemoryActor, createEventActor, createEmit, forkTask } from '@presence/infra/infra/actors.js'
+import { turnActorR, memoryActorR, eventActorR, emitR, forkTask } from '@presence/infra/infra/actors.js'
 import { createMemoryGraph } from '@presence/infra/infra/memory.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -38,7 +38,7 @@ async function run() {
     })
 
     const agent = createAgent({ interpret, ST, state })
-    const turnActor = createTurnActor((input, opts) => agent.run(input, opts))
+    const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // 3개 동시 요청 — Actor가 직렬화
     const results = await Promise.all([
@@ -71,7 +71,7 @@ async function run() {
     })
 
     const agent = createAgent({ interpret, ST, state })
-    const turnActor = createTurnActor((input, opts) => agent.run(input, opts))
+    const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     const [r1, r2] = await Promise.all([
       forkTask(turnActor.send({ input: 'fail' })),
@@ -98,7 +98,7 @@ async function run() {
     })
 
     const agent = createAgent({ interpret, ST, state })
-    const turnActor = createTurnActor((input, opts) => agent.run(input, opts))
+    const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // 빠르게 5개 요청 (브라우저 탭 5개 동시 전송 시뮬레이션)
     const promises = Array.from({ length: 5 }, (_, i) =>
@@ -122,7 +122,7 @@ async function run() {
       const memory = await createMemoryGraph(join(tmpDir, 'mem'))
       const memoryActorOps = []
       // memoryActor 래핑: 메시지 순서 기록
-      const realMemoryActor = createMemoryActor({ graph: memory, embedder: null, logger: null })
+      const realMemoryActor = memoryActorR.run({ graph: memory, embedder: null, logger: null })
       const trackingMemoryActor = {
         send: (msg) => {
           memoryActorOps.push(msg.type)
@@ -219,11 +219,11 @@ async function run() {
     })
 
     const agent = createAgent({ interpret, ST, state })
-    const turnActor = createTurnActor((input, opts) => agent.run(input, opts))
+    const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // EventActor + 브릿지 hook 연결
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = emitR.run({ eventActor })
 
     state.hooks.on('turnState', (phase) => {
       if (phase.tag === 'idle') {

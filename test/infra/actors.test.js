@@ -4,7 +4,7 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { HISTORY } from '@presence/core/core/policies.js'
 import {
-  createMemoryActor, createCompactionActor, createPersistenceActor,
+  memoryActorR, compactionActorR, persistenceActorR,
   applyCompaction, forkTask,
 } from '@presence/infra/infra/actors.js'
 import {
@@ -52,7 +52,7 @@ async function run() {
       { id: '1', memory: '회의 안건 A', score: 0.9 },
       { id: '2', memory: '회의 안건 B', score: 0.8 },
     ]})
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({ type: 'recall', input: '회의' }))
     assert(Array.isArray(result), 'MemoryActor recall: returns array')
@@ -64,7 +64,7 @@ async function run() {
   // M2. save → mem0.add 호출, 'ok' 반환
   {
     const mem0 = makeMockMem0()
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({
       type: 'save',
@@ -78,7 +78,7 @@ async function run() {
 
   // M3. mem0=null → recall 빈 배열, save skip
   {
-    const actor = createMemoryActor({ mem0: null, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0: null, adapter: null, logger: null })
 
     const recalled = await forkTask(actor.send({ type: 'recall', input: '회의' }))
     assert(Array.isArray(recalled) && recalled.length === 0, 'MemoryActor null: recall returns []')
@@ -93,7 +93,7 @@ async function run() {
   // M4. save data.input 없음 → skip
   {
     const mem0 = makeMockMem0()
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({ type: 'save', node: { data: {} } }))
     assert(result === 'skip', 'MemoryActor save: no input → skip')
@@ -103,7 +103,7 @@ async function run() {
   // M5. 미지원 메시지 → no-op (embed/prune/promote/removeWorking/saveDisk)
   {
     const mem0 = makeMockMem0()
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     for (const type of ['embed', 'prune', 'promote', 'removeWorking', 'saveDisk']) {
       const result = await forkTask(actor.send({ type }))
@@ -115,7 +115,7 @@ async function run() {
   // M6. recall 오류 → 빈 배열 반환 (격리)
   {
     const mem0 = makeMockMem0({ failSearch: true })
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({ type: 'recall', input: 'x' }))
     assert(Array.isArray(result) && result.length === 0, 'MemoryActor recall error: returns []')
@@ -128,7 +128,7 @@ async function run() {
   // M7. save 오류 → skip 반환 (격리)
   {
     const mem0 = makeMockMem0({ failAdd: true })
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     const result = await forkTask(actor.send({
       type: 'save',
@@ -144,7 +144,7 @@ async function run() {
       search: async () => { order.push('search'); return { results: [] } },
       add: async () => { order.push('add') },
     }
-    const actor = createMemoryActor({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
     const p1 = forkTask(actor.send({ type: 'recall', input: 'x' }))
     const p2 = forkTask(actor.send({ type: 'save', node: { data: { input: 'q', output: 'a' } } }))
@@ -162,7 +162,7 @@ async function run() {
 
   // C1. threshold 미만 → skip
   {
-    const actor = createCompactionActor({ llm: null, logger: null })
+    const actor = compactionActorR.run({ llm: null, logger: null })
     const result = await forkTask(actor.send({
       type: 'check',
       history: makeHistory(10),
@@ -173,7 +173,7 @@ async function run() {
   // C2. 정상 → summary + extractedIds 반환
   {
     const mockLlm = { chat: async () => ({ content: 'summarized conversation' }) }
-    const actor = createCompactionActor({ llm: mockLlm, logger: null })
+    const actor = compactionActorR.run({ llm: mockLlm, logger: null })
 
     const result = await forkTask(actor.send({
       type: 'check',
@@ -191,7 +191,7 @@ async function run() {
     const logs = []
     const mockLlm = { chat: async () => { throw new Error('LLM timeout') } }
     const mockLogger = { warn: (msg, meta) => logs.push({ msg, meta }) }
-    const actor = createCompactionActor({ llm: mockLlm, logger: mockLogger })
+    const actor = compactionActorR.run({ llm: mockLlm, logger: mockLogger })
 
     const result = await forkTask(actor.send({
       type: 'check',
@@ -218,7 +218,7 @@ async function run() {
         }, 50)
       }),
     }
-    const actor = createCompactionActor({ llm: slowLlm, logger: null })
+    const actor = compactionActorR.run({ llm: slowLlm, logger: null })
 
     const p1 = forkTask(actor.send({ type: 'check', history: makeHistory(20) }))
     const p2 = forkTask(actor.send({ type: 'check', history: makeHistory(20) }))
@@ -232,7 +232,7 @@ async function run() {
   // C5. epoch passthrough: 결과에 요청 시점 epoch 포함
   {
     const mockLlm = { chat: async () => ({ content: 'epoch test' }) }
-    const actor = createCompactionActor({ llm: mockLlm, logger: null })
+    const actor = compactionActorR.run({ llm: mockLlm, logger: null })
 
     const result = await forkTask(actor.send({
       type: 'check', history: makeHistory(20), epoch: 7,
@@ -254,7 +254,7 @@ async function run() {
         setTimeout(() => resolve({ content: 'stale summary' }), 50)
       ),
     }
-    const actor = createCompactionActor({ llm: slowLlm, logger: null })
+    const actor = compactionActorR.run({ llm: slowLlm, logger: null })
 
     const subscribedResults = []
     actor.subscribe((result) => subscribedResults.push(result))
@@ -344,7 +344,7 @@ async function run() {
   {
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 50 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 50 })
 
     const result = await forkTask(actor.send({
       type: 'save',
@@ -363,7 +363,7 @@ async function run() {
   {
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 50 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 50 })
 
     await forkTask(actor.send({ type: 'save', snapshot: { turn: 1 } }))
     await forkTask(actor.send({ type: 'save', snapshot: { turn: 2 } }))
@@ -377,7 +377,7 @@ async function run() {
   {
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 500 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 500 })
 
     await forkTask(actor.send({
       type: 'flush',
@@ -392,7 +392,7 @@ async function run() {
     const stored = {}
     let setCount = 0
     const mockStore = { set: (k, v) => { stored[k] = v; setCount++ } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 200 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 200 })
 
     // save triggers timer
     await forkTask(actor.send({ type: 'save', snapshot: { turn: 1 } }))
@@ -410,7 +410,7 @@ async function run() {
   {
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 5000 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 5000 })
 
     // save triggers a long timer
     await forkTask(actor.send({ type: 'save', snapshot: { turn: 10 } }))
@@ -424,7 +424,7 @@ async function run() {
   // P6. store.set 실패 → non-fatal
   {
     const mockStore = { set: () => { throw new Error('disk full') } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 0 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 0 })
 
     let threw = false
     try {
@@ -445,7 +445,7 @@ async function run() {
   {
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const actor = createPersistenceActor({ store: mockStore, debounceMs: 30 })
+    const actor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
     await forkTask(actor.send({ type: 'save', snapshot: { turn: 99, _temp: true } }))
 
@@ -467,7 +467,7 @@ async function run() {
     const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const mockMem0 = makeMockMem0({ searchResult: [{ memory: 'recall target' }] })
-    const memActor = createMemoryActor({ mem0: mockMem0, adapter: null, logger: null })
+    const memActor = memoryActorR.run({ mem0: mockMem0, adapter: null, logger: null })
 
     const state = createReactiveState({
       turnState: Phase.idle(), lastTurn: null, turn: 0,
@@ -600,7 +600,7 @@ async function run() {
 
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const pActor = createPersistenceActor({ store: mockStore, debounceMs: 30 })
+    const pActor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
     const state = createReactiveState({
       turnState: Phase.idle(), lastTurn: null, turn: 0,
@@ -626,7 +626,7 @@ async function run() {
 
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
-    const pActor = createPersistenceActor({ store: mockStore, debounceMs: 30 })
+    const pActor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
     const state = createReactiveState({
       turnState: Phase.idle(), lastTurn: null, turn: 0,

@@ -4,7 +4,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { createJobStore } from '@presence/infra/infra/job-store.js'
 import { createSchedulerActor, calcNextRun, validateCron } from '@presence/infra/infra/scheduler-actor.js'
 import { createJobTools } from '@presence/infra/infra/job-tools.js'
-import { createEventActor, createTurnActor } from '@presence/infra/infra/actors.js'
+import { eventActorR, turnActorR } from '@presence/infra/infra/actors.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { eventToPrompt } from '@presence/infra/infra/events.js'
 import { Phase } from '@presence/core/core/agent.js'
@@ -355,10 +355,10 @@ async function run() {
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
-    const turnActor = createTurnActor(async () => '성공 결과')
+    const turnActor = turnActorR.run({ runTurn: async () => '성공 결과' })
     const schedulerActor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
-    const eventActor = createEventActor({
+    const eventActor = eventActorR.run({
       turnActor, state, logger: null,
       onEventDone: (event, { success, result, error }) => {
         if (event.type !== 'scheduled_job') return
@@ -397,10 +397,10 @@ async function run() {
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
-    const turnActor = createTurnActor(async () => { throw new Error('job crashed') })
+    const turnActor = turnActorR.run({ runTurn: async () => { throw new Error('job crashed') } })
     const schedulerActor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
-    const eventActor = createEventActor({
+    const eventActor = eventActorR.run({
       turnActor, state, logger: null,
       onEventDone: (event, { success, result, error }) => {
         if (event.type !== 'scheduled_job') return
@@ -697,8 +697,8 @@ async function run() {
       ],
     })
     let receivedPrompt = null
-    const turnActor = createTurnActor(async (input) => { receivedPrompt = input; return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME })
+    const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME })
 
     // SchedulerActor가 생성하는 것과 동일한 형태 (type: 'scheduled_job', jobName: '__todo_review__')
     eventActor.send({
@@ -721,8 +721,8 @@ async function run() {
       todos: [],
     })
     let turnCalled = false
-    const turnActor = createTurnActor(async () => { turnCalled = true; return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME })
+    const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME })
 
     eventActor.send({
       type: 'enqueue',
@@ -741,8 +741,8 @@ async function run() {
       todos: [],
     })
     let turnCalled = false
-    const turnActor = createTurnActor(async () => { turnCalled = true; return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr1', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(100)
@@ -762,8 +762,8 @@ async function run() {
       ],
     })
     let receivedPrompt = null
-    const turnActor = createTurnActor(async (input) => { receivedPrompt = input; return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr2', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(150)
@@ -785,8 +785,8 @@ async function run() {
       ],
     })
     let receivedPrompt = null
-    const turnActor = createTurnActor(async (input) => { receivedPrompt = input; return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr3', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(150)
@@ -807,8 +807,8 @@ async function run() {
       ],
     })
     let turnCalled = false
-    const turnActor = createTurnActor(async () => { turnCalled = true; return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr4', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(100)

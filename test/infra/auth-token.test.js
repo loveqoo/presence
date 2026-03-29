@@ -1,5 +1,5 @@
 import {
-  createTokenService, sign, verify, ensureSecret, secretFilePath,
+  createTokenService, ensureSecret,
 } from '@presence/infra/infra/auth-token.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { mkdirSync, rmSync, existsSync, statSync } from 'fs'
@@ -22,81 +22,6 @@ function createTmpDir() {
 async function run() {
   console.log('Auth Token tests')
 
-  // --- low-level sign/verify ---
-
-  {
-    const secret = 'test-secret-32chars-for-testing!'
-    const payload = { sub: 'alice', iss: 'presence', aud: 'presence:test', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 }
-    const token = sign(payload, secret)
-
-    assert(typeof token === 'string', 'sign: returns string')
-    assert(token.split('.').length === 3, 'sign: has 3 parts')
-
-    const result = verify(token, secret)
-    assert(isRight(result), 'verify: Right for valid token')
-    assert(getRight(result).sub === 'alice', 'verify: payload.sub correct')
-  }
-
-  // --- 잘못된 서명 ---
-
-  {
-    const secret = 'test-secret-32chars-for-testing!'
-    const payload = { sub: 'alice', iss: 'presence', aud: 'presence:test', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 }
-    const token = sign(payload, secret)
-
-    const result = verify(token, 'wrong-secret')
-    assert(isLeft(result), 'verify: Left with wrong secret')
-    assert(getLeft(result) === 'invalid signature', 'verify: error message')
-  }
-
-  // --- 만료된 토큰 ---
-
-  {
-    const secret = 'test-secret-32chars-for-testing!'
-    const payload = { sub: 'alice', iss: 'presence', aud: 'presence:test', iat: 1000, exp: 1001 }
-    const token = sign(payload, secret)
-
-    const result = verify(token, secret)
-    assert(isLeft(result), 'verify: Left for expired token')
-    assert(getLeft(result) === 'token expired', 'verify: expired error message')
-  }
-
-  // --- 잘못된 iss ---
-
-  {
-    const secret = 'test-secret-32chars-for-testing!'
-    const payload = { sub: 'alice', iss: 'wrong-issuer', aud: 'presence:test', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 }
-    const token = sign(payload, secret)
-
-    const result = verify(token, secret)
-    assert(isLeft(result), 'verify: Left for wrong issuer')
-    assert(getLeft(result) === 'invalid issuer', 'verify: issuer error message')
-  }
-
-  // --- aud 검증 ---
-
-  {
-    const secret = 'test-secret-32chars-for-testing!'
-    const payload = { sub: 'alice', iss: 'presence', aud: 'presence:test', iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 }
-    const token = sign(payload, secret)
-
-    assert(isRight(verify(token, secret, { audience: 'presence:test' })), 'verify: Right for correct audience')
-    const bad = verify(token, secret, { audience: 'presence:other' })
-    assert(isLeft(bad), 'verify: Left for wrong audience')
-    assert(getLeft(bad) === 'invalid audience', 'verify: audience error message')
-  }
-
-  // --- 엣지 케이스: null, undefined, malformed ---
-
-  {
-    const secret = 'test-secret-32chars-for-testing!'
-    assert(isLeft(verify(null, secret)), 'verify: Left for null token')
-    assert(isLeft(verify(undefined, secret)), 'verify: Left for undefined token')
-    assert(isLeft(verify('', secret)), 'verify: Left for empty string')
-    assert(isLeft(verify('not.a.jwt.token', secret)), 'verify: Left for 4-part string')
-    assert(isLeft(verify('x.y.z', secret)), 'verify: Left for random 3-part')
-  }
-
   // --- Secret 생성 + 파일 권한 ---
 
   {
@@ -105,7 +30,7 @@ async function run() {
     assert(typeof secret === 'string', 'ensureSecret: returns string')
     assert(secret.length === 64, 'ensureSecret: 32 bytes hex = 64 chars')
 
-    const filePath = secretFilePath('test', dir)
+    const filePath = join(dir, 'instances', 'test.secret.json')
     assert(existsSync(filePath), 'ensureSecret: file created')
 
     try {

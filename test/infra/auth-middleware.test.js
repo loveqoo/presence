@@ -1,12 +1,7 @@
 import {
-  // Reader 버전
   loginHandlerR, refreshHandlerR, logoutHandlerR,
   authMiddlewareR, authenticateWsR,
   issueTokensR, validateRefreshChainR, rotateRefreshTokenR,
-  // 레거시 브릿지
-  createLoginHandler, createRefreshHandler, createLogoutHandler,
-  createAuthMiddleware, authenticateWs,
-  createRateLimiter,
 } from '@presence/infra/infra/auth-middleware.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { assert, summary } from '../lib/assert.js'
@@ -252,53 +247,6 @@ async function run() {
   {
     const result = authenticateWsR(createMockReq()).run(authEnv)
     assert(isLeft(result), 'authenticateWsR: no auth → Left')
-  }
-
-  // =================================================================
-  // 9. 브릿지 동치 테스트: createX(deps) === xR.run(deps)
-  // =================================================================
-
-  {
-    // authMiddleware 브릿지
-    const legacy = createAuthMiddleware(tokenService, { publicPaths: ['/auth/login'] })
-    const reader = authMiddlewareR.run({ tokenService, publicPaths: ['/auth/login'] })
-    assert(typeof legacy === 'function', 'bridge: createAuthMiddleware returns function')
-    assert(typeof reader === 'function', 'bridge: authMiddlewareR.run returns function')
-
-    // 동일 동작: public path
-    let legacyNext = false, readerNext = false
-    legacy(createMockReq({ path: '/auth/login' }), createMockRes(), () => { legacyNext = true })
-    reader(createMockReq({ path: '/auth/login' }), createMockRes(), () => { readerNext = true })
-    assert(legacyNext === readerNext, 'bridge: authMiddleware public path behavior identical')
-
-    // 동일 동작: no auth
-    const legacyRes = createMockRes()
-    const readerRes = createMockRes()
-    legacy(createMockReq(), legacyRes, () => {})
-    reader(createMockReq(), readerRes, () => {})
-    assert(legacyRes.statusCode === readerRes.statusCode, 'bridge: authMiddleware 401 behavior identical')
-  }
-
-  {
-    // authenticateWs 브릿지
-    const req = createMockReq({ headers: { authorization: 'Bearer access-alice' } })
-    const legacy = authenticateWs(req, tokenService, { userStore })
-    const reader = authenticateWsR(req).run({ tokenService, userStore })
-    assert(isRight(legacy) === isRight(reader), 'bridge: authenticateWs result shape identical')
-    assert(getRight(legacy)?.sub === getRight(reader)?.sub, 'bridge: authenticateWs payload identical')
-  }
-
-  // =================================================================
-  // 10. createRateLimiter (변경 없음, 기존 동작 확인)
-  // =================================================================
-
-  {
-    const rl = createRateLimiter({ maxAttempts: 2, windowMs: 1000 })
-    assert(rl.isAllowed('1.2.3.4'), 'rateLimiter: first attempt allowed')
-    rl.record('1.2.3.4')
-    rl.record('1.2.3.4')
-    assert(!rl.isAllowed('1.2.3.4'), 'rateLimiter: exceeded → blocked')
-    assert(rl.isAllowed('5.6.7.8'), 'rateLimiter: different IP allowed')
   }
 
   summary()

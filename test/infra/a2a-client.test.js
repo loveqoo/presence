@@ -5,7 +5,7 @@ import {
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { Phase } from '@presence/core/core/agent.js'
-import { createDelegateActor, createEventActor, createTurnActor, forkTask } from '@presence/infra/infra/actors.js'
+import { delegateActorR, eventActorR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {
@@ -266,9 +266,9 @@ async function run() {
       }),
     })
 
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const delegateActor = createDelegateActor({
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const delegateActor = delegateActorR.run({
       state, eventActor, agentRegistry: agentReg, fetchFn: mockFetch,
     })
 
@@ -314,9 +314,9 @@ async function run() {
       }
     }
 
-    const turnActor = createTurnActor(async () => 'done')
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const delegateActor = createDelegateActor({
+    const turnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const delegateActor = delegateActorR.run({
       state, eventActor, agentRegistry: agentReg,
       fetchFn: mockFetch, pollIntervalMs: 30,
     })

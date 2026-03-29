@@ -287,35 +287,10 @@ const authenticateWsR = (req) =>
   })
 
 // =============================================================================
-// 레거시 브릿지: createX(deps) === xR.run(deps)
-// =============================================================================
-
-/** @deprecated Use authMiddlewareR. Legacy bridge: authMiddlewareR.run({ tokenService, publicPaths }) */
-const createAuthMiddleware = (tokenService, { publicPaths = [] } = {}) =>
-  authMiddlewareR.run({ tokenService, publicPaths })
-
-/** @deprecated Use loginHandlerR. Legacy bridge: loginHandlerR.run({ authProvider, tokenService, userStore }) */
-const createLoginHandler = (authProvider, tokenService, userStore) =>
-  loginHandlerR.run({ authProvider, tokenService, userStore })
-
-/** @deprecated Use refreshHandlerR. Legacy bridge: refreshHandlerR.run({ tokenService, userStore }) */
-const createRefreshHandler = (tokenService, userStore) =>
-  refreshHandlerR.run({ tokenService, userStore })
-
-/** @deprecated Use logoutHandlerR. Legacy bridge: logoutHandlerR.run({ tokenService, userStore }) */
-const createLogoutHandler = (tokenService, userStore) =>
-  logoutHandlerR.run({ tokenService, userStore })
-
-/** @deprecated Use authenticateWsR. Legacy bridge: authenticateWsR(req).run({ tokenService, userStore }) */
-const authenticateWs = (req, tokenService, { userStore } = {}) =>
-  authenticateWsR(req).run({ tokenService, userStore })
-
-// =============================================================================
-// Export: Reader 버전 + 레거시 브릿지
+// Export: Reader 버전
 // =============================================================================
 
 export {
-  // Reader 기반 (신규)
   loginHandlerR,
   refreshHandlerR,
   logoutHandlerR,
@@ -324,12 +299,4 @@ export {
   issueTokensR,
   validateRefreshChainR,
   rotateRefreshTokenR,
-
-  // 레거시 브릿지 (createX → xR.run 위임)
-  createAuthMiddleware,
-  createLoginHandler,
-  createRefreshHandler,
-  createLogoutHandler,
-  authenticateWs,
-  createRateLimiter,
 }

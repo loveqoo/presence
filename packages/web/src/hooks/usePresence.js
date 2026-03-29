@@ -126,9 +126,21 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
                 break
               case 'context.conversationHistory':
                 setHistoryMessages(historyToMessages(value))
-                // history push = 서버 truth 갱신. pending을 모두 비움.
-                // finishFailure는 history push가 안 오므로 이 코드가 실행 안 됨 → pending 유지.
-                setPendingMessages([])
+                // history 비어있으면 대화 초기화(/clear) → pending 전부 제거.
+                // 비어있지 않으면 서버 truth와 매칭된 pending만 제거 (reconcile).
+                setPendingMessages(prev => {
+                  if (prev.length === 0) return prev
+                  const history = value || []
+                  if (history.length === 0) return []
+                  const serverInputs = history.map(e => e.input)
+                  const matched = new Set()
+                  const remaining = prev.filter(msg => {
+                    const idx = serverInputs.findIndex((input, i) => !matched.has(i) && input === msg.content)
+                    if (idx !== -1) { matched.add(idx); return false }
+                    return true
+                  })
+                  return remaining.length === prev.length ? prev : remaining
+                })
                 break
             }
           }
@@ -158,9 +170,8 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   const apiBase = sessionId === 'user-default' ? '/api' : `/api/sessions/${sessionId}`
 
   const sendMessage = useCallback(async (input) => {
-    // user 메시지를 pending에 추가 (서버 history 반영 전까지 보임)
-    const clientId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    setPendingMessages(prev => [...prev, { role: 'user', content: input, _clientId: clientId }])
+    // user 메시지를 pending에 추가 (서버 history에 반영되면 reconcile로 제거)
+    setPendingMessages(prev => [...prev, { role: 'user', content: input }])
 
     try {
       const res = await fetchFn(`${apiBase}/chat`, {
