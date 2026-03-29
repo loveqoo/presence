@@ -56,6 +56,11 @@ const messageReducer = (state, event) => {
       const prevLen = state.historyLen
       const historyMessages = historyToMessages(history)
 
+      // 빈 history = 원격/로컬 clear → pending 전부 제거
+      if (history.length === 0) {
+        return { ...state, historyMessages, historyLen: 0, pendingMessages: [], localMessages: [] }
+      }
+
       // compaction 또는 변화 없음 → pending 유지
       if (history.length <= prevLen) {
         return { ...state, historyMessages, historyLen: history.length }
