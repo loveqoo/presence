@@ -1,6 +1,6 @@
 # Presence 테스트 시나리오
 
-1578 tests, 39 test files.
+2526 tests, 46 test files.
 
 ```bash
 npm test              # 전체 실행
@@ -414,12 +414,47 @@ node test/core/agent.test.js   # 개별 파일 실행
 
 ## 인프라
 
-### Config (`test/infra/config.test.js`) — 27 tests
+### Config (`test/infra/config.test.js`) — 44 tests
 
 - mergeConfig: 중첩 병합, 배열 교체, 빈 override → 기본값
 - readConfigFile: 없는 파일 → {}, 유효 JSON → 파싱, 무효 JSON → {} + 경고
-- loadConfig: 파일 없으면 기본값, 파일 있으면 병합, 기본값 shape 검증
-- validateConfig: 누락 설정 경고
+- loadInstanceConfig: instanceId 필수, 파일 없으면 기본값, 3단 머지 체인 (DEFAULTS → server.json → instances/{id}.json → env)
+- loadInstancesFile: 필수 파일, Zod 검증, 빈 instances 배열 → 에러
+- loadClientConfig: 필수 파일, Zod 검증, 기본 locale
+- env override: PRESENCE_MAX_RETRIES, PRESENCE_TIMEOUT_MS, 비숫자 무시
+
+### Auth UserStore (`test/infra/auth-user-store.test.js`) — 39 tests
+
+- addUser: 첫 사용자 admin, 중복 거부, 비밀번호 8자 미만 거부, 잘못된 username 거부
+- verifyPassword: 정확/부정확/존재하지 않는 사용자
+- findUser/listUsers: 조회, passwordHash 미노출
+- removeUser: 삭제 후 없음, 존재하지 않는 사용자 에러
+- changePassword: tokenVersion bump, refreshSessions 전체 삭제, 새 비밀번호 동작
+- refreshSessions: 추가/확인/제거/전체 폐기 (탈취 감지)
+
+### Auth Token (`test/infra/auth-token.test.js`) — 41 tests
+
+- sign/verify: 정상 토큰, 잘못된 서명, 만료, 잘못된 iss/aud
+- 엣지: null, undefined, 빈 문자열, 4-part 문자열
+- secret.json: 자동 생성, 파일 권한 0600, 멱등성
+- TokenService: access token (sub, roles, iss, aud, exp), refresh token (jti, tokenVersion, type)
+- cross-instance: 다른 인스턴스 토큰 거부
+- PRESENCE_JWT_SECRET env override
+
+### Auth Provider (`test/infra/auth-provider.test.js`) — 24 tests
+
+- authenticate: 성공, 잘못된 비밀번호, 존재하지 않는 사용자 (타이밍 공격 방지)
+- null/빈 입력 처리
+- tokenVersion 변경 후 인증
+- Refresh token rotation 전체 흐름: 로그인 → 갱신 → 이전 jti 폐기 → 폐기된 jti 재사용 → 탈취 감지
+
+### Auth E2E (`test/server/auth-e2e.test.js`) — 38 tests (network)
+
+- AE1-AE3: 미인증 401, 로그인 성공 (accessToken + HttpOnly 쿠키), 로그인 실패 (사용자 존재 미노출)
+- AE4-AE6: 인증된 요청 정상, 잘못된 토큰 401, 만료 토큰 401
+- AE7-AE9: Refresh rotation + 새 토큰, 폐기된 jti 탈취 감지, 비밀번호 변경 후 refresh 401
+- AE10-AE12: Logout (쿠키 만료 + jti 폐기), /api/instance authRequired, Rate limiting 429
+- AE13-AE14: WS 미인증 4001 close, WS 인증 init 수신
 
 ### Persistence (`test/infra/persistence.test.js`) — 15 tests
 
@@ -462,3 +497,60 @@ node test/core/agent.test.js   # 개별 파일 실행
 - 경로 정규화: 절대경로 → 허용 디렉토리 상대경로
 - 전체 에이전트 파이프라인: planner → parse → validate → (retry) → execute → finish
 - 다양한 시나리오: 파일 읽기, 셸 명령, 멀티스텝, 승인, 위임
+
+---
+
+## 오케스트레이터
+
+### ChildManager (`test/orchestrator/child-manager.test.js`) — 11 tests
+
+- createChildManager: API 인터페이스 존재 확인 (forkInstance, stopInstance, restartInstance, getStatus, listStatus, shutdownAll)
+- listStatus: 초기 빈 배열
+- getStatus: 존재하지 않는 인스턴스 → null
+- stopInstance/restartInstance: 존재하지 않는 인스턴스 → no-op / null
+
+### Orchestrator E2E (`test/orchestrator/orchestrator-e2e.test.js`) — 33 tests (network)
+
+**기본 인프라 (OE1-OE3):**
+- 오케스트레이터 시작 → 관리 API 응답, 인스턴스 목록
+- 인스턴스 fork → 서버 프로세스 기동 확인
+- /api/instance 헬스 엔드포인트: id, status, uptime
+
+**관리 API (OE4-OE6):**
+- 여러 인스턴스 상태 목록
+- 인스턴스 중지/시작: 프로세스 종료 → 접속 불가 → 재기동 → 접속 복구
+- 인스턴스 restart: 중지 + 시작 일괄 처리
+
+**인스턴스 격리 (OE7-OE9):**
+- 두 인스턴스에 병렬 chat → 독립 응답, 독립 turn
+- 인스턴스별 설정 분리: 서로 다른 LLM model 확인
+- disabled 인스턴스: fork 안 됨, 관리 목록에 미포함
+
+**WebSocket (OE10):**
+- 인스턴스 직접 WS 연결 → init 메시지 수신
+
+---
+
+## 멀티-인스턴스 Live 테스트
+
+### Multi-Instance Live E2E (`test/e2e/multi-instance-live.test.js`) — 86 tests (수동 실행)
+
+> 실제 LLM + 실제 오케스트레이터 대상. `npm start` 후 별도 실행.
+
+**기본 인프라 (ML1-ML3):** 관리 API, 헬스(uptime), 설정 분리(apiKey 미노출)
+
+**대화 + 도구 (ML4-ML6):** 실제 LLM 응답, file_list 도구 실행, 멀티턴 컨텍스트 유지
+
+**격리 (ML7-ML9):** 인스턴스간 대화 격리, 히스토리 독립, 세션간 대화 격리
+
+**동시성 (ML10-ML11):** 다른 인스턴스 병렬 chat, 같은 인스턴스 다른 세션 병렬 chat
+
+**슬래시 커맨드 (ML12-ML14):** /tools, /status 인스턴스별 동작, /clear 격리 확인
+
+**WebSocket (ML15-ML17):** init, state push(turn + turnState), 멀티 클라이언트
+
+**세션 CRUD (ML18-ML19):** 생성/대화/삭제 lifecycle, 삭제 후 404
+
+**에러/경계 (ML20-ML23):** 빈 입력 400, 잘못된 JSON → 에러 후 정상 유지, 존재하지 않는 인스턴스 404, 복잡한 입력 후 idle 복귀
+
+**운영 (ML24-ML25):** 오케스트레이터 restart API → 서비스 복구, 재시작 후 chat 정상

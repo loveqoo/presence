@@ -59,7 +59,7 @@
 - [x] `packages/infra/src/infra/remote-state.js` — WS 기반 상태 어댑터 (get/hooks.on/off 인터페이스, useAgentState 그대로 동작)
 - [x] `packages/tui/src/main.js` — 서버 자동 감지 → 없으면 spawn → `runRemote()` (WS 상태 + REST 커맨드)
 - [x] `handleInput/approve/cancel` → REST POST 경유
-- [x] `--local` 플래그: in-process `runLocal()` 모드 유지
+- [x] ~~`--local` 플래그~~ — Phase 9에서 제거됨 (멀티-인스턴스 전환)
 - [x] 테스트 전체 통과 (2030 passed, 0 failed)
 
 #### Phase D: 세션 정리 + 스케줄러 ephemeral 세션 ✅
@@ -89,6 +89,54 @@
 - [x] `Delegate` Op — Free Monad DSL, DelegateInterpreter (local/remote)
 - [x] `agentRegistry.list()` lazy — 세션 생성 후 등록된 에이전트도 프롬프트에 포함
 - [x] 테스트: delegate.test.js (29), supervisor-session.test.js (24), supervisor.test.js (60) — 총 113 assertions
+
+### Phase 9: 멀티-인스턴스 아키텍처 ✅
+
+**목표**: 머신 1대에 N개의 에이전트 인스턴스(개인/팀)를 운영. 인스턴스별 독립 설정, 독립 프로세스, 독립 포트.
+
+#### 결정 사항
+- **프로세스 모델**: 인스턴스당 별도 프로세스 (스케줄러 경합 방지, 장애 격리)
+- **라우팅**: 게이트웨이 없음 — 클라이언트/A2A 모두 인스턴스에 직접 접속
+- **오케스트레이터**: 순수 프로세스 매니저 (fork, 감시, 재시작, 관리 API)
+- **설정**: 디렉터리 기반 분리 (`~/.presence/{server.json, instances.json, instances/, clients/}`)
+- **하위 호환 없음**: 기존 `config.json` 단일 파일 모드 폐기, `instances.json` 필수
+
+#### 완료 항목
+- [x] 설정 시스템 확장: `loadInstanceConfig()` 3단 머지 체인 (DEFAULTS → server.json → instances/{id}.json → env)
+- [x] `loadInstancesFile()`, `loadClientConfig()`, Zod 스키마 3개 추가
+- [x] 기존 `loadConfig()`, `defaultConfigPath()` 제거
+- [x] 서버 인스턴스 모드: `PRESENCE_INSTANCE_ID` 필수, `HOST` env, `/api/instance` 헬스 엔드포인트
+- [x] `@presence/orchestrator` 신규 패키지: child-manager (fork, 감시, exponential backoff 재시작) + 관리 API
+- [x] TUI 클라이언트: `loadClientConfig` 기반 서버 접속, `spawnOrchestrator`, `--local` 모드 제거
+- [x] 테스트: config 유닛(44), ChildManager 유닛(11), 오케스트레이터 E2E(33), 멀티-인스턴스 live(86)
+- [x] 전체 테스트 통과 (2384 passed, 0 failed)
+
+### Phase 10: Password + JWT 인증 ✅
+
+**목표**: 서버 운영자도 사용자 위장 불가. bcrypt 해시 + JWT로 비대칭 인증. LDAP 확장 가능.
+
+#### 결정 사항
+- **인증 필수**: 사용자 없으면 서버 시작 에러
+- **비밀번호 + JWT**: bcrypt 해시 (서버), HMAC-SHA256 JWT (node:crypto)
+- **Refresh token rotation**: jti 추적, 폐기된 jti → 탈취 감지 → 전체 세션 삭제
+- **jwtSecret 분리**: `{id}.secret.json` (0600), users.json과 별도
+- **Web**: access token 메모리 + refresh token HttpOnly 쿠키 (SameSite=Strict, Path=/api/auth)
+- **TUI**: access token + refresh token 메모리, WS Authorization 헤더
+- **Rate limiting**: IP당 분당 5회 (in-memory, best-effort)
+
+#### 완료 항목
+- [x] `auth-user-store.js` — 사용자 CRUD, bcrypt, refreshSessions, 비밀번호 8자 검증
+- [x] `auth-token.js` — JWT sign/verify (node:crypto), jti, iss/aud, secret.json 0600
+- [x] `auth-provider.js` — AuthProvider 인터페이스, 타이밍 공격 방지, 사용자 존재 미노출
+- [x] `auth-middleware.js` — Express 미들웨어, login/refresh/logout 핸들러, WS 인증, rate limiter
+- [x] `auth-cli.js` — init/add/remove/list/passwd CLI
+- [x] 서버 통합: auth 미들웨어, /api/auth/* 라우트, WS 인증, 사용자 없으면 시작 에러
+- [x] TUI: 비밀번호 프롬프트, 로그인, 토큰 전달, 401 자동 갱신 (단일 refreshPromise)
+- [x] Web: useAuth 훅, LoginPage, App 조건부 렌더링, 쿠키 기반 WS
+- [x] 테스트: auth 유닛(104), auth E2E(38), live(86)
+- [x] 전체 테스트 통과 (2526 passed, 0 failed)
+
+---
 
 ## 미착수 Phase
 
@@ -162,7 +210,8 @@
 
 ```bash
 node test/run.js                                    # 전체 테스트 (mock 기반, LLM 불필요)
-node test/e2e/tui-live.test.js                      # 실제 LLM TUI E2E (서버 먼저 실행 필요)
-node packages/tui/src/main.js                       # TUI 앱 실행 (서버 자동 감지 + spawn)
-node packages/server/src/server/index.js            # 서버 단독 실행
+npm start                                           # 오케스트레이터 시작 (instances.json 필요)
+node test/e2e/multi-instance-live.test.js            # 멀티-인스턴스 live E2E (오케스트레이터 실행 필요)
+node test/e2e/tui-live.test.js --url http://...:3001 # 단일 인스턴스 TUI live E2E
+npm run start:cli                                    # TUI 클라이언트 (clients/{userId}.json 필요)
 ```

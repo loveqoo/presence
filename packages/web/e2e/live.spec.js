@@ -153,6 +153,7 @@ test('턴 실행 중 input disabled → 완료 후 enabled', async ({ page }) =>
 // ===========================================
 
 test('파일 목록 요청 → 도구 실행 후 응답', async ({ page }) => {
+
   await page.goto('/')
   await page.waitForSelector('.status-conn.on', { timeout: 10000 })
 
@@ -165,4 +166,131 @@ test('파일 목록 요청 → 도구 실행 후 응답', async ({ page }) => {
 
   const text = await agentMsg.textContent()
   expect(text.trim().length).toBeGreaterThan(0)
+})
+
+// ===========================================
+// 7. 세션 관리
+// ===========================================
+
+test('WL-S1: StatusBar에 세션 버튼 표시', async ({ page }) => {
+  await page.goto('/')
+  await page.waitForSelector('.status-conn.on', { timeout: 10000 })
+
+  const btn = page.locator('.session-btn')
+  await expect(btn).toBeVisible()
+  await expect(btn).toContainText('user-default')
+})
+
+test('WL-S2: SessionPanel 열기 → user-default 목록 표시', async ({ page }) => {
+  await page.goto('/')
+  await page.waitForSelector('.status-conn.on', { timeout: 10000 })
+
+  await page.locator('.session-btn').click()
+  await expect(page.locator('.session-panel')).toBeVisible()
+
+  const defaultItem = page.locator('.session-item').filter({ hasText: 'user-default' })
+  await expect(defaultItem).toBeVisible()
+  await expect(defaultItem.locator('.session-item-current')).toContainText('현재')
+
+  await page.locator('.session-panel-close').click()
+  await expect(page.locator('.session-panel')).not.toBeVisible()
+})
+
+test('WL-S3: 새 세션 생성 → 목록에 추가됨', async ({ page, request: req }) => {
+  await page.goto('/')
+  await page.waitForSelector('.status-conn.on', { timeout: 10000 })
+
+  const testId = `wl-live-${Date.now()}`
+
+  await page.locator('.session-btn').click()
+  await page.waitForSelector('.session-panel')
+
+  const initialCount = await page.locator('.session-item').count()
+  await page.locator('.session-create-input').fill(testId)
+  await page.locator('.btn-session-create').click()
+
+  await expect(page.locator('.session-item')).toHaveCount(initialCount + 1, { timeout: 5000 })
+  await expect(page.locator('.session-item').filter({ hasText: testId })).toBeVisible()
+
+  // 정리
+  await req.delete(`/api/sessions/${testId}`)
+})
+
+test('WL-S4: 세션 전환 → StatusBar 갱신 + 메시지 초기화', async ({ page, request: req }) => {
+  await page.goto('/')
+  await page.waitForSelector('.status-conn.on', { timeout: 10000 })
+
+  const testId = `wl-switch-${Date.now()}`
+  await req.post('/api/sessions', { data: { id: testId, type: 'user' } })
+
+  // 먼저 user-default에 메시지 전송
+  await page.locator('.input-bar input').fill('안녕')
+  await page.locator('.input-bar input').press('Enter')
+  await expect(page.locator('.msg-user').first()).toBeVisible({ timeout: 5000 })
+
+  // 세션 전환
+  await page.locator('.session-btn').click()
+  await page.waitForSelector('.session-panel')
+  const targetItem = page.locator('.session-item').filter({ hasText: testId })
+  await expect(targetItem).toBeVisible()
+  await targetItem.locator('.btn-session-switch').click()
+
+  // StatusBar 갱신
+  await expect(page.locator('.session-btn')).toContainText(testId, { timeout: 5000 })
+
+  // 새 세션은 메시지 없음
+  await expect(page.locator('.msg')).toHaveCount(0)
+
+  // 정리
+  await req.delete(`/api/sessions/${testId}`)
+})
+
+test('WL-S5: 새 세션에서 LLM 응답 (turn 증가)', async ({ page, request: req }) => {
+  await page.goto('/')
+  await page.waitForSelector('.status-conn.on', { timeout: 10000 })
+
+  const testId = `wl-llm-${Date.now()}`
+  await req.post('/api/sessions', { data: { id: testId, type: 'user' } })
+
+  // 세션 전환
+  await page.locator('.session-btn').click()
+  await page.waitForSelector('.session-panel')
+  const targetItem = page.locator('.session-item').filter({ hasText: testId })
+  await targetItem.locator('.btn-session-switch').click()
+  await expect(page.locator('.session-btn')).toContainText(testId, { timeout: 5000 })
+
+  // 새 세션에서 메시지 전송
+  await page.locator('.input-bar input').fill('한 문장으로 인사해주세요.')
+  await page.locator('.input-bar input').press('Enter')
+
+  await expect(page.locator('.msg-user').first()).toContainText('한 문장')
+  await expect(page.locator('.msg-agent').first()).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('.status-indicator')).not.toContainText('working', { timeout: 15000 })
+
+  const text = await page.locator('.msg-agent').first().textContent()
+  expect(text.trim().length).toBeGreaterThan(0)
+
+  // 정리
+  await req.delete(`/api/sessions/${testId}`)
+})
+
+test('WL-S6: 세션 삭제 → 목록에서 제거', async ({ page, request: req }) => {
+  await page.goto('/')
+  await page.waitForSelector('.status-conn.on', { timeout: 10000 })
+
+  const testId = `wl-del-${Date.now()}`
+  await req.post('/api/sessions', { data: { id: testId, type: 'user' } })
+
+  await page.locator('.session-btn').click()
+  await page.waitForSelector('.session-panel')
+
+  const beforeCount = await page.locator('.session-item').count()
+  const targetItem = page.locator('.session-item').filter({ hasText: testId })
+  await expect(targetItem).toBeVisible()
+
+  page.on('dialog', d => d.accept())
+  await targetItem.locator('.btn-session-delete').click()
+
+  await expect(page.locator('.session-item')).toHaveCount(beforeCount - 1, { timeout: 5000 })
+  await expect(page.locator('.session-item').filter({ hasText: testId })).not.toBeVisible()
 })

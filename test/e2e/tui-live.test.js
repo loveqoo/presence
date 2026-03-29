@@ -12,8 +12,10 @@ import { render } from 'ink-testing-library'
 import http from 'node:http'
 import { createRemoteState } from '@presence/infra/infra/remote-state.js'
 import { App } from '@presence/tui/ui/App.js'
+import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../lib/assert.js'
 
+initI18n('ko')
 const h = React.createElement
 
 // ---------------------------------------------------------------------------
@@ -107,20 +109,36 @@ console.log(`TUI live e2e tests (서버: ${baseUrl}, 모델: ${config.llm?.model
 // 공통 setup — RemoteState + App 렌더
 // ---------------------------------------------------------------------------
 
-const setupLive = async () => {
+const setupLive = async ({ sessionId = 'user-default' } = {}) => {
   // /clear로 이전 대화 초기화
-  await request('POST', '/api/chat', { input: '/clear' }).catch(() => {})
+  await request('POST', `/api/sessions/${sessionId}/chat`, { input: '/clear' }).catch(() => {})
   await delay(200)
 
-  const remoteState = await connectRemoteState()
+  const remoteState = new Promise((resolve) => {
+    const rs = createRemoteState({ wsUrl, sessionId })
+    const check = () => {
+      if (rs.get('turnState') !== undefined) { resolve(rs); return }
+      setTimeout(check, 20)
+    }
+    setTimeout(check, 20)
+  })
+  const rs = await remoteState
 
+  const apiBase = `/api/sessions/${sessionId}`
   const onInput = (input) =>
-    request('POST', '/api/chat', { input }).then(r => r.body?.content ?? null)
-  const onApprove = (approved) => request('POST', '/api/approve', { approved })
-  const onCancel = () => request('POST', '/api/cancel')
+    request('POST', `${apiBase}/chat`, { input }).then(r => r.body?.content ?? null)
+  const onApprove = (approved) => request('POST', `${apiBase}/approve`, { approved })
+  const onCancel = () => request('POST', `${apiBase}/cancel`)
+
+  const onListSessions = () =>
+    request('GET', '/api/sessions').then(r => Array.isArray(r.body) ? r.body : [])
+  const onCreateSession = (id) =>
+    request('POST', '/api/sessions', { id, type: 'user' }).then(r => r.body)
+  const onDeleteSession = (id) =>
+    request('DELETE', `/api/sessions/${id}`)
 
   const { lastFrame, stdin, unmount } = render(h(App, {
-    state: remoteState,
+    state: rs,
     onInput, onApprove, onCancel,
     tools, agents,
     cwd: process.cwd(),
@@ -129,10 +147,14 @@ const setupLive = async () => {
     config,
     memory: null, llm: null, mcpControl: null,
     initialMessages: [],
+    sessionId,
+    onListSessions,
+    onCreateSession,
+    onDeleteSession,
   }))
 
-  const cleanup = () => { unmount(); remoteState.disconnect() }
-  return { remoteState, lastFrame, stdin, cleanup }
+  const cleanup = () => { unmount(); rs.disconnect() }
+  return { remoteState: rs, lastFrame, stdin, cleanup }
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +269,57 @@ const setupLive = async () => {
     stdin.write('\x1B[A')
     await waitFor(() => lastFrame().includes('FIRST'), { timeout: 2000 })
     assert(lastFrame().includes('FIRST'), 'TL7: ↑↑ → 이전 입력 복원')
+  } finally { cleanup() }
+}
+
+// ---------------------------------------------------------------------------
+// 세션 관리 live 테스트
+// ---------------------------------------------------------------------------
+
+// TL-S1. /sessions → user-default 목록 표시
+{
+  const { lastFrame, stdin, cleanup } = await setupLive()
+  try {
+    await typeInput(stdin, '/sessions')
+    await waitFor(() => lastFrame().includes('user-default'), { timeout: 5000 })
+    assert(lastFrame().includes('user-default'), 'TL-S1: /sessions 출력에 user-default 포함')
+    const frame = lastFrame()
+    const hasCurrentMarker = frame.includes('현재') || frame.includes('●')
+    assert(hasCurrentMarker, 'TL-S1: 현재 세션 마커 표시')
+  } finally { cleanup() }
+}
+
+// TL-S2. /sessions new <id> → 세션 생성 확인 (REST 검증)
+{
+  const testId = `live-test-${Date.now()}`
+  const { lastFrame, stdin, cleanup } = await setupLive()
+  try {
+    await typeInput(stdin, `/sessions new ${testId}`)
+    await waitFor(() => lastFrame().includes('생성됨') || lastFrame().includes(testId), { timeout: 5000 })
+    // REST로 서버 상태 검증
+    const res = await request('GET', '/api/sessions')
+    const sessions = Array.isArray(res.body) ? res.body : []
+    const created = sessions.find(s => s.id === testId)
+    assert(!!created, `TL-S2: 서버에 세션 '${testId}' 생성됨`)
+    // 정리
+    await request('DELETE', `/api/sessions/${testId}`).catch(() => {})
+  } finally { cleanup() }
+}
+
+// TL-S3. /sessions delete <id> → 세션 삭제 확인 (REST 검증)
+{
+  const testId = `live-del-${Date.now()}`
+  // 먼저 세션 생성
+  await request('POST', '/api/sessions', { id: testId, type: 'user' })
+  const { lastFrame, stdin, cleanup } = await setupLive()
+  try {
+    await typeInput(stdin, `/sessions delete ${testId}`)
+    await waitFor(() => lastFrame().includes('삭제됨') || lastFrame().includes(testId), { timeout: 5000 })
+    // REST로 서버 상태 검증
+    const res = await request('GET', '/api/sessions')
+    const sessions = Array.isArray(res.body) ? res.body : []
+    const deleted = sessions.find(s => s.id === testId)
+    assert(!deleted, `TL-S3: 서버에서 세션 '${testId}' 삭제됨`)
   } finally { cleanup() }
 }
 

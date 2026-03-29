@@ -5,33 +5,77 @@ A personal task-delegation agent platform.
 ## Quick Start
 
 ```bash
-# Install
+# 1. Install
 npm install
 
-# Create config file
-cp config.example.json ~/.presence/config.json
-# Edit to set your API key
+# 2. Create config files
+mkdir -p ~/.presence/instances ~/.presence/clients
 
-# Run
+# instances.json (required — instance list)
+cat > ~/.presence/instances.json << 'EOF'
+{
+  "orchestrator": { "port": 3010, "host": "127.0.0.1" },
+  "instances": [
+    { "id": "my-agent", "port": 3001, "host": "127.0.0.1", "enabled": true, "autoStart": true }
+  ]
+}
+EOF
+
+# server.json (shared LLM config)
+cat > ~/.presence/server.json << 'EOF'
+{
+  "llm": { "apiKey": "sk-..." }
+}
+EOF
+
+# Instance config (override, can be empty)
+echo '{}' > ~/.presence/instances/my-agent.json
+
+# Client config (for TUI connection)
+cat > ~/.presence/clients/my-agent.json << 'EOF'
+{
+  "instanceId": "my-agent",
+  "server": { "url": "http://127.0.0.1:3001" }
+}
+EOF
+
+# 3. Register a user (required — server won't start without users)
+npm run user -- init --instance my-agent
+
+# 4. Start server
 npm start
 
-# Test
+# 5. Connect TUI client (enter password)
+npm run start:cli -- --instance my-agent
+
+# Run tests
 npm test
 ```
 
 ## Configuration
 
-Config file location: `~/.presence/config.json`
+### File Structure
 
-Use the `PRESENCE_CONFIG` environment variable to change the path.
+```
+~/.presence/
+├── server.json              ← Shared server config (base for all instances)
+├── instances.json           ← Instance list + ports (required)
+├── instances/
+│   ├── my-agent.json        ← Per-instance override
+│   ├── my-agent.users.json  ← User list (managed via npm run user)
+│   └── my-agent.secret.json ← JWT secret (auto-generated, 0600)
+└── clients/
+    └── my-agent.json        ← Client connection config
+```
+
+Config merge chain: `DEFAULTS → server.json → instances/{id}.json → environment variables`
 
 ### Minimal Config (OpenAI)
 
+`~/.presence/server.json`:
 ```json
 {
-  "llm": {
-    "apiKey": "sk-..."
-  }
+  "llm": { "apiKey": "sk-..." }
 }
 ```
 
@@ -39,6 +83,7 @@ Defaults are applied for the rest (model: gpt-4o, responseFormat: json_schema).
 
 ### Local Model Config (MLX, Ollama, etc.)
 
+`~/.presence/server.json`:
 ```json
 {
   "llm": {
@@ -46,14 +91,33 @@ Defaults are applied for the rest (model: gpt-4o, responseFormat: json_schema).
     "model": "qwen3.5-35b",
     "apiKey": "local",
     "responseFormat": "json_object"
-  },
-  "heartbeat": {
-    "enabled": false
   }
 }
 ```
 
 Local models may not support `json_schema` well — use `json_object` instead.
+
+### Multi-Instance Setup
+
+`~/.presence/instances.json`:
+```json
+{
+  "orchestrator": { "port": 3010, "host": "127.0.0.1" },
+  "instances": [
+    { "id": "anthony", "port": 3001, "host": "127.0.0.1", "enabled": true, "autoStart": true },
+    { "id": "team-dev", "port": 3002, "host": "127.0.0.1", "enabled": true, "autoStart": true }
+  ]
+}
+```
+
+Override per-instance settings in `~/.presence/instances/{id}.json`:
+```json
+{
+  "llm": { "model": "claude-sonnet-4-20250514" },
+  "memory": { "path": "~/.presence/data/anthony" },
+  "locale": "en"
+}
+```
 
 ### Full Config Options
 
@@ -84,7 +148,7 @@ Local models may not support `json_schema` well — use `json_object` instead.
 
 ### Environment Variable Overrides
 
-Environment variables take precedence over the config file.
+Environment variables are the last step in the merge chain, overriding all file settings.
 
 ```bash
 OPENAI_API_KEY=sk-...           # llm.apiKey
@@ -95,9 +159,43 @@ PRESENCE_MEMORY_PATH=/custom/path
 PRESENCE_EMBED_PROVIDER=cohere
 PRESENCE_EMBED_API_KEY=...
 PRESENCE_EMBED_DIMENSIONS=512
-PRESENCE_HEARTBEAT=false
-PRESENCE_HEARTBEAT_MS=60000
+PRESENCE_DIR=/custom/presence   # Override ~/.presence/ path
+PRESENCE_JWT_SECRET=...         # JWT secret override
 ```
+
+## Authentication
+
+### User Management
+
+```bash
+# Initialize instance (secret + first user)
+npm run user -- init --instance my-agent
+
+# Add user
+npm run user -- add --instance my-agent --username bob
+
+# List users
+npm run user -- list --instance my-agent
+
+# Change password (invalidates all existing sessions)
+npm run user -- passwd --instance my-agent --username bob
+
+# Remove user
+npm run user -- remove --instance my-agent --username bob
+```
+
+### Auth Flow
+
+- **Server**: Won't start without users → run `npm run user -- init` first
+- **TUI**: `npm run start:cli -- --instance <id>` → password prompt → login
+- **Web**: Browser access → login form → authenticate
+
+### Token Structure
+
+- **Access token** (15 min): Used for all API requests. Stored in memory only.
+- **Refresh token** (7 days): For access token renewal. Web uses HttpOnly cookie, TUI uses memory.
+- Password change immediately invalidates all existing tokens.
+- Refresh token rotation: old token revoked on refresh; replaying a revoked token triggers full session revocation (theft detection).
 
 ## Usage
 
@@ -251,6 +349,15 @@ Executed via the event queue; queued if the agent is busy.
 ## Architecture
 
 ```
+Orchestrator (:3010) ─── Management API
+  ├── Instance A (:3001) ─── Express + WS + JWT Auth
+  │     ├── SessionManager → N sessions
+  │     ├── GlobalContext (LLM, Memory, MCP, Scheduler)
+  │     └── A2A (direct agent-to-agent communication)
+  └── Instance B (:3002) ─── Separate process, separate config
+```
+
+```
 User Input → Free Monad Program → Interpreter → Side Effects
                                               ↓
                                     State + Hook → Memory, Persistence, Events
@@ -260,28 +367,48 @@ User Input → Free Monad Program → Interpreter → Side Effects
 - **ADT**: State transitions expressed as sum types (Phase, TurnResult, ErrorInfo)
 - **Either/Maybe**: Errors and nulls handled as values
 - **Interpreter**: prod (real), test (mock), traced (logging), dryrun (validation)
-- **Policies**: Policy constants centralized in `src/core/policies.js`
+- **Multi-instance**: Separate process per instance, crash isolation, scheduler contention prevention
+- **Auth**: Password + JWT (bcrypt hash, HMAC-SHA256, refresh rotation)
 
 ## Tests
 
 ```bash
-npm test              # Full suite (1590 tests, 39 files)
-node test/core/agent.test.js    # Individual file
+npm test                          # Full suite (2526 tests, 46 files)
+node test/core/agent.test.js      # Individual file
+node test/run.js --no-network     # Skip network-binding tests
 ```
 
-All tests run without external dependencies.
+All mock-based tests run without external dependencies.
+
+### Live Tests (real LLM)
+
+```bash
+npm start                         # Start orchestrator
+node test/e2e/multi-instance-live.test.js --orchestrator http://127.0.0.1:3010
+```
 
 ## Troubleshooting
 
+### Server won't start
+
+- `No users configured` → Run `npm run user -- init --instance <id>` to register a user
+- `instances.json not found` → Create `~/.presence/instances.json`
+
+### Login failure
+
+- Verify user exists: `npm run user -- list --instance <id>`
+- Reset password: `npm run user -- passwd --instance <id> --username <name>`
+- Rate limited (429): Wait 1 minute and retry
+
 ### Responses are too slow
 
-- Change `responseFormat` to `json_object` in `~/.presence/config.json`
+- Change `responseFormat` to `json_object` in `~/.presence/server.json`
 - Local models: `json_object` instead of `json_schema` is required
 
 ### Repeated "LLM API error"
 
 - Check status with `/status`
-- Verify `llm.apiKey` and `llm.baseUrl` in `~/.presence/config.json`
+- Verify `llm.apiKey` and `llm.baseUrl` in `~/.presence/server.json`
 
 ### Tools not showing up
 

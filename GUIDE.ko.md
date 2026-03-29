@@ -5,15 +5,48 @@
 ## 빠른 시작
 
 ```bash
-# 설치
+# 1. 설치
 npm install
 
-# 설정 파일 생성
-cp config.example.json ~/.presence/config.json
-# 에디터로 열어 API 키 등을 설정
+# 2. 설정 파일 생성
+mkdir -p ~/.presence/instances ~/.presence/clients
 
-# 실행
+# instances.json (필수 — 인스턴스 목록)
+cat > ~/.presence/instances.json << 'EOF'
+{
+  "orchestrator": { "port": 3010, "host": "127.0.0.1" },
+  "instances": [
+    { "id": "my-agent", "port": 3001, "host": "127.0.0.1", "enabled": true, "autoStart": true }
+  ]
+}
+EOF
+
+# server.json (공통 LLM 설정)
+cat > ~/.presence/server.json << 'EOF'
+{
+  "llm": { "apiKey": "sk-..." }
+}
+EOF
+
+# 인스턴스 설정 (override, 생략 가능)
+echo '{}' > ~/.presence/instances/my-agent.json
+
+# 클라이언트 설정 (TUI 접속용)
+cat > ~/.presence/clients/my-agent.json << 'EOF'
+{
+  "instanceId": "my-agent",
+  "server": { "url": "http://127.0.0.1:3001" }
+}
+EOF
+
+# 3. 사용자 등록 (필수 — 사용자 없으면 서버 시작 불가)
+npm run user -- init --instance my-agent
+
+# 4. 서버 시작
 npm start
+
+# 5. TUI 클라이언트 접속 (비밀번호 입력)
+npm run start:cli -- --instance my-agent
 
 # 테스트
 npm test
@@ -21,17 +54,28 @@ npm test
 
 ## 설정
 
-설정 파일 위치: `~/.presence/config.json`
+### 파일 구조
 
-환경변수 `PRESENCE_CONFIG`로 경로를 변경할 수 있습니다.
+```
+~/.presence/
+├── server.json              ← 공통 서버 설정 (모든 인스턴스의 base)
+├── instances.json           ← 인스턴스 목록 + 포트 (필수)
+├── instances/
+│   ├── my-agent.json        ← 인스턴스별 override
+│   ├── my-agent.users.json  ← 사용자 목록 (npm run user로 관리)
+│   └── my-agent.secret.json ← JWT 시크릿 (자동 생성, 0600)
+└── clients/
+    └── my-agent.json        ← 클라이언트 접속 설정
+```
+
+설정 머지 체인: `DEFAULTS → server.json → instances/{id}.json → 환경변수`
 
 ### 최소 설정 (OpenAI)
 
+`~/.presence/server.json`:
 ```json
 {
-  "llm": {
-    "apiKey": "sk-..."
-  }
+  "llm": { "apiKey": "sk-..." }
 }
 ```
 
@@ -39,6 +83,7 @@ npm test
 
 ### 로컬 모델 설정 (MLX, Ollama 등)
 
+`~/.presence/server.json`:
 ```json
 {
   "llm": {
@@ -46,14 +91,33 @@ npm test
     "model": "qwen3.5-35b",
     "apiKey": "local",
     "responseFormat": "json_object"
-  },
-  "heartbeat": {
-    "enabled": false
   }
 }
 ```
 
 로컬 모델은 `json_schema`가 느리거나 지원되지 않을 수 있으므로 `json_object`를 권장합니다.
+
+### 멀티-인스턴스 설정
+
+`~/.presence/instances.json`:
+```json
+{
+  "orchestrator": { "port": 3010, "host": "127.0.0.1" },
+  "instances": [
+    { "id": "anthony", "port": 3001, "host": "127.0.0.1", "enabled": true, "autoStart": true },
+    { "id": "team-dev", "port": 3002, "host": "127.0.0.1", "enabled": true, "autoStart": true }
+  ]
+}
+```
+
+인스턴스별 설정을 override하려면 `~/.presence/instances/{id}.json`에 작성:
+```json
+{
+  "llm": { "model": "claude-sonnet-4-20250514" },
+  "memory": { "path": "~/.presence/data/anthony" },
+  "locale": "en"
+}
+```
 
 ### 전체 설정 옵션
 
@@ -84,7 +148,7 @@ npm test
 
 ### 환경변수 오버라이드
 
-설정 파일보다 환경변수가 우선합니다.
+환경변수는 머지 체인의 마지막 단계로, 모든 파일 설정보다 우선합니다.
 
 ```bash
 OPENAI_API_KEY=sk-...           # llm.apiKey
@@ -95,9 +159,43 @@ PRESENCE_MEMORY_PATH=/custom/path
 PRESENCE_EMBED_PROVIDER=cohere
 PRESENCE_EMBED_API_KEY=...
 PRESENCE_EMBED_DIMENSIONS=512
-PRESENCE_HEARTBEAT=false
-PRESENCE_HEARTBEAT_MS=60000
+PRESENCE_DIR=/custom/presence   # ~/.presence/ 경로 변경
+PRESENCE_JWT_SECRET=...         # JWT 시크릿 override
 ```
+
+## 인증
+
+### 사용자 관리
+
+```bash
+# 인스턴스 초기화 (시크릿 + 첫 사용자 등록)
+npm run user -- init --instance my-agent
+
+# 사용자 추가
+npm run user -- add --instance my-agent --username bob
+
+# 사용자 목록
+npm run user -- list --instance my-agent
+
+# 비밀번호 변경 (기존 모든 세션 즉시 무효화)
+npm run user -- passwd --instance my-agent --username bob
+
+# 사용자 삭제
+npm run user -- remove --instance my-agent --username bob
+```
+
+### 인증 흐름
+
+- **서버**: 사용자가 없으면 시작 불가 → `npm run user -- init` 먼저 실행
+- **TUI**: `npm run start:cli -- --instance <id>` → 비밀번호 프롬프트 → 로그인
+- **Web**: 브라우저 접속 → 로그인 폼 → 인증 후 사용
+
+### 토큰 구조
+
+- **Access token** (15분): 모든 API 요청에 사용. 메모리에만 저장.
+- **Refresh token** (7일): access token 갱신용. Web은 HttpOnly 쿠키, TUI는 메모리.
+- 비밀번호 변경 시 모든 기존 토큰 즉시 무효화.
+- Refresh token rotation: 갱신 시 이전 토큰 폐기, 폐기된 토큰 재사용 시 전체 세션 삭제 (탈취 감지).
 
 ## 사용법
 
@@ -251,6 +349,15 @@ Incremental Planning Engine:
 ## 아키텍처
 
 ```
+오케스트레이터 (:3010) ─── 관리 API
+  ├── 인스턴스 A (:3001) ─── Express + WS + JWT 인증
+  │     ├── SessionManager → N개 세션
+  │     ├── GlobalContext (LLM, Memory, MCP, Scheduler)
+  │     └── A2A (에이전트 간 직접 통신)
+  └── 인스턴스 B (:3002) ─── 독립 프로세스, 독립 설정
+```
+
+```
 User Input → Free Monad Program → Interpreter → Side Effects
                                               ↓
                                     State + Hook → Memory, Persistence, Events
@@ -260,28 +367,48 @@ User Input → Free Monad Program → Interpreter → Side Effects
 - **ADT**: 상태 전이를 합타입으로 표현 (Phase, TurnResult, ErrorInfo)
 - **Either/Maybe**: 에러와 null을 값으로 처리
 - **Interpreter**: prod (실제), test (mock), traced (로깅), dryrun (검증)
-- **Policies**: 정책 상수를 `src/core/policies.js`에 통합 관리
+- **멀티-인스턴스**: 인스턴스당 별도 프로세스, 장애 격리, 스케줄러 경합 방지
+- **인증**: Password + JWT (bcrypt 해시, HMAC-SHA256, refresh rotation)
 
 ## 테스트
 
 ```bash
-npm test              # 전체 (1578 tests, 39 files)
-node test/core/agent.test.js    # 개별 파일
+npm test                          # 전체 (2526 tests, 46 files)
+node test/core/agent.test.js      # 개별 파일
+node test/run.js --no-network     # 네트워크 바인딩 불필요 테스트만
 ```
 
-모든 테스트는 외부 의존성 없이 실행됩니다.
+모든 mock 기반 테스트는 외부 의존성 없이 실행됩니다.
+
+### Live 테스트 (실제 LLM)
+
+```bash
+npm start                         # 오케스트레이터 시작
+node test/e2e/multi-instance-live.test.js --orchestrator http://127.0.0.1:3010
+```
 
 ## 트러블슈팅
 
+### 서버가 시작되지 않음
+
+- `No users configured` → `npm run user -- init --instance <id>`로 사용자 등록
+- `instances.json not found` → `~/.presence/instances.json` 생성
+
+### 로그인 실패
+
+- 비밀번호 확인: `npm run user -- list --instance <id>`로 사용자 존재 확인
+- `npm run user -- passwd --instance <id> --username <name>`으로 비밀번호 재설정
+- Rate limit (429): 1분 대기 후 재시도
+
 ### 응답이 너무 느림
 
-- `~/.presence/config.json`에서 `responseFormat`을 `json_object`로 변경
+- `~/.presence/server.json`에서 `responseFormat`을 `json_object`로 변경
 - 로컬 모델이면 `json_schema` 대신 `json_object` 필수
 
 ### "LLM API error" 반복
 
 - `/status`로 상태 확인
-- `~/.presence/config.json`의 `llm.apiKey`와 `llm.baseUrl` 확인
+- `~/.presence/server.json`의 `llm.apiKey`와 `llm.baseUrl` 확인
 
 ### 도구가 안 보임
 

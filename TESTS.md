@@ -1,6 +1,6 @@
 # Presence Test Scenarios
 
-1590 tests, 39 test files.
+2526 tests, 46 test files.
 
 ```bash
 npm test              # Run all
@@ -418,12 +418,47 @@ node test/core/agent.test.js   # Run individual file
 
 ## Infrastructure
 
-### Config (`test/infra/config.test.js`) — 27 tests
+### Config (`test/infra/config.test.js`) — 44 tests
 
 - mergeConfig: nested merge, array replacement, empty override → defaults
 - readConfigFile: missing file → {}, valid JSON → parsed, invalid JSON → {} + warning
-- loadConfig: no file → defaults, with file → merged, default shape validation
-- validateConfig: missing setting warnings
+- loadInstanceConfig: instanceId required, no files → defaults, 3-layer merge chain (DEFAULTS → server.json → instances/{id}.json → env)
+- loadInstancesFile: required file, Zod validation, empty instances array → error
+- loadClientConfig: required file, Zod validation, default locale
+- env override: PRESENCE_MAX_RETRIES, PRESENCE_TIMEOUT_MS, non-numeric ignored
+
+### Auth UserStore (`test/infra/auth-user-store.test.js`) — 39 tests
+
+- addUser: first user admin, duplicate rejected, password < 8 chars rejected, invalid username rejected
+- verifyPassword: correct/incorrect/nonexistent user
+- findUser/listUsers: lookup, passwordHash not exposed
+- removeUser: removed, nonexistent throws
+- changePassword: tokenVersion bump, refreshSessions cleared, new password works
+- refreshSessions: add/check/remove/revokeAll (theft detection)
+
+### Auth Token (`test/infra/auth-token.test.js`) — 41 tests
+
+- sign/verify: valid token, wrong secret, expired, wrong iss/aud
+- Edge cases: null, undefined, empty string, 4-part string
+- secret.json: auto-generated, file permissions 0600, idempotent
+- TokenService: access token (sub, roles, iss, aud, exp), refresh token (jti, tokenVersion, type)
+- Cross-instance: token from instance A rejected by instance B
+- PRESENCE_JWT_SECRET env override
+
+### Auth Provider (`test/infra/auth-provider.test.js`) — 24 tests
+
+- authenticate: success, wrong password, nonexistent user (timing attack prevention)
+- Null/empty input handling
+- tokenVersion change after password update
+- Refresh token rotation full flow: login → refresh → revoke old jti → replay revoked jti → theft detection
+
+### Auth E2E (`test/server/auth-e2e.test.js`) — 38 tests (network)
+
+- AE1-AE3: unauthenticated 401, login success (accessToken + HttpOnly cookie), login failure (user existence hidden)
+- AE4-AE6: authenticated requests OK, invalid token 401, expired token 401
+- AE7-AE9: refresh rotation + new token, revoked jti theft detection, password change → refresh 401
+- AE10-AE12: logout (cookie expired + jti revoked), /api/instance authRequired, rate limiting 429
+- AE13-AE14: WS unauthenticated 4001 close, WS authenticated init received
 
 ### Persistence (`test/infra/persistence.test.js`) — 15 tests
 
@@ -466,3 +501,50 @@ node test/core/agent.test.js   # Run individual file
 - Path normalization: absolute path → allowed-directory-relative
 - Full agent pipeline: planner → parse → validate → (retry) → execute → finish
 - Various scenarios: file read, shell command, multi-step, approval, delegation
+
+---
+
+## Orchestrator
+
+### ChildManager (`test/orchestrator/child-manager.test.js`) — 11 tests
+
+- createChildManager: API interface (forkInstance, stopInstance, restartInstance, getStatus, listStatus, shutdownAll)
+- listStatus: initially empty array
+- getStatus: nonexistent instance → null
+- stopInstance/restartInstance: nonexistent instance → no-op / null
+
+### Orchestrator E2E (`test/orchestrator/orchestrator-e2e.test.js`) — 33 tests (network)
+
+**Infrastructure (OE1-OE3):** orchestrator start → management API, instance fork → health endpoint
+
+**Management API (OE4-OE6):** multi-instance list, stop/start lifecycle, restart
+
+**Isolation (OE7-OE9):** parallel chat → independent responses, config separation (different models), disabled instance not forked
+
+**WebSocket (OE10):** direct WS connection → init message
+
+---
+
+## Multi-Instance Live Tests
+
+### Multi-Instance Live E2E (`test/e2e/multi-instance-live.test.js`) — 86 tests (manual)
+
+> Real LLM + real orchestrator. Run `npm start` first, then execute separately.
+
+**Infrastructure (ML1-ML3):** management API, health (uptime), config separation (apiKey hidden)
+
+**Chat + Tools (ML4-ML6):** real LLM response, file_list tool execution, multi-turn context retention
+
+**Isolation (ML7-ML9):** cross-instance isolation, independent history, cross-session isolation
+
+**Concurrency (ML10-ML11):** parallel chat across instances, parallel chat within same instance different sessions
+
+**Slash Commands (ML12-ML14):** /tools, /status per-instance, /clear isolation
+
+**WebSocket (ML15-ML17):** init, state push (turn + turnState), multi-client
+
+**Session CRUD (ML18-ML19):** create/chat/delete lifecycle, 404 after delete
+
+**Error/Boundary (ML20-ML23):** empty input 400, malformed JSON → error + instance healthy, nonexistent instance 404, idle recovery after complex input
+
+**Operations (ML24-ML25):** orchestrator restart API → service recovery, chat works after restart
