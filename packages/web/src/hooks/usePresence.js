@@ -29,29 +29,24 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   const [messages, setMessages] = useState([])
   const wsRef = useRef(null)
   const stateRef = useRef({})
-  const actorRef = useRef(null)
 
-  // MessageActor — mount 시 1회 생성, 컴포넌트 생명주기 동안 유지
-  useEffect(() => {
-    const actor = Actor({ init: INITIAL_STATE, handle })
-    actorRef.current = actor
+  // MessageActor — hook 인스턴스당 1회 생성
+  const [actor] = useState(() => Actor({ init: INITIAL_STATE, handle }))
 
-    const unsubscribe = actor.subscribe((_result, s) => {
-      setMessages([...s.historyMessages, ...s.pendingMessages, ...s.localMessages])
-    })
-
-    return unsubscribe
-  }, [])
+  // subscribe — mount 시 1회 연결
+  useEffect(() => actor.subscribe((_result, s) => {
+    setMessages([...s.historyMessages, ...s.pendingMessages, ...s.localMessages])
+  }), [actor])
 
   // 세션 전환은 Actor 재생성이 아니라 메시지로 처리
   useEffect(() => {
-    actorRef.current?.send({ type: 'sessionReset' }).fork(() => {}, () => {})
-  }, [sessionId])
+    actor.send({ type: 'sessionReset' }).fork(() => {}, () => {})
+  }, [sessionId, actor])
 
   // actor.send 헬퍼 — Task를 fire-and-forget
   const send = useCallback((msg) => {
-    actorRef.current?.send(msg).fork(() => {}, () => {})
-  }, [])
+    actor.send(msg).fork(() => {}, () => {})
+  }, [actor])
 
   // tools 로드
   const loadTools = useCallback(() => {
