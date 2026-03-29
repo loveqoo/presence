@@ -1,39 +1,36 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 
 function InputBar({ onSubmit, disabled }) {
   const [value, setValue] = useState('')
-  const [history, setHistory] = useState([])
-  const [historyIndex, setHistoryIndex] = useState(-1)
+  const historyRef = useRef([])
+  const indexRef = useRef(-1)
 
   const handleSubmit = useCallback((e) => {
     e.preventDefault()
     const text = value.trim()
     if (!text || disabled) return
-    setHistory(prev => [text, ...prev].slice(0, 50))
-    setHistoryIndex(-1)
+    historyRef.current = [text, ...historyRef.current].slice(0, 50)
+    indexRef.current = -1
     onSubmit(text)
     setValue('')
   }, [value, disabled, onSubmit])
 
   const handleKeyDown = useCallback((e) => {
+    const history = historyRef.current
     if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setHistoryIndex(prev => {
-        const next = Math.min(prev + 1, history.length - 1)
-        if (history[next]) setValue(history[next])
-        return next
-      })
+      const next = Math.min(indexRef.current + 1, history.length - 1)
+      if (history[next]) setValue(history[next])
+      indexRef.current = next
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setHistoryIndex(prev => {
-        if (prev <= 0) { setValue(''); return -1 }
-        const next = prev - 1
-        if (history[next]) setValue(history[next])
-        return next
-      })
+      if (indexRef.current <= 0) { setValue(''); indexRef.current = -1; return }
+      const next = indexRef.current - 1
+      if (history[next]) setValue(history[next])
+      indexRef.current = next
     }
-  }, [history])
+  }, [])
 
   return (
     <form className="input-bar" onSubmit={handleSubmit}>
