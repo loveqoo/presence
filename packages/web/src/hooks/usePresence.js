@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useMemo, useReducer } from 'react'
-import { messageReducer, initialState } from './messageActor.js'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import fp from '@presence/core/lib/fun-fp.js'
+import { handle, INITIAL_STATE } from './messageActor.js'
+
+const { Actor } = fp
 
 const deriveStatus = (state) => {
   if (state.turnState?.tag === 'working') return 'working'
@@ -9,7 +12,7 @@ const deriveStatus = (state) => {
 
 /**
  * React hook that connects to the Presence server via WebSocket and mirrors session state.
- * IO only — message state is owned by MessageActor (useReducer).
+ * IO only — message state is owned by MessageActor (Actor pattern).
  * @param {string} [sessionId='user-default']
  * @param {{authFetch?: Function, accessToken?: string|null, enabled?: boolean}} [options]
  */
@@ -23,15 +26,27 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
   const [approve, setApprove] = useState(null)
   const [tools, setTools] = useState([])
   const [opTrace, setOpTrace] = useState([])
+  const [messages, setMessages] = useState([])
   const wsRef = useRef(null)
   const stateRef = useRef({})
+  const actorRef = useRef(null)
 
-  // MessageActor — 메시지 상태의 단일 직렬화 지점
-  const [msgState, dispatch] = useReducer(messageReducer, initialState)
+  // MessageActor 초기화 — sessionId 변경 시 새 actor 생성
+  useEffect(() => {
+    const actor = Actor({ init: INITIAL_STATE, handle })
+    actorRef.current = actor
 
-  const messages = useMemo(() =>
-    [...msgState.historyMessages, ...msgState.pendingMessages, ...msgState.localMessages]
-  , [msgState.historyMessages, msgState.pendingMessages, msgState.localMessages])
+    const unsubscribe = actor.subscribe((_result, s) => {
+      setMessages([...s.historyMessages, ...s.pendingMessages, ...s.localMessages])
+    })
+
+    return unsubscribe
+  }, [sessionId])
+
+  // actor.send 헬퍼 — Task를 fire-and-forget
+  const send = useCallback((msg) => {
+    actorRef.current?.send(msg).fork(() => {}, () => {})
+  }, [])
 
   // tools 로드
   const loadTools = useCallback(() => {
@@ -78,7 +93,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
             setStreaming(data.state._streaming || null)
             setApprove(data.state._approve || null)
             setOpTrace(data.state._debug?.opTrace || [])
-            dispatch({ type: 'hydrate', history: data.state.context?.conversationHistory })
+            send({ type: 'hydrate', history: data.state.context?.conversationHistory })
             return
           }
 
@@ -106,7 +121,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
                 setOpTrace(Array.isArray(value) ? value : [])
                 break
               case 'context.conversationHistory':
-                dispatch({ type: 'history_push', history: value })
+                send({ type: 'historyPush', history: value })
                 break
             }
           }
@@ -115,7 +130,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
     }
 
     // 세션 전환 시 초기화
-    dispatch({ type: 'session_reset' })
+    send({ type: 'sessionReset' })
 
     if (!enabled) return () => { mounted = false }
 
@@ -128,7 +143,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [sessionId, loadTools, accessToken, enabled])
+  }, [sessionId, loadTools, accessToken, enabled, send])
 
   const apiBase = sessionId === 'user-default' ? '/api' : `/api/sessions/${sessionId}`
 
@@ -138,7 +153,7 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
 
     // slash 커맨드는 history에 안 들어가므로 pending 불필요
     if (!isSlash) {
-      dispatch({ type: 'send_pending', input })
+      send({ type: 'sendPending', input })
     }
 
     try {
@@ -150,23 +165,23 @@ const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabl
       const data = await res.json()
 
       if (isClear) {
-        dispatch({ type: 'clear' })
+        send({ type: 'clear' })
       }
 
       if (data.type === 'system') {
-        dispatch({ type: 'system', content: data.content })
+        send({ type: 'system', content: data.content })
       }
 
       loadTools()
       return data
     } catch (err) {
-      dispatch({ type: 'error', content: err.message })
+      send({ type: 'error', content: err.message })
     }
-  }, [apiBase, loadTools, fetchFn])
+  }, [apiBase, loadTools, fetchFn, send])
 
   const clearMessages = useCallback(() => {
-    dispatch({ type: 'clear' })
-  }, [])
+    send({ type: 'clear' })
+  }, [send])
 
   const respondApprove = useCallback(async (approved) => {
     await fetchFn(`${apiBase}/approve`, {
