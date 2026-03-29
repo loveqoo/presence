@@ -122,6 +122,23 @@ const getA2ATaskStatus = async (target, endpoint, taskId, { fetchFn, timeoutMs =
   }
 }
 
+/**
+ * `sendA2ATask(target, endpoint, task, opts?)` — Sends a task to a remote A2A agent via JSON-RPC and returns a DelegateResult.
+ * @param {string} target - Logical agent name used in DelegateResult.
+ * @param {string} endpoint - Full A2A HTTP endpoint URL.
+ * @param {string} task - Free-text task description to send.
+ * @param {{ fetchFn?: Function, timeoutMs?: number }} [opts]
+ * @returns {Promise<DelegateResult>}
+ *
+ * `getA2ATaskStatus(target, endpoint, taskId, opts?)` — Polls an existing A2A task for its current status.
+ * @returns {Promise<DelegateResult>}
+ *
+ * `extractArtifactText(artifacts)` — Extracts concatenated text parts from A2A artifact array.
+ *
+ * `buildTaskSendRequest / buildTaskGetRequest` — Pure JSON-RPC request builders.
+ *
+ * `responseToResult(target, taskId, data)` — Converts a raw A2A JSON-RPC response to a DelegateResult.
+ */
 export {
   sendA2ATask, getA2ATaskStatus, extractArtifactText,
   buildTaskSendRequest, buildTaskGetRequest, responseToResult,

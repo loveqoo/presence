@@ -73,6 +73,17 @@
 
 ## 완료된 Phase
 
+### Reader / Writer / State 모나드 도입 ✅
+
+- [x] Phase 1: auth-middleware.js — 8개 함수 Reader 전환 + 레거시 브릿지
+- [x] Phase 2: config.js — State.modify chain (buildConfig 파이프라인)
+- [x] Phase 3: traced.js — Writer 기반 trace 축적 + getTrace/resetTrace API
+- [x] Phase 4: actors.js — 8개 factory Reader 전환 + 레거시 브릿지
+- [x] Phase 5: session-factory.js — Reader 합성 (xR.run(sessionEnv))
+- [x] Phase 6: server/index.js — sessionBridge/sessionRoutes Reader 전환
+- [x] FP 코딩 규칙 강제: CLAUDE.md + .claude/rules/ + PreToolUse hook
+- [x] 브릿지 동치 테스트 + 전체 테스트 통과 (2556 passed)
+
 ### npm workspaces 마이그레이션 ✅
 
 - [x] 5개 패키지 분리: `@presence/core`, `@presence/infra`, `@presence/server`, `@presence/tui`, `@presence/web`
@@ -188,15 +199,19 @@
 | embedder null 처리 | embedder 없으면 memory recall 빈 배열 반환 | 키워드 단독 검색은 noise가 많아 오히려 해로움 |
 | history rolling window | 상한 20턴 + budget fitting으로 추가 축소 | LLM 컨텍스트 효율성, 오래된 대화는 가치 감소 |
 
-### FP 라이브러리 활용 판단
+### FP 모나드 활용 현황
 
-| 항목 | 판단 | 이유 |
-|------|------|------|
-| `Either.catch()` (config.js) | **적용** | agent.js `safeJsonParse`와 일관된 패턴 |
+| 모나드 | 상태 | 적용 범위 |
+|--------|------|----------|
+| `Either` | **적용** | config.js, agent.js, auth-middleware.js 등 전역 |
+| `Task` | **적용** | LLM, 인터프리터, Actor 등 비동기 전역 |
+| `Reader` | **적용** | auth-middleware (8개), actors (8개), server/index (2개) |
+| `Writer` | **적용** | traced.js (trace 축적, getTrace/resetTrace API) |
+| `State` | **적용** | config.js (buildConfig 파이프라인) |
+| `StateT(Task)` | **적용** | Free 인터프리터 상태 스레딩 |
+| `Free` | **적용** | Agent Op DSL + 인터프리터 |
 | prompt.js `pipe()` | 보류 | 안정화 단계에서 불필요한 변경 |
 | state.js `Maybe` 체인 | 유지 | hot path, 성능 우선 |
-| `Writer` monad (tracing) | 보류 | fun-fp-js WriterT 필요 |
-| `Reader` monad (DI) | 유지 | 현재 클로저 기반이 더 직관적 |
 
 ## 핵심 제약
 

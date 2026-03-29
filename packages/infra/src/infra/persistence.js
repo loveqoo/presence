@@ -1,5 +1,10 @@
 import Conf from 'conf'
 
+/**
+ * Removes transient keys (prefixed with `_`) from a state snapshot before persisting.
+ * @param {object} snap - State snapshot object.
+ * @returns {object} Snapshot with transient keys stripped.
+ */
 // _접두사 키는 일시적 UI 상태 (_streaming, _debug, _toolResults 등)
 export const stripTransient = (snap) => {
   const out = {}
@@ -9,6 +14,12 @@ export const stripTransient = (snap) => {
   return out
 }
 
+/**
+ * Creates a debounced persistence layer backed by Conf (JSON file store).
+ * Strips transient (_-prefixed) keys before saving.
+ * @param {{ projectName?: string, debounceMs?: number, cwd?: string }} [options]
+ * @returns {{ save: Function, saveImmediate: Function, restore: Function, clear: Function, store: object }}
+ */
 const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } = {}) => {
   const confOpts = cwd
     ? { cwd, configName: 'state' }
@@ -50,6 +61,11 @@ const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } =
   return { save, saveImmediate, restore, clear, store }
 }
 
+/**
+ * Assigns stable ids to history entries that lack them (migration for legacy data).
+ * @param {object[]} history - Conversation history array.
+ * @returns {object[]} History with ids added to any entries that were missing them.
+ */
 // 순수 함수: id 없는 history 항목에 id 부여
 const migrateHistoryIds = (history) => {
   if (!Array.isArray(history)) return []

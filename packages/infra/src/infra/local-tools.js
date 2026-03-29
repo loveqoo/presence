@@ -218,4 +218,12 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
   ]
 }
 
+/**
+ * `createLocalTools` — Creates built-in local tools: file_read, file_write, file_list, web_fetch, shell_exec, calculate.
+ * @see createLocalTools
+ *
+ * `isPathAllowed(path, allowedDirs)` — Returns true if the resolved path is within one of the allowed directories.
+ *
+ * `normalizePath(path, allowedDirs)` — Resolves and normalises a path, falling back to allowed-dir-relative resolution.
+ */
 export { createLocalTools, isPathAllowed, normalizePath }

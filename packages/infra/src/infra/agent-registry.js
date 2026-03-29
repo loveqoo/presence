@@ -35,4 +35,10 @@ const createAgentRegistry = () => {
   return { register, get, list, has }
 }
 
+/**
+ * `createAgentRegistry()` — Creates an in-memory registry of local and remote agents.
+ * Returns `{ register, get, list, has }`.
+ *
+ * `DelegateResult` — ADT factory for delegate outcomes: `.completed`, `.submitted`, `.failed`.
+ */
 export { createAgentRegistry, DelegateResult }

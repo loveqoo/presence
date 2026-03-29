@@ -161,4 +161,14 @@ const validateCron = (expr) => {
   }
 }
 
+/**
+ * `createSchedulerActor({ store, onDispatch, logger, pollIntervalMs? })` — Actor-based cron job scheduler.
+ * Polls due jobs at each tick, dispatches `scheduled_job` events via `onDispatch`, and handles retry/backoff.
+ *
+ * `calcNextRun(cronExpr)` — Returns the next scheduled epoch ms for a cron expression, or null if invalid.
+ * @param {string} cronExpr
+ * @returns {number | null}
+ *
+ * `validateCron(expr)` — Returns true if the cron expression is syntactically valid.
+ */
 export { createSchedulerActor, calcNextRun, validateCron }

@@ -7,10 +7,18 @@ const { Task } = fp
 // handles: 처리 가능한 Op 태그 Set
 // interpret: (functor) → StateT(Task)
 
+/**
+ * Base interpreter protocol. Each instance handles a fixed set of Op tags
+ * and maps functors to StateT(Task) computations.
+ */
 class Interpreter {
   #handles
   #interpret
 
+  /**
+   * @param {string[]} tags - Non-empty array of Op tag strings this interpreter handles.
+   * @param {Function} interpret - `(functor) => StateT(Task)` handler function.
+   */
   constructor(tags, interpret) {
     if (!Array.isArray(tags) || tags.length === 0) {
       throw new TypeError('Interpreter: tags must be a non-empty array')
@@ -22,12 +30,23 @@ class Interpreter {
     this.#interpret = interpret
   }
 
+  /** @returns {Set<string>} Frozen set of Op tags this interpreter handles. */
   get handles() { return this.#handles }
 
+  /**
+   * Dispatch a functor to this interpreter's handler.
+   * @param {object} functor - An AgentOp functor with a `tag` property.
+   * @returns {import('../lib/fun-fp.js').StateT} StateT(Task) computation.
+   */
   interpret(functor) { return this.#interpret(functor) }
 
   // 데코레이터: interpret 호출 전후에 래핑 로직 삽입
   // wrapper: (functor, next) → StateT(Task)  (next = 원본 interpret)
+  /**
+   * Return a new Interpreter that wraps this one, allowing pre/post logic injection.
+   * @param {Function} wrapper - `(functor, next) => StateT(Task)` where `next` is the original interpret.
+   * @returns {Interpreter}
+   */
   wrap(wrapper) {
     const inner = this.#interpret
     return new Interpreter([...this.#handles], (f) => wrapper(f, inner))
@@ -38,6 +57,13 @@ class Interpreter {
   // 여러 인터프리터를 tag 기반으로 합성.
   // 중복 태그: 즉시 throw (설정 오류 fail-fast).
   // 미처리 태그: Task.rejected.
+  /**
+   * Compose multiple interpreters into a single dispatch function keyed by Op tag.
+   * Throws on duplicate tags (fail-fast). Returns `ST.lift(Task.rejected(...))` for unknown tags.
+   * @param {object} ST - StateT instance used for lifting unknown-op errors.
+   * @param {...Interpreter} interpreters - Interpreter instances to compose.
+   * @returns {Function} `(functor) => StateT(Task)` dispatch function.
+   */
   static compose(ST, ...interpreters) {
     const dispatch = new Map()
     for (const interp of interpreters) {

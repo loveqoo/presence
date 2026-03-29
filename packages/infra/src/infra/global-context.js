@@ -17,6 +17,13 @@ import { initI18n, t } from '../i18n/index.js'
 // LLM, 메모리, MCP, JobStore, AgentRegistry 등 세션 간 공유 자원.
 // =============================================================================
 
+/**
+ * Assembles all shared infrastructure for a server instance (LLM, memory, MCP, tools, etc.).
+ * Returns a context object that is shared across all sessions for the lifetime of the server.
+ * @param {object|null} configOverride - Config object to use directly; if null, loads from instanceId.
+ * @param {{ instanceId?: string }} [options]
+ * @returns {Promise<{config, logger, persona, personaConfig, mem0, memory, embedder, memoryPath, toolRegistry, mcpControl, mcpConnections, agentRegistry, llm, jobStore, shutdown: () => Promise<void>}>}
+ */
 const createGlobalContext = async (configOverride, { instanceId } = {}) => {
   const config = configOverride || loadInstanceConfig(instanceId)
   initI18n(config.locale)

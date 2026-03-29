@@ -10,6 +10,7 @@ const TIERS = { WORKING: 'working', EPISODIC: 'episodic', SEMANTIC: 'semantic' }
 
 // --- Storage strategies ---
 
+/** In-memory store for testing or ephemeral sessions; data is not persisted. */
 class InMemoryStore {
   constructor() {
     this.data = { nodes: [], edges: [] }
@@ -17,6 +18,7 @@ class InMemoryStore {
   async save() {}
 }
 
+/** File-backed store using lowdb; persists data to a JSON file on save(). */
 class LowdbStore {
   constructor(db) {
     this.data = db.data
@@ -39,6 +41,10 @@ const _tokenize = (text) =>
 
 // --- MemoryGraph ---
 
+/**
+ * Graph-based memory store with tiered nodes (working/episodic/semantic),
+ * keyword inverted index, and vector similarity search.
+ */
 class MemoryGraph {
   constructor(store) {
     this.store = store
@@ -73,10 +79,16 @@ class MemoryGraph {
     this._nodeTerms.delete(nodeId)
   }
 
+  /** Creates an in-memory MemoryGraph (not persisted). */
   static create() {
     return new MemoryGraph(new InMemoryStore())
   }
 
+  /**
+   * Creates a file-backed MemoryGraph, loading existing data from dbPath.
+   * @param {string} dbPath - Path to the JSON database file.
+   * @returns {Promise<MemoryGraph>}
+   */
   static async fromFile(dbPath) {
     const store = await LowdbStore.create(dbPath)
     return new MemoryGraph(store)
@@ -85,6 +97,11 @@ class MemoryGraph {
   get nodes() { return this.store.data.nodes }
   get edges() { return this.store.data.edges }
 
+  /**
+   * Adds a node, deduplicating by source hash or label/data hash. Returns the existing node if matched.
+   * @param {{ label: string, type?: string, data?: object, tier?: string, expiresAt?: number|null, source?: object|null }} params
+   * @returns {object} The created or matched existing node.
+   */
   addNode({ label, type = 'entity', data = {}, tier = TIERS.EPISODIC, expiresAt = null, source = null }) {
     const sourceHash = source ? textHash(source.tool + JSON.stringify(source.toolArgs || {})) : null
 
@@ -150,12 +167,21 @@ class MemoryGraph {
     return node
   }
 
+  /**
+   * Adds a directed edge between two nodes.
+   * @param {string} fromId @param {string} toId @param {string} relation @param {object} [data]
+   * @returns {object} The created edge.
+   */
   addEdge(fromId, toId, relation, data = {}) {
     const edge = { from: fromId, to: toId, relation, data }
     this.edges.push(edge)
     return edge
   }
 
+  /**
+   * Finds a node by id. Returns Maybe.Just(node) or Maybe.Nothing.
+   * @param {string} id
+   */
   findNode(id) {
     return Maybe.fromNullable(this.nodes.find(n => n.id === id))
   }
@@ -164,6 +190,11 @@ class MemoryGraph {
     return this.nodes.filter(n => n.label === label)
   }
 
+  /**
+   * BFS graph traversal from a node, following edges up to the given depth.
+   * @param {{ from: string, relation?: string, depth?: number }} params
+   * @returns {object[]} Array of reachable nodes.
+   */
   query({ from, relation, depth = 1 }) {
     const results = new Set()
     const visited = new Set()
@@ -225,6 +256,13 @@ class MemoryGraph {
 
   // --- recall ---
   // embedder 없으면 recall 비활성 (키워드 단독 검색은 오히려 해로움)
+  /**
+   * Retrieves relevant nodes by combining vector similarity and keyword search.
+   * Requires an embedder; returns [] if embedder is not provided.
+   * @param {string} text - Query text.
+   * @param {{ embedder?: object, topK?: number, logger?: object }} [options]
+   * @returns {Promise<object[]>} Array of matching nodes, expanded with connected neighbors.
+   */
   async recall(text, { embedder, topK: k = 10, logger } = {}) {
     if (!text) return []
     if (!embedder) return []
@@ -253,6 +291,12 @@ class MemoryGraph {
     return [...expanded].filter(isValid)
   }
 
+  /**
+   * Stores embedding vector metadata on an existing node.
+   * @param {string} nodeId
+   * @param {{ vector: number[], model: string, dimensions: number, embeddedAt: number, textHash: string }} params
+   * @returns {boolean} False if node not found.
+   */
   setVector(nodeId, { vector, model, dimensions, embeddedAt, textHash: hash }) {
     const node = this.nodes.find(n => n.id === nodeId)
     if (!node) return false
@@ -284,6 +328,10 @@ class MemoryGraph {
     return before - keep.length
   }
 
+  /**
+   * Removes all nodes of the given tier and cleans up orphan edges.
+   * @param {string} tier - One of TIERS values.
+   */
   removeNodesByTier(tier) {
     this._removeMatchingNodes(n => n.tier === tier)
   }
@@ -293,6 +341,10 @@ class MemoryGraph {
     return this._removeMatchingNodes(predicate)
   }
 
+  /**
+   * Promotes a node to a higher tier (e.g., episodic → semantic).
+   * @param {string} nodeId @param {string} newTier
+   */
   promoteNode(nodeId, newTier) {
     Maybe.fold(
       () => {},
@@ -302,6 +354,11 @@ class MemoryGraph {
   }
 
   // age 기반 삭제: maxAgeMs보다 오래된 노드 제거. tier 필터 선택적.
+  /**
+   * Removes nodes older than maxAgeMs. Optionally filtered by tier.
+   * @param {number} maxAgeMs @param {{ tier?: string }} [options]
+   * @returns {number} Count of removed nodes.
+   */
   removeOlderThan(maxAgeMs, { tier } = {}) {
     const cutoff = Date.now() - maxAgeMs
     return this._removeMatchingNodes(n => {
@@ -311,6 +368,11 @@ class MemoryGraph {
   }
 
   // tier별 노드 수 제한: maxCount 초과 시 오래된 것부터 제거
+  /**
+   * Limits nodes of a given tier to maxCount, removing oldest first.
+   * @param {string} tier @param {number} maxCount
+   * @returns {number} Count of removed nodes.
+   */
   pruneByTier(tier, maxCount) {
     const tierNodes = this.nodes
       .filter(n => n.tier === tier)
@@ -321,6 +383,10 @@ class MemoryGraph {
   }
 
   // 전체 삭제 (working 제외) — edges도 전부 초기화
+  /**
+   * Clears all non-working-tier nodes and all edges.
+   * @returns {number} Count of removed nodes.
+   */
   clearAll() {
     const before = this.nodes.length
     this.nodes.filter(n => n.tier !== TIERS.WORKING).forEach(n => this._unindexNode(n.id))
@@ -333,10 +399,19 @@ class MemoryGraph {
   allEdges() { return [...this.edges] }
 }
 
+/**
+ * Creates a MemoryGraph backed by a file (if dbPath given) or in-memory.
+ * @param {string|null} [dbPath] - Path to JSON database file; null for in-memory.
+ * @returns {Promise<MemoryGraph>}
+ */
 const createMemoryGraph = async (dbPath = null) => {
   return dbPath ? MemoryGraph.fromFile(dbPath) : MemoryGraph.create()
 }
 
+/**
+ * Returns the default memory directory path (~/.presence/memory).
+ * @returns {string}
+ */
 const defaultMemoryPath = () => {
   const home = process.env.HOME || process.env.USERPROFILE || '.'
   return `${home}/.presence/memory`

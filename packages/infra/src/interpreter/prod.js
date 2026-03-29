@@ -84,4 +84,11 @@ const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry
   return { interpret, ST }
 }
 
+/**
+ * `createProdInterpreter(deps)` — Composes all seven production interpreters into a single StateT(Task) interpreter.
+ * @param {{ llm, toolRegistry, reactiveState?, agentRegistry?, fetchFn?, onApprove?, getAbortSignal? }} deps
+ * @returns {{ interpret: Function, ST: object }}
+ *
+ * `extractStreamingMessage` — Re-exported from the LLM interpreter; extracts the final message from a streaming response.
+ */
 export { createProdInterpreter, extractStreamingMessage }

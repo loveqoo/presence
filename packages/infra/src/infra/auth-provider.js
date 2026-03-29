@@ -11,8 +11,19 @@ const { Either, Task } = fp
 //   fork(onError, onResult) where onResult = Either.Right(user) | Either.Left('Invalid credentials')
 // =============================================================================
 
+/**
+ * Creates a local (bcrypt) authentication provider backed by a UserStore.
+ * @param {object} userStore - UserStore instance with findUser()
+ * @returns {{ type: 'local', authenticate: (username, password) => Task<Either> }}
+ */
 const INVALID = Either.Left('Invalid credentials')
 const DUMMY_HASH = '$2b$12$invalidhashpaddingtopreventsideeffects'
+
+/**
+ * Creates a local (bcrypt) authentication provider backed by a UserStore.
+ * @param {object} userStore - UserStore instance with findUser()
+ * @returns {{ type: 'local', authenticate: (username, password) => Task<Either> }}
+ */
 
 const createLocalAuthProvider = (userStore) => ({
   type: 'local',

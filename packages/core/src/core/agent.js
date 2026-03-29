@@ -15,8 +15,13 @@ const truncate = (text, max) =>
 
 // --- 상태 ADT ---
 
+/** Enum of agent lifecycle phases: IDLE | WORKING. */
 const PHASE = Object.freeze({ IDLE: 'idle', WORKING: 'working' })
+
+/** Enum of turn outcome tags: SUCCESS | FAILURE. */
 const RESULT = Object.freeze({ SUCCESS: 'success', FAILURE: 'failure' })
+
+/** Enum of structured error categories for planner and interpreter failures. */
 const ERROR_KIND = Object.freeze({
   PLANNER_PARSE:   'planner_parse',
   PLANNER_SHAPE:   'planner_shape',
@@ -24,20 +29,39 @@ const ERROR_KIND = Object.freeze({
   MAX_ITERATIONS:  'max_iterations',
 })
 
+/**
+ * ADT constructors for the agent's current phase.
+ * @type {{ idle: () => {tag: string}, working: (input: string) => {tag: string, input: string} }}
+ */
 const Phase = {
   idle:    ()      => ({ tag: PHASE.IDLE }),
   working: (input) => ({ tag: PHASE.WORKING, input }),
 }
 
+/**
+ * ADT constructors for a completed turn result.
+ * @type {{ success: (input, result) => object, failure: (input, error, response) => object }}
+ */
 const TurnResult = {
   success: (input, result)          => ({ tag: RESULT.SUCCESS, input, result }),
   failure: (input, error, response) => ({ tag: RESULT.FAILURE, input, error, response }),
 }
 
+/**
+ * Constructs a structured error value carrying a message and an ERROR_KIND tag.
+ * @param {string} message - Human-readable error description.
+ * @param {string} kind - One of the ERROR_KIND constants.
+ * @returns {{ message: string, kind: string }}
+ */
 const ErrorInfo = (message, kind) => ({ message, kind })
 
 // --- 순수 파싱/검증 (Either) ---
 
+/**
+ * Strips non-JSON prefix from an LLM response string (e.g. `<think>` tags).
+ * @param {string|*} str - Raw LLM output.
+ * @returns {string|*} Substring starting at the first `{`, or the original value.
+ */
 // LLM 응답에서 JSON 부분만 추출 (Qwen 등 <think> 태그 포함 모델 대응)
 const extractJson = (str) => {
   if (typeof str !== 'string') return str
@@ -46,6 +70,11 @@ const extractJson = (str) => {
   return str.slice(idx)
 }
 
+/**
+ * Parses a JSON string (after stripping non-JSON prefix) into Either.
+ * @param {string} str - String to parse.
+ * @returns {Either} Right(parsed) or Left(ErrorInfo) with PLANNER_PARSE kind.
+ */
 const safeJsonParse = (str) =>
   Either.fold(
     e => Either.Left(ErrorInfo(e.message || String(e), ERROR_KIND.PLANNER_PARSE)),
@@ -55,6 +84,12 @@ const safeJsonParse = (str) =>
 
 // --- step 검증 (Either 기반) ---
 
+/**
+ * Validates that an EXEC step provides all required tool arguments.
+ * @param {object} step - Plan step object.
+ * @param {object[]} tools - Available tool definitions.
+ * @returns {Either} Right(true) or Left(ErrorInfo) with PLANNER_SHAPE kind.
+ */
 // EXEC: tool_args 필수 인자 확인
 const validateExecArgs = (step, tools) => {
   if (step.op !== 'EXEC' || !tools || tools.length === 0) return Either.Right(true)
@@ -75,6 +110,12 @@ const validateExecArgs = (step, tools) => {
     : Either.Left(ErrorInfo(`EXEC ${a.tool}: missing required args: ${missing.join(', ')}`, ERROR_KIND.PLANNER_SHAPE))
 }
 
+/**
+ * Validates that RESPOND `ref` and ASK_LLM `ctx` indices are within the preceding step range.
+ * @param {object} step - Plan step object.
+ * @param {number} index - Zero-based index of this step in the plan.
+ * @returns {Either} Right(true) or Left(ErrorInfo) with PLANNER_SHAPE kind.
+ */
 // RESPOND/ASK_LLM: ref/ctx 범위 확인
 const validateRefRange = (step, index) => {
   const a = step.args || {}
@@ -94,6 +135,14 @@ const validateRefRange = (step, index) => {
   return Either.Right(true)
 }
 
+/**
+ * Full validation for a single plan step: structure + args + ref range.
+ * Composes validateStep, validateExecArgs, and validateRefRange via Either Kleisli chain.
+ * @param {object} step - Plan step to validate.
+ * @param {number} index - Zero-based position of the step.
+ * @param {object[]} tools - Available tool definitions.
+ * @returns {Either} Right(step) or Left(ErrorInfo).
+ */
 // 단일 step 전체 검증 (구조 + args + range) → Either Kleisli 합성
 const validateStepFull = (step, index, tools) => {
   const pipeline = Either.pipeK(
@@ -108,6 +157,13 @@ const validateStepFull = (step, index, tools) => {
   return pipeline(null)
 }
 
+/**
+ * Validates a parsed LLM plan object: must be `direct_response` or `plan` with valid steps.
+ * Short-circuits on the first invalid step.
+ * @param {object} plan - Parsed plan from the LLM.
+ * @param {{ tools?: object[] }} opts - Tool definitions for step-level validation.
+ * @returns {Either} Right(plan) or Left(ErrorInfo).
+ */
 const validatePlan = (plan, { tools = [] } = {}) => {
   if (plan == null || typeof plan !== 'object' || Array.isArray(plan)) {
     return Either.Left(ErrorInfo(
@@ -143,8 +199,21 @@ const validatePlan = (plan, { tools = [] } = {}) => {
 
 // --- 상태 전이 함수 ---
 
+/**
+ * Free monad program that marks the start of a turn. Currently a no-op placeholder.
+ * @param {string} _input - The user input (unused).
+ * @returns {Free} Free.of(null)
+ */
 const beginTurn = (_input) => Free.of(null)
 
+/**
+ * Free monad program that commits a successful turn: clears streaming state,
+ * appends conversation history (when source is 'user'), and transitions to idle.
+ * @param {string} input - Original user input.
+ * @param {string} result - The response text to record.
+ * @param {{ source?: string }} opts
+ * @returns {Free} Resolves to the result string.
+ */
 const finishSuccess = (input, result, { source } = {}) =>
   updateState('_streaming', null)
     .chain(() => {
@@ -169,6 +238,15 @@ const finishSuccess = (input, result, { source } = {}) =>
     .chain(() => updateState('turnState', Phase.idle()))
     .chain(() => Free.of(result))
 
+/**
+ * Free monad program that commits a failed turn: clears streaming state,
+ * appends a failure entry to conversation history (when source is 'user'), and transitions to idle.
+ * @param {string} input - Original user input.
+ * @param {{ message: string, kind: string }} error - Structured error value.
+ * @param {string} response - The error message shown to the user.
+ * @param {{ source?: string }} opts
+ * @returns {Free} Resolves to the response string.
+ */
 const finishFailure = (input, error, response, { source } = {}) =>
   updateState('_streaming', null)
     .chain(() => {
@@ -196,6 +274,15 @@ const finishFailure = (input, error, response, { source } = {}) =>
     .chain(() => updateState('turnState', Phase.idle()))
     .chain(() => Free.of(response))
 
+/**
+ * Sends an error response to the user and then commits the turn as a failure.
+ * Combines `respond` + `finishFailure` into a single Free program.
+ * @param {string} input - Original user input.
+ * @param {{ message: string, kind: string }} error - Structured error value.
+ * @param {Function} [t] - i18n translation function; falls back to identity.
+ * @param {{ source?: string }} opts
+ * @returns {Free}
+ */
 // --- 에러 → 실패 턴 종료 (공통 패턴) ---
 // t: 번역 함수 (주입 없으면 identity fallback)
 const respondAndFail = (input, error, t = _identityT, { source } = {}) =>
@@ -210,6 +297,15 @@ const respondAndFail = (input, error, t = _identityT, { source } = {}) =>
 //   plan + RESPOND      → execute → finishSuccess (RESPOND이 빠른 종료)
 //   plan - RESPOND      → execute → 결과를 rolling context에 추가 → 다음 iteration
 
+/**
+ * Builds an Incremental Planning Engine turn as a curried Free monad program.
+ * Each call to the returned function runs one full Plan-Validate-Execute-Observe cycle,
+ * iterating up to maxIterations times before giving up.
+ *
+ * @param opts - tools, getTools, agents, getAgents, persona, responseFormatMode,
+ *               maxRetries (default 0), maxIterations (default 10), budget, t (i18n fn)
+ * @returns A function (input, opts?) => Free that executes one agent turn.
+ */
 const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona = {}, responseFormatMode, maxRetries = 0, maxIterations = 10, budget, t = _identityT } = {}) => {
   return (input, { source } = {}) =>
     getState('context.memories')
@@ -337,6 +433,13 @@ const createAgentTurn = ({ tools = [], getTools, agents = [], getAgents, persona
       }))
 }
 
+/**
+ * Computes a minimal state patch to recover from an interpreter-level exception.
+ * Returns a plain object (not a Free program) for direct application via applyRecovery.
+ * @param {string} input - The input that was being processed when the error occurred.
+ * @param {Error} err - The caught exception.
+ * @returns {{ _streaming: null, lastTurn: object, turnState: object }}
+ */
 // 인터프리터 예외 시 상태 복구 (순수 전이 함수)
 const recoverFromFailure = (input, err) => ({
   _streaming: null,
@@ -344,6 +447,11 @@ const recoverFromFailure = (input, err) => ({
   turnState: Phase.idle(),
 })
 
+/**
+ * Applies a recovery patch (from recoverFromFailure) directly to a reactive state object.
+ * @param {object} state - Reactive state with a `.set(path, value)` interface.
+ * @param {object} recovery - Key/value pairs to write into state.
+ */
 const applyRecovery = (state, recovery) => {
   for (const [key, value] of Object.entries(recovery)) state.set(key, value)
 }
@@ -351,6 +459,10 @@ const applyRecovery = (state, recovery) => {
 // Task → Promise 변환 헬퍼
 const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, resolve))
 
+/**
+ * Ordered list of reactive state paths committed atomically after each turn.
+ * `turnState` is always last so that the idle hook fires after all other state is current.
+ */
 // --- StateT → reactive state 원자적 커밋 ---
 // Free 실행 완료 후 StateT의 최종 상태를 reactive state에 반영.
 // epoch 기반 경합 방어: /clear 또는 compaction이 턴 실행 중 발생하면 conversationHistory 스킵.
@@ -363,6 +475,11 @@ const MANAGED_PATHS = [
   'turnState',
 ]
 
+/**
+ * Resets conversation and debug state on the reactive state object (e.g. on /clear).
+ * Increments `_compactionEpoch` so that in-flight turns skip their conversationHistory commit.
+ * @param {object} state - Reactive state with `.set(path, value)` and `.get(path)` interface.
+ */
 const clearDebugState = (state) => {
   state.set('context.conversationHistory', [])
   state.set('context.memories', [])
@@ -375,6 +492,13 @@ const clearDebugState = (state) => {
   state.set('_debug.iterationHistory', [])
 }
 
+/**
+ * Atomically commits the StateT final state to the reactive state after a turn completes.
+ * Skips `context.conversationHistory` when the compaction epoch changed mid-turn.
+ * @param {object|null} reactiveState - Target reactive state; no-op if falsy.
+ * @param {object} finalState - Plain snapshot produced by the Free interpreter.
+ * @param {{ initialEpoch?: number }} opts - Epoch at turn start for conflict detection.
+ */
 const applyFinalState = (reactiveState, finalState, { initialEpoch } = {}) => {
   if (!reactiveState) return
   const currentEpoch = reactiveState.get('_compactionEpoch') || 0
@@ -387,6 +511,17 @@ const applyFinalState = (reactiveState, finalState, { initialEpoch } = {}) => {
   }
 }
 
+/**
+ * Wraps a Free monad turn program with lifecycle management: memory recall before,
+ * memory/compaction/persistence Actor messages after, and interpreter-exception recovery.
+ * Returns an async function that resolves to the turn result.
+ *
+ * @param interpret - StateT(Task) interpreter function.
+ * @param ST - StateT constructor used for the interpreter.
+ * @param reactiveState - Shared reactive state for the server instance.
+ * @param actors - Optional memoryActor, compactionActor, persistenceActor, logger.
+ * @returns async (program: Free, input: string) => Promise<string>
+ */
 // 인터프리터 레벨 실패에 대한 안전망 + Actor 기반 턴 전후 처리
 // { interpret, ST }: StateT(Task) 인터프리터 번들
 const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compactionActor, persistenceActor, logger } = {}) =>
@@ -462,6 +597,16 @@ const safeRunTurn = ({ interpret, ST }, reactiveState, { memoryActor, compaction
     }
   }
 
+/**
+ * Assembles a complete agent from a turn builder and an execution wrapper.
+ * Returns `{ run, program }` where `run` executes a turn end-to-end
+ * and `program` returns the raw Free monad program for testing or composition.
+ *
+ * @param opts - buildTurn?, tools?, getTools?, agents?, getAgents?, persona?,
+ *               responseFormatMode?, maxRetries?, maxIterations?, interpret, ST,
+ *               state (reactiveState), budget?, execute? (injected executor), t?
+ * @returns An agent object with `run(input, opts?) => Promise<string>` and `program(input, opts?) => Free`.
+ */
 // --- 조립된 에이전트 ---
 const createAgent = ({ buildTurn, tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, interpret, ST, state, budget, execute: injectedExecute, t = _identityT }) => {
   const turnBuilder = buildTurn || createAgentTurn({ tools, getTools, agents, getAgents, persona, responseFormatMode, maxRetries, maxIterations, budget, t })

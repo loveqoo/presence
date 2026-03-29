@@ -56,4 +56,12 @@ const createMemoryEmbedder = (embedder, { concurrency = 3 } = {}) => {
   }
 }
 
+/**
+ * `createMemoryEmbedder(embedder, opts?)` — Wraps an embedder with batched embedding logic for MemoryGraph nodes.
+ * Returns `{ needsEmbedding, embedNodes, embedPending }`.
+ * @param {{ embed: Function, model: string, dimensions?: number }} embedder
+ * @param {{ concurrency?: number }} [opts]
+ *
+ * `needsEmbedding(node, embedder)` — Returns true if the node lacks a vector or its embedding is stale.
+ */
 export { createMemoryEmbedder, needsEmbedding }

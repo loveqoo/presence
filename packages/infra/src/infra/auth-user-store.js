@@ -25,6 +25,12 @@ const UserStoreFileSchema = z.object({
   users: z.array(UserSchema).default([]),
 })
 
+/**
+ * Returns the filesystem path of the users file for an instance.
+ * @param {string} instanceId
+ * @param {string} [basePath] - Override for ~/.presence directory
+ * @returns {string}
+ */
 const usersFilePath = (instanceId, basePath) => {
   const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
   return join(dir, 'instances', `${instanceId}.users.json`)
@@ -40,6 +46,14 @@ const readStore = (filePath) => {
 const writeStore = (filePath, data) => {
   writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
 }
+
+/**
+ * Creates a UserStore for managing users and refresh sessions for a given instance.
+ * Persists data to ~/.presence/instances/{instanceId}.users.json.
+ * @param {string} instanceId
+ * @param {{ basePath?: string }} [opts]
+ * @returns {{ findUser, listUsers, addUser, removeUser, changePassword, verifyPassword, addRefreshSession, removeRefreshSession, hasRefreshSession, revokeAllRefreshSessions, hasUsers, exists, filePath }}
+ */
 
 const createUserStore = (instanceId, { basePath } = {}) => {
   const filePath = usersFilePath(instanceId, basePath)

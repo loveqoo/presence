@@ -20,6 +20,13 @@ const historyToMessages = (history) => {
   return msgs
 }
 
+/**
+ * React hook that connects to the Presence server via WebSocket and mirrors session state.
+ * Implements a 3-channel message model: history (server truth), pending (optimistic), local (system/error).
+ * @param {string} [sessionId='user-default'] - Session ID to subscribe to.
+ * @param {{authFetch?: Function, accessToken?: string|null, enabled?: boolean}} [options]
+ * @returns {{connected: boolean, status: string, turn: number, messages: Array, streaming: object|null, approve: object|null, tools: Array, opTrace: Array, sendMessage: Function, clearMessages: Function, respondApprove: Function, cancel: Function}}
+ */
 const usePresence = (sessionId = 'user-default', { authFetch, accessToken, enabled = true } = {}) => {
   const fetchFn = authFetch || fetch
 

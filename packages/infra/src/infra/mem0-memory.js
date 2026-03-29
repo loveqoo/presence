@@ -98,4 +98,15 @@ const createMem0Memory = async (config, { memoryPath } = {}) => {
   return { mem0, adapter }
 }
 
+/**
+ * `createMem0Memory(config, opts?)` — Initialises a mem0 OSS Memory instance and wraps it in a Mem0Adapter.
+ * Returns `{ mem0, adapter }` or `null` if embedding credentials are missing.
+ * @param {{ llm: object, embed: object }} config
+ * @param {{ memoryPath?: string }} [opts]
+ * @returns {Promise<{ mem0: object, adapter: Mem0Adapter } | null>}
+ *
+ * `Mem0Adapter` — MemoryGraph-compatible adapter over a mem0 Memory instance (synchronous cache + async persistence).
+ *
+ * `MEM0_USER_ID` — Fixed user ID used for all mem0 operations in single-user deployments.
+ */
 export { createMem0Memory, Mem0Adapter, MEM0_USER_ID }

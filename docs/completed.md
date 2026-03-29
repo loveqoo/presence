@@ -236,3 +236,38 @@ Actor 메시지 경계에서 pending 노드 스냅샷을 선행 캡처.
 - `src/main.js`: `createMemoryGraph` → `createMem0Memory`, MemoryActor 파라미터 변경.
 - `test/infra/actors.test.js`: M1~M8 MemoryActor 테스트 전면 재작성 (mem0 mock 기반).
 - Embedding 정책 유지: embed API 없으면 메모리 비활성 (`createMem0Memory` null 반환).
+
+### Reader / Writer / State 모나드 도입
+
+클로저 기반 DI 34개를 Reader 모나드로 전환하고, Writer/State 모나드를 도입하여 FP 아키텍처 강화.
+
+**Phase 1 — auth-middleware.js Reader:**
+- 8개 함수 Reader 전환: `loginHandlerR`, `refreshHandlerR`, `logoutHandlerR`, `authMiddlewareR`, `authenticateWsR`, `issueTokensR`, `validateRefreshChainR`, `rotateRefreshTokenR`
+- Reader 합성: `rotateRefreshTokenR`이 내부에서 `issueTokensR` 체이닝
+- 레거시 브릿지: `const createX = (deps) => xR.run(deps)` 단일 라인 위임
+
+**Phase 2 — config.js State:**
+- `buildConfig(layers)` — `State.modify` chain으로 config 머지 파이프라인 구성
+- `mergeConfig(mergeConfig(...))` 중첩 호출 → `buildConfig([...]).run(DEFAULTS)[0]`
+
+**Phase 3 — traced.js Writer:**
+- 가변 `trace[]` → `Writer.of(null)` + `Writer.tell([entry])` 축적
+- 외부 API: `getTrace()` (방어적 복사) / `resetTrace()`
+- 내부 mutable accumulator, 외부에는 함수 인터페이스만 노출
+
+**Phase 4 — actors.js Reader:**
+- 8개 factory Reader 전환: `memoryActorR`, `compactionActorR`, `persistenceActorR`, `turnActorR`, `eventActorR`, `emitR`, `budgetActorR`, `delegateActorR`
+
+**Phase 5 — session-factory.js Reader 합성:**
+- `create*` 직접 호출 → `xR.run(sessionEnv)` 전환
+
+**Phase 6 — server/index.js Reader:**
+- `sessionBridgeR`, `sessionRoutesR` Reader 전환
+- `authEnv` 패턴으로 인증 미들웨어 Reader 실행
+
+**FP 코딩 규칙 강제:**
+- CLAUDE.md: 모나드 역할 경계 테이블, Reader/State/Writer 사용 규칙
+- `.claude/rules/`: 4개 경로별 규칙 파일 (fp-monad, interpreter, test, auth-web)
+- `.claude/hooks/validate-fp.sh`: PreToolUse hook — 클로저 DI, trace.push, mergeConfig 중첩 차단
+
+**검증:** 브릿지 동치 테스트 (35 assertions) + 전체 mock 테스트 2556 passed + live E2E 121 passed

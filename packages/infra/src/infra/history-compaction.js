@@ -44,6 +44,20 @@ const buildCompactionPrompt = (toCompact) => {
   }
 }
 
+/**
+ * `extractForCompaction(history, threshold, keep)` — Splits history into `{ extracted, remaining }` when length exceeds threshold.
+ * @param {Array} history - Full conversation history array.
+ * @param {number} threshold - Minimum length before compaction triggers.
+ * @param {number} keep - Number of recent entries to keep verbatim.
+ * @returns {{ extracted: Array, remaining: Array } | null}
+ *
+ * `buildCompactionPrompt(toCompact)` — Builds an LLM summarisation prompt from the entries to compact.
+ * @returns {{ messages: Array<{ role: string, content: string }> }}
+ *
+ * `createSummaryEntry(content)` — Creates a synthetic history entry that holds a compacted summary.
+ *
+ * `SUMMARY_MARKER` — Sentinel string used as the `input` field of summary entries.
+ */
 export {
   extractForCompaction,
   buildCompactionPrompt,

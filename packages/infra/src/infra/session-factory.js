@@ -17,7 +17,11 @@ import { formatTodosAsLines } from './events.js'
 import { t } from '../i18n/index.js'
 // t는 createAgent/createAgentTurn에 주입됨
 
-// config.prompt → budget 변환 (chars 하위 호환)
+/**
+ * Converts prompt config to token budget, with backward-compatible chars fallback.
+ * @param {{ maxContextTokens?: number, maxContextChars?: number, reservedOutputTokens?: number, reservedOutputChars?: number }} prompt
+ * @returns {{ maxContextChars: number, reservedOutputChars: number }}
+ */
 const resolveBudget = (prompt) => {
   const maxContextTokens = prompt.maxContextTokens
     || (prompt.maxContextChars ? charsToTokens(prompt.maxContextChars) : PROMPT.DEFAULT_MAX_CONTEXT_TOKENS)
@@ -33,6 +37,13 @@ const resolveBudget = (prompt) => {
 // NOTE: jobTools / read_todos는 현재 globalCtx.toolRegistry에 등록됨.
 //       Phase B 멀티 세션에서는 세션별 toolRegistry 사본으로 교체 필요.
 // =============================================================================
+
+/**
+ * Creates a session with isolated state, actors, and agent wired from the shared global context.
+ * @param {object} globalCtx - Shared infrastructure from createGlobalContext().
+ * @param {{ persistenceCwd?: string, type?: string, onScheduledJobDone?: Function, idleTimeoutMs?: number, onIdle?: Function }} [options]
+ * @returns {{ agent, state, tools, agents, handleInput, handleApproveResponse, handleCancel, schedulerActor, delegateActor, eventActor, emit, shutdown }}
+ */
 
 const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, onScheduledJobDone, idleTimeoutMs, onIdle } = {}) => {
   const {

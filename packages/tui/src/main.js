@@ -15,6 +15,13 @@ const h = React.createElement
 // e2e 테스트에서 직접 사용 가능: const app = await bootstrap(config)
 // =============================================================================
 
+/**
+ * Bootstrap a standalone (local) Presence session without a remote server.
+ * Creates global context and a session, then returns handles for testing and programmatic use.
+ * @param {object} configOverride - Config overrides merged on top of defaults.
+ * @param {{persistenceCwd?: string}} [options]
+ * @returns {Promise<{agent: object, state: object, config: object, handleInput: Function, shutdown: Function}>}
+ */
 const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
   const globalCtx = await createGlobalContext(configOverride)
   const session = createSession(globalCtx, { persistenceCwd })
@@ -356,6 +363,11 @@ const runRemote = async (baseUrl, { authState } = {}) => {
 }
 
 
+/**
+ * TUI entry point: resolves the instance ID from CLI args, loads client config,
+ * optionally spawns the orchestrator, authenticates, then renders the Ink UI over a remote WebSocket connection.
+ * @returns {Promise<void>}
+ */
 const main = async () => {
   const userId = resolveUserId()
 

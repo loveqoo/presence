@@ -63,6 +63,13 @@ const applyPromotions = (memory, candidates, logger) => {
   }
 }
 
+/**
+ * `findPromotionCandidates(memory)` — Finds episodic `conversation` nodes that cluster above the promotion threshold.
+ * @param {object} memory - MemoryGraph instance.
+ * @returns {Array<{ representative: object, duplicates: object[] }>}
+ *
+ * `applyPromotions(memory, candidates, logger?)` — Promotes representative nodes to semantic tier and removes duplicates.
+ */
 export {
   findPromotionCandidates,
   applyPromotions,

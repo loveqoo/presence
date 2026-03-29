@@ -5,6 +5,10 @@
 const PASTE_START = '\x1b[200~'
 const PASTE_END = '\x1b[201~'
 
+/**
+ * Handles raw terminal input with Bracketed Paste Mode support.
+ * Calls `onLine` for normal line input and `onPaste` for multi-line paste sequences.
+ */
 class InputHandler {
   constructor({ onLine, onPaste } = {}) {
     this._onLine = onLine || (() => {})
@@ -76,4 +80,7 @@ class InputHandler {
   }
 }
 
+/**
+ * `PASTE_START` / `PASTE_END` — Bracketed Paste Mode escape sequences emitted by the terminal.
+ */
 export { InputHandler, PASTE_START, PASTE_END }

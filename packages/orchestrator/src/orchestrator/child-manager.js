@@ -11,11 +11,21 @@ const RESTART_WINDOW_MS = 60_000
 const HEALTH_CHECK_INTERVAL_MS = 30_000
 const HEALTH_CHECK_TIMEOUT_MS = 5_000
 
+/**
+ * Resolve the absolute path to the server entry point (`packages/server/src/server/index.js`).
+ * @returns {string}
+ */
 const serverEntryPath = () => {
   const here = dirname(fileURLToPath(import.meta.url))
   return join(here, '../../../server/src/server/index.js')
 }
 
+/**
+ * Create a child process manager that forks, monitors, and restarts server instances.
+ * Supports exponential-backoff auto-restart (max 3 restarts per 60 s) and periodic health checks.
+ * @param {{logger: object, presenceDir?: string}} deps
+ * @returns {{forkInstance: Function, stopInstance: Function, restartInstance: Function, getStatus: Function, listStatus: Function, shutdownAll: Function}}
+ */
 const createChildManager = ({ logger, presenceDir }) => {
   const children = new Map() // id → { process, def, status, restarts, healthTimer }
 

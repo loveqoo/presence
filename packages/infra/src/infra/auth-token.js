@@ -29,11 +29,23 @@ const base64urlDecode = (str) =>
 
 // --- Secret 파일 관리 ---
 
+/**
+ * Returns the filesystem path of the JWT secret file for an instance.
+ * @param {string} instanceId
+ * @param {string} [basePath] - Override for ~/.presence directory
+ * @returns {string}
+ */
 const secretFilePath = (instanceId, basePath) => {
   const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
   return join(dir, 'instances', `${instanceId}.secret.json`)
 }
 
+/**
+ * Loads the JWT secret from PRESENCE_JWT_SECRET env var or the instance secret file.
+ * @param {string} instanceId
+ * @param {{ basePath?: string }} [opts]
+ * @returns {string|null}
+ */
 const loadSecret = (instanceId, { basePath } = {}) => {
   const envSecret = process.env.PRESENCE_JWT_SECRET
   if (envSecret) return envSecret
@@ -44,6 +56,12 @@ const loadSecret = (instanceId, { basePath } = {}) => {
   return raw.jwtSecret || null
 }
 
+/**
+ * Generates and persists a new random JWT secret for an instance (chmod 0600).
+ * @param {string} instanceId
+ * @param {{ basePath?: string }} [opts]
+ * @returns {string} The generated secret
+ */
 const generateSecret = (instanceId, { basePath } = {}) => {
   const filePath = secretFilePath(instanceId, basePath)
   const jwtSecret = randomBytes(32).toString('hex')
@@ -52,6 +70,12 @@ const generateSecret = (instanceId, { basePath } = {}) => {
   return jwtSecret
 }
 
+/**
+ * Returns the existing JWT secret for an instance, generating one if none exists.
+ * @param {string} instanceId
+ * @param {{ basePath?: string }} [opts]
+ * @returns {string}
+ */
 const ensureSecret = (instanceId, { basePath } = {}) => {
   const existing = loadSecret(instanceId, { basePath })
   if (existing) return existing
@@ -60,6 +84,12 @@ const ensureSecret = (instanceId, { basePath } = {}) => {
 
 // --- JWT 구현 ---
 
+/**
+ * Signs a JWT payload using HMAC-SHA256.
+ * @param {object} payload
+ * @param {string} secret
+ * @returns {string} Signed JWT string
+ */
 const sign = (payload, secret) => {
   const header = base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
   const body = base64url(JSON.stringify(payload))
@@ -69,7 +99,13 @@ const sign = (payload, secret) => {
   return `${header}.${body}.${signature}`
 }
 
-// Either.Right(payload) | Either.Left(error)
+/**
+ * Verifies a JWT: checks signature, expiry, issuer, and optional audience.
+ * @param {string} token
+ * @param {string} secret
+ * @param {{ audience?: string }} [opts]
+ * @returns {Either} Either.Right(payload) | Either.Left(error)
+ */
 const verify = (token, secret, { audience } = {}) => {
   if (!token || typeof token !== 'string') return Either.Left('missing token')
 
@@ -99,6 +135,13 @@ const verify = (token, secret, { audience } = {}) => {
 }
 
 // --- TokenService 팩토리 ---
+
+/**
+ * Creates a TokenService for the given instance using its persisted JWT secret.
+ * @param {string} instanceId
+ * @param {{ basePath?: string }} [opts]
+ * @returns {{ signAccessToken, signRefreshToken, verifyAccessToken, verifyRefreshToken, secret }}
+ */
 
 const createTokenService = (instanceId, { basePath } = {}) => {
   const secret = ensureSecret(instanceId, { basePath })

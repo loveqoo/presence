@@ -19,6 +19,13 @@ const defaultHandlers = {
 // log 축적은 관찰 전용 부수효과.
 const appendLog = (log, entry) => { log.push(entry); return entry }
 
+/**
+ * Convert a mock handler function to an Interpreter instance for the given tag.
+ * ExecuteTool errors are returned as string values so the turn continues.
+ * @param {string} tag - Op tag string.
+ * @param {Function} handler - `(functor) => result` mock handler.
+ * @returns {Interpreter}
+ */
 // 핸들러 함수를 Interpreter 인스턴스로 변환.
 // ExecuteTool 예외는 에러 결과값으로 변환 (턴 계속 진행).
 const handlerToInterpreter = (tag, handler) =>
@@ -34,6 +41,12 @@ const handlerToInterpreter = (tag, handler) =>
     }
   })
 
+/**
+ * Create a mock interpreter suitable for unit tests.
+ * All ops use configurable in-memory handlers; every op call is logged.
+ * @param {Record<string, Function>} [handlers] - Override map of `tag => (functor) => result`.
+ * @returns {{ interpret: Function, ST: object, log: object[] }}
+ */
 const createTestInterpreter = (handlers = {}) => {
   const log = []
   const merged = { ...defaultHandlers, ...handlers }

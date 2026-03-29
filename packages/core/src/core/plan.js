@@ -7,9 +7,21 @@ const { Maybe } = fp
 
 // --- Reference resolution (Maybe로 안전한 lookup) ---
 
+/**
+ * Safely retrieves an element from an array by index, returning a Maybe.
+ * @param {Array} arr - Source array
+ * @param {number} index - Zero-based index
+ * @returns {Maybe}
+ */
 const safeLookup = (arr, index) =>
   Maybe.fromNullable(Array.isArray(arr) ? arr[index] : undefined)
 
+/**
+ * Resolves a list of 1-based step reference indices to their actual result values.
+ * @param {number[]} refs - 1-based indices into results
+ * @param {Array} results - Accumulated step results
+ * @returns {Array} Resolved values (missing refs are omitted)
+ */
 const resolveRefs = (refs, results) => {
   if (!refs || !Array.isArray(refs)) return []
   return refs
@@ -18,6 +30,12 @@ const resolveRefs = (refs, results) => {
     .map(m => m.value)
 }
 
+/**
+ * Replaces `$N` placeholders in a string with corresponding step results.
+ * @param {string} str - Template string with optional `$N` references
+ * @param {Array} results - Accumulated step results
+ * @returns {string} String with placeholders substituted
+ */
 const resolveStringRefs = (str, results) => {
   if (typeof str !== 'string') return str
   return str.replace(/\$(\d+)/g, (_, n) =>
@@ -29,6 +47,12 @@ const resolveStringRefs = (str, results) => {
   )
 }
 
+/**
+ * Resolves `$N` placeholders inside string-valued tool argument fields.
+ * @param {Object} args - Tool arguments object
+ * @param {Array} results - Accumulated step results
+ * @returns {Object} New args object with string values resolved
+ */
 const resolveToolArgs = (args, results) => {
   if (!args || typeof args !== 'object') return args
   return Object.fromEntries(
@@ -41,11 +65,26 @@ const resolveToolArgs = (args, results) => {
 
 // --- 공통 검증 헬퍼 ---
 
+/**
+ * Returns true if v is an integer greater than or equal to 1.
+ * @param {*} v
+ * @returns {boolean}
+ */
 const isPositiveInt = (v) => Number.isInteger(v) && v >= 1
 
+/**
+ * Returns true if v is a non-empty array where every element satisfies {@link isPositiveInt}.
+ * @param {*} v
+ * @returns {boolean}
+ */
 const isPositiveIntArray = (v) =>
   Array.isArray(v) && v.every(isPositiveInt)
 
+/**
+ * Per-op argument validators. Each function receives the step's `args` object
+ * and returns `Either.Right(true)` on success or `Either.Left(errorMessage)` on failure.
+ * @type {Object.<string, function(Object): Either>}
+ */
 const argValidators = {
   LOOKUP_MEMORY: (a) => (a.query == null || typeof a.query === 'string')
     ? Either.Right(true)
@@ -78,6 +117,11 @@ const argValidators = {
     : Either.Left('DELEGATE: target(string)과 task(string)가 필요합니다.'),
 }
 
+/**
+ * Validates a raw plan step object: checks structure, known op name, and op-specific args.
+ * @param {Object} step - Raw step from the plan JSON
+ * @returns {Either} `Either.Right(step)` if valid, `Either.Left(errorMessage)` otherwise
+ */
 const validateStep = (step) => {
   if (!step || typeof step !== 'object') {
     return Either.Left(`유효하지 않은 step: ${String(step)}`)
@@ -95,6 +139,11 @@ const validateStep = (step) => {
 // --- Step → Op (dispatch object) ---
 // 반환: Free<Either<string, value>>
 
+/**
+ * Dispatch table mapping op names to their Free monad execution handlers.
+ * Each handler receives `(args, results)` and returns `Free<value>`.
+ * @type {Object.<string, function(Object, Array): Free>}
+ */
 const opHandlers = {
   LOOKUP_MEMORY: (a) =>
     getState('context.memories').chain(memories => {
@@ -136,7 +185,12 @@ const opHandlers = {
 // --- Normalization rules ---
 // 각 규칙: step → step (불변). 매칭 안 되면 원본 반환.
 
-// LLM이 DELEGATE op 대신 EXEC {tool: "delegate"} 를 생성하는 패턴 보정
+/**
+ * Converts `EXEC { tool: "delegate" }` steps to the canonical `DELEGATE` op.
+ * Corrects LLM output that uses EXEC instead of the dedicated DELEGATE op.
+ * @param {Object} step - Raw plan step
+ * @returns {Object} Normalized step
+ */
 const normalizeExecToDelegate = (step) => {
   if (!step || step.op !== 'EXEC') return step
   const a = step.args || {}
@@ -147,7 +201,12 @@ const normalizeExecToDelegate = (step) => {
   return step
 }
 
-// LLM이 APPROVE op 대신 EXEC {tool: "approve"} 를 생성하는 패턴 보정
+/**
+ * Converts `EXEC { tool: "approve" }` steps to the canonical `APPROVE` op.
+ * Corrects LLM output that uses EXEC instead of the dedicated APPROVE op.
+ * @param {Object} step - Raw plan step
+ * @returns {Object} Normalized step
+ */
 const normalizeExecToApprove = (step) => {
   if (!step || step.op !== 'EXEC') return step
   const a = step.args || {}
@@ -158,14 +217,31 @@ const normalizeExecToApprove = (step) => {
 }
 
 // --- Pipeline ---
+/**
+ * Default normalization rule pipeline applied to every step before validation.
+ * @type {Array<function(Object): Object>}
+ */
 const defaultRules = [
   normalizeExecToDelegate,
   normalizeExecToApprove,
 ]
 
+/**
+ * Applies a sequence of normalization rules to a step in order.
+ * @param {Object} step - Raw plan step
+ * @param {Array<function(Object): Object>} [rules=defaultRules] - Rule functions to apply
+ * @returns {Object} Normalized step
+ */
 const normalizeStep = (step, rules = defaultRules) =>
   rules.reduce((s, rule) => rule(s), step)
 
+/**
+ * Normalizes, validates, and executes a single plan step, returning its result wrapped in Either.
+ * Short-circuits to `Free.of(Either.Left(err))` on validation failure or out-of-range ref.
+ * @param {Object} step - Raw plan step
+ * @param {Array} results - Accumulated results from prior steps (used for ref resolution)
+ * @returns {Free<Either<string, *>>}
+ */
 const stepToOp = (step, results) =>
   Either.fold(
     err => Free.of(Either.Left(err)),
@@ -187,6 +263,12 @@ const stepToOp = (step, results) =>
 // 반환: Free<Either<string, results[]>>
 // 잘못된 step이 있으면 즉시 Left로 short-circuit
 
+/**
+ * Converts a plan object (from LLM output) into a sequential Free monad program.
+ * Handles `direct_response` plans and multi-step plans; short-circuits on the first invalid step.
+ * @param {{ type?: string, message?: string, steps?: Object[] }} plan - Parsed plan JSON
+ * @returns {Free<Either<string, Array>>} Program yielding all step results or the first error
+ */
 const parsePlan = (plan) => {
   if (plan.type === 'direct_response') {
     return respond(plan.message).chain(r => Free.of(Either.Right(r)))

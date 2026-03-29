@@ -50,4 +50,17 @@ const createEventReceiver = (state) => {
   return { emit }
 }
 
+/**
+ * `withEventMeta(event)` — Adds `id` (UUID) and `receivedAt` timestamp to an event object.
+ *
+ * `eventToPrompt(event)` — Extracts the agent prompt string from an event (`prompt`, `message`, or generated fallback).
+ *
+ * `buildTodoReviewPrompt(pendingTodos)` — Generates a prompt asking the agent to surface pending TODO items to the user.
+ *
+ * `todoFromEvent(event)` — Converts an event's `.todo` field into a TODO record wrapped in Maybe.
+ *
+ * `isDuplicate(todos, eventId)` — Returns true if a TODO derived from the given event already exists.
+ *
+ * `createEventReceiver(state)` — (Deprecated) Legacy event emitter backed by ReactiveState. Use EventActor instead.
+ */
 export { createEventReceiver, withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate }

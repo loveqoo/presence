@@ -7,6 +7,7 @@ const section = (id, content) => Object.freeze({ id, content })
 const renderSections = (sections) => sections.map(s => s.content).join('\n\n')
 
 // --- Plan JSON Schema ---
+/** JSON Schema for structured LLM plan output (json_schema response format). */
 const planSchema = {
   name: 'agent_plan',
   strict: true,
@@ -59,6 +60,10 @@ const planSchema = {
 
 // --- Prompt sections (structured data) ---
 
+/**
+ * Frozen map of all reusable prompt sections (role definition, op reference, rules, etc.).
+ * Each value is a `{ id, content }` section object.
+ */
 const PROMPT_SECTIONS = Object.freeze({
   ROLE_DEFINITION: section('role_definition', `You are a planner for a task-delegation agent.
 Analyze the user's request and respond with ONLY valid JSON. No explanation text, ONLY JSON.
@@ -150,6 +155,11 @@ Read-only actions (file_read, file_list, web_fetch, mcp_search_tools) do NOT nee
 })
 
 // --- Formatters ---
+/**
+ * Formats an array of tool descriptors into a human-readable tool list string.
+ * @param {Array<{name: string, description?: string, parameters?: object}>} tools
+ * @returns {string}
+ */
 const formatToolList = (tools) => {
   if (!tools || tools.length === 0) {
     return 'Available tools:\n\nNo tools available'
@@ -166,18 +176,33 @@ const formatToolList = (tools) => {
   return `Available tools:\n\n${lines.join('\n\n')}`
 }
 
+/**
+ * Formats an array of agent descriptors into a delegation list string.
+ * @param {Array<{name?: string, id?: string, description?: string}>} agents
+ * @returns {string}
+ */
 const formatAgentList = (agents) => {
   if (!agents || agents.length === 0) return ''
   const lines = agents.map(a => `${a.name || a.id}: ${a.description || ''}`)
   return `Available agents for delegation:\n\n${lines.join('\n')}`
 }
 
+/**
+ * Formats memory entries as a numbered list string.
+ * @param {Array<string|object>} memories
+ * @returns {string}
+ */
 const formatMemories = (memories) => {
   if (!memories || memories.length === 0) return ''
   return memories.map((m, i) => `[${i + 1}] ${typeof m === 'string' ? m : JSON.stringify(m)}`).join('\n')
 }
 
 // 공통 메모리 프롬프트 (Plan, ReAct 양쪽에서 사용)
+/**
+ * Builds the "Relevant memories:" block used in both Plan and ReAct system messages.
+ * @param {Array<string|object>} memories
+ * @returns {string} Empty string when memories is empty.
+ */
 const buildMemoryPrompt = (memories) => {
   if (!memories || memories.length === 0) return ''
   return `Relevant memories:\n${formatMemories(memories)}`
@@ -185,6 +210,11 @@ const buildMemoryPrompt = (memories) => {
 
 // --- Result summarization (rolling context) ---
 
+/**
+ * Converts step results into a numbered summary string, truncating long values.
+ * @param {string|object|Array} results - Single result or array of step results.
+ * @returns {string}
+ */
 const summarizeResults = (results) =>
   (Array.isArray(results) ? results : [results])
     .map((r, i) => {
@@ -194,14 +224,30 @@ const summarizeResults = (results) =>
 
 // --- Budget helpers ---
 
+/**
+ * Measures the token cost of a message array.
+ * Alias for `measureMessages` from the tokenizer library.
+ * @type {(messages: Array<{role: string, content: string}>) => number}
+ */
 const measureMessages = measureTokens
 
+/**
+ * Flattens conversation turn objects into a flat `[user, assistant, ...]` message array.
+ * @param {Array<{input: string, output: string}>} turns
+ * @returns {Array<{role: string, content: string}>}
+ */
 const flattenHistory = (turns) =>
   turns.flatMap(t => [
     { role: 'user', content: t.input },
     { role: 'assistant', content: t.output },
   ])
 
+/**
+ * Selects the most recent turns that fit within the token budget, newest-first greedy.
+ * @param {Array<{input: string, output: string}>} turns - Full conversation history.
+ * @param {number} charBudget - Maximum token budget available for history.
+ * @returns {Array<{input: string, output: string}>} Subset of turns in chronological order.
+ */
 const fitHistory = (turns, charBudget) => {
   const fitted = []
   let used = 0
@@ -217,6 +263,13 @@ const fitHistory = (turns, charBudget) => {
 // Cost of adding memories to system message (token 기반)
 const MEMORY_PROMPT_OVERHEAD = estimateTokens('\n\nRelevant memories:\n')
 
+/**
+ * Selects as many memories as fit within the token budget, in priority order (first = highest).
+ * Accounts for the "Relevant memories:" header overhead.
+ * @param {Array<string|object>} memories - Ranked memory entries.
+ * @param {number} tokenBudget - Maximum token budget available for memory content.
+ * @returns {Array<string|object>} Subset of memories that fit within the budget.
+ */
 const fitMemories = (memories, tokenBudget) => {
   if (!memories || memories.length === 0) return []
   if (tokenBudget <= MEMORY_PROMPT_OVERHEAD) return []
@@ -237,6 +290,12 @@ const fitMemories = (memories, tokenBudget) => {
 // --- Iteration context block ---
 
 
+/**
+ * Builds the assistant+user message pair that injects previous plan results into context.
+ * @param {{previousPlan: object, previousResults: string}|null} iterationContext
+ * @param {'full'|'summarized'} mode - 'summarized' truncates long results to save tokens.
+ * @returns {Array<{role: string, content: string}>} 0 or 2 messages.
+ */
 const buildIterationBlock = (iterationContext, mode = 'full') => {
   if (!iterationContext?.previousPlan || iterationContext.previousResults == null) return []
 
@@ -255,6 +314,35 @@ const buildIterationBlock = (iterationContext, mode = 'full') => {
 
 // --- Prompt assembly with budget ---
 
+/**
+ * Assembles a complete LLM prompt, fitting history and memories within the token budget.
+ *
+ * @param {object} opts
+ * @param {object}   [opts.persona]               - Agent persona (systemPrompt, rules).
+ * @param {string}   [opts.persona.systemPrompt]  - Custom system prompt; replaces ROLE_DEFINITION when set.
+ * @param {string[]} [opts.persona.rules]         - Additional user rules appended to system message.
+ * @param {Array}    [opts.tools]                 - Available tool descriptors.
+ * @param {Array}    [opts.agents]                - Available agent descriptors for delegation.
+ * @param {Array<{input: string, output: string}>} [opts.history] - Full conversation history turns.
+ * @param {Array<string|object>} [opts.memories]  - Ranked memory entries.
+ * @param {string}   opts.input                   - Current user message.
+ * @param {{previousPlan: object, previousResults: string}|null} [opts.iterationContext]
+ *   - Previous plan + results for incremental planning iterations.
+ * @param {{maxContextChars: number, reservedOutputChars: number}} [opts.budget]
+ *   - Token budget; defaults to unlimited when omitted.
+ * @param {'json_schema'|'json_object'|'none'} [opts.responseFormatMode]
+ *   - LLM response format; defaults to 'json_object'.
+ *
+ * @returns {{
+ *   messages: Array<{role: string, content: string}>,
+ *   response_format: object|undefined,
+ *   _assembly: {
+ *     budget: number, used: number,
+ *     historyUsed: number, historyDropped: number,
+ *     memoriesUsed: number, sections: string[]
+ *   }
+ * }}
+ */
 const assemblePrompt = ({
   persona = {}, tools = [], agents = [], history = [],
   memories = [], input, iterationContext, budget,
@@ -338,12 +426,30 @@ const assemblePrompt = ({
 
 // --- Prompt builders ---
 // responseFormat 모드: 'json_schema' | 'json_object' | 'none'
+/**
+ * Returns the LLM `response_format` object for the given mode.
+ * @param {'json_schema'|'json_object'|'none'} mode
+ * @returns {{type: string, json_schema?: object}|undefined}
+ */
 const buildResponseFormat = (mode) => {
   if (mode === 'json_schema') return { type: 'json_schema', json_schema: planSchema }
   if (mode === 'json_object') return { type: 'json_object' }
   return undefined
 }
 
+/**
+ * Builds a prompt for an incremental planning iteration (no history, injects previous plan+results).
+ * @param {object} opts
+ * @param {Array}  [opts.tools]
+ * @param {Array}  [opts.agents]
+ * @param {Array}  [opts.memories]
+ * @param {string} opts.input
+ * @param {object} [opts.persona]
+ * @param {'json_schema'|'json_object'|'none'} [opts.responseFormatMode]
+ * @param {object|null} [opts.previousPlan]
+ * @param {string|null} [opts.previousResults]
+ * @returns {ReturnType<typeof assemblePrompt>}
+ */
 const buildIterationPrompt = ({ tools = [], agents = [], memories = [], input, persona = {}, responseFormatMode = 'json_object', previousPlan = null, previousResults = null }) =>
   assemblePrompt({
     persona,
@@ -358,6 +464,12 @@ const buildIterationPrompt = ({ tools = [], agents = [], memories = [], input, p
     responseFormatMode,
   })
 
+/**
+ * Appends an error correction turn to an existing prompt so the LLM retries with valid JSON.
+ * @param {{messages: Array, response_format: object}} originalPrompt
+ * @param {string} errorMessage - JSON parse error description shown to the LLM.
+ * @returns {{messages: Array, response_format: object}}
+ */
 const buildRetryPrompt = (originalPrompt, errorMessage) => ({
   messages: [
     ...originalPrompt.messages,
@@ -368,9 +480,13 @@ const buildRetryPrompt = (originalPrompt, errorMessage) => ({
 })
 
 // String aliases for backward compatibility
+/** @type {string} Raw content of the ROLE_DEFINITION prompt section. */
 const ROLE_DEFINITION = PROMPT_SECTIONS.ROLE_DEFINITION.content
+/** @type {string} Raw content of the OP_REFERENCE prompt section. */
 const OP_REFERENCE    = PROMPT_SECTIONS.OP_REFERENCE.content
+/** @type {string} Raw content of the APPROVE_RULES prompt section. */
 const APPROVE_RULES   = PROMPT_SECTIONS.APPROVE_RULES.content
+/** @type {string} Raw content of the PLAN_RULES prompt section. */
 const PLAN_RULES      = PROMPT_SECTIONS.PLAN_RULES.content
 
 export {

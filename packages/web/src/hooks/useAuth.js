@@ -7,6 +7,11 @@ import { useState, useCallback, useRef } from 'react'
 // - 401 시 단일 refreshPromise로 동시성 제어
 // =============================================================================
 
+/**
+ * React hook that manages authentication state (access token in memory, refresh token in HttpOnly cookie).
+ * Provides login/logout/refresh helpers and an `authFetch` wrapper that auto-retries on 401.
+ * @returns {{accessToken: string|null, user: object|null, authRequired: boolean|null, isAuthenticated: boolean, checkAuthRequired: Function, login: Function, logout: Function, refresh: Function, authFetch: Function}}
+ */
 const useAuth = () => {
   const [accessToken, setAccessToken] = useState(null)
   const [user, setUser] = useState(null)

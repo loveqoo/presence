@@ -47,6 +47,10 @@ const projectEvents = (state, { queue, inFlight, deadLetter, lastProcessed }) =>
 // Reader 기반 Actor Factory
 // =============================================================================
 
+/**
+ * Actor that recalls and saves memories via mem0. Handles 'recall' and 'save' messages.
+ * @type {Reader} Reader({ mem0, adapter, logger } → Actor)
+ */
 // --- MemoryActor: Reader({ mem0, adapter, logger } → Actor) ---
 
 const memoryActorR = Reader.asks(({ mem0, adapter, logger }) => Actor({
@@ -96,6 +100,10 @@ const memoryActorR = Reader.asks(({ mem0, adapter, logger }) => Actor({
   },
 }))
 
+/**
+ * Actor that compacts conversation history using LLM summarization. Handles 'check' messages.
+ * @type {Reader} Reader({ llm, logger } → Actor)
+ */
 // --- CompactionActor: Reader({ llm, logger } → Actor) ---
 
 const compactionActorR = Reader.asks(({ llm, logger }) => Actor({
@@ -125,6 +133,10 @@ const compactionActorR = Reader.asks(({ llm, logger }) => Actor({
   },
 }))
 
+/**
+ * Actor that debounces agent state persistence. Handles 'save' (debounced) and 'flush' (immediate) messages.
+ * @type {Reader} Reader({ store, debounceMs? } → Actor)
+ */
 // --- PersistenceActor: Reader({ store, debounceMs } → Actor) ---
 // self-referential closure는 Reader.asks 내부에 유지
 
@@ -156,6 +168,10 @@ const persistenceActorR = Reader.asks(({ store, debounceMs = 500 }) => {
   return actor
 })
 
+/**
+ * Actor that executes a single agent turn asynchronously via runTurn.
+ * @type {Reader} Reader({ runTurn } → Actor)
+ */
 // --- TurnActor: Reader({ runTurn } → Actor) ---
 
 const turnActorR = Reader.asks(({ runTurn }) => Actor({
@@ -168,6 +184,11 @@ const turnActorR = Reader.asks(({ runTurn }) => Actor({
     }),
 }))
 
+/**
+ * Actor managing the event queue: enqueues events and drains them one-at-a-time via turnActor.
+ * Handles 'enqueue' and 'drain' messages; failed events go to deadLetter.
+ * @type {Reader} Reader({ turnActor, state, logger, onEventDone?, todoReviewJobName? } → Actor)
+ */
 // --- EventActor: Reader({ turnActor, state, logger, onEventDone, todoReviewJobName } → Actor) ---
 // self-referential closure는 Reader.asks 내부에 유지
 
@@ -257,6 +278,10 @@ const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoRe
   return actor
 })
 
+/**
+ * Enqueues an event into the eventActor with generated metadata (id, timestamp).
+ * @type {Reader} Reader({ eventActor } → (event) → enrichedEvent)
+ */
 // --- createEmit: Reader({ eventActor } → (event) → enrichedEvent) ---
 
 const emitR = Reader.asks(({ eventActor }) => (event) => {
@@ -265,6 +290,10 @@ const emitR = Reader.asks(({ eventActor }) => (event) => {
   return enriched
 })
 
+/**
+ * Actor that monitors prompt budget usage and writes warnings to state. Handles 'check' messages.
+ * @type {Reader} Reader({ state } → Actor)
+ */
 // --- BudgetActor: Reader({ state } → Actor) ---
 
 const budgetActorR = Reader.asks(({ state }) => Actor({
@@ -292,6 +321,11 @@ const budgetActorR = Reader.asks(({ state }) => Actor({
   },
 }))
 
+/**
+ * Actor that polls A2A delegated tasks on an interval and enqueues results back into eventActor.
+ * Handles 'start', 'stop', 'tick', and 'poll' messages.
+ * @type {Reader} Reader({ state, eventActor, agentRegistry?, logger?, fetchFn?, pollIntervalMs? } → Actor)
+ */
 // --- DelegateActor: Reader({ state, eventActor, agentRegistry, logger, fetchFn, pollIntervalMs } → Actor) ---
 // self-referential closure + timer는 Reader.asks 내부에 유지
 
@@ -387,13 +421,21 @@ const delegateActorR = Reader.asks(({ state, eventActor, agentRegistry, logger, 
 // 레거시 브릿지: createX(deps) === xR.run(deps)
 // =============================================================================
 
+/** @deprecated Use memoryActorR */
 const createMemoryActor = (deps) => memoryActorR.run(deps)
+/** @deprecated Use compactionActorR */
 const createCompactionActor = (deps) => compactionActorR.run(deps)
+/** @deprecated Use persistenceActorR */
 const createPersistenceActor = (deps) => persistenceActorR.run(deps)
+/** @deprecated Use turnActorR */
 const createTurnActor = (runTurn) => turnActorR.run({ runTurn })
+/** @deprecated Use eventActorR */
 const createEventActor = (deps) => eventActorR.run(deps)
+/** @deprecated Use emitR */
 const createEmit = (eventActor) => emitR.run({ eventActor })
+/** @deprecated Use budgetActorR */
 const createBudgetActor = (deps) => budgetActorR.run(deps)
+/** @deprecated Use delegateActorR */
 const createDelegateActor = (deps) => delegateActorR.run(deps)
 
 export {

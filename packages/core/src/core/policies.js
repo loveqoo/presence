@@ -1,9 +1,9 @@
-// --- Debug policy ---
+/** Debug output limits. */
 export const DEBUG = Object.freeze({
   MAX_ITERATION_HISTORY: 10,
 })
 
-// --- History policy ---
+/** Conversation history rolling-window and compaction thresholds. */
 export const HISTORY = Object.freeze({
   MAX_CONVERSATION: 20,
   COMPACTION_THRESHOLD: 15,
@@ -12,13 +12,13 @@ export const HISTORY = Object.freeze({
   MAX_OUTPUT_CHARS: 1000,
 })
 
-// --- Memory policy ---
+/** Memory graph capacity and promotion rules. */
 export const MEMORY = Object.freeze({
   MAX_EPISODIC: 100,
   PROMOTION_THRESHOLD: 3,
 })
 
-// --- Prompt policy ---
+/** Prompt assembly budget and truncation limits. */
 export const PROMPT = Object.freeze({
   RESULT_MAX_LEN: 500,
   SUMMARIZED_RESULT_MAX_LEN: 200,
@@ -26,12 +26,12 @@ export const PROMPT = Object.freeze({
   DEFAULT_RESERVED_OUTPUT_TOKENS: 1000,
 })
 
-// --- System job names ---
+/** Well-known system job identifiers used by SchedulerActor. */
 export const SYSTEM_JOBS = Object.freeze({
   TODO_REVIEW: '__todo_review__',
 })
 
-// --- Session types ---
+/** Session type discriminants for SessionManager lifecycle. */
 export const SESSION_TYPE = Object.freeze({
   USER: 'user',
   SCHEDULED: 'scheduled',

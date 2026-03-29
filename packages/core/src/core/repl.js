@@ -1,8 +1,10 @@
 // identity fallback: t를 주입받지 않으면 key를 그대로 반환
 const _identityT = (key) => key
 
-// REPL — 콜백 기반. 슬래시 명령어는 agent를 거치지 않고 직접 처리.
-
+/**
+ * Slash command registry. Each entry has a description and a handler(ctx).
+ * @type {Object.<string, {description: string, handler: function}>}
+ */
 const COMMANDS = {
   '/help': {
     description: 'Show available commands',
@@ -124,6 +126,7 @@ const COMMANDS = {
   },
 }
 
+/** @see COMMANDS for slash command definitions */
 const createRepl = ({ agent, onOutput, onError, state, toolRegistry, agentRegistry, memory, mcp, t = _identityT }) => {
   let running = true
   let turnCount = 0

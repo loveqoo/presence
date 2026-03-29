@@ -6,6 +6,14 @@ const { Task } = fp
 // --- ToolInterpreter ---
 // ExecuteTool — 도구 실행. 에러는 문자열로 반환 (턴 계속 진행, LLM이 re-plan).
 
+/**
+ * Create an interpreter for the `ExecuteTool` op.
+ * Looks up the tool in the registry and executes its handler; errors are returned as
+ * string values so the agent can re-plan rather than aborting the turn.
+ * @param {{ ST: object, toolRegistry: Map<string, object>, toolResultUi: object }} deps
+ * @returns {Interpreter}
+ */
+
 const createToolInterpreter = ({ ST, toolRegistry, toolResultUi }) =>
   new Interpreter(['ExecuteTool'], (f) => {
     const tool = toolRegistry.get(f.name)

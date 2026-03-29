@@ -6,6 +6,12 @@ const { Task } = fp
 // --- 스트리밍 중 direct_response의 message 필드 추출 ---
 // JSON이 부분적으로 도착해도 "message":"..." 내용을 점진적으로 보여준다.
 
+/**
+ * Extract the `message` field value from a partially-accumulated JSON stream.
+ * Returns `null` if the field or its value has not yet arrived.
+ * @param {string} accumulated - Partial JSON string received so far.
+ * @returns {string|null}
+ */
 const extractStreamingMessage = (accumulated) => {
   const marker = '"message":'
   const idx = accumulated.indexOf(marker)
@@ -46,6 +52,12 @@ const extractStreamingMessage = (accumulated) => {
 
 // --- context 참조 메시지 ---
 
+/**
+ * Append a formatted context block as a user message when context entries are present.
+ * @param {object[]} messages - Existing chat messages array.
+ * @param {Array<string|object>} [context] - Context entries to append.
+ * @returns {object[]} New messages array (unchanged if context is empty).
+ */
 const appendContext = (messages, context) => {
   if (!context || context.length === 0) return messages
   const ctxText = context
@@ -56,6 +68,14 @@ const appendContext = (messages, context) => {
 
 // --- LlmInterpreter ---
 // AskLLM — LLM 통신 + 스트리밍.
+
+/**
+ * Create an interpreter for the `AskLLM` op.
+ * Supports streaming via `llm.chatStream` when enabled and no tool calls are present;
+ * falls back to non-streaming `llm.chat` otherwise.
+ * @param {{ ST: object, llm: object, streamingUi: object, getAbortSignal?: () => AbortSignal }} deps
+ * @returns {Interpreter}
+ */
 
 const createLlmInterpreter = ({ ST, llm, streamingUi, getAbortSignal }) =>
   new Interpreter(['AskLLM'], (f) =>

@@ -62,6 +62,11 @@ const parseCookies = (cookieStr) => {
 
 // --- 토큰 발행: (user) → Reader(AuthEnv → tokens) ---
 
+/**
+ * Issues access and refresh tokens for the given user.
+ * @param {object} user - Authenticated user object with username, roles, tokenVersion
+ * @returns {Reader} Reader(AuthEnv → { accessToken, refreshToken, user })
+ */
 const issueTokensR = (user) =>
   Reader.asks(({ tokenService, userStore }) => {
     const accessToken = tokenService.signAccessToken({ sub: user.username, roles: user.roles })
@@ -75,6 +80,12 @@ const issueTokensR = (user) =>
 
 // --- Refresh 검증: (refreshToken) → Reader(AuthEnv → Either) ---
 
+/**
+ * Validates a refresh token and checks active session + tokenVersion.
+ * Revokes all sessions if a stolen token is detected.
+ * @param {string} refreshToken
+ * @returns {Reader} Reader(AuthEnv → Either<error, { user, jti }>)
+ */
 const validateRefreshChainR = (refreshToken) =>
   Reader.asks(({ tokenService, userStore }) => {
     if (!refreshToken) return Either.Left('Refresh token required')
@@ -103,12 +114,21 @@ const validateRefreshChainR = (refreshToken) =>
 
 // --- Refresh 토큰 회전: Reader 합성 — deps 암묵 전파 ---
 
+/**
+ * Rotates a refresh token: removes the old session and issues new tokens.
+ * @param {{ user: object, jti: string }} validated - Result from validateRefreshChainR
+ * @returns {Reader} Reader(AuthEnv → { accessToken, refreshToken, user })
+ */
 const rotateRefreshTokenR = ({ user, jti }) =>
   Reader.asks(({ userStore }) => userStore.removeRefreshSession(user.username, jti))
     .chain(() => issueTokensR(user))
 
 // --- Express Auth Middleware: Reader(AuthEnv → ExpressMiddleware) ---
 
+/**
+ * Express middleware that verifies Bearer access tokens, bypassing publicPaths.
+ * @type {Reader} Reader({ tokenService, publicPaths? } → ExpressMiddleware)
+ */
 const authMiddlewareR = Reader.asks(({ tokenService, publicPaths = [] }) =>
   (req, res, next) => {
     if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) return next()
@@ -128,6 +148,11 @@ const authMiddlewareR = Reader.asks(({ tokenService, publicPaths = [] }) =>
 
 // --- Login Handler: Reader(AuthEnv → ExpressHandler) ---
 
+/**
+ * Express handler for POST /api/auth/login with rate limiting.
+ * Sets refreshToken HttpOnly cookie and returns accessToken on success.
+ * @type {Reader} Reader({ authProvider, tokenService, userStore } → ExpressHandler)
+ */
 const loginHandlerR = Reader.ask.map(env => {
   const { authProvider } = env
   const rateLimiter = createRateLimiter()
@@ -168,6 +193,10 @@ const loginHandlerR = Reader.ask.map(env => {
 
 // --- Refresh Handler: Reader(AuthEnv → ExpressHandler) ---
 
+/**
+ * Express handler for POST /api/auth/refresh. Rotates the refresh token and returns new tokens.
+ * @type {Reader} Reader({ tokenService, userStore } → ExpressHandler)
+ */
 const refreshHandlerR = Reader.ask.map(env =>
   (req, res) => {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
@@ -186,6 +215,10 @@ const refreshHandlerR = Reader.ask.map(env =>
 
 // --- Logout Handler: Reader(AuthEnv → ExpressHandler) ---
 
+/**
+ * Express handler for POST /api/auth/logout. Revokes the refresh session and clears the cookie.
+ * @type {Reader} Reader({ tokenService, userStore } → ExpressHandler)
+ */
 const logoutHandlerR = Reader.asks(({ tokenService, userStore }) =>
   (req, res) => {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
@@ -203,6 +236,11 @@ const logoutHandlerR = Reader.asks(({ tokenService, userStore }) =>
 
 // --- WebSocket 인증: (req) → Reader(AuthEnv → Either) ---
 
+/**
+ * Authenticates a WebSocket upgrade request via Bearer Authorization header.
+ * @param {object} req - HTTP upgrade request
+ * @returns {Reader} Reader({ tokenService } → Either<error, payload>)
+ */
 const authenticateViaHeaderR = (req) =>
   Reader.asks(({ tokenService }) => {
     const authHeader = req.headers.authorization
@@ -210,6 +248,11 @@ const authenticateViaHeaderR = (req) =>
     return tokenService.verifyAccessToken(authHeader.slice(7))
   })
 
+/**
+ * Authenticates a WebSocket upgrade request via HttpOnly refreshToken cookie.
+ * @param {object} req - HTTP upgrade request
+ * @returns {Reader} Reader({ tokenService, userStore } → Either<error, { sub }>)
+ */
 const authenticateViaCookieR = (req) =>
   Reader.asks(({ tokenService, userStore }) => {
     const cookies = parseCookies(req.headers.cookie || '')
@@ -228,6 +271,11 @@ const authenticateViaCookieR = (req) =>
     )
   })
 
+/**
+ * Authenticates a WebSocket request: tries Bearer header first, falls back to cookie.
+ * @param {object} req - HTTP upgrade request
+ * @returns {Reader} Reader(AuthEnv → Either<error, payload>)
+ */
 const authenticateWsR = (req) =>
   Reader.asks(env => {
     const headerResult = authenticateViaHeaderR(req).run(env)
@@ -242,18 +290,23 @@ const authenticateWsR = (req) =>
 // 레거시 브릿지: createX(deps) === xR.run(deps)
 // =============================================================================
 
+/** @deprecated Use authMiddlewareR. Legacy bridge: authMiddlewareR.run({ tokenService, publicPaths }) */
 const createAuthMiddleware = (tokenService, { publicPaths = [] } = {}) =>
   authMiddlewareR.run({ tokenService, publicPaths })
 
+/** @deprecated Use loginHandlerR. Legacy bridge: loginHandlerR.run({ authProvider, tokenService, userStore }) */
 const createLoginHandler = (authProvider, tokenService, userStore) =>
   loginHandlerR.run({ authProvider, tokenService, userStore })
 
+/** @deprecated Use refreshHandlerR. Legacy bridge: refreshHandlerR.run({ tokenService, userStore }) */
 const createRefreshHandler = (tokenService, userStore) =>
   refreshHandlerR.run({ tokenService, userStore })
 
+/** @deprecated Use logoutHandlerR. Legacy bridge: logoutHandlerR.run({ tokenService, userStore }) */
 const createLogoutHandler = (tokenService, userStore) =>
   logoutHandlerR.run({ tokenService, userStore })
 
+/** @deprecated Use authenticateWsR. Legacy bridge: authenticateWsR(req).run({ tokenService, userStore }) */
 const authenticateWs = (req, tokenService, { userStore } = {}) =>
   authenticateWsR(req).run({ tokenService, userStore })
 

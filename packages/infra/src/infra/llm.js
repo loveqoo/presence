@@ -1,4 +1,10 @@
+/**
+ * OpenAI-compatible LLM client supporting chat completions, SSE streaming, and model listing.
+ */
 class LLMClient {
+  /**
+   * @param {{ baseUrl?: string, model?: string, apiKey?: string, fetchFn?: Function, timeoutMs?: number }} [options]
+   */
   constructor({ baseUrl = 'https://api.openai.com/v1', model = 'gpt-4o', apiKey, fetchFn, timeoutMs = 120_000 } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, '')
     this.model = model
@@ -10,6 +16,11 @@ class LLMClient {
     }
   }
 
+  /**
+   * Sends a chat completion request and returns the first choice as text or tool_calls.
+   * @param {{ messages: object[], tools?: object[], responseFormat?: object, signal?: AbortSignal }} params
+   * @returns {Promise<{ type: 'text', content: string, raw: object } | { type: 'tool_calls', toolCalls: object[], raw: object }>}
+   */
   async chat({ messages, tools, responseFormat, signal }) {
     const body = {
       model: this.model,
@@ -144,10 +155,18 @@ class LLMClient {
       clearTimeout(timeout)
     }
   }
+  /**
+   * Updates the model used for subsequent requests.
+   * @param {string} model
+   */
   setModel(model) {
     this.model = model
   }
 
+  /**
+   * Fetches available model ids from the /models endpoint. Returns [] on failure.
+   * @returns {Promise<string[]>}
+   */
   async listModels() {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 10_000)

@@ -34,6 +34,11 @@ const WATCHED_PATHS = [
 
 // --- SessionBridge: Reader({ wss } → { broadcast, watchSession }) ---
 
+/**
+ * Reader that creates a WebSocket bridge for broadcasting session state changes.
+ * Provides `broadcast` (send to all clients) and `watchSession` (subscribe a session's state hooks).
+ * @type {Reader<{wss: WebSocketServer}, {broadcast: Function, watchSession: Function}>}
+ */
 const sessionBridgeR = Reader.asks(({ wss }) => {
   const broadcast = (data) => {
     const msg = JSON.stringify(data)
@@ -109,6 +114,10 @@ const handleSlashCommand = (input, { state, tools, memory, mcpControl }) => {
 
 // --- SessionRoutes: Reader({ session, globalCtx } → Express Router) ---
 
+/**
+ * Reader that builds an Express router for a single session (chat, state, approve, cancel, tools, agents, config).
+ * @type {Reader<{session: object, globalCtx: object}, import('express').Router>}
+ */
 const sessionRoutesR = Reader.asks(({ session, globalCtx }) => {
   const { mcpControl, memory, config } = globalCtx
   const router = express.Router()
@@ -166,6 +175,13 @@ const sessionRoutesR = Reader.asks(({ session, globalCtx }) => {
 // Server 시작
 // =============================================================================
 
+/**
+ * Start the Presence HTTP + WebSocket server for a single instance.
+ * Initialises global context, session manager, scheduler, auth, and static web UI if available.
+ * @param {object} configOverride - Instance config overrides merged on top of defaults.
+ * @param {{port?: number, host?: string, persistenceCwd?: string, instanceId?: string}} [options]
+ * @returns {Promise<{server: import('http').Server, wss: import('ws').WebSocketServer, app: object, sessionManager: object, globalCtx: object, shutdown: Function}>}
+ */
 const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', persistenceCwd, instanceId } = {}) => {
   const globalCtx = await createGlobalContext(configOverride, { instanceId })
   const serverStartedAt = Date.now()

@@ -9,6 +9,11 @@ import { createChildManager } from './child-manager.js'
 // Orchestrator: instances.json 읽기 → N개 서버 fork → 관리 API
 // =============================================================================
 
+/**
+ * Start the orchestrator: reads instances.json, forks enabled+autoStart instances, and exposes a management API.
+ * @param {{presenceDir?: string}} [options] - Optional override for the ~/.presence directory path.
+ * @returns {Promise<{server: import('http').Server, childManager: object, shutdown: Function}>}
+ */
 const startOrchestrator = async ({ presenceDir } = {}) => {
   const instancesFile = Either.fold(
     err => { throw new Error(err) },

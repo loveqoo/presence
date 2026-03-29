@@ -41,4 +41,9 @@ const createDelegateInterpreter = ({ ST, agentRegistry, delegateUi, fetchFn }) =
     )
   })
 
+/**
+ * `createDelegateInterpreter({ ST, agentRegistry, delegateUi, fetchFn })` — Handles `Delegate` ops.
+ * Routes to a local `run()` function or a remote A2A endpoint based on the registry entry type.
+ * Adds pending remote tasks to `delegateUi` for UI tracking.
+ */
 export { createDelegateInterpreter }

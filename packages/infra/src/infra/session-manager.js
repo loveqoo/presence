@@ -14,6 +14,13 @@ import { SESSION_TYPE } from '@presence/core/core/policies.js'
 // onSessionCreated: 세션 생성 직후 호출되는 콜백. WS 브릿지 구독 등에 사용.
 // =============================================================================
 
+/**
+ * Creates a session lifecycle manager that shares global infrastructure across independent sessions.
+ * @param {object} globalCtx - Shared infrastructure from createGlobalContext().
+ * @param {{ onSessionCreated?: (entry: { id: string, type: string, session: object }) => void }} [options]
+ * @returns {{ create: Function, get: Function, list: Function, destroy: Function }}
+ */
+
 const createSessionManager = (globalCtx, { onSessionCreated } = {}) => {
   const sessions = new Map()  // id → { id, type, session }
 
@@ -28,10 +35,13 @@ const createSessionManager = (globalCtx, { onSessionCreated } = {}) => {
     return entry
   }
 
+  /** @param {string} id @returns {{ id: string, type: string, session: object } | null} */
   const get = (id) => sessions.get(id) ?? null
 
+  /** @returns {Array<{ id: string, type: string, session: object }>} */
   const list = () => [...sessions.values()]
 
+  /** @param {string} id - Session id to destroy. Calls session.shutdown() before removal. */
   const destroy = async (id) => {
     const entry = sessions.get(id)
     if (!entry) return

@@ -37,4 +37,10 @@ const createPersona = ({ projectName = 'presence', cwd } = {}) => {
   return { get, set, reset, filterTools, store }
 }
 
+/**
+ * `createPersona(opts?)` — Creates a persistent persona store (backed by `conf`) with get/set/reset/filterTools.
+ * @param {{ projectName?: string, cwd?: string }} [opts]
+ *
+ * `DEFAULT_PERSONA` — Baseline persona shape: `{ name, systemPrompt, rules, tools }`.
+ */
 export { createPersona, DEFAULT_PERSONA }

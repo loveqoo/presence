@@ -109,4 +109,9 @@ const createRemoteState = ({ wsUrl, sessionId = 'user-default', headers } = {}) 
   return { get, set, hooks, disconnect }
 }
 
+/**
+ * `createRemoteState({ wsUrl, sessionId?, headers? })` — Creates a WebSocket-backed state mirror of the server's ReactiveState.
+ * Implements `{ get, set (no-op), hooks: { on, off }, disconnect }` so `useAgentState` works without modification.
+ * Automatically reconnects with exponential backoff on disconnect.
+ */
 export { createRemoteState }

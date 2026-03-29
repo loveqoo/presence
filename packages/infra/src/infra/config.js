@@ -96,6 +96,12 @@ const DEFAULTS = {
 
 // --- 순수 병합 (deep, 2단계) ---
 
+/**
+ * Performs a shallow-deep merge of two config objects (2-level deep for nested objects).
+ * @param {object} base - Base configuration object.
+ * @param {object} override - Overrides to apply on top of base.
+ * @returns {object} Merged configuration object.
+ */
 const mergeConfig = (base, override) => {
   const result = { ...base }
   for (const [key, val] of Object.entries(override)) {
@@ -110,6 +116,11 @@ const mergeConfig = (base, override) => {
 
 // --- State 기반 config 빌드 파이프라인 ---
 
+/**
+ * Builds a merged config by folding layers over DEFAULTS using State monad.
+ * @param {object[]} layers - Array of partial config objects to merge in order.
+ * @returns {import('../lib/fun-fp.js').State} State computation yielding the merged config.
+ */
 const buildConfig = (layers) =>
   layers.reduce(
     (st, layer) => st.chain(() => State.modify(cfg => mergeConfig(cfg, layer))),
@@ -118,6 +129,10 @@ const buildConfig = (layers) =>
 
 // --- 환경변수 오버라이드 (기존 호환) ---
 
+/**
+ * Collects config overrides from environment variables (OPENAI_*, PRESENCE_*).
+ * @returns {object} Partial config object with env-sourced overrides.
+ */
 const envOverrides = () => {
   const overrides = {}
   const env = process.env
@@ -174,6 +189,12 @@ const envOverrides = () => {
 
 // --- 파일 읽기 (Either) ---
 
+/**
+ * Reads and parses a JSON config file. Returns {} if the file does not exist or fails to parse.
+ * @param {string} filePath - Absolute path to the JSON config file.
+ * @param {Function} [t] - Optional i18n translator for parse error messages.
+ * @returns {object} Parsed config object or empty object on failure.
+ */
 const readConfigFile = (filePath, t) =>
   Either.fold(
     _ => ({}),
@@ -196,6 +217,11 @@ const readConfigFile = (filePath, t) =>
 
 // --- 설정 검증 (런타임 경고: 구조 오류는 ConfigSchema.safeParse가 담당) ---
 
+/**
+ * Validates a fully merged config and returns an array of warning strings.
+ * @param {object} config - Merged config object.
+ * @returns {string[]} List of warning messages (empty if valid).
+ */
 const validateConfig = (config) => {
   const warnings = []
   if (!config.llm?.apiKey) warnings.push('llm.apiKey is not set — LLM calls will fail')
@@ -204,6 +230,10 @@ const validateConfig = (config) => {
 
 // --- 기본 경로 ---
 
+/**
+ * Returns the default ~/.presence directory path.
+ * @returns {string}
+ */
 const defaultPresenceDir = () => {
   const home = process.env.HOME || process.env.USERPROFILE || '.'
   return join(home, '.presence')
@@ -240,6 +270,13 @@ const ClientConfigSchema = z.object({
 // --- instances.json 로드 (Either) ---
 // Either.Right(data) | Either.Left(errorMessage)
 
+/**
+ * Validates raw data against a Zod schema. Returns Either.Right(data) or Either.Left(errorMessage).
+ * @param {import('zod').ZodSchema} schema
+ * @param {unknown} raw
+ * @param {string} label - Label used in the error message.
+ * @returns {Either}
+ */
 const validateWithSchema = (schema, raw, label) => {
   const result = schema.safeParse(raw)
   return result.success
@@ -247,6 +284,11 @@ const validateWithSchema = (schema, raw, label) => {
     : Either.Left(`${label} validation failed: ${(result.error.issues || []).map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`)
 }
 
+/**
+ * Loads and validates instances.json. Returns Either.Right(data) or Either.Left(errorMessage).
+ * @param {string} [presenceDir] - Directory containing instances.json; defaults to ~/.presence.
+ * @returns {Either}
+ */
 const loadInstancesFile = (presenceDir) => {
   const dir = presenceDir || process.env.PRESENCE_DIR || defaultPresenceDir()
   const filePath = join(dir, 'instances.json')
@@ -257,6 +299,12 @@ const loadInstancesFile = (presenceDir) => {
 
 // --- 인스턴스별 설정 로드: DEFAULTS → server.json → instances/{id}.json → env ---
 
+/**
+ * Loads and merges config for a specific instance: DEFAULTS → server.json → instances/{id}.json → env.
+ * @param {string} instanceId - Instance identifier (e.g. 'anthony').
+ * @param {{ basePath?: string }} [options] - Optional base directory override.
+ * @returns {object} Fully merged and validated config object.
+ */
 const loadInstanceConfig = (instanceId, { basePath } = {}) => {
   if (!instanceId) throw new Error('instanceId is required for loadInstanceConfig')
   const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
@@ -282,6 +330,12 @@ const loadInstanceConfig = (instanceId, { basePath } = {}) => {
 // --- 클라이언트 설정 로드 (Either) ---
 // Either.Right(data) | Either.Left(errorMessage)
 
+/**
+ * Loads client connection config from ~/.presence/clients/{userId}.json.
+ * @param {string} userId - Client/user identifier.
+ * @param {{ basePath?: string }} [options]
+ * @returns {Either} Either.Right(ClientConfig) or Either.Left(errorMessage).
+ */
 const loadClientConfig = (userId, { basePath } = {}) => {
   const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
   const filePath = join(dir, 'clients', `${userId}.json`)
