@@ -8,24 +8,24 @@ import { createAgentRegistry } from './agent-registry.js'
 import { connectMCPServer } from './mcp.js'
 import { createEmbedder } from './embedding.js'
 import { createJobStore, defaultJobDbPath } from './job-store.js'
-import { loadInstanceConfig, validateConfig } from './config.js'
+import { loadUserMergedConfig, defaultUserDataPath, validateConfig } from './config.js'
 import { createLocalTools } from './local-tools.js'
 import { initI18n, t } from '../i18n/index.js'
 
 // =============================================================================
-// Global Context: config → 전역 인프라 조립. 서버 수명 동안 1개 인스턴스.
+// Global Context: config → 전역 인프라 조립. 사용자 수명 동안 1개 인스턴스.
 // LLM, 메모리, MCP, JobStore, AgentRegistry 등 세션 간 공유 자원.
 // =============================================================================
 
 /**
- * Assembles all shared infrastructure for a server instance (LLM, memory, MCP, tools, etc.).
+ * Assembles all shared infrastructure for a user (LLM, memory, MCP, tools, etc.).
  * Returns a context object that is shared across all sessions for the lifetime of the server.
- * @param {object|null} configOverride - Config object to use directly; if null, loads from instanceId.
- * @param {{ instanceId?: string }} [options]
+ * @param {object|null} configOverride - Config object to use directly; if null, loads from username.
+ * @param {{ username?: string }} [options]
  * @returns {Promise<{config, logger, persona, personaConfig, mem0, memory, embedder, memoryPath, toolRegistry, mcpControl, mcpConnections, agentRegistry, llm, jobStore, shutdown: () => Promise<void>}>}
  */
-const createGlobalContext = async (configOverride, { instanceId } = {}) => {
-  const config = configOverride || loadInstanceConfig(instanceId)
+const createGlobalContext = async (configOverride, { username } = {}) => {
+  const config = configOverride || loadUserMergedConfig(username)
   initI18n(config.locale)
   const { logger } = createLogger()
 
@@ -37,7 +37,7 @@ const createGlobalContext = async (configOverride, { instanceId } = {}) => {
   const personaConfig = persona.get()
 
   // --- Memory ---
-  const memoryPath = config.memory.path || defaultMemoryPath()
+  const memoryPath = config.memory.path || (username ? defaultUserDataPath(username) : defaultMemoryPath())
   const mem0Result = await createMem0Memory(config, { memoryPath }).catch(e => {
     logger.warn('mem0 init failed, memory disabled', { error: e.message })
     return null

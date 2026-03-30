@@ -13,9 +13,10 @@ const isLeft = (e) => Either.fold(() => true, () => false, e)
 const getRight = (e) => Either.fold(() => null, v => v, e)
 const getLeft = (e) => Either.fold(v => v, () => null, e)
 
+let _tmpDirCounter = 0
 function createTmpDir() {
-  const dir = join(tmpdir(), `presence-auth-token-${Date.now()}`)
-  mkdirSync(join(dir, 'instances'), { recursive: true })
+  const dir = join(tmpdir(), `presence-auth-token-${Date.now()}-${_tmpDirCounter++}`)
+  mkdirSync(dir, { recursive: true })
   return dir
 }
 
@@ -26,11 +27,11 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const secret = ensureSecret('test', { basePath: dir })
+    const secret = ensureSecret({ basePath: dir })
     assert(typeof secret === 'string', 'ensureSecret: returns string')
     assert(secret.length === 64, 'ensureSecret: 32 bytes hex = 64 chars')
 
-    const filePath = join(dir, 'instances', 'test.secret.json')
+    const filePath = join(dir, 'server.secret.json')
     assert(existsSync(filePath), 'ensureSecret: file created')
 
     try {
@@ -39,7 +40,7 @@ async function run() {
       assert(mode === '600', `ensureSecret: file permissions 0600 (got ${mode})`)
     } catch { /* non-POSIX */ }
 
-    const secret2 = ensureSecret('test', { basePath: dir })
+    const secret2 = ensureSecret({ basePath: dir })
     assert(secret === secret2, 'ensureSecret: idempotent')
 
     rmSync(dir, { recursive: true, force: true })
@@ -49,7 +50,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const service = createTokenService('test', { basePath: dir })
+    const service = createTokenService({ basePath: dir })
 
     const token = service.signAccessToken({ sub: 'alice', roles: ['admin'] })
     assert(typeof token === 'string', 'signAccessToken: returns string')
@@ -60,7 +61,7 @@ async function run() {
     assert(payload.sub === 'alice', 'verifyAccessToken: sub correct')
     assert(payload.roles.includes('admin'), 'verifyAccessToken: roles correct')
     assert(payload.iss === 'presence', 'verifyAccessToken: iss correct')
-    assert(payload.aud === 'presence:test', 'verifyAccessToken: aud correct')
+    assert(payload.aud === 'presence', 'verifyAccessToken: aud correct')
     assert(typeof payload.exp === 'number', 'verifyAccessToken: has exp')
 
     rmSync(dir, { recursive: true, force: true })
@@ -70,7 +71,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const service = createTokenService('test', { basePath: dir })
+    const service = createTokenService({ basePath: dir })
 
     const { token, jti } = service.signRefreshToken({ sub: 'alice', tokenVersion: 0 })
     assert(typeof token === 'string', 'signRefreshToken: returns token')
@@ -91,7 +92,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const service = createTokenService('test', { basePath: dir })
+    const service = createTokenService({ basePath: dir })
 
     const accessToken = service.signAccessToken({ sub: 'alice', roles: ['user'] })
     const result = service.verifyRefreshToken(accessToken)
@@ -101,18 +102,20 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // --- 다른 인스턴스의 토큰 거부 ---
+  // --- 다른 서버 시크릿으로 서명된 토큰 거부 ---
 
   {
-    const dir = createTmpDir()
-    const service1 = createTokenService('inst-a', { basePath: dir })
-    const service2 = createTokenService('inst-b', { basePath: dir })
+    const dir1 = createTmpDir()
+    const dir2 = createTmpDir()
+    const service1 = createTokenService({ basePath: dir1 })
+    const service2 = createTokenService({ basePath: dir2 })
 
     const token = service1.signAccessToken({ sub: 'alice', roles: ['user'] })
     const result = service2.verifyAccessToken(token)
-    assert(isLeft(result), 'cross-instance: Left for token from inst-a by inst-b')
+    assert(isLeft(result), 'cross-secret: Left for token signed by different secret')
 
-    rmSync(dir, { recursive: true, force: true })
+    rmSync(dir1, { recursive: true, force: true })
+    rmSync(dir2, { recursive: true, force: true })
   }
 
   // --- PRESENCE_JWT_SECRET env override ---
@@ -122,7 +125,7 @@ async function run() {
     const origEnv = process.env.PRESENCE_JWT_SECRET
     process.env.PRESENCE_JWT_SECRET = 'env-override-secret-that-is-long-enough'
 
-    const service = createTokenService('test', { basePath: dir })
+    const service = createTokenService({ basePath: dir })
     const token = service.signAccessToken({ sub: 'alice', roles: ['user'] })
     assert(isRight(service.verifyAccessToken(token)), 'env override: Right with env secret')
 

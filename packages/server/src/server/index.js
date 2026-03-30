@@ -1,8 +1,9 @@
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import { createGlobalContext } from '@presence/infra/infra/global-context.js'
-import { loadInstanceConfig } from '@presence/infra/infra/config.js'
+import { loadServerConfig } from '@presence/infra/infra/config.js'
 import { createSessionManager } from '@presence/infra/infra/session-manager.js'
 import { createSchedulerActor } from '@presence/infra/infra/scheduler-actor.js'
 import { clearDebugState } from '@presence/core/core/agent.js'
@@ -172,18 +173,115 @@ const sessionRoutesR = Reader.asks(({ session, globalCtx }) => {
 })
 
 // =============================================================================
+// UserContextManager — 유저별 GlobalContext + SessionManager 생명주기 관리
+// (인증 활성화 시 사용. 인증 없이 기동한 경우에는 전역 단일 컨텍스트 사용)
+// =============================================================================
+
+const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000 // 30분
+
+/**
+ * Per-user context entry shape:
+ * { globalCtx, sessionManager, wsConnections: Set<ws>, lastActivity: number, shutdownTimer: NodeJS.Timeout|null }
+ */
+
+/**
+ * Builds a UserContextManager that manages per-user GlobalContext lifecycle.
+ * @param {{ bridge: object, configOverride: object }} env
+ * @returns {{ getOrCreate: Function, touch: Function, addWs: Function, removeWs: Function, shutdownAll: Function }}
+ */
+const buildUserContextManager = ({ bridge, configOverride }) => {
+  // Map<username, { globalCtx, sessionManager, wsConnections, lastActivity, shutdownTimer }>
+  const userContexts = new Map()
+
+  const getOrCreate = async (username) => {
+    if (userContexts.has(username)) return userContexts.get(username)
+
+    const globalCtx = await createGlobalContext(configOverride, { username })
+    const sessionManager = createSessionManager(globalCtx, {
+      onSessionCreated: ({ id, type, session }) => {
+        if (type !== SESSION_TYPE.SCHEDULED) bridge.watchSession(id, session.state)
+      },
+    })
+
+    const entry = {
+      globalCtx,
+      sessionManager,
+      wsConnections: new Set(),
+      lastActivity: Date.now(),
+      shutdownTimer: null,
+    }
+    userContexts.set(username, entry)
+    return entry
+  }
+
+  const touch = (username) => {
+    const entry = userContexts.get(username)
+    if (!entry) return
+    entry.lastActivity = Date.now()
+    if (entry.shutdownTimer) {
+      clearTimeout(entry.shutdownTimer)
+      entry.shutdownTimer = null
+    }
+  }
+
+  const shutdownUser = async (username) => {
+    const entry = userContexts.get(username)
+    if (!entry) return
+    userContexts.delete(username)
+    if (entry.shutdownTimer) clearTimeout(entry.shutdownTimer)
+    await Promise.all(entry.sessionManager.list().map(({ session }) => session.shutdown().catch(() => {})))
+    await entry.globalCtx.shutdown().catch(() => {})
+  }
+
+  const scheduleShutdown = (username) => {
+    const entry = userContexts.get(username)
+    if (!entry) return
+    if (entry.wsConnections.size > 0) return  // 연결 있으면 타이머 불필요
+    if (entry.shutdownTimer) return
+    entry.shutdownTimer = setTimeout(() => shutdownUser(username), INACTIVITY_TIMEOUT_MS)
+  }
+
+  const addWs = (username, ws) => {
+    const entry = userContexts.get(username)
+    if (!entry) return
+    entry.wsConnections.add(ws)
+    // WS 연결 추가 시 예약된 shutdown 취소
+    if (entry.shutdownTimer) {
+      clearTimeout(entry.shutdownTimer)
+      entry.shutdownTimer = null
+    }
+  }
+
+  const removeWs = (username, ws) => {
+    const entry = userContexts.get(username)
+    if (!entry) return
+    entry.wsConnections.delete(ws)
+    if (entry.wsConnections.size === 0) scheduleShutdown(username)
+  }
+
+  const shutdownAll = async () => {
+    const usernames = [...userContexts.keys()]
+    await Promise.all(usernames.map(u => shutdownUser(u)))
+  }
+
+  const list = () => [...userContexts.entries()].map(([username, entry]) => ({ username, entry }))
+
+  return { getOrCreate, touch, addWs, removeWs, shutdownAll, shutdownUser, list }
+}
+
+// =============================================================================
 // Server 시작
 // =============================================================================
 
 /**
  * Start the Presence HTTP + WebSocket server for a single instance.
  * Initialises global context, session manager, scheduler, auth, and static web UI if available.
- * @param {object} configOverride - Instance config overrides merged on top of defaults.
- * @param {{port?: number, host?: string, persistenceCwd?: string, instanceId?: string}} [options]
+ * @param {object} configOverride - Config object to use directly; if null, loads from username.
+ * @param {{port?: number, host?: string, persistenceCwd?: string, username?: string}} [options]
  * @returns {Promise<{server: import('http').Server, wss: import('ws').WebSocketServer, app: object, sessionManager: object, globalCtx: object, shutdown: Function}>}
  */
-const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', persistenceCwd, instanceId } = {}) => {
-  const globalCtx = await createGlobalContext(configOverride, { instanceId })
+const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', persistenceCwd, username } = {}) => {
+  const globalCtx = await createGlobalContext(configOverride, { username })
   const serverStartedAt = Date.now()
 
   const expressApp = express()
@@ -264,19 +362,19 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   }
 
   // --- 인증 ---
-  const userStore = instanceId ? createUserStore(instanceId) : null
+  const userStore = createUserStore()
 
-  // instanceId가 있으면 인증 필수 — 사용자 없으면 시작 불가
-  if (instanceId && !userStore?.hasUsers()) {
-    throw new Error(`No users configured for instance '${instanceId}'. Run: npm run user -- init --instance ${instanceId}`)
+  // 사용자 없으면 시작 불가
+  if (!userStore.hasUsers()) {
+    throw new Error(`No users configured. Run: npm run user -- init`)
   }
 
-  const authEnabled = userStore?.hasUsers() ?? false
+  const authEnabled = userStore.hasUsers()
   let tokenService = null
   let authProvider = null
 
   if (authEnabled) {
-    tokenService = createTokenService(instanceId)
+    tokenService = createTokenService()
     authProvider = createLocalAuthProvider(userStore)
 
     // cookie-parser (쿠키에서 refreshToken 추출용)
@@ -326,10 +424,18 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     })
   }
 
+  // lastActivity 미들웨어 — 인증된 요청의 사용자 활동 기록 (인증 미들웨어 이후)
+  expressApp.use('/api', (req, _res, next) => {
+    if (req.user?.username && userContextManager) {
+      userContextManager.touch(req.user.username)
+    }
+    next()
+  })
+
   // 인스턴스 헬스 엔드포인트 (public)
   expressApp.get('/api/instance', (_req, res) => {
     res.json({
-      id: instanceId || 'standalone',
+      id: username || process.env.PRESENCE_INSTANCE_ID || 'standalone',
       status: 'running',
       uptime: Math.floor((Date.now() - serverStartedAt) / 1000),
       authRequired: authEnabled,
@@ -340,9 +446,14 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   expressApp.use('/api', sessionRoutesR.run({ session: defaultSession, globalCtx }))
 
   // 세션별 라우트: /api/sessions/:sessionId/*
+  // 세션 접근 제어: 인증된 경우 세션 소유자(owner) 확인
   expressApp.use('/api/sessions/:sessionId', express.json(), (req, res, next) => {
     const entry = sessionManager.get(req.params.sessionId)
     if (!entry) return res.status(404).json({ error: `Session not found: ${req.params.sessionId}` })
+    // 인증 활성화 시 소유자 검증
+    if (authEnabled && req.user?.username && entry.owner !== null && entry.owner !== req.user.username) {
+      return res.status(403).json({ error: 'Access denied: session belongs to another user' })
+    }
     req.presenceSession = entry
     next()
   })
@@ -389,7 +500,9 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   // POST /api/sessions — 새 세션 생성
   expressApp.post('/api/sessions', express.json(), (req, res) => {
     const { type = 'user', id } = req.body || {}
-    const entry = sessionManager.create({ id, type })
+    const owner = req.user?.username ?? null
+    const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
+    const entry = sessionManager.create({ id: sessionId, type, owner })
     res.status(201).json({ id: entry.id, type: entry.type })
   })
 
@@ -400,6 +513,13 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     await sessionManager.destroy(sessionId)
     res.json({ ok: true })
   })
+
+  // UserContextManager 초기화 (인증 활성화 시)
+  // 서버 전체 공유 globalCtx와 별개로, 사용자별 전용 globalCtx를 관리
+  let userContextManager = null
+  if (authEnabled) {
+    userContextManager = buildUserContextManager({ bridge, configOverride })
+  }
 
   // WebSocket: 연결 시 user-default 초기 상태 전송, join 메시지 처리
   wss.on('connection', (ws, req) => {
@@ -438,18 +558,37 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
       }
     }
 
+    // 유저별 활동 추적 (인증 활성화 + userContextManager 있을 때)
+    const wsUsername = ws.user?.username ?? null
+    if (wsUsername && userContextManager) {
+      userContextManager.touch(wsUsername)
+      userContextManager.addWs(wsUsername, ws)
+    }
+
+    // 기본 세션 init 전송 (user-default 하위 호환)
     ws.send(JSON.stringify({ type: 'init', session_id: 'user-default', state: defaultSession.state.snapshot() }))
 
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString())
         if (msg.type === 'join') {
+          // 세션 소유권 검증
           const entry = sessionManager.get(msg.session_id)
           if (entry) {
+            if (authEnabled && wsUsername && entry.owner !== null && entry.owner !== wsUsername) {
+              ws.send(JSON.stringify({ type: 'error', code: 403, message: 'Access denied: session belongs to another user' }))
+              return
+            }
             ws.send(JSON.stringify({ type: 'init', session_id: msg.session_id, state: entry.session.state.snapshot() }))
           }
         }
       } catch (_) {}
+    })
+
+    ws.on('close', () => {
+      if (wsUsername && userContextManager) {
+        userContextManager.removeWs(wsUsername, ws)
+      }
     })
   })
 
@@ -466,6 +605,8 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     globalSchedulerActor.send({ type: 'stop' }).fork(() => {}, () => {})
     await Promise.all(sessionManager.list().map(({ session }) => session.shutdown().catch(() => {})))
     await globalCtx.shutdown()
+    // 유저별 컨텍스트도 정리
+    if (userContextManager) await userContextManager.shutdownAll()
     await new Promise(r => wss.close(r))
     await new Promise(r => server.close(r))
   }
@@ -496,7 +637,7 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
   const jobCount = jobStore.listJobs().filter(j => j.enabled).length
 
   console.log(`\nPresence server ready`)
-  if (instanceId) console.log(`  Instance   : ${instanceId}`)
+  if (username || process.env.PRESENCE_INSTANCE_ID) console.log(`  User       : ${username || process.env.PRESENCE_INSTANCE_ID}`)
   console.log(`  URL        : http://${host}:${port}`)
   console.log(`  WebSocket  : ws://${host}:${port}`)
   console.log(`  Model      : ${cfg.llm.model}`)
@@ -537,26 +678,20 @@ export { startServer, sessionRoutesR, sessionBridgeR, handleSlashCommand }
 
 // CLI 실행
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
-  const instanceId = process.env.PRESENCE_INSTANCE_ID
-  if (!instanceId) {
-    console.error('PRESENCE_INSTANCE_ID environment variable is required.')
-    console.error('Usage: PRESENCE_INSTANCE_ID=<id> PORT=<port> node packages/server/src/server/index.js')
-    process.exit(1)
-  }
   // 사용자 확인 (인증 필수)
-  const userStore = createUserStore(instanceId)
+  const userStore = createUserStore()
   if (!userStore.hasUsers()) {
-    console.error(`No users configured for instance '${instanceId}'.`)
-    console.error(`Run: npm run user -- init --instance ${instanceId}`)
+    console.error('No users configured.')
+    console.error('Run: npm run user -- init')
     process.exit(1)
   }
 
   const port = Number(process.env.PORT) || 3000
   const host = process.env.HOST || '127.0.0.1'
-  const config = loadInstanceConfig(instanceId)
-  console.log(`Starting Presence server [${instanceId}] on ${host}:${port}...`)
-  startServer(config, { port, host, instanceId }).catch(err => {
-    console.error(`\nFailed to start server [${instanceId}]: ${err.message}`)
+  const config = loadServerConfig()
+  console.log(`Starting Presence server on ${host}:${port}...`)
+  startServer(config, { port, host }).catch(err => {
+    console.error(`\nFailed to start server: ${err.message}`)
     if (err.code === 'EADDRINUSE') {
       console.error(`  Port ${port} is already in use. Set a different port with PORT=<n>`)
     } else if (err.code === 'EACCES') {

@@ -102,12 +102,8 @@ packages/
 │       ├── infra/       ← llm, tools, state, memory, config, persistence 등
 │       ├── interpreter/ ← 프로덕션 인터프리터 (prod.js)
 │       └── i18n/        ← ko.json, en.json
-├── orchestrator/        ← @presence/orchestrator
-│   └── src/orchestrator/
-│       ├── index.js          ← instances.json → N개 서버 fork + 관리 API
-│       └── child-manager.js  ← 자식 프로세스 fork, 감시, 자동 재시작
 ├── server/              ← @presence/server
-│   └── src/server/      ← Express + WebSocket 서버 (인스턴스 1개)
+│   └── src/server/      ← Express + WebSocket 서버 (유저 N명 직접 서비스)
 ├── tui/                 ← @presence/tui
 │   └── src/
 │       ├── ui/          ← Ink 컴포넌트 (App, StatusBar, ChatArea, InputBar 등)
@@ -135,43 +131,93 @@ packages/
 ### 아키텍처
 
 ```
-오케스트레이터 :3010 (프로세스 매니저 + 관리 API)
-  ├── fork @presence/server (anthony)    :3001  ← 클라이언트/A2A 직접 접속
-  ├── fork @presence/server (team-be)    :3002  ← 클라이언트/A2A 직접 접속
-  └── 관리 API: GET/POST /api/instances
+@presence/server :3001  ← 클라이언트/A2A 직접 접속 (유저 N명 직접 서비스)
 ```
 
-- **1인스턴스 1유저** — 인스턴스는 개인 에이전트 단위. 데이터(세션, 메모리, persistence)에 유저 구분 없음
-- 인스턴스당 별도 프로세스 (스케줄러 경합 방지, 장애 격리)
-- 게이트웨이 없음 — 클라이언트/A2A 모두 인스턴스에 직접 접속
-- `PRESENCE_INSTANCE_ID` 환경변수로 인스턴스 식별
+- 서버 1개가 모든 유저를 서비스
+- 클라이언트/A2A 모두 서버에 직접 접속
+- 유저별 데이터 완전 격리 (`~/.presence/data/{username}/`)
 
-### 인증
+## 정책
+
+### 개인 에이전트 모델
+
+Presence는 개인 업무 대리 에이전트 플랫폼이다.
+각 사용자는 자신만의 에이전트를 갖는다.
+
+- 서버 1대 = 인스턴스 1개 = 유저 N명.
+- 유저별 데이터(대화, 메모리, 스케줄, 설정)는 완전 격리.
+- 유저 폴더 단위로 다른 머신에 이동 가능.
+- 오케스트레이터 없음. 서버 1개가 모든 유저를 서비스.
+- 여러 머신 배포 시 서버 간 A2A 통신 (URL + 유저 식별 필요).
+
+### 유저 데이터 격리
+
+```
+~/.presence/data/
+  ├── anthony/          ← anthony의 모든 데이터
+  │   ├── config.json       설정 (LLM, locale, persona 등)
+  │   ├── memory.json       MemoryGraph
+  │   ├── mem0_history.db   mem0 SQLite
+  │   ├── jobs.db           스케줄러 JobStore
+  │   └── persistence/      세션 영속화
+  └── bob/              ← bob의 모든 데이터
+      └── (동일 구조)
+```
+
+다른 머신으로 이동: 유저 폴더를 통째로 복사.
+
+### 사용자 등록
+
+관리자가 사용자를 등록한다. 사용자가 스스로 가입하는 기능은 없다.
+
+1. 관리자가 CLI로 사용자를 등록하고 임시 비밀번호를 설정한다.
+   `npm run user -- init --username <이름>`
+2. 관리자가 임시 비밀번호를 사용자에게 전달한다.
+3. 사용자가 웹 또는 TUI에서 임시 비밀번호로 로그인한다.
+4. 시스템이 비밀번호 변경을 강제한다. 변경 전까지 채팅 등 기능은 사용 불가.
+5. 비밀번호를 변경하면 모든 기능이 활성화된다.
+
+비밀번호를 잊었을 경우, 관리자가 CLI로 재설정한다:
+`npm run user -- passwd --username <이름>`
+재설정하면 다시 최초 로그인과 같은 흐름을 거친다.
+
+### 클라이언트 접속 흐름
+
+웹과 TUI는 동일한 흐름을 따른다.
+
+1. 서버에 접속한다.
+2. 사용자 이름과 비밀번호로 로그인한다.
+3. 비밀번호 변경이 필요하면 변경 화면이 나타난다.
+4. 변경 완료 후 채팅 화면으로 진입한다.
+
+### 테스트
+
+테스트 환경에서도 위 정책을 그대로 따른다.
+
+### 인증 구현
 
 - **Password + JWT**: bcrypt 해시 + HMAC-SHA256 JWT (node:crypto)
 - 인스턴스별 독립 사용자/시크릿 (`instances/{id}.users.json`, `instances/{id}.secret.json`)
-- Access token (15분) + Refresh token (7일, HttpOnly 쿠키, rotation)
-- `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`
-- TUI: `--instance` → 비밀번호 프롬프트 → JWT 메모리 저장
-- Web: 로그인 폼 → access token 메모리, refresh token HttpOnly 쿠키
-- 사용자 관리: `npm run user -- init/add/remove/list/passwd --instance <id>`
+- Access token (15분) + Refresh token (7일, rotation)
+- `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/change-password`
 
 ## 실행
 
 ```bash
-# 최초 설정: 인스턴스별 사용자 등록 (필수, 사용자 없으면 서버 시작 불가)
-npm run user -- init --instance anthony
+# 최초 설정: 사용자 등록 (필수, 사용자 없으면 서버 시작 불가)
+npm run user -- init --username anthony
 
-# 오케스트레이터 시작 (instances.json의 모든 인스턴스 fork)
+# 서버 시작
 npm start
 
 # TUI 클라이언트 (비밀번호 프롬프트 → 로그인)
-npm run start:cli -- --instance anthony
+npm run start:cli
 
 # 사용자 관리
-npm run user -- add --instance anthony --username bob
-npm run user -- list --instance anthony
-npm run user -- passwd --instance anthony --username bob
+npm run user -- add --username bob
+npm run user -- list
+npm run user -- passwd --username bob
 ```
 
 ## 테스트
@@ -195,7 +241,6 @@ node test/infra/config.test.js
 | 단위/통합 | `test/core/`, `test/infra/`, `test/ui/` 등 | mock 인터프리터, mock LLM |
 | 서버 E2E | `test/e2e/server-e2e.test.js` | Express + mock LLM, HTTP 직접 검증 |
 | TUI E2E | `test/e2e/tui-e2e.test.js` | ink-testing-library + 실제 서버(mock LLM) |
-| 오케스트레이터 E2E | `test/orchestrator/orchestrator-e2e.test.js` | 실제 fork + 관리 API + 인스턴스 접속 (mock LLM) |
 | 브라우저 E2E | `web/e2e/chat.spec.js` | Playwright + 실제 서버(mock LLM) |
 
 > 위 테스트는 모두 mock LLM을 사용하므로 외부 API 키 불필요.
@@ -203,16 +248,13 @@ node test/infra/config.test.js
 
 ### 실제 LLM E2E (live 테스트)
 
-설정된 LLM으로 실제 동작을 검증합니다. 오케스트레이터를 먼저 실행해야 합니다.
+설정된 LLM으로 실제 동작을 검증합니다. 서버를 먼저 실행해야 합니다.
 
 ```bash
-# 오케스트레이터 시작 (instances.json에 2개 이상 인스턴스 필요)
+# 서버 시작
 npm start
 
-# 멀티-인스턴스 live E2E (별도 터미널, 25개 시나리오 86 assertions)
-node test/e2e/multi-instance-live.test.js [--orchestrator http://127.0.0.1:3010]
-
-# TUI live E2E (단일 인스턴스 대상)
+# TUI live E2E (단일 서버 대상)
 node test/e2e/tui-live.test.js [--url http://127.0.0.1:3001]
 
 # 브라우저 live E2E
@@ -242,7 +284,6 @@ node test/run.js --no-network
 | `test/e2e/tui-e2e.test.js` | Express + mock LLM + WebSocket |
 | `test/server/server.test.js` | Express 서버 |
 | `test/server/supervisor.test.js` | Express 서버 |
-| `test/orchestrator/orchestrator-e2e.test.js` | 오케스트레이터 + 서버 fork |
 
 > 이 테스트들은 외부 서비스가 아닌 localhost 포트를 점유하므로, 코드 자체의 문제가
 > 아니라 실행 환경의 네트워크 바인딩 권한 부족일 때만 실패합니다.

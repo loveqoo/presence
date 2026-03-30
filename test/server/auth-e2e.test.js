@@ -112,8 +112,8 @@ const setupAuthServer = async (llmPort) => {
   }))
 
   // 사용자 등록
-  ensureSecret(instanceId, { basePath: tmpDir })
-  const userStore = createUserStore(instanceId, { basePath: tmpDir })
+  ensureSecret({ basePath: tmpDir })
+  const userStore = createUserStore({ basePath: tmpDir })
   await userStore.addUser('testuser', 'testpassword123')
 
   // PRESENCE_DIR을 설정해야 서버 내부의 createUserStore/createTokenService가 올바른 경로 사용
@@ -254,9 +254,9 @@ async function run() {
     const { server, shutdown, tmpDir, instanceId } = await setupAuthServer(llmPort)
     const port = server.address().port
     try {
-      const tokenService = createTokenService(instanceId, { basePath: tmpDir })
+      const tokenService = createTokenService({ basePath: tmpDir })
       const expiredToken = sign({
-        sub: 'testuser', roles: ['admin'], iss: 'presence', aud: `presence:${instanceId}`,
+        sub: 'testuser', roles: ['admin'], iss: 'presence', aud: 'presence',
         iat: 1000, exp: 1001,
       }, tokenService.secret)
 

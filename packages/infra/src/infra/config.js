@@ -239,6 +239,92 @@ const defaultPresenceDir = () => {
   return join(home, '.presence')
 }
 
+/**
+ * Returns the default data directory path for a user: ~/.presence/users/{username}/
+ * @param {string} username
+ * @returns {string}
+ */
+const defaultUserDataPath = (username) => {
+  if (!username) throw new Error('username is required for defaultUserDataPath')
+  return join(defaultPresenceDir(), 'users', username)
+}
+
+// --- 서버 설정 로드: DEFAULTS → server.json → env ---
+
+/**
+ * Loads and merges server-level config: DEFAULTS → server.json → env.
+ * No per-instance file is applied.
+ * @param {{ basePath?: string }} [options] - Optional base directory override.
+ * @returns {object} Fully merged and validated config object.
+ */
+const loadServerConfig = ({ basePath } = {}) => {
+  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const serverFile = join(dir, 'server.json')
+
+  const fromServer = readConfigFile(serverFile)
+  const fromEnv = envOverrides()
+
+  const merged = buildConfig([fromServer, fromEnv]).run(DEFAULTS)[0]
+
+  const result = ConfigSchema.safeParse(merged)
+  if (!result.success) {
+    result.error.errors.forEach(e =>
+      console.warn(`[config] schema error — ${e.path.join('.')}: ${e.message}`)
+    )
+    return merged
+  }
+  return result.data
+}
+
+// --- 사용자 설정 로드: ~/.presence/users/{username}/config.json ---
+
+/**
+ * Loads user-specific config overrides from ~/.presence/users/{username}/config.json.
+ * Returns Either.Right(overrides) if file exists, Either.Right({}) if not.
+ * Does NOT merge with DEFAULTS — returns raw overrides only.
+ * @param {string} username
+ * @param {{ basePath?: string }} [options]
+ * @returns {Either} Either.Right(object) always (file absence is not an error).
+ */
+const loadUserConfig = (username, { basePath } = {}) => {
+  if (!username) throw new Error('username is required for loadUserConfig')
+  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const filePath = join(dir, 'users', username, 'config.json')
+  const raw = readConfigFile(filePath)
+  return Either.Right(raw)
+}
+
+// --- 사용자 병합 설정 로드: DEFAULTS → server.json → users/{username}/config.json → env ---
+
+/**
+ * Loads and merges full config for a user: DEFAULTS → server.json → users/{username}/config.json → env.
+ * This is the primary config loader for user-based contexts (replaces instance-based loading).
+ * @param {string} username
+ * @param {{ basePath?: string }} [options]
+ * @returns {object} Fully merged and validated config object.
+ */
+const loadUserMergedConfig = (username, { basePath } = {}) => {
+  if (!username) throw new Error('username is required for loadUserMergedConfig')
+  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const serverFile = join(dir, 'server.json')
+  const userFile = join(dir, 'users', username, 'config.json')
+
+  const fromServer = readConfigFile(serverFile)
+  const fromUser = readConfigFile(userFile)
+  const fromEnv = envOverrides()
+
+  const merged = buildConfig([fromServer, fromUser, fromEnv]).run(DEFAULTS)[0]
+
+  const result = ConfigSchema.safeParse(merged)
+  if (!result.success) {
+    result.error.errors.forEach(e =>
+      console.warn(`[config] schema error — ${e.path.join('.')}: ${e.message}`)
+    )
+    return merged
+  }
+  return result.data
+}
+
 // --- 인스턴스 스키마 ---
 
 const InstanceDefSchema = z.object({
@@ -286,6 +372,7 @@ const validateWithSchema = (schema, raw, label) => {
 
 /**
  * Loads and validates instances.json. Returns Either.Right(data) or Either.Left(errorMessage).
+ * @deprecated Orchestrator-specific. Will be removed in Phase 7.
  * @param {string} [presenceDir] - Directory containing instances.json; defaults to ~/.presence.
  * @returns {Either}
  */
@@ -301,6 +388,7 @@ const loadInstancesFile = (presenceDir) => {
 
 /**
  * Loads and merges config for a specific instance: DEFAULTS → server.json → instances/{id}.json → env.
+ * @deprecated Use loadUserMergedConfig(username) instead. Will be removed in Phase 7.
  * @param {string} instanceId - Instance identifier (e.g. 'anthony').
  * @param {{ basePath?: string }} [options] - Optional base directory override.
  * @returns {object} Fully merged and validated config object.
@@ -332,6 +420,7 @@ const loadInstanceConfig = (instanceId, { basePath } = {}) => {
 
 /**
  * Loads client connection config from ~/.presence/clients/{userId}.json.
+ * @deprecated TUI-specific. Will be removed in Phase 7.
  * @param {string} userId - Client/user identifier.
  * @param {{ basePath?: string }} [options]
  * @returns {Either} Either.Right(ClientConfig) or Either.Left(errorMessage).
@@ -345,7 +434,12 @@ const loadClientConfig = (userId, { basePath } = {}) => {
 }
 
 export {
+  // New user-based API
+  loadServerConfig, loadUserConfig, loadUserMergedConfig,
+  defaultUserDataPath,
+  // Deprecated: instance-based API (kept for backward compatibility until Phase 7)
   loadInstanceConfig, loadInstancesFile, loadClientConfig,
+  // Shared utilities
   mergeConfig, envOverrides, readConfigFile, validateConfig,
   defaultPresenceDir, DEFAULTS, ConfigSchema,
   InstancesFileSchema, InstanceDefSchema, ClientConfigSchema,

@@ -15,12 +15,8 @@ function App() {
   const [showSessionPanel, setShowSessionPanel] = useState(false)
 
   const {
-    orchestratorUrl,
-    instances,
-    selectedInstance,
     instanceUrl,
     loading: instanceLoading,
-    selectInstance,
     clearInstance,
   } = useInstance()
 
@@ -41,29 +37,8 @@ function App() {
     sendMessage, respondApprove, cancel,
   } = usePresence(currentSessionId, { instanceUrl, authFetch, accessToken, enabled: canConnect })
 
-  // 로그인 핸들러:
-  // - 오케스트레이터 모드: POST {orchestratorUrl}/api/auth/login with { instanceId, password }
-  // - 프로덕션 모드: POST {instanceUrl}/api/auth/login directly
-  const handleLogin = async (password) => {
-    if (orchestratorUrl && selectedInstance) {
-      // 오케스트레이터 경유: instanceId + password
-      const res = await fetch(`${orchestratorUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instanceId: selectedInstance.id, password }),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || 'Login failed')
-      }
-      const data = await res.json()
-      const newUser = { username: data.username, roles: data.roles || [] }
-      instanceLogin(data.accessToken, data.refreshToken, newUser, data.mustChangePassword || false)
-    } else {
-      // 프로덕션: 인스턴스에 직접 로그인 (username은 selectedInstance.username)
-      const username = selectedInstance?.username || ''
-      await instanceLogin(username, password)
-    }
+  const handleLogin = async (username, password) => {
+    await instanceLogin(username, password)
   }
 
   const handleChangePassword = async (currentPassword, newPassword) => {
@@ -84,23 +59,6 @@ function App() {
     return <div className="app loading">Loading...</div>
   }
 
-  // 여러 인스턴스 + 미선택 → 인스턴스 선택 모드
-  if (!selectedInstance && instances.length > 1) {
-    return (
-      <LoginPage
-        instances={instances}
-        selectedInstance={null}
-        onSelectInstance={selectInstance}
-        onLogin={handleLogin}
-      />
-    )
-  }
-
-  // 오케스트레이터 모드이지만 인스턴스 미결정 (단일 인스턴스 자동 선택 중 등)
-  if (!instanceUrl && orchestratorUrl) {
-    return <div className="app loading">Loading...</div>
-  }
-
   // 인증 확인 중
   if (authRequired === null) {
     return <div className="app loading">Loading...</div>
@@ -110,9 +68,9 @@ function App() {
   if (authRequired && !isAuthenticated) {
     return (
       <LoginPage
-        instances={instances}
-        selectedInstance={selectedInstance}
-        onSelectInstance={instances.length > 1 ? selectInstance : null}
+        instances={[]}
+        selectedInstance={null}
+        onSelectInstance={null}
         onLogin={handleLogin}
       />
     )
@@ -139,7 +97,7 @@ function App() {
         onSessionClick={() => setShowSessionPanel(true)}
         user={user}
         onLogout={authRequired ? handleLogout : null}
-        instanceId={selectedInstance?.id || null}
+        instanceId={null}
       />
       <ChatArea messages={messages} streaming={streaming} />
       <InputBar onSubmit={handleSubmit} disabled={status === 'working'} />

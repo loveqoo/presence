@@ -17,28 +17,28 @@ import { SESSION_TYPE } from '@presence/core/core/policies.js'
 /**
  * Creates a session lifecycle manager that shares global infrastructure across independent sessions.
  * @param {object} globalCtx - Shared infrastructure from createGlobalContext().
- * @param {{ onSessionCreated?: (entry: { id: string, type: string, session: object }) => void }} [options]
+ * @param {{ onSessionCreated?: (entry: { id: string, type: string, owner: string|null, session: object }) => void }} [options]
  * @returns {{ create: Function, get: Function, list: Function, destroy: Function }}
  */
 
 const createSessionManager = (globalCtx, { onSessionCreated } = {}) => {
-  const sessions = new Map()  // id → { id, type, session }
+  const sessions = new Map()  // id → { id, type, owner, session }
 
-  const create = ({ id, type = SESSION_TYPE.USER, persistenceCwd, onScheduledJobDone, idleTimeoutMs, onIdle } = {}) => {
+  const create = ({ id, type = SESSION_TYPE.USER, owner = null, persistenceCwd, onScheduledJobDone, idleTimeoutMs, onIdle } = {}) => {
     const sessionId = id ?? `user-${randomUUID()}`
     if (sessions.has(sessionId)) return sessions.get(sessionId)
 
     const session = createSession(globalCtx, { persistenceCwd, type, onScheduledJobDone, idleTimeoutMs, onIdle })
-    const entry = { id: sessionId, type, session }
+    const entry = Object.freeze({ id: sessionId, type, owner, session })
     sessions.set(sessionId, entry)
     onSessionCreated?.(entry)
     return entry
   }
 
-  /** @param {string} id @returns {{ id: string, type: string, session: object } | null} */
+  /** @param {string} id @returns {{ id: string, type: string, owner: string|null, session: object } | null} */
   const get = (id) => sessions.get(id) ?? null
 
-  /** @returns {Array<{ id: string, type: string, session: object }>} */
+  /** @returns {Array<{ id: string, type: string, owner: string|null, session: object }>} */
   const list = () => [...sessions.values()]
 
   /** @param {string} id - Session id to destroy. Calls session.shutdown() before removal. */

@@ -8,7 +8,7 @@ const { Either } = fp
 
 // =============================================================================
 // TokenService: JWT sign/verify with node:crypto HMAC-SHA256
-// Secret 파일: ~/.presence/instances/{instanceId}.secret.json (권한 0600)
+// Secret 파일: ~/.presence/server.secret.json (권한 0600)
 // =============================================================================
 
 const ACCESS_TOKEN_EXPIRY_S = 15 * 60       // 15분
@@ -30,40 +30,37 @@ const base64urlDecode = (str) =>
 // --- Secret 파일 관리 ---
 
 /**
- * Returns the filesystem path of the JWT secret file for an instance.
- * @param {string} instanceId
+ * Returns the filesystem path of the JWT secret file.
  * @param {string} [basePath] - Override for ~/.presence directory
  * @returns {string}
  */
-const secretFilePath = (instanceId, basePath) => {
+const secretFilePath = (basePath) => {
   const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
-  return join(dir, 'instances', `${instanceId}.secret.json`)
+  return join(dir, 'server.secret.json')
 }
 
 /**
- * Loads the JWT secret from PRESENCE_JWT_SECRET env var or the instance secret file.
- * @param {string} instanceId
+ * Loads the JWT secret from PRESENCE_JWT_SECRET env var or the secret file.
  * @param {{ basePath?: string }} [opts]
  * @returns {string|null}
  */
-const loadSecret = (instanceId, { basePath } = {}) => {
+const loadSecret = ({ basePath } = {}) => {
   const envSecret = process.env.PRESENCE_JWT_SECRET
   if (envSecret) return envSecret
 
-  const filePath = secretFilePath(instanceId, basePath)
+  const filePath = secretFilePath(basePath)
   if (!existsSync(filePath)) return null
   const raw = JSON.parse(readFileSync(filePath, 'utf-8'))
   return raw.jwtSecret || null
 }
 
 /**
- * Generates and persists a new random JWT secret for an instance (chmod 0600).
- * @param {string} instanceId
+ * Generates and persists a new random JWT secret (chmod 0600).
  * @param {{ basePath?: string }} [opts]
  * @returns {string} The generated secret
  */
-const generateSecret = (instanceId, { basePath } = {}) => {
-  const filePath = secretFilePath(instanceId, basePath)
+const generateSecret = ({ basePath } = {}) => {
+  const filePath = secretFilePath(basePath)
   const jwtSecret = randomBytes(32).toString('hex')
   writeFileSync(filePath, JSON.stringify({ jwtSecret }, null, 2), 'utf-8')
   try { chmodSync(filePath, 0o600) } catch { /* best-effort on non-POSIX */ }
@@ -71,15 +68,14 @@ const generateSecret = (instanceId, { basePath } = {}) => {
 }
 
 /**
- * Returns the existing JWT secret for an instance, generating one if none exists.
- * @param {string} instanceId
+ * Returns the existing JWT secret, generating one if none exists.
  * @param {{ basePath?: string }} [opts]
  * @returns {string}
  */
-const ensureSecret = (instanceId, { basePath } = {}) => {
-  const existing = loadSecret(instanceId, { basePath })
+const ensureSecret = ({ basePath } = {}) => {
+  const existing = loadSecret({ basePath })
   if (existing) return existing
-  return generateSecret(instanceId, { basePath })
+  return generateSecret({ basePath })
 }
 
 // --- JWT 구현 ---
@@ -137,15 +133,14 @@ const verify = (token, secret, { audience } = {}) => {
 // --- TokenService 팩토리 ---
 
 /**
- * Creates a TokenService for the given instance using its persisted JWT secret.
- * @param {string} instanceId
+ * Creates a TokenService using its persisted JWT secret.
  * @param {{ basePath?: string }} [opts]
  * @returns {{ signAccessToken, signRefreshToken, verifyAccessToken, verifyRefreshToken, secret }}
  */
 
-const createTokenService = (instanceId, { basePath } = {}) => {
-  const secret = ensureSecret(instanceId, { basePath })
-  const audience = `presence:${instanceId}`
+const createTokenService = ({ basePath } = {}) => {
+  const secret = ensureSecret({ basePath })
+  const audience = 'presence'
 
   const signAccessToken = ({ sub, roles, mustChangePassword }) => {
     const now = Math.floor(Date.now() / 1000)
@@ -196,4 +191,4 @@ const createTokenService = (instanceId, { basePath } = {}) => {
   }
 }
 
-export { createTokenService, ensureSecret }
+export { createTokenService, ensureSecret, sign }

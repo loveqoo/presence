@@ -4,7 +4,7 @@
  *
  * 사용법:
  *   node packages/server/src/server/index.js &
- *   node test/e2e/tui-live.test.js [--url http://127.0.0.1:3001]
+ *   node test/e2e/tui-live.test.js [--url http://127.0.0.1:3000]
  */
 
 import React from 'react'
@@ -24,7 +24,7 @@ const h = React.createElement
 
 const baseUrl = (() => {
   const idx = process.argv.indexOf('--url')
-  return idx !== -1 ? process.argv[idx + 1] : 'http://127.0.0.1:3001'
+  return idx !== -1 ? process.argv[idx + 1] : 'http://127.0.0.1:3000'
 })()
 const wsUrl = baseUrl.replace(/^http/, 'ws')
 
@@ -74,7 +74,7 @@ const request = (method, path, body) =>
   })
 
 // 인증: --username/--password CLI 인자 또는 기본값
-const testUsername = (() => { const idx = process.argv.indexOf('--username'); return idx !== -1 ? process.argv[idx + 1] : 'testuser' })()
+const testUsername = (() => { const idx = process.argv.indexOf('--username'); return idx !== -1 ? process.argv[idx + 1] : 'anthony' })()
 const testPassword = (() => { const idx = process.argv.indexOf('--password'); return idx !== -1 ? process.argv[idx + 1] : 'testpass123' })()
 
 // 서버가 인증을 요구하면 로그인

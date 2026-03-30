@@ -6,7 +6,7 @@ import { assert, summary } from '../lib/assert.js'
 
 function createTmpDir() {
   const dir = join(tmpdir(), `presence-auth-store-${Date.now()}`)
-  mkdirSync(join(dir, 'instances'), { recursive: true })
+  mkdirSync(dir, { recursive: true })
   return dir
 }
 
@@ -17,7 +17,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     assert(!store.exists(), 'store: does not exist initially')
     assert(!store.hasUsers(), 'store: no users initially')
     rmSync(dir, { recursive: true, force: true })
@@ -27,7 +27,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
 
     const user = await store.addUser('alice', 'password123')
     assert(user.username === 'alice', 'addUser: username correct')
@@ -45,7 +45,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     let threw = false
@@ -58,7 +58,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
 
     let threw = false
     try { await store.addUser('alice', 'short') } catch { threw = true }
@@ -70,7 +70,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
 
     let threw = false
     try { await store.addUser('', 'password123') } catch { threw = true }
@@ -86,7 +86,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'correctpassword')
 
     assert(await store.verifyPassword('alice', 'correctpassword'), 'verifyPassword: correct returns true')
@@ -99,7 +99,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
     await store.addUser('bob', 'password456')
 
@@ -121,7 +121,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     store.removeUser('alice')
@@ -138,7 +138,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
     store.addRefreshSession('alice', 'jti-1')
     store.addRefreshSession('alice', 'jti-2')
@@ -165,7 +165,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     store.addRefreshSession('alice', 'jti-abc')
@@ -185,7 +185,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     store.addRefreshSession('alice', 'jti-1')

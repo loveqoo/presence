@@ -142,8 +142,8 @@ const createTestPresenceDir = async (llmPort, { instances, instanceOverrides = {
     writeFileSync(join(dir, 'instances', `${inst.id}.json`), JSON.stringify(override))
 
     // 각 인스턴스에 테스트 사용자 등록 (인증 필수)
-    ensureSecret(inst.id, { basePath: dir })
-    const store = createUserStore(inst.id, { basePath: dir })
+    ensureSecret({ basePath: dir })
+    const store = createUserStore({ basePath: dir })
     userSetupPromises.push(store.addUser('testuser', 'testpass123'))
   }
   await Promise.all(userSetupPromises)

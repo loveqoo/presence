@@ -5,8 +5,8 @@ import bcrypt from 'bcryptjs'
 import { defaultPresenceDir } from './config.js'
 
 // =============================================================================
-// UserStore: 인스턴스별 사용자 CRUD + refreshSessions 관리
-// 파일: ~/.presence/instances/{instanceId}.users.json
+// UserStore: 사용자 CRUD + refreshSessions 관리
+// 파일: ~/.presence/users.json
 // =============================================================================
 
 const MIN_PASSWORD_LENGTH = 8
@@ -27,14 +27,13 @@ const UserStoreFileSchema = z.object({
 })
 
 /**
- * Returns the filesystem path of the users file for an instance.
- * @param {string} instanceId
+ * Returns the filesystem path of the users file.
  * @param {string} [basePath] - Override for ~/.presence directory
  * @returns {string}
  */
-const usersFilePath = (instanceId, basePath) => {
+const usersFilePath = (basePath) => {
   const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
-  return join(dir, 'instances', `${instanceId}.users.json`)
+  return join(dir, 'users.json')
 }
 
 const readStore = (filePath) => {
@@ -49,15 +48,14 @@ const writeStore = (filePath, data) => {
 }
 
 /**
- * Creates a UserStore for managing users and refresh sessions for a given instance.
- * Persists data to ~/.presence/instances/{instanceId}.users.json.
- * @param {string} instanceId
+ * Creates a UserStore for managing users and refresh sessions.
+ * Persists data to ~/.presence/users.json.
  * @param {{ basePath?: string }} [opts]
  * @returns {{ findUser, listUsers, addUser, removeUser, changePassword, verifyPassword, addRefreshSession, removeRefreshSession, hasRefreshSession, revokeAllRefreshSessions, hasUsers, exists, filePath }}
  */
 
-const createUserStore = (instanceId, { basePath } = {}) => {
-  const filePath = usersFilePath(instanceId, basePath)
+const createUserStore = ({ basePath } = {}) => {
+  const filePath = usersFilePath(basePath)
 
   const load = () => readStore(filePath) || { users: [] }
   const save = (data) => writeStore(filePath, data)

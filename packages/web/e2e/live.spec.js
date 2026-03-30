@@ -4,10 +4,10 @@
 
 import { test as base, expect } from '@playwright/test'
 
-const TEST_USERNAME = process.env.TEST_USERNAME || 'testuser'
+const TEST_USERNAME = process.env.TEST_USERNAME || 'anthony'
 const TEST_PASSWORD = process.env.TEST_PASSWORD || 'testpass123'
 // 인스턴스에 직접 API 호출 (Vite 프록시 경유하지 않음)
-const INSTANCE_URL = process.env.INSTANCE_URL || 'http://127.0.0.1:3001'
+const INSTANCE_URL = process.env.INSTANCE_URL || 'http://127.0.0.1:3000'
 
 // API 요청용 access token
 let apiAccessToken = null
@@ -46,20 +46,17 @@ base.beforeAll(async ({ browser }, testInfo) => {
 
   await sharedPage.goto('/')
 
-  const instanceSelect = sharedPage.locator('.instance-select-btn').first()
   const passwordInput = sharedPage.locator('#password')
   const statusBar = sharedPage.locator('.status-bar')
 
-  await expect(instanceSelect.or(passwordInput).or(statusBar)).toBeVisible({ timeout: 15000 })
+  await expect(passwordInput.or(statusBar)).toBeVisible({ timeout: 15000 })
 
-  // 인스턴스 선택 화면이면 첫 번째 인스턴스 선택
-  if (await instanceSelect.isVisible()) {
-    await instanceSelect.click()
-    await expect(passwordInput.or(statusBar)).toBeVisible({ timeout: 10000 })
-  }
-
-  // 로그인 필요하면 로그인 (password만 입력)
+  // 로그인 필요하면 로그인 (username + password 입력)
   if (await passwordInput.isVisible()) {
+    const usernameInput = sharedPage.locator('#username')
+    if (await usernameInput.isVisible()) {
+      await usernameInput.fill(TEST_USERNAME)
+    }
     await sharedPage.locator('#password').fill(TEST_PASSWORD)
     await sharedPage.locator('.login-container button[type="submit"]').click()
   }

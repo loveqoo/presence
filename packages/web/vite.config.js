@@ -1,11 +1,18 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(import.meta.dirname, './src'),
+    },
+  },
   define: {
-    'import.meta.env.VITE_ORCHESTRATOR_URL': JSON.stringify(
-      process.env.ORCHESTRATOR_URL || 'http://127.0.0.1:3010'
+    'import.meta.env.VITE_SERVER_URL': JSON.stringify(
+      process.env.SERVER_URL || null
     ),
   },
 })

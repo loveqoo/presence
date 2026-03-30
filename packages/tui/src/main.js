@@ -3,9 +3,6 @@ import { render } from 'ink'
 import { createGlobalContext } from '@presence/infra/infra/global-context.js'
 import { createRemoteState } from '@presence/infra/infra/remote-state.js'
 import { createSession } from '@presence/infra/infra/session-factory.js'
-import { loadClientConfig, loadInstancesFile } from '@presence/infra/infra/config.js'
-import fp from '@presence/core/lib/fun-fp.js'
-const { Either } = fp
 import { App } from './ui/App.js'
 
 const h = React.createElement
@@ -63,57 +60,17 @@ const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
 // =============================================================================
 // View: Ink 렌더링. TTY 필요.
 //
-// ~/.presence/clients/{userId}.json 에서 서버 URL을 읽어 원격 접속.
-// 서버 미응답 시 오케스트레이터 자동 spawn 시도.
+// --server <url> 또는 PRESENCE_SERVER 환경변수로 서버 URL 지정.
 // =============================================================================
 
-// --- 클라이언트 설정 로드 ---
-
-const resolveUserId = () => {
-  // --instance anthony 또는 --instance=anthony
-  const eqIdx = process.argv.indexOf('--instance')
-  if (eqIdx !== -1 && process.argv[eqIdx + 1]) return process.argv[eqIdx + 1]
-  const eqArg = process.argv.find(a => a.startsWith('--instance='))
+// --- 서버 URL 결정: --server <url> → PRESENCE_SERVER env → default ---
+const resolveServerUrl = () => {
+  const argIdx = process.argv.indexOf('--server')
+  if (argIdx !== -1 && process.argv[argIdx + 1]) return process.argv[argIdx + 1]
+  const eqArg = process.argv.find(a => a.startsWith('--server='))
   if (eqArg) return eqArg.split('=')[1]
-  return null
-}
-
-// 오케스트레이터 URL 결정 (env → instances.json → default)
-const resolveOrchestratorUrl = () => {
-  if (process.env.ORCHESTRATOR_URL) return process.env.ORCHESTRATOR_URL
-  let url = 'http://127.0.0.1:3010'
-  Either.fold(
-    _ => {},
-    data => {
-      if (data?.orchestrator) {
-        const { host = '127.0.0.1', port = 3010 } = data.orchestrator
-        url = `http://${host}:${port}`
-      }
-    },
-    loadInstancesFile(),
-  )
-  return url
-}
-
-// 오케스트레이터에서 실행 중인 인스턴스 목록 조회
-const fetchRunningInstances = async (orchestratorUrl) => {
-  try {
-    const { default: http } = await import('node:http')
-    const url = new URL('/api/instances', orchestratorUrl)
-    return await new Promise((resolve) => {
-      const req = http.get({ hostname: url.hostname, port: url.port, path: url.pathname }, (res) => {
-        let buf = ''
-        res.on('data', d => { buf += d })
-        res.on('end', () => {
-          try { resolve(JSON.parse(buf)) } catch { resolve([]) }
-        })
-      })
-      req.on('error', () => resolve([]))
-      req.setTimeout(2000, () => { req.destroy(); resolve([]) })
-    })
-  } catch (_) {
-    return []
-  }
+  if (process.env.PRESENCE_SERVER) return process.env.PRESENCE_SERVER
+  return 'http://127.0.0.1:3000'
 }
 
 // 텍스트 입력 프롬프트 (readline)
@@ -250,8 +207,8 @@ const refreshAccessToken = async (baseUrl, refreshToken) => {
 }
 
 // mustChangePassword 흐름: 새 비밀번호 입력 → API 호출 → 새 토큰 반환
-const changePasswordFlow = async (baseUrl, instanceId, currentPassword, authState) => {
-  console.log(`\n[${instanceId}] 최초 로그인입니다. 새 비밀번호를 설정하세요.`)
+const changePasswordFlow = async (baseUrl, username, currentPassword, authState) => {
+  console.log(`\n[${username}] 최초 로그인입니다. 새 비밀번호를 설정하세요.`)
   for (let attempt = 0; attempt < 3; attempt++) {
     const newPassword = await promptPassword('새 비밀번호: ')
     const confirmPassword = await promptPassword('새 비밀번호 확인: ')
@@ -277,32 +234,8 @@ const changePasswordFlow = async (baseUrl, instanceId, currentPassword, authStat
   process.exit(1)
 }
 
-// 서버가 응답할 때까지 폴링 (최대 10초)
-const waitForServer = async (baseUrl, { maxMs = 10_000, intervalMs = 300 } = {}) => {
-  const deadline = Date.now() + maxMs
-  while (Date.now() < deadline) {
-    const { reachable } = await checkServer(baseUrl)
-    if (reachable) return true
-    await new Promise(r => setTimeout(r, intervalMs))
-  }
-  return false
-}
-
-// 오케스트레이터 프로세스 백그라운드 spawn (터미널 종료 후에도 유지)
-const spawnOrchestrator = async () => {
-  const { spawn } = await import('node:child_process')
-  const { createRequire } = await import('node:module')
-  const orchestratorPath = createRequire(import.meta.url).resolve('@presence/orchestrator')
-  const child = spawn(process.execPath, [orchestratorPath], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env },
-  })
-  child.unref()
-}
-
 // 원격 모드: WS 상태 미러링 + REST 커맨드
-const runRemote = async (baseUrl, { authState } = {}) => {
+const runRemote = async (baseUrl, { authState, username } = {}) => {
   const wsUrl = baseUrl.replace(/^http/, 'ws')
 
   // --- 401 자동 갱신 (단일 refreshPromise 동시성 제어) ---
@@ -381,7 +314,7 @@ const runRemote = async (baseUrl, { authState } = {}) => {
   const onDeleteSession = (id) => httpDelete(`/api/sessions/${id}`)
 
   // --- 세션 상태 (mutable) ---
-  let currentSessionId = 'user-default'
+  let currentSessionId = username ? `${username}-default` : 'user-default'
   const wsHeaders = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : undefined
   let remoteState = createRemoteState({ wsUrl, sessionId: currentSessionId, headers: wsHeaders })
   let currentTools = []
@@ -449,7 +382,8 @@ const runRemote = async (baseUrl, { authState } = {}) => {
     currentSessionId = newId
     const newWsHeaders = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : undefined
     remoteState = createRemoteState({ wsUrl, sessionId: newId, headers: newWsHeaders })
-    const toolsPath = newId === 'user-default' ? '/api/tools' : `/api/sessions/${newId}/tools`
+    const defaultSessionId = username ? `${username}-default` : 'user-default'
+    const toolsPath = newId === defaultSessionId ? '/api/tools' : `/api/sessions/${newId}/tools`
     currentTools = await getJson(toolsPath).catch(() => currentTools)
     if (rerender) rerender(h(App, buildAppProps()))
   }
@@ -470,99 +404,32 @@ const runRemote = async (baseUrl, { authState } = {}) => {
 
 
 /**
- * TUI entry point: resolves the instance ID from CLI args or orchestrator discovery,
- * loads client config, optionally spawns the orchestrator, authenticates (with
- * mustChangePassword support), then renders the Ink UI over a remote WebSocket connection.
+ * TUI entry point: resolves server URL from --server CLI arg or PRESENCE_SERVER env,
+ * checks server reachability, authenticates if required (with mustChangePassword support),
+ * then renders the Ink UI over a remote WebSocket connection.
  * @returns {Promise<void>}
  */
 const main = async () => {
-  let userId = resolveUserId()
+  const baseUrl = resolveServerUrl()
 
-  // --- 인스턴스 디스커버리: --instance 미지정 시 오케스트레이터에서 목록 조회 ---
-  if (!userId) {
-    const orchestratorUrl = resolveOrchestratorUrl()
-    const instances = await fetchRunningInstances(orchestratorUrl)
-    const running = Array.isArray(instances)
-      ? instances.filter(i => i.status === 'running' || i.enabled !== false)
-      : []
-
-    if (running.length === 0) {
-      console.error('실행 중인 인스턴스를 찾을 수 없습니다.')
-      console.error('사용법: npm run start:cli -- --instance <user-id>')
-      console.error(`오케스트레이터(${orchestratorUrl})가 실행 중인지 확인하세요.`)
-      process.exit(1)
-    }
-
-    if (running.length === 1) {
-      userId = running[0].id
-      console.log(`인스턴스 [${userId}]에 연결합니다.`)
-    } else {
-      console.log('연결할 인스턴스를 선택하세요:')
-      running.forEach((inst, idx) => {
-        console.log(`  ${idx + 1}. ${inst.id}`)
-      })
-      const answer = await promptInput('번호 입력: ')
-      const num = parseInt(answer, 10)
-      if (isNaN(num) || num < 1 || num > running.length) {
-        console.error('잘못된 번호입니다.')
-        process.exit(1)
-      }
-      userId = running[num - 1].id
-    }
-  }
-
-  // --- 인스턴스 URL 결정: 클라이언트 설정 → 오케스트레이터 인스턴스 목록 ---
-  let baseUrl = null
-
-  const clientConfigResult = loadClientConfig(userId)
-  let clientConfig = null
-  if (typeof clientConfigResult.fold === 'function') {
-    clientConfigResult.fold(_ => {}, cfg => { clientConfig = cfg })
-  }
-  if (clientConfig?.server?.url) {
-    baseUrl = clientConfig.server.url
-  } else {
-    // 클라이언트 설정 없음: 오케스트레이터에서 인스턴스 URL 조회
-    const orchestratorUrl = resolveOrchestratorUrl()
-    const instances = await fetchRunningInstances(orchestratorUrl)
-    const found = Array.isArray(instances) ? instances.find(i => i.id === userId) : null
-    if (found?.url) {
-      baseUrl = found.url
-    } else if (found?.port) {
-      const host = found.host || '127.0.0.1'
-      baseUrl = `http://${host}:${found.port}`
-    } else {
-      console.error(`클라이언트 설정을 찾을 수 없습니다: ${userId}`)
-      console.error(`~/.presence/clients/${userId}.json 파일을 생성하거나 오케스트레이터를 실행하세요.`)
-      console.error(`예시: { "instanceId": "${userId}", "server": { "url": "http://127.0.0.1:3001" } }`)
-      process.exit(1)
-    }
-  }
-
+  // --- 서버 생존 여부 확인 ---
   const serverStatus = await checkServer(baseUrl)
   if (!serverStatus.reachable) {
-    console.log(`서버에 연결할 수 없습니다: ${baseUrl}`)
-    console.log('오케스트레이터를 시작합니다...')
-    await spawnOrchestrator()
-    const ready = await waitForServer(baseUrl)
-    if (!ready) {
-      console.error('서버 시작 실패. 오케스트레이터를 수동으로 시작하세요: npm start')
-      process.exit(1)
-    }
-    // 재확인
-    const recheckStatus = await checkServer(baseUrl)
-    serverStatus.authRequired = recheckStatus.authRequired
+    console.error(`서버에 연결할 수 없습니다: ${baseUrl}`)
+    console.error('서버가 실행 중인지 확인하세요: npm start')
+    process.exit(1)
   }
 
-  // --- 인증 (username = instanceId, 암묵적) ---
+  // --- 인증 ---
   let authState = null
+  let username = null
   if (serverStatus.authRequired) {
-    console.log(`인스턴스 [${userId}]에 로그인합니다.`)
+    username = await promptInput('사용자명: ')
     const maxAttempts = 3
     let lastPassword = null
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const password = await promptPassword(`${userId} 비밀번호: `)
-      const res = await loginToServer(baseUrl, userId, password)
+      const password = await promptPassword('비밀번호: ')
+      const res = await loginToServer(baseUrl, username, password)
       if (res.status === 200) {
         authState = {
           accessToken: res.body.accessToken,
@@ -571,7 +438,7 @@ const main = async () => {
         lastPassword = password
         // mustChangePassword 처리
         if (res.body.mustChangePassword) {
-          authState = await changePasswordFlow(baseUrl, userId, lastPassword, authState)
+          authState = await changePasswordFlow(baseUrl, username, lastPassword, authState)
         }
         break
       }
@@ -584,7 +451,7 @@ const main = async () => {
     }
   }
 
-  return runRemote(baseUrl, { authState })
+  return runRemote(baseUrl, { authState, username })
 }
 
 export { main, bootstrap, createGlobalContext, createSession }

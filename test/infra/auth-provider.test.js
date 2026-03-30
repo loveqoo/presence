@@ -20,7 +20,7 @@ const forkToPromise = (task) => new Promise((resolve, reject) =>
 
 function createTmpDir() {
   const dir = join(tmpdir(), `presence-auth-provider-${Date.now()}`)
-  mkdirSync(join(dir, 'instances'), { recursive: true })
+  mkdirSync(dir, { recursive: true })
   return dir
 }
 
@@ -31,7 +31,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     const provider = createLocalAuthProvider(store)
@@ -51,7 +51,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     const provider = createLocalAuthProvider(store)
@@ -66,7 +66,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     const provider = createLocalAuthProvider(store)
@@ -81,7 +81,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     const provider = createLocalAuthProvider(store)
@@ -98,7 +98,7 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     const provider = createLocalAuthProvider(store)
@@ -121,8 +121,8 @@ async function run() {
 
   {
     const dir = createTmpDir()
-    const store = createUserStore('test', { basePath: dir })
-    const tokenService = createTokenService('test', { basePath: dir })
+    const store = createUserStore({ basePath: dir })
+    const tokenService = createTokenService({ basePath: dir })
     await store.addUser('alice', 'password123')
 
     const provider = createLocalAuthProvider(store)
