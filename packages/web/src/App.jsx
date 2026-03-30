@@ -11,7 +11,7 @@ import LoginPage from './components/LoginPage'
 import ChangePasswordPage from './components/ChangePasswordPage'
 
 function App() {
-  const [currentSessionId, setCurrentSessionId] = useState('user-default')
+  const [currentSessionId, setCurrentSessionId] = useState(null)
   const [showSessionPanel, setShowSessionPanel] = useState(false)
 
   const {
@@ -30,7 +30,14 @@ function App() {
     if (instanceUrl) checkAuthRequired()
   }, [instanceUrl, checkAuthRequired])
 
-  const canConnect = authRequired === false || (isAuthenticated && !mustChangePassword)
+  // user 복원 시 sessionId 설정
+  useEffect(() => {
+    if (user?.username && !currentSessionId) {
+      setCurrentSessionId(`${user.username}-default`)
+    }
+  }, [user, currentSessionId])
+
+  const canConnect = currentSessionId && (authRequired === false || (isAuthenticated && !mustChangePassword))
 
   const {
     connected, status, turn, messages, streaming, approve, tools,
@@ -39,6 +46,7 @@ function App() {
 
   const handleLogin = async (username, password) => {
     await instanceLogin(username, password)
+    setCurrentSessionId(`${username}-default`)
   }
 
   const handleChangePassword = async (currentPassword, newPassword) => {

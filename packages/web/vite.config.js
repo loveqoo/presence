@@ -12,7 +12,7 @@ export default defineConfig({
   },
   define: {
     'import.meta.env.VITE_SERVER_URL': JSON.stringify(
-      process.env.SERVER_URL || null
+      process.env.SERVER_URL || 'http://127.0.0.1:3000'
     ),
   },
 })

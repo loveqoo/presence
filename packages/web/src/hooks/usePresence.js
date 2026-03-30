@@ -53,9 +53,7 @@ const usePresence = (sessionId = 'user-default', { instanceUrl, authFetch, acces
   // tools 로드
   const loadTools = useCallback(() => {
     if (!instanceUrl) return
-    const url = sessionId === 'user-default'
-      ? `${instanceUrl}/api/tools`
-      : `${instanceUrl}/api/sessions/${sessionId}/tools`
+    const url = `${instanceUrl}/api/sessions/${sessionId}/tools`
     fetchFn(url).then(r => r.json()).then(setTools).catch(() => {})
   }, [sessionId, fetchFn, instanceUrl])
 
@@ -146,8 +144,8 @@ const usePresence = (sessionId = 'user-default', { instanceUrl, authFetch, acces
     }
   }, [sessionId, loadTools, accessToken, enabled, instanceUrl, send])
 
-  const apiBase = instanceUrl
-    ? (sessionId === 'user-default' ? `${instanceUrl}/api` : `${instanceUrl}/api/sessions/${sessionId}`)
+  const apiBase = instanceUrl && sessionId
+    ? `${instanceUrl}/api/sessions/${sessionId}`
     : null
 
   const sendMessage = useCallback(async (input) => {

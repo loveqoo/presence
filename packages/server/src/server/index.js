@@ -1,9 +1,10 @@
 import { createServer } from 'node:http'
+import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import { createGlobalContext } from '@presence/infra/infra/global-context.js'
-import { loadServerConfig } from '@presence/infra/infra/config.js'
+import { loadServerConfig, defaultPresenceDir } from '@presence/infra/infra/config.js'
 import { createSessionManager } from '@presence/infra/infra/session-manager.js'
 import { createSchedulerActor } from '@presence/infra/infra/scheduler-actor.js'
 import { clearDebugState } from '@presence/core/core/agent.js'
@@ -442,19 +443,37 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     })
   })
 
-  // 레거시 라우트 (user-default)
-  expressApp.use('/api', sessionRoutesR.run({ session: defaultSession, globalCtx }))
-
-  // 세션별 라우트: /api/sessions/:sessionId/*
+  // 세션별 라우트: /api/sessions/:sessionId/* (레거시 /api 라우트보다 먼저 매칭)
   // 세션 접근 제어: 인증된 경우 세션 소유자(owner) 확인
-  expressApp.use('/api/sessions/:sessionId', express.json(), (req, res, next) => {
-    const entry = sessionManager.get(req.params.sessionId)
-    if (!entry) return res.status(404).json({ error: `Session not found: ${req.params.sessionId}` })
+  expressApp.use('/api/sessions/:sessionId', express.json(), async (req, res, next) => {
+    const sessionId = req.params.sessionId
+    const username = req.user?.username
+    console.log(`[session-middleware] sessionId=${sessionId} username=${username} authEnabled=${authEnabled} hasUCM=${!!userContextManager}`)
+
+    // 유저 컨텍스트 확보 (on-demand)
+    let userCtx = null
+    if (authEnabled && username && userContextManager) {
+      userCtx = await userContextManager.getOrCreate(username)
+      userContextManager.touch(username)
+    }
+
+    const sm = userCtx?.sessionManager || sessionManager
+    let entry = sm.get(sessionId)
+
+    // 세션이 없으면 자동 생성 ({username}-default 패턴)
+    if (!entry && username && sessionId === `${username}-default`) {
+      const persistenceCwd = join(defaultPresenceDir(), 'users', username)
+      entry = sm.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username })
+    }
+
+    if (!entry) return res.status(404).json({ error: `Session not found: ${sessionId}` })
+
     // 인증 활성화 시 소유자 검증
-    if (authEnabled && req.user?.username && entry.owner !== null && entry.owner !== req.user.username) {
+    if (authEnabled && username && entry.owner !== null && entry.owner !== username) {
       return res.status(403).json({ error: 'Access denied: session belongs to another user' })
     }
     req.presenceSession = entry
+    req.presenceGlobalCtx = userCtx?.globalCtx || globalCtx
     next()
   })
   expressApp.post('/api/sessions/:sessionId/chat', async (req, res) => {
@@ -513,6 +532,9 @@ const startServer = async (configOverride, { port = 3000, host = '127.0.0.1', pe
     await sessionManager.destroy(sessionId)
     res.json({ ok: true })
   })
+
+  // 레거시 라우트 (user-default) — 세션별 라우트 이후 매칭
+  expressApp.use('/api', sessionRoutesR.run({ session: defaultSession, globalCtx }))
 
   // UserContextManager 초기화 (인증 활성화 시)
   // 서버 전체 공유 globalCtx와 별개로, 사용자별 전용 globalCtx를 관리
