@@ -6,7 +6,7 @@ import {
 import { migrateHistoryIds } from '@presence/infra/infra/persistence.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 
-import { assert, assertDeepEqual, summary } from '../lib/assert.js'
+import { assert, assertDeepEqual, summary } from '../../../../test/lib/assert.js'
 
 // --- 헬퍼 ---
 const makeHistory = (n) => Array.from({ length: n }, (_, i) => ({

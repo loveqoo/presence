@@ -1,10 +1,13 @@
-import { createAgentTurn, createAgent, safeRunTurn, applyFinalState, PHASE, RESULT, Phase, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
+import { PHASE, RESULT, ERROR_KIND } from '@presence/core/core/policies.js'
+import { Phase, ErrorInfo } from '@presence/core/core/turn.js'
+import { Agent } from '@presence/core/core/agent.js'
+import { applyFinalState } from '@presence/core/core/stateCommit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
 import { eventActorR, emitR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
-import { runFreeWithStateT } from '@presence/core/core/op.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 
 import { assert, summary } from '../lib/assert.js'
 
@@ -130,9 +133,9 @@ async function run() {
       },
     })
 
-    const turn = createAgentTurn({ tools: [], agents: agentReg.list() })
+    const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
     const initialState = state.snapshot()
-    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('보고서 요약해줘'))(initialState)
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('보고서 요약해줘'))(initialState)
     applyFinalState(state, finalState)
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 E2E: turnState idle')
@@ -166,8 +169,8 @@ async function run() {
       Delegate: (op) => DelegateResult.failed(op.target, 'Unknown agent'),
     })
 
-    const agent = createAgent({
-      buildTurn: createAgentTurn({ tools: [] }),
+    const agent = new Agent({
+      resolveTools: () => [],
       interpret, ST, state,
     })
     await agent.run('test')

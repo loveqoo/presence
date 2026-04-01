@@ -4,9 +4,10 @@
 import { assert, check, summary } from '../lib/assert.js'
 
 // --- @presence/core ---
-import { createAgent, createAgentTurn, PHASE } from '@presence/core/core/agent.js'
+import { PHASE } from '@presence/core/core/policies.js'
+import { Agent } from '@presence/core/core/agent.js'
 import { askLLM, executeTool, respond, updateState, getState } from '@presence/core/core/op.js'
-import { DEBUG, HISTORY, MEMORY, PROMPT, SESSION_TYPE } from '@presence/core/core/policies.js'
+import { DEBUG, HISTORY, PROMPT, SESSION_TYPE } from '@presence/core/core/policies.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { getByPath } from '@presence/core/lib/path.js'
@@ -23,8 +24,9 @@ import { initI18n, t } from '@presence/infra/i18n'
 console.log('Workspace smoke tests')
 
 // @presence/core
-assert(typeof createAgent === 'function',           'core: createAgent is a function')
-assert(typeof createAgentTurn === 'function',       'core: createAgentTurn is a function')
+assert(typeof Agent === 'function',                  'core: Agent is a class/function')
+assert(typeof new Agent({}).run === 'function',      'core: Agent.run is a method')
+assert(new Agent({}).planner != null,                'core: Agent.planner exists')
 assert(PHASE.IDLE === 'idle',                       'core: PHASE.IDLE === "idle"')
 assert(PHASE.WORKING === 'working',                 'core: PHASE.WORKING === "working"')
 assert(typeof askLLM === 'function',                'core: op.askLLM is a function')
@@ -34,7 +36,6 @@ assert(typeof updateState === 'function',           'core: op.updateState is a f
 assert(typeof getState === 'function',              'core: op.getState is a function')
 assert(typeof SESSION_TYPE.USER === 'string',       'core: SESSION_TYPE.USER is a string')
 assert(typeof HISTORY === 'object' && HISTORY !== null, 'core: HISTORY is an object')
-assert(typeof MEMORY === 'object' && MEMORY !== null,   'core: MEMORY is an object')
 assert(typeof PROMPT === 'object' && PROMPT !== null,   'core: PROMPT is an object')
 assert(typeof createTestInterpreter === 'function', 'core: createTestInterpreter is a function')
 assert(fp != null,                                  'core: fun-fp default export exists')

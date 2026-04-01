@@ -1,9 +1,20 @@
-/** Debug output limits. */
+// --- 턴 상태 ---
+
+export const PHASE = Object.freeze({ IDLE: 'idle', WORKING: 'working' })
+export const RESULT = Object.freeze({ SUCCESS: 'success', FAILURE: 'failure' })
+export const ERROR_KIND = Object.freeze({
+  PLANNER_PARSE:   'planner_parse',
+  PLANNER_SHAPE:   'planner_shape',
+  INTERPRETER:     'interpreter',
+  MAX_ITERATIONS:  'max_iterations',
+})
+
+// --- 실행 설정 ---
+
 export const DEBUG = Object.freeze({
   MAX_ITERATION_HISTORY: 10,
 })
 
-/** Conversation history rolling-window and compaction thresholds. */
 export const HISTORY = Object.freeze({
   MAX_CONVERSATION: 20,
   COMPACTION_THRESHOLD: 15,
@@ -12,13 +23,6 @@ export const HISTORY = Object.freeze({
   MAX_OUTPUT_CHARS: 1000,
 })
 
-/** Memory graph capacity and promotion rules. */
-export const MEMORY = Object.freeze({
-  MAX_EPISODIC: 100,
-  PROMOTION_THRESHOLD: 3,
-})
-
-/** Prompt assembly budget and truncation limits. */
 export const PROMPT = Object.freeze({
   RESULT_MAX_LEN: 500,
   SUMMARIZED_RESULT_MAX_LEN: 200,
@@ -26,14 +30,14 @@ export const PROMPT = Object.freeze({
   DEFAULT_RESERVED_OUTPUT_TOKENS: 1000,
 })
 
-/** Well-known system job identifiers used by SchedulerActor. */
+// --- 인프라 식별자 ---
+
 export const SYSTEM_JOBS = Object.freeze({
   TODO_REVIEW: '__todo_review__',
 })
 
-/** Session type discriminants for SessionManager lifecycle. */
 export const SESSION_TYPE = Object.freeze({
   USER: 'user',
   SCHEDULED: 'scheduled',
-  AGENT: 'agent',  // 서브 에이전트 세션: persistence 없음, 장기 유지
+  AGENT: 'agent',
 })

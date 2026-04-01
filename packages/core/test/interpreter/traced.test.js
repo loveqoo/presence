@@ -1,7 +1,8 @@
 import { createTracedInterpreter } from '@presence/core/interpreter/traced.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { askLLM, executeTool, respond, runFreeWithStateT } from '@presence/core/core/op.js'
-import { assert, summary } from '../lib/assert.js'
+import { askLLM, executeTool, respond } from '@presence/core/core/op.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 const msg = (t) => [{ role: 'user', content: t }]
 const initialState = {}

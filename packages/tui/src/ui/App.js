@@ -9,7 +9,7 @@ import { TranscriptOverlay } from './components/TranscriptOverlay.js'
 import { useAgentState } from './hooks/useAgentState.js'
 import { MarkdownText } from './components/MarkdownText.js'
 import { buildReport } from './report.js'
-import { clearDebugState } from '@presence/core/core/agent.js'
+import { clearDebugState } from '@presence/core/core/stateCommit.js'
 import { t } from '@presence/infra/i18n'
 
 const h = React.createElement

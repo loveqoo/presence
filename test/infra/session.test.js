@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createGlobalContext, createSession } from '@presence/tui'
-import { Phase } from '@presence/core/core/agent.js'
+import { Phase } from '@presence/core/core/turn.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))

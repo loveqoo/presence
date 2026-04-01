@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrap } from '@presence/tui'
-import { PHASE, RESULT } from '@presence/core/core/agent.js'
+import { PHASE, RESULT } from '@presence/core/core/policies.js'
 
 import { assert, summary } from '../lib/assert.js'
 
@@ -259,8 +259,8 @@ async function run() {
   // ===========================================
   {
     const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
-    const { createAgentTurn } = await import('@presence/core/core/agent.js')
-    const { runFreeWithStateT } = await import('@presence/core/core/op.js')
+    const { Agent } = await import('@presence/core/core/agent.js')
+    const { runFreeWithStateT } = await import('@presence/core/lib/runner.js')
 
     let llmCall = 0
     let capturedRollingContext = null
@@ -291,7 +291,8 @@ async function run() {
     })
 
     const initial = { turnState: { tag: 'idle' }, lastTurn: null, turn: 0, context: { memories: [] } }
-    const [result, finalState] = await runFreeWithStateT(interpret, ST)(createAgentTurn()('3가지 주제 검색해줘'))(initial)
+    const agent = new Agent({ interpret, ST })
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('3가지 주제 검색해줘'))(initial)
 
     // 3개 도구 모두 실행됨 (2번째는 에러 결과)
     assert(toolCall === 3, 'e2e-6: all 3 tools executed')

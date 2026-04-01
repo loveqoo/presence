@@ -1,5 +1,6 @@
 import { calcNextRun, validateCron } from './scheduler-actor.js'
 import { withEventMeta } from './events.js'
+import { fireAndForget } from '@presence/core/lib/task.js'
 
 // --- Job 관리 에이전트 툴 ---
 // toolRegistry.register()로 등록. store + eventActor 클로저로 캡처.
@@ -141,7 +142,7 @@ const createJobTools = ({ store, eventActor }) => {
           attempt: 1,
           allowedTools: job.allowedTools || [],
         })
-        eventActor.send({ type: 'enqueue', event }).fork(() => {}, () => {})
+        fireAndForget(eventActor.send({ type: 'enqueue', event }))
         return `Job 즉시 실행 요청됨: ${job.name} (runId: ${runId})`
       },
     },

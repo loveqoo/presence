@@ -7,7 +7,7 @@ import {
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { Phase } from '@presence/core/core/agent.js'
+import { Phase } from '@presence/core/core/turn.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {

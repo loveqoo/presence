@@ -1,19 +1,14 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import {
-  createAgentTurn, safeRunTurn, createAgent,
-  PHASE, RESULT, Phase,
-} from '@presence/core/core/agent.js'
+import { PHASE, RESULT } from '@presence/core/core/policies.js'
+import { Phase } from '@presence/core/core/turn.js'
+import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { turnActorR, memoryActorR, eventActorR, emitR, forkTask } from '@presence/infra/infra/actors.js'
-import { createMemoryGraph } from '@presence/infra/infra/memory.js'
+import { turnActorR, eventActorR, emitR, forkTask } from '@presence/infra/infra/actors.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 
-import { assert, summary } from '../lib/assert.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 async function run() {
   console.log('Turn concurrency tests')
@@ -37,7 +32,7 @@ async function run() {
       },
     })
 
-    const agent = createAgent({ interpret, ST, state })
+    const agent = new Agent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // 3개 동시 요청 — Actor가 직렬화
@@ -70,7 +65,7 @@ async function run() {
       },
     })
 
-    const agent = createAgent({ interpret, ST, state })
+    const agent = new Agent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     const [r1, r2] = await Promise.all([
@@ -97,7 +92,7 @@ async function run() {
       },
     })
 
-    const agent = createAgent({ interpret, ST, state })
+    const agent = new Agent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // 빠르게 5개 요청 (브라우저 탭 5개 동시 전송 시뮬레이션)
@@ -115,71 +110,51 @@ async function run() {
   // Issue 2: cleanup → recall 순서 보장
   // ===========================================
 
-  // C4. 턴 연쇄 시 cleanup이 recall보다 먼저 memoryActor 큐에 있는지
+  // C4. 턴 연쇄 시 save가 다음 턴 recall보다 먼저 memoryActor 큐에 있는지
   {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'presence-conc-'))
-    try {
-      const memory = await createMemoryGraph(join(tmpDir, 'mem'))
-      const memoryActorOps = []
-      // memoryActor 래핑: 메시지 순서 기록
-      const realMemoryActor = memoryActorR.run({ graph: memory, embedder: null, logger: null })
-      const trackingMemoryActor = {
-        send: (msg) => {
-          memoryActorOps.push(msg.type)
-          return realMemoryActor.send(msg)
-        },
-      }
-
-      const state = createReactiveState({
-        turnState: Phase.idle(), lastTurn: null, turn: 0,
-        context: { memories: [], conversationHistory: [] },
-      })
-      const { interpret, ST } = createTestInterpreter({
-        AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
-      })
-
-      const execute = safeRunTurn({ interpret, ST }, state, {
-        memoryActor: trackingMemoryActor,
-      })
-      const agent = createAgent({ interpret, ST, state, execute })
-
-      // 1st 턴
-      await agent.run('first', { source: 'user' })
-
-      // idle hook에서 2nd 턴 자동 시작 시뮬레이션
-      const execute2 = safeRunTurn({ interpret, ST }, state, {
-        memoryActor: trackingMemoryActor,
-      })
-      const agent2 = createAgent({ interpret, ST, state, execute: execute2 })
-      await agent2.run('second', { source: 'user' })
-
-      // memoryActor에서 1st 턴의 removeWorking이 2nd 턴의 recall보다 먼저인지
-      const removeIdx = memoryActorOps.indexOf('removeWorking')
-      const secondRecallIdx = memoryActorOps.lastIndexOf('recall')
-      assert(removeIdx !== -1, 'C4: removeWorking was sent')
-      assert(secondRecallIdx !== -1, 'C4: second recall was sent')
-      assert(removeIdx < secondRecallIdx, 'C4: removeWorking before second recall')
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true })
+    const memoryActorOps = []
+    const trackingMemoryActor = {
+      send: (msg) => {
+        memoryActorOps.push(msg.type)
+        if (msg.type === 'recall') return { fork: (_, cb) => cb([]) }
+        return { fork: (_, cb) => cb('ok') }
+      },
     }
+
+    const state = createReactiveState({
+      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      context: { memories: [], conversationHistory: [] },
+    })
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
+    })
+
+    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: trackingMemoryActor } })
+    await agent.run('first', { source: 'user' })
+    await agent.run('second', { source: 'user' })
+
+    const saveIdx = memoryActorOps.indexOf('save')
+    const secondRecallIdx = memoryActorOps.lastIndexOf('recall')
+    assert(saveIdx !== -1, 'C4: save was sent')
+    assert(secondRecallIdx !== -1, 'C4: second recall was sent')
+    assert(saveIdx < secondRecallIdx, 'C4: save before second recall')
   }
 
-  // C5. cleanup이 applyFinalState 이전에 큐잉되는지 (구조 검증)
-  //     finalState에서 lastTurn을 읽으므로 reactive state 미커밋 상태에서도 동작
+  // C5. save가 applyFinalState 이전에 큐잉되는지 (turnState=working 중에 전송)
   {
     const state = createReactiveState({
       turnState: Phase.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
-    let cleanupBeforeIdle = false
+    let saveBeforeIdle = false
     const memoryOps = []
     const trackingActor = {
       send: (msg) => {
         memoryOps.push(msg.type)
-        // idle hook 전에 cleanup이 왔는지 확인
-        if (msg.type === 'removeWorking') {
-          cleanupBeforeIdle = state.get('turnState')?.tag === 'working'
+        if (msg.type === 'save') {
+          saveBeforeIdle = state.get('turnState')?.tag === 'working'
         }
+        if (msg.type === 'recall') return { fork: (_, cb) => cb([]) }
         return { fork: (_, cb) => cb('ok') }
       },
     }
@@ -188,12 +163,11 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const execute = safeRunTurn({ interpret, ST }, state, { memoryActor: trackingActor })
-    const agent = createAgent({ interpret, ST, state, execute })
+    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: trackingActor } })
     await agent.run('test', { source: 'user' })
 
-    assert(cleanupBeforeIdle, 'C5: removeWorking sent while turnState still working')
-    assert(memoryOps.includes('removeWorking'), 'C5: removeWorking in ops')
+    assert(saveBeforeIdle, 'C5: save sent while turnState still working')
+    assert(memoryOps.includes('save'), 'C5: save in ops')
   }
 
   // ===========================================
@@ -218,7 +192,7 @@ async function run() {
       },
     })
 
-    const agent = createAgent({ interpret, ST, state })
+    const agent = new Agent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // EventActor + 브릿지 hook 연결

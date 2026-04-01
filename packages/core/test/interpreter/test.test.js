@@ -2,12 +2,12 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { getByPath } from '@presence/infra/infra/state.js'
 import {
-  askLLM, executeTool, respond, updateState, getState, Free,
-  runFreeWithStateT
+  askLLM, executeTool, respond, updateState, getState,
 } from '@presence/core/core/op.js'
-import { assert, summary } from '../lib/assert.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
-const { Task } = fp
+const { Free, Task } = fp
 const msg = (text) => [{ role: 'user', content: text }]
 
 async function run() {

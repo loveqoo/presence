@@ -1,5 +1,6 @@
 import { Cron } from 'croner'
 import fp from '@presence/core/lib/fun-fp.js'
+import { fireAndForget } from '@presence/core/lib/task.js'
 
 const { Actor, Task } = fp
 
@@ -28,7 +29,7 @@ const createSchedulerActor = ({ store, onDispatch, logger, pollIntervalMs = 60_0
       switch (msg.type) {
         case 'start': {
           if (s.running) return ['already-running', s]
-          setTimeout(() => actor.send({ type: 'tick' }).fork(() => {}, () => {}), pollIntervalMs)
+          setTimeout(() => fireAndForget(actor.send({ type: 'tick' })), pollIntervalMs)
           return ['started', { ...s, running: true }]
         }
 
@@ -38,9 +39,9 @@ const createSchedulerActor = ({ store, onDispatch, logger, pollIntervalMs = 60_0
 
         case 'tick': {
           if (!s.running) return ['no-op:stopped', s]
-          setTimeout(() => actor.send({ type: 'tick' }).fork(() => {}, () => {}), pollIntervalMs)
-          actor.send({ type: 'poll' }).fork(() => {}, () => {})
-          actor.send({ type: 'cleanup' }).fork(() => {}, () => {})
+          setTimeout(() => fireAndForget(actor.send({ type: 'tick' })), pollIntervalMs)
+          fireAndForget(actor.send({ type: 'poll' }))
+          fireAndForget(actor.send({ type: 'cleanup' }))
           return ['ticked', s]
         }
 

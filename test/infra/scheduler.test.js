@@ -7,7 +7,7 @@ import { createJobTools } from '@presence/infra/infra/job-tools.js'
 import { eventActorR, turnActorR } from '@presence/infra/infra/actors.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { eventToPrompt } from '@presence/infra/infra/events.js'
-import { Phase } from '@presence/core/core/agent.js'
+import { Phase } from '@presence/core/core/turn.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))

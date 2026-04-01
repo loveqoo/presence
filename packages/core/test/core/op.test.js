@@ -1,12 +1,16 @@
+import fp from '@presence/core/lib/fun-fp.js'
 import {
-  FUNCTOR, Free,
   AskLLM, ExecuteTool, Respond, Approve, Delegate,
   Observe, UpdateState, GetState, Parallel, Spawn,
   askLLM, executeTool, respond, approve, delegate,
   observe, updateState, getState, parallel, spawn,
 } from '@presence/core/core/op.js'
 
-import { assert, summary } from '../lib/assert.js'
+const { Free, Task } = fp
+
+const FUNCTOR = Symbol.for('fun-fp-js/Functor')
+
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 console.log('Op ADT tests')
 
@@ -70,9 +74,6 @@ const composed = askLLM({ messages: [{ role: 'user', content: 'hello' }] })
 assert(Free.isImpure(composed), 'askLLM.chain(respond) returns Impure')
 
 // Verify full chain with mock runner
-import fp from '@presence/core/lib/fun-fp.js'
-const { Task } = fp
-
 const runner = (functor) => {
   if (functor.tag === 'AskLLM') return Task.of(functor.next('llm-response'))
   if (functor.tag === 'Respond') return Task.of(functor.next('done'))

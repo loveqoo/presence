@@ -9,7 +9,9 @@ initI18n('ko')
 import { loadInstanceConfig } from '@presence/infra/infra/config.js'
 import { LLMClient } from '@presence/infra/infra/llm.js'
 import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
-import { createAgent, createAgentTurn, PHASE, RESULT, Phase } from '@presence/core/core/agent.js'
+import { PHASE, RESULT } from '@presence/core/core/policies.js'
+import { Phase } from '@presence/core/core/turn.js'
+import { Agent } from '@presence/core/core/agent.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createLocalTools } from '@presence/infra/infra/local-tools.js'
 import { createToolRegistry } from '@presence/infra/infra/tools.js'
@@ -18,7 +20,7 @@ import { Free } from '@presence/core/core/op.js'
 import { MemoryGraph } from '@presence/infra/infra/memory.js'
 import { createMemoryEmbedder } from '@presence/infra/infra/memory-embedder.js'
 import { memoryActorR } from '@presence/infra/infra/actors.js'
-import { safeRunTurn } from '@presence/core/core/agent.js'
+
 import { createEmbedder } from '@presence/infra/infra/embedding.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
@@ -66,18 +68,19 @@ function assert(condition, msg) {
 const runScenario = async (label, input, opts = {}) => {
   const { maxRetries = 2, maxIterations = 5, validate } = opts
   const state = initState()
-  const interpreter = createProdInterpreter({
+  const { interpret, ST } = createProdInterpreter({
     llm, toolRegistry, state, agentRegistry,
     onApprove: async () => true,  // 자동 승인
   })
 
-  const agent = createAgent({
-    tools: toolRegistry.list(),
-    agents: agentRegistry.list(),
+  const agent = new Agent({
+    resolveTools: () => toolRegistry.list(),
+    resolveAgents: () => agentRegistry.list(),
     responseFormatMode: config.llm.responseFormat,
     maxRetries,
     maxIterations,
-    interpreter,
+    interpret,
+    ST,
     state,
   })
 
@@ -295,15 +298,15 @@ async function run() {
     const { maxRetries = 2, maxIterations = 5, budget, validate, setupState } = opts
     const state = initState()
     if (setupState) setupState(state)
-    const interpreter = createProdInterpreter({
+    const { interpret, ST } = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
-    const agent = createAgent({
-      tools: toolRegistry.list(),
-      agents: agentRegistry.list(),
+    const agent = new Agent({
+      resolveTools: () => toolRegistry.list(),
+      resolveAgents: () => agentRegistry.list(),
       responseFormatMode: config.llm.responseFormat,
-      maxRetries, maxIterations, interpreter, state, budget,
+      maxRetries, maxIterations, interpret, ST, state, budget,
     })
 
     console.log(`\n  [${label}] ${turns.length} turns`)
@@ -412,16 +415,16 @@ async function run() {
 
     const memActor = memoryActorR.run({ graph: memory, embedder: null, logger: null })
 
-    const interpreter = createProdInterpreter({
+    const { interpret, ST } = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
-    const execute = safeRunTurn(interpreter, state, { memoryActor: memActor })
-    const agent = createAgent({
-      tools: toolRegistry.list(),
-      agents: agentRegistry.list(),
+    const agent = new Agent({
+      resolveTools: () => toolRegistry.list(),
+      resolveAgents: () => agentRegistry.list(),
       responseFormatMode: config.llm.responseFormat,
-      maxRetries: 2, maxIterations: 5, state, execute,
+      maxRetries: 2, maxIterations: 5, interpret, ST, state,
+      actors: { memoryActor: memActor },
     })
 
     console.log(`\n  [${label}] embedder=null memory recall test`)
@@ -502,16 +505,16 @@ async function run() {
 
     const memActor2 = memoryActorR.run({ graph: memory, embedder, logger: null })
 
-    const interpreter = createProdInterpreter({
+    const { interpret: interpret2, ST: ST2 } = createProdInterpreter({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
-    const execute2 = safeRunTurn(interpreter, state, { memoryActor: memActor2 })
-    const agent = createAgent({
-      tools: toolRegistry.list(),
-      agents: agentRegistry.list(),
+    const agent = new Agent({
+      resolveTools: () => toolRegistry.list(),
+      resolveAgents: () => agentRegistry.list(),
       responseFormatMode: config.llm.responseFormat,
-      maxRetries: 2, maxIterations: 5, state, execute: execute2,
+      maxRetries: 2, maxIterations: 5, interpret: interpret2, ST: ST2, state,
+      actors: { memoryActor: memActor2 },
     })
 
     // 프랑스 관련 질문 → "파리는 프랑스의 수도" 노드가 recall 되어야 함

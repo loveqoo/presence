@@ -9,7 +9,8 @@ import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/
 import { detectWholeCodeLang } from '@presence/tui/ui/components/MarkdownText.js'
 import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgentState.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
+import { ERROR_KIND } from '@presence/core/core/policies.js'
+import { Phase, TurnResult, ErrorInfo } from '@presence/core/core/turn.js'
 import { assert, summary } from '../lib/assert.js'
 
 console.log('UI component tests (renderToString)')

@@ -4,7 +4,7 @@ import {
 } from '@presence/infra/infra/a2a-client.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { Phase } from '@presence/core/core/agent.js'
+import { Phase } from '@presence/core/core/turn.js'
 import { delegateActorR, eventActorR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
 import { assert, summary } from '../lib/assert.js'
 

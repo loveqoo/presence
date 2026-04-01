@@ -3,11 +3,13 @@ import { createToolRegistry } from './tools.js'
 import { createPersistence, migrateHistoryIds } from './persistence.js'
 import { createTracedInterpreter } from '@presence/core/interpreter/traced.js'
 import { createProdInterpreter } from '../interpreter/prod.js'
-import { createAgent, createAgentTurn, safeRunTurn, PHASE, Phase } from '@presence/core/core/agent.js'
-import { PROMPT, SYSTEM_JOBS, SESSION_TYPE } from '@presence/core/core/policies.js'
+import { PHASE, PROMPT, SYSTEM_JOBS, SESSION_TYPE } from '@presence/core/core/policies.js'
+import { Phase } from '@presence/core/core/turn.js'
+import { Agent } from '@presence/core/core/agent.js'
 import { createJobTools } from './job-tools.js'
 import { createSchedulerActor, calcNextRun } from './scheduler-actor.js'
 import { charsToTokens } from '@presence/core/lib/tokenizer.js'
+import { fireAndForget } from '@presence/core/lib/task.js'
 import {
   memoryActorR, compactionActorR, persistenceActorR,
   turnActorR, eventActorR, emitR, budgetActorR, delegateActorR,
@@ -165,19 +167,17 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   const getAgents = () => agentRegistry.list()
   const responseFormatMode = config.llm.responseFormat
 
-  const execute = safeRunTurn({ interpret: tracedInterpret, ST }, state, {
-    memoryActor, compactionActor, persistenceActor, logger,
-  })
-  const agent = createAgent({
-    getTools, getAgents, persona: personaConfig,
+  const agent = new Agent({
+    resolveTools: getTools,
+    resolveAgents: getAgents,
+    persona: personaConfig,
     responseFormatMode,
     maxRetries: config.llm.maxRetries,
     maxIterations: config.maxIterations,
-    interpret: tracedInterpret, ST,
-    state,
     budget: resolveBudget(config.prompt),
-    execute,
     t,
+    interpret: tracedInterpret, ST, state,
+    actors: { memoryActor, compactionActor, persistenceActor, logger },
   })
 
   // --- TurnActor: 모든 턴 요청 직렬화 (Reader.run) ---
@@ -191,15 +191,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     )
     if (effectiveTools.length === currentTools.length) return agent.run(input, opts)
 
-    const filteredTurn = createAgentTurn({
-      tools: effectiveTools, getAgents, persona: personaConfig,
-      responseFormatMode,
-      maxRetries: config.llm.maxRetries,
-      maxIterations: config.maxIterations,
-      budget: resolveBudget(config.prompt),
-      t,
-    })
-    return execute(filteredTurn(input, opts), input)
+    return agent.withTools(effectiveTools).run(input, opts)
   } })
 
   // --- Actors (비동기 비즈니스 로직 통합) ---
@@ -213,12 +205,12 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
         onScheduledJobDone(event, { success, result, error })
       } else if (schedulerActor) {
         if (success) {
-          schedulerActor.send({ type: 'job_done', runId: event.runId, jobId: event.jobId, result }).fork(() => {}, () => {})
+          fireAndForget(schedulerActor.send({ type: 'job_done', runId: event.runId, jobId: event.jobId, result }))
         } else {
-          schedulerActor.send({
+          fireAndForget(schedulerActor.send({
             type: 'job_fail', runId: event.runId, jobId: event.jobId,
             attempt: event.attempt ?? 1, error,
-          }).fork(() => {}, () => {})
+          }))
         }
       }
     },
@@ -231,7 +223,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   // ephemeral 세션이거나 외부 스케줄러(onScheduledJobDone)가 제공되면 로컬 스케줄러 생성 안 함
   schedulerActor = (isEphemeral || onScheduledJobDone) ? null : createSchedulerActor({
     store: jobStore,
-    onDispatch: (event) => eventActor.send({ type: 'enqueue', event }).fork(() => {}, () => {}),
+    onDispatch: (event) => fireAndForget(eventActor.send({ type: 'enqueue', event })),
     logger,
     pollIntervalMs: config.scheduler.pollIntervalMs,
   })
@@ -274,8 +266,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
   let _idleTimer = null
   state.hooks.on('turnState', (phase) => {
     if (phase.tag === 'idle') {
-      eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
-      delegateActor.send({ type: 'poll' }).fork(() => {}, () => {})
+      fireAndForget(eventActor.send({ type: 'drain' }))
+      fireAndForget(delegateActor.send({ type: 'poll' }))
       if (idleTimeoutMs && onIdle) {
         _idleTimer = setTimeout(() => {
           const events = state.get('events')
@@ -291,7 +283,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
     }
   })
   state.hooks.on('_debug.lastTurn', (debug, s) => {
-    budgetActor.send({ type: 'check', debug, turn: s.get('turn') }).fork(() => {}, () => {})
+    fireAndForget(budgetActor.send({ type: 'check', debug, turn: s.get('turn') }))
   })
 
   // --- Controller: Input handler (TurnActor 경유) ---
@@ -318,8 +310,8 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
 
   // --- Shutdown (세션 자원만. jobStore/MCP는 globalCtx.shutdown이 처리) ---
   const shutdown = async () => {
-    schedulerActor?.send({ type: 'stop' }).fork(() => {}, () => {})
-    delegateActor.send({ type: 'stop' }).fork(() => {}, () => {})
+    if (schedulerActor) fireAndForget(schedulerActor.send({ type: 'stop' }))
+    fireAndForget(delegateActor.send({ type: 'stop' }))
     if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null }
     if (!isEphemeral) {
       try {

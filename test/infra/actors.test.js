@@ -10,6 +10,10 @@ import {
 import {
   extractForCompaction, createSummaryEntry, SUMMARY_MARKER,
 } from '@presence/infra/infra/history-compaction.js'
+import { Agent } from '@presence/core/core/agent.js'
+import { PHASE, RESULT } from '@presence/core/core/policies.js'
+import { Phase, TurnResult } from '@presence/core/core/turn.js'
+import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp
@@ -463,8 +467,6 @@ async function run() {
 
   // I1. recall 성공 → context.memories 반영
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
-    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const mockMem0 = makeMockMem0({ searchResult: [{ memory: 'recall target' }] })
     const memActor = memoryActorR.run({ mem0: mockMem0, adapter: null, logger: null })
@@ -477,9 +479,8 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state, { memoryActor: memActor })
-    const turn = createAgentTurn()
-    await safe(turn('hello'), 'hello')
+    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: memActor } })
+    await agent.run('hello')
 
     assert(state.get('turn') === 1, 'integration recall: turn incremented')
     assert(Array.isArray(state.get('context.memories')), 'integration recall: memories is array')
@@ -487,8 +488,6 @@ async function run() {
 
   // I2. recall 실패 → context.memories=[], 턴 계속
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
-    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     // Create a mock actor that fails on recall
     const failActor = fp.Actor({
@@ -510,9 +509,8 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'still ok' }),
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state, { memoryActor: failActor, logger: mockLogger })
-    const turn = createAgentTurn()
-    const result = await safe(turn('test'), 'test')
+    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: failActor, logger: mockLogger } })
+    const result = await agent.run('test')
 
     assert(result === 'still ok', 'integration recall fail: turn completes')
     assert(state.get('turn') === 1, 'integration recall fail: turn incremented')
@@ -520,11 +518,8 @@ async function run() {
     assert(logs.some(l => l.msg === 'Memory recall failed'), 'integration recall fail: logged')
   }
 
-  // I3. 후처리 순서: save → removeWorking → embed → prune → promote → saveDisk
+  // I3. 후처리 순서: recall → save (성공 턴)
   {
-    const { safeRunTurn, createAgentTurn, Phase, TurnResult, RESULT } = await import('@presence/core/core/agent.js')
-    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
-
     const order = []
     const mockActor = fp.Actor({
       init: {},
@@ -542,29 +537,17 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'result' }),
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state, { memoryActor: mockActor })
-    const turn = createAgentTurn()
-    await safe(turn('test', { source: 'user' }), 'test')
+    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: mockActor } })
+    await agent.run('test', { source: 'user' })
 
-    // Wait for fire-and-forget messages to process
     await delay(50)
 
-    // First message is recall (awaited), then post-turn messages
     assert(order[0] === 'recall', 'integration order: recall first')
-    const postTurn = order.slice(1)
-    assert(postTurn[0] === 'save', 'integration order: save after recall')
-    assert(postTurn[1] === 'removeWorking', 'integration order: removeWorking')
-    assert(postTurn[2] === 'embed', 'integration order: embed')
-    assert(postTurn[3] === 'prune', 'integration order: prune')
-    assert(postTurn[4] === 'promote', 'integration order: promote')
-    assert(postTurn[5] === 'saveDisk', 'integration order: saveDisk last')
+    assert(order[1] === 'save', 'integration order: save after recall')
   }
 
-  // I4. 실패 턴 → save 메시지 안 보냄 (node save), 나머지 후처리 실행
+  // I4. 실패 턴 → save 메시지 안 보냄
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
-    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
-
     const messages = []
     const mockActor = fp.Actor({
       init: {},
@@ -582,21 +565,16 @@ async function run() {
       AskLLM: () => '<<<invalid json>>>',
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state, { memoryActor: mockActor })
-    const turn = createAgentTurn()
-    await safe(turn('fail-test'), 'fail-test')
+    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: mockActor } })
+    await agent.run('fail-test')
     await delay(50)
 
     const postRecall = messages.slice(1)
-    assert(!postRecall.includes('save') || postRecall[0] !== 'save',
-      'integration failure: no node save on failed turn')
-    assert(postRecall.includes('removeWorking'), 'integration failure: removeWorking still runs')
+    assert(!postRecall.includes('save'), 'integration failure: no save on failed turn')
   }
 
   // I5. persistenceActor: 성공 턴 후 save 메시지
   {
-    const { safeRunTurn, createAgentTurn, Phase } = await import('@presence/core/core/agent.js')
-    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
@@ -610,9 +588,8 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state, { persistenceActor: pActor })
-    const turn = createAgentTurn()
-    await safe(turn('persist-test'), 'persist-test')
+    const agent = new Agent({ interpret, ST, state, actors: { persistenceActor: pActor } })
+    await agent.run('persist-test')
 
     await delay(80)
     assert(stored.agentState != null, 'integration persistence: state saved after turn')
@@ -621,8 +598,6 @@ async function run() {
 
   // I6. persistenceActor: 에러 턴 후에도 save
   {
-    const { safeRunTurn, createAgentTurn, Phase, PHASE } = await import('@presence/core/core/agent.js')
-    const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
 
     const stored = {}
     const mockStore = { set: (k, v) => { stored[k] = v } }
@@ -636,10 +611,9 @@ async function run() {
       AskLLM: () => { throw new Error('crash') },
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state, { persistenceActor: pActor })
-    const turn = createAgentTurn()
+    const agent = new Agent({ interpret, ST, state, actors: { persistenceActor: pActor } })
     try {
-      await safe(turn('crash-test'), 'crash-test')
+      await agent.run('crash-test')
     } catch (_) {}
 
     await delay(80)

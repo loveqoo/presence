@@ -2,12 +2,15 @@ import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+import fp from '@presence/core/lib/fun-fp.js'
 import {
   askLLM, executeTool, respond, approve, delegate,
-  observe, updateState, getState, parallel, Free,
-  runFreeWithStateT,
+  observe, updateState, getState, parallel,
 } from '@presence/core/core/op.js'
-import { assert, summary } from '../lib/assert.js'
+
+const { Free } = fp
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 const msg = (text) => [{ role: 'user', content: text }]
 
@@ -380,9 +383,9 @@ async function run() {
 
     const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg })
 
-    const { createAgentTurn } = await import('@presence/core/core/agent.js')
-    const turn = createAgentTurn({ tools: [], agents: agentReg.list() })
-    const [result] = await runFreeWithStateT(interpret, ST)(turn('보고서 요약해줘'))({})
+    const { Agent } = await import('@presence/core/core/agent.js')
+    const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
+    const [result] = await runFreeWithStateT(interpret, ST)(agent.planner.program('보고서 요약해줘'))({})
 
     // RESPOND가 DelegateResult를 직접 전달 (formatter 없음)
     assert(result != null && result.status === 'completed', 'full delegate path: returns DelegateResult')

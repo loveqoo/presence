@@ -1,13 +1,13 @@
-import {
-  parsePlan, normalizeStep, defaultRules,
-  normalizeExecToDelegate, normalizeExecToApprove,
-  validateStep, argValidators, resolveRefs, resolveStringRefs, resolveToolArgs,
-} from '@presence/core/core/plan.js'
+import { ops } from '@presence/core/core/opHandler.js'
+import { parsePlan } from '@presence/core/core/planner.js'
+import { validateStep } from '@presence/core/core/validate.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { runFreeWithStateT } from '@presence/core/core/op.js'
-import { Either } from '@presence/core/core/op.js'
+import fp from '@presence/core/lib/fun-fp.js'
 
-import { assert, summary } from '../lib/assert.js'
+const { Either } = fp
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
+
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b)
@@ -16,21 +16,16 @@ function deepEqual(a, b) {
 async function run() {
   console.log('Plan parser tests')
 
-  // --- Utility tests ---
+  // --- Op 메서드 테스트 ---
 
-  // resolveRefs
-  assert(deepEqual(resolveRefs([1, 2], ['a', 'b', 'c']), ['a', 'b']), 'resolveRefs: [1,2] → first two results')
-  assert(deepEqual(resolveRefs(null, []), []), 'resolveRefs: null → empty')
-  assert(deepEqual(resolveRefs([5], ['a']), []), 'resolveRefs: out of range → filtered')
+  // AskLlmOp.resolveCtx
+  assert(deepEqual(ops.ASK_LLM.resolveCtx([1, 2], ['a', 'b', 'c']), ['a', 'b']), 'resolveCtx: [1,2] → first two results')
+  assert(deepEqual(ops.ASK_LLM.resolveCtx(null, []), []), 'resolveCtx: null → empty')
+  assert(deepEqual(ops.ASK_LLM.resolveCtx([5], ['a']), []), 'resolveCtx: out of range → filtered')
 
-  // resolveStringRefs
-  assert(resolveStringRefs('hello $1', ['world']) === 'hello world', 'resolveStringRefs: $1 replaced')
-  assert(resolveStringRefs('$1 and $2', ['a', 'b']) === 'a and b', 'resolveStringRefs: multiple refs')
-  assert(resolveStringRefs('no refs', []) === 'no refs', 'resolveStringRefs: no refs unchanged')
-
-  // resolveToolArgs
+  // ExecOp.resolveToolArgs
   assert(deepEqual(
-    resolveToolArgs({ msg: '$1', count: 5 }, ['hello']),
+    ops.EXEC.resolveToolArgs({ msg: '$1', count: 5 }, ['hello']),
     { msg: 'hello', count: 5 }
   ), 'resolveToolArgs: replaces string refs, keeps numbers')
 
@@ -65,11 +60,11 @@ async function run() {
   assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: [-1] } })), 'validateStep: ASK_LLM ctx=[-1] → Left')
   assert(Either.isLeft(validateStep({ op: 'ASK_LLM', args: { prompt: 'q', ctx: [1.5] } })), 'validateStep: ASK_LLM ctx=[1.5] → Left')
 
-  // argValidators 단위
-  assert(Either.isRight(argValidators.EXEC({ tool: 'gh' })), 'argValidators.EXEC: valid')
-  assert(Either.isLeft(argValidators.EXEC({})), 'argValidators.EXEC: missing tool')
-  assert(Either.isRight(argValidators.DELEGATE({ target: 'a', task: 'b' })), 'argValidators.DELEGATE: valid')
-  assert(Either.isLeft(argValidators.DELEGATE({ target: 'a' })), 'argValidators.DELEGATE: missing task')
+  // ops.*.validate 단위
+  assert(Either.isRight(ops.EXEC.validate({ tool: 'gh' })), 'ops.EXEC.validate: valid')
+  assert(Either.isLeft(ops.EXEC.validate({})), 'ops.EXEC.validate: missing tool')
+  assert(Either.isRight(ops.DELEGATE.validate({ target: 'a', task: 'b' })), 'ops.DELEGATE.validate: valid')
+  assert(Either.isLeft(ops.DELEGATE.validate({ target: 'a' })), 'ops.DELEGATE.validate: missing task')
 
   // --- parsePlan tests ---
 
@@ -353,41 +348,7 @@ async function run() {
     assert(result.value.includes('99'), 'RESPOND bad ref: error mentions index')
   }
 
-  // --- normalizeStep ---
-
-  // EXEC {tool: "delegate", target, task} → DELEGATE
-  {
-    const step = { op: 'EXEC', args: { tool: 'delegate', target: 'summarizer', task: 'summarize this' } }
-    const n = normalizeStep(step)
-    assert(n.op === 'DELEGATE', 'normalizeStep: EXEC delegate → DELEGATE op')
-    assert(n.args.target === 'summarizer', 'normalizeStep: target preserved')
-    assert(n.args.task === 'summarize this', 'normalizeStep: task preserved')
-  }
-
-  // EXEC {tool: "delegate", tool_args: {target, task}} → DELEGATE (tool_args fallback)
-  {
-    const step = { op: 'EXEC', args: { tool: 'delegate', tool_args: { target: 'agent1', task: 'do it' } } }
-    const n = normalizeStep(step)
-    assert(n.op === 'DELEGATE', 'normalizeStep: tool_args fallback → DELEGATE')
-    assert(n.args.target === 'agent1', 'normalizeStep: tool_args target')
-    assert(n.args.task === 'do it', 'normalizeStep: tool_args task')
-  }
-
-  // EXEC {tool: "delegate"} without target → no normalization (falls through)
-  {
-    const step = { op: 'EXEC', args: { tool: 'delegate' } }
-    const n = normalizeStep(step)
-    assert(n.op === 'EXEC', 'normalizeStep: no target → stays EXEC')
-  }
-
-  // non-EXEC → passthrough
-  {
-    const step = { op: 'DELEGATE', args: { target: 'x', task: 'y' } }
-    assert(normalizeStep(step) === step, 'normalizeStep: DELEGATE unchanged')
-    assert(normalizeStep(null) === null, 'normalizeStep: null passthrough')
-  }
-
-  // 통합: EXEC delegate가 parsePlan에서 DELEGATE로 실행됨
+  // --- 정규화 통합: EXEC delegate → DELEGATE로 실행됨
   {
     const delegateResults = []
     const { interpret, ST } = createTestInterpreter({
@@ -405,72 +366,7 @@ async function run() {
     assert(delegateResults[0].target === 'summarizer', 'normalizeStep integration: correct target')
   }
 
-  // --- normalizeExecToApprove ---
-
-  // EXEC {tool: "approve", description} → APPROVE
-  {
-    const step = { op: 'EXEC', args: { tool: 'approve', description: 'delete files?' } }
-    const n = normalizeExecToApprove(step)
-    assert(n.op === 'APPROVE', 'normalizeExecToApprove: → APPROVE op')
-    assert(n.args.description === 'delete files?', 'normalizeExecToApprove: description preserved')
-  }
-
-  // EXEC {tool: "approve", tool_args: {description}} → APPROVE (tool_args fallback)
-  {
-    const step = { op: 'EXEC', args: { tool: 'approve', tool_args: { description: 'send email?' } } }
-    const n = normalizeExecToApprove(step)
-    assert(n.op === 'APPROVE', 'normalizeExecToApprove: tool_args fallback → APPROVE')
-    assert(n.args.description === 'send email?', 'normalizeExecToApprove: tool_args description')
-  }
-
-  // EXEC {tool: "approve"} without description → stays EXEC
-  {
-    const step = { op: 'EXEC', args: { tool: 'approve' } }
-    const n = normalizeExecToApprove(step)
-    assert(n.op === 'EXEC', 'normalizeExecToApprove: no description → stays EXEC')
-  }
-
-  // non-EXEC → passthrough
-  {
-    const step = { op: 'APPROVE', args: { description: 'x' } }
-    assert(normalizeExecToApprove(step) === step, 'normalizeExecToApprove: non-EXEC unchanged')
-    assert(normalizeExecToApprove(null) === null, 'normalizeExecToApprove: null passthrough')
-  }
-
-  // --- Pipeline behavior ---
-
-  // defaultRules has 3 rules
-  assert(defaultRules.length === 2, 'defaultRules: 2 rules')
-
-  // Pipeline applies rules sequentially
-  {
-    const step = { op: 'EXEC', args: { tool: 'delegate', target: 'a', task: 'b' } }
-    const n = normalizeStep(step)
-    assert(n.op === 'DELEGATE', 'pipeline: EXEC delegate → DELEGATE via pipeline')
-  }
-
-  {
-    const step = { op: 'EXEC', args: { tool: 'approve', description: 'ok?' } }
-    const n = normalizeStep(step)
-    assert(n.op === 'APPROVE', 'pipeline: EXEC approve → APPROVE via pipeline')
-  }
-
-  // Custom rules override
-  {
-    const customRule = (s) => s && s.op === 'EXEC' ? { ...s, op: 'CUSTOM' } : s
-    const step = { op: 'EXEC', args: { tool: 'anything' } }
-    const n = normalizeStep(step, [customRule])
-    assert(n.op === 'CUSTOM', 'pipeline: custom rules applied')
-  }
-
-  // Empty rules → passthrough
-  {
-    const step = { op: 'EXEC', args: { tool: 'delegate', target: 'a', task: 'b' } }
-    const n = normalizeStep(step, [])
-    assert(n.op === 'EXEC', 'pipeline: empty rules → no normalization')
-  }
-
-  // 통합: EXEC approve가 parsePlan에서 APPROVE로 실행됨
+  // --- 정규화 통합: EXEC approve → APPROVE로 실행됨
   {
     const approveResults = []
     const { interpret, ST } = createTestInterpreter({

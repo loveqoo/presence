@@ -4,7 +4,8 @@ import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { App } from '@presence/tui/ui/App.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { Phase, TurnResult, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
+import { ERROR_KIND } from '@presence/core/core/policies.js'
+import { Phase, TurnResult, ErrorInfo } from '@presence/core/core/turn.js'
 import { assert, summary } from '../lib/assert.js'
 
 const h = React.createElement

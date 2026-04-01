@@ -1,5 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { HISTORY } from '@presence/core/core/policies.js'
+import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
 const MEM0_USER_ID = 'default'
 import { stripTransient } from './persistence.js'
 import {
@@ -11,8 +12,6 @@ import { getA2ATaskStatus } from './a2a-client.js'
 const { Actor, Task, Maybe, Reader } = fp
 
 // --- Helpers (순수, Reader 대상 아님) ---
-
-const forkTask = (task) => new Promise((resolve, reject) => task.fork(reject, resolve))
 
 const applyCompaction = (reactiveState, { summary, extractedIds }) => {
   const current = reactiveState.get('context.conversationHistory') || []
@@ -159,7 +158,7 @@ const persistenceActorR = Reader.asks(({ store, debounceMs = 500 }) => {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {
         timer = null
-        actor.send({ type: 'flush', snapshot: msg.snapshot }).fork(() => {}, () => {})
+        fireAndForget(actor.send({ type: 'flush', snapshot: msg.snapshot }))
       }, debounceMs)
       return ['deferred', state]
     },
@@ -204,7 +203,7 @@ const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoRe
           projectEvents(state, next)
           const ts = state.get('turnState')
           if (ts && ts.tag === 'idle' && !s.inFlight) {
-            actor.send({ type: 'drain' }).fork(() => {}, () => {})
+            fireAndForget(actor.send({ type: 'drain' }))
           }
           return ['enqueued', next]
         }
@@ -224,7 +223,7 @@ const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoRe
             if (pending.length === 0) {
               const skipped = { ...s, queue: rest }
               projectEvents(state, skipped)
-              if (rest.length > 0) actor.send({ type: 'drain' }).fork(() => {}, () => {})
+              if (rest.length > 0) fireAndForget(actor.send({ type: 'drain' }))
               return ['no-op:no-todos', skipped]
             }
             event = { ...event, prompt: buildTodoReviewPrompt(pending) }
@@ -242,7 +241,7 @@ const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoRe
                 const done = { ...draining, queue: [...draining.queue], inFlight: null, lastProcessed: event }
                 projectEvents(state, done)
                 if (done.queue.length > 0) {
-                  actor.send({ type: 'drain' }).fork(() => {}, () => {})
+                  fireAndForget(actor.send({ type: 'drain' }))
                 }
                 resolve(['drained', done])
               })
@@ -262,7 +261,7 @@ const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoRe
                 if (onEventDone) onEventDone(event, { success: false, error: err.message })
                 ;(logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
                 if (failed.queue.length > 0) {
-                  actor.send({ type: 'drain' }).fork(() => {}, () => {})
+                  fireAndForget(actor.send({ type: 'drain' }))
                 }
                 resolve(['dead-letter', failed])
               })
@@ -286,7 +285,7 @@ const eventActorR = Reader.asks(({ turnActor, state, logger, onEventDone, todoRe
 
 const emitR = Reader.asks(({ eventActor }) => (event) => {
   const enriched = withEventMeta(event)
-  eventActor.send({ type: 'enqueue', event: enriched }).fork(() => {}, () => {})
+  fireAndForget(eventActor.send({ type: 'enqueue', event: enriched }))
   return enriched
 })
 
@@ -348,7 +347,7 @@ const delegateActorR = Reader.asks(({ state, eventActor, agentRegistry, logger, 
           if (s.running) return ['already-running', s]
           const next = { ...s, running: true }
           timer = setTimeout(() => {
-            actor.send({ type: 'tick' }).fork(() => {}, () => {})
+            fireAndForget(actor.send({ type: 'tick' }))
           }, pollIntervalMs)
           return ['started', next]
         }
@@ -362,9 +361,9 @@ const delegateActorR = Reader.asks(({ state, eventActor, agentRegistry, logger, 
           if (!s.running) return ['no-op:stopped', s]
           if (timer) clearTimeout(timer)
           timer = setTimeout(() => {
-            actor.send({ type: 'tick' }).fork(() => {}, () => {})
+            fireAndForget(actor.send({ type: 'tick' }))
           }, pollIntervalMs)
-          actor.send({ type: 'poll' }).fork(() => {}, () => {})
+          fireAndForget(actor.send({ type: 'poll' }))
           return ['ticked', s]
         }
 
@@ -396,7 +395,7 @@ const delegateActorR = Reader.asks(({ state, eventActor, agentRegistry, logger, 
                       taskId: r.entry.taskId,
                       result: r.result,
                     })
-                    eventActor.send({ type: 'enqueue', event: enriched }).fork(() => {}, () => {})
+                    fireAndForget(eventActor.send({ type: 'enqueue', event: enriched }))
                     ;(logger || console).info(`Delegate ${r.result.status}: ${r.entry.target}/${r.entry.taskId}`)
                   })
                 state.set('delegates.pending', settled.filter(r => !r.done).map(r => r.entry))

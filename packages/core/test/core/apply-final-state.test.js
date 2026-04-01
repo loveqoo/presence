@@ -1,14 +1,14 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import {
-  applyFinalState, safeRunTurn, createAgentTurn, createAgent,
-  PHASE, RESULT, Phase, TurnResult, MANAGED_PATHS,
-} from '@presence/core/core/agent.js'
+import { PHASE, RESULT } from '@presence/core/core/policies.js'
+import { Phase, TurnResult } from '@presence/core/core/turn.js'
+import { Agent } from '@presence/core/core/agent.js'
+import { applyFinalState, MANAGED_PATHS } from '@presence/core/core/stateCommit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState, getByPath } from '@presence/infra/infra/state.js'
-import { runFreeWithStateT } from '@presence/core/core/op.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 
-import { assert, summary } from '../lib/assert.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 async function run() {
   console.log('applyFinalState ordering + turn chaining tests')
@@ -139,15 +139,14 @@ async function run() {
         secondTurnHistoryLength = (state.get('context.conversationHistory') || []).length
 
         // 2nd 턴 시작 (source 없음 — event/heartbeat 시나리오)
-        const safe = safeRunTurn({ interpret, ST }, state)
-        await safe(createAgentTurn()('자동 후속 질문'), '자동 후속 질문')
+        const agent2 = new Agent({ interpret, ST, state })
+        await agent2.run('자동 후속 질문')
       }
     })
 
     // 1st 턴 실행 (source: 'user' → history에 기록)
-    const turn = createAgentTurn()
-    const safe = safeRunTurn({ interpret, ST }, state)
-    await safe(turn('첫 질문', { source: 'user' }), '첫 질문')
+    const agent = new Agent({ interpret, ST, state })
+    await agent.run('첫 질문', { source: 'user' })
 
     // 2nd 턴이 실행될 시간 확보
     await new Promise(r => setTimeout(r, 200))
@@ -181,8 +180,8 @@ async function run() {
       }
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state)
-    await safe(createAgentTurn()('질문'), '질문')
+    const agent = new Agent({ interpret, ST, state })
+    await agent.run('질문')
     await new Promise(r => setTimeout(r, 100))
 
     assert(snapshotLastTurn !== 'NOT_CAPTURED', 'F7: lastTurn captured in idle hook')
@@ -260,8 +259,8 @@ async function run() {
     })
 
     // memoryActor 없이 실행
-    const safe = safeRunTurn({ interpret, ST }, state)
-    await safe(createAgentTurn()('test'), 'test')
+    const agent = new Agent({ interpret, ST, state })
+    await agent.run('test')
 
     assert(hookLastTurn !== null, 'F10: lastTurn available in idle hook (no memoryActor)')
     assert(hookLastTurn?.tag === RESULT.SUCCESS, 'F10: lastTurn is success')
@@ -289,8 +288,8 @@ async function run() {
       AskLLM: () => '<<<invalid>>>',
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state)
-    await safe(createAgentTurn()('fail'), 'fail')
+    const agent = new Agent({ interpret, ST, state })
+    await agent.run('fail')
 
     assert(hookLastTurnTag === RESULT.FAILURE, 'F11: idle hook sees failure lastTurn')
   }
@@ -318,9 +317,9 @@ async function run() {
       },
     })
 
-    const safe = safeRunTurn({ interpret, ST }, state)
-    await safe(createAgentTurn()('fail first'), 'fail first')
-    await safe(createAgentTurn()('then succeed'), 'then succeed')
+    const agent = new Agent({ interpret, ST, state })
+    await agent.run('fail first')
+    await agent.run('then succeed')
 
     assert(lastTurnTags.length === 2, 'F12: 2 idle hooks fired')
     assert(lastTurnTags[0] === RESULT.FAILURE, 'F12: 1st idle sees failure')

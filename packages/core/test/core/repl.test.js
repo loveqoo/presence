@@ -1,10 +1,10 @@
-import { createRepl, COMMANDS } from '@presence/core/core/repl.js'
+import { Repl, COMMANDS } from '@presence/core/core/repl.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools.js'
 import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
-import { Phase } from '@presence/core/core/agent.js'
+import { Phase } from '@presence/core/core/turn.js'
 
-import { assert, summary } from '../lib/assert.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 const mockAgent = (response) => ({
   run: async () => response,
@@ -26,7 +26,7 @@ async function run() {
   // 1. Normal input → agent.run called
   {
     const outputs = []
-    const repl = createRepl({
+    const repl = new Repl({
       agent: mockAgent('hello'),
       onOutput: (r) => outputs.push(r),
       state: mockState(),
@@ -39,7 +39,7 @@ async function run() {
 
   // 2. /quit
   {
-    const repl = createRepl({ agent: mockAgent('x'), state: mockState() })
+    const repl = new Repl({ agent: mockAgent('x'), state: mockState() })
     assert(repl.running === true, 'before quit: running')
     await repl.handleInput('/quit')
     assert(repl.running === false, '/quit: stopped')
@@ -48,7 +48,7 @@ async function run() {
 
   // 3. /exit
   {
-    const repl = createRepl({ agent: mockAgent('x'), state: mockState() })
+    const repl = new Repl({ agent: mockAgent('x'), state: mockState() })
     await repl.handleInput('/exit')
     assert(repl.running === false, '/exit: stopped')
   }
@@ -56,7 +56,7 @@ async function run() {
   // 4. Agent error
   {
     const errors = []
-    const repl = createRepl({
+    const repl = new Repl({
       agent: { run: async () => { throw new Error('agent died') } },
       onError: (e) => errors.push(e),
       state: mockState(),
@@ -69,7 +69,7 @@ async function run() {
 
   // 5. Multiple turns
   {
-    const repl = createRepl({ agent: mockAgent('ok'), state: mockState() })
+    const repl = new Repl({ agent: mockAgent('ok'), state: mockState() })
     await repl.handleInput('a')
     await repl.handleInput('b')
     await repl.handleInput('c')
@@ -78,7 +78,7 @@ async function run() {
 
   // 6. stop()
   {
-    const repl = createRepl({ agent: mockAgent('x'), state: mockState() })
+    const repl = new Repl({ agent: mockAgent('x'), state: mockState() })
     repl.stop()
     assert(repl.running === false, 'stop(): running = false')
   }
@@ -87,7 +87,7 @@ async function run() {
   {
     let agentCalled = false
     const outputs = []
-    const repl = createRepl({
+    const repl = new Repl({
       agent: { run: async () => { agentCalled = true; return 'x' } },
       onOutput: (r) => outputs.push(r),
       state: mockState(),
@@ -101,7 +101,7 @@ async function run() {
   // 8. /help → lists commands
   {
     const outputs = []
-    const repl = createRepl({
+    const repl = new Repl({
       agent: mockAgent('x'),
       onOutput: (r) => outputs.push(r),
       state: mockState(),
@@ -117,7 +117,7 @@ async function run() {
     const outputs = []
     const toolReg = createToolRegistry()
     toolReg.register({ name: 'file_read', description: 'Read files', parameters: {}, handler: () => {} })
-    const repl = createRepl({
+    const repl = new Repl({
       agent: mockAgent('x'),
       onOutput: (r) => outputs.push(r),
       state: mockState(),
@@ -133,7 +133,7 @@ async function run() {
     const outputs = []
     const agentReg = createAgentRegistry()
     agentReg.register({ name: 'summarizer', description: 'Summarize text', type: 'local' })
-    const repl = createRepl({
+    const repl = new Repl({
       agent: mockAgent('x'),
       onOutput: (r) => outputs.push(r),
       state: mockState(),
@@ -149,7 +149,7 @@ async function run() {
     const outputs = []
     const state = mockState()
     state.set('todos', [{ type: 'review', title: 'PR #42', done: false }])
-    const repl = createRepl({
+    const repl = new Repl({
       agent: mockAgent('x'),
       onOutput: (r) => outputs.push(r),
       state,
@@ -164,7 +164,7 @@ async function run() {
     const outputs = []
     const state = mockState()
     state.set('events.deadLetter', [{ type: 'bad', error: 'crashed' }])
-    const repl = createRepl({
+    const repl = new Repl({
       agent: mockAgent('x'),
       onOutput: (r) => outputs.push(r),
       state,

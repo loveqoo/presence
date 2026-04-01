@@ -1,20 +1,24 @@
-import { makeOp, FUNCTOR, Free } from '@presence/core/core/op.js'
+import { AskLLM } from '@presence/core/core/op.js'
+import fp from '@presence/core/lib/fun-fp.js'
 
-import { assert, summary } from '../lib/assert.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
-console.log('makeOp factory tests')
+const { Free, Task } = fp
+const FUNCTOR = Symbol.for('fun-fp-js/Functor')
+
+console.log('Op factory tests')
 
 // 1. Functor Symbol present
-const op = makeOp('Test')({ value: 1 })
+const op = AskLLM({ messages: ['hi'] })
 assert(op[FUNCTOR] === true, 'has Functor Symbol')
-assert(op.tag === 'Test', 'has correct tag')
-assert(op.value === 1, 'has correct data')
+assert(op.tag === 'AskLLM', 'has correct tag')
+assert(op.messages[0] === 'hi', 'has correct data')
 
 // 2. map applies to next (continuation), not data
 const mapped = op.map(x => x * 2)
-assert(mapped.value === 1, 'map preserves data (value unchanged)')
+assert(mapped.messages[0] === 'hi', 'map preserves data (messages unchanged)')
 assert(mapped.next(10) === 20, 'map transforms continuation (next)')
-assert(mapped.tag === 'Test', 'map preserves tag')
+assert(mapped.tag === 'AskLLM', 'map preserves tag')
 
 // 3. original next is identity
 assert(op.next(42) === 42, 'default next is identity')
@@ -26,7 +30,7 @@ const composed = op.map(double).map(inc)
 assert(composed.next(5) === 11, 'map composes: inc(double(5)) = 11')
 
 // 5. Free.liftF compatibility
-const lifted = Free.liftF(makeOp('Test')({ value: 1 }))
+const lifted = Free.liftF(AskLLM({ messages: ['test'] }))
 assert(Free.isImpure(lifted), 'Free.liftF returns Impure')
 
 // 6. chain works after liftF
@@ -34,14 +38,10 @@ const chained = lifted.chain(r => Free.of(r + 100))
 assert(Free.isImpure(chained), 'chain returns Impure (still has work to do)')
 
 // 7. Run through Free.runWithTask to verify full round-trip
-import fp from '@presence/core/lib/fun-fp.js'
-const { Task } = fp
-
 const runner = (functor) => Task.of(functor.next('result'))
 Free.runWithTask(runner)(lifted).then(result => {
   assert(result === 'result', 'Free.runWithTask resolves lifted op')
 
-  // Also test chained
   return Free.runWithTask(runner)(chained)
 }).then(result => {
   assert(result === 'result100', 'Free.runWithTask resolves chained op')

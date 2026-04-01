@@ -6,7 +6,7 @@ import {
   PROMPT_SECTIONS,
 } from '@presence/core/core/prompt.js'
 
-import { assert, summary } from '../lib/assert.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 console.log('Prompt builder tests')
 

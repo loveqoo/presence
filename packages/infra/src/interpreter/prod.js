@@ -1,5 +1,5 @@
 import fp from '@presence/core/lib/fun-fp.js'
-import { runFreeWithStateT } from '@presence/core/core/op.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
 import { createStateInterpreter } from '@presence/core/interpreter/state.js'
 import { createLlmInterpreter, extractStreamingMessage } from '@presence/core/interpreter/llm.js'

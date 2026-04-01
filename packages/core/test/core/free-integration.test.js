@@ -1,12 +1,16 @@
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
+import fp from '@presence/core/lib/fun-fp.js'
 import {
   askLLM, executeTool, respond, approve,
-  updateState, getState, Free, runFreeWithStateT
+  updateState, getState,
 } from '@presence/core/core/op.js'
+
+const { Free } = fp
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 
 const msg = (text) => [{ role: 'user', content: text }]
 
-import { assert, summary } from '../lib/assert.js'
+import { assert, summary } from '../../../../test/lib/assert.js'
 
 async function run() {
   console.log('Free + Mock interpreter integration tests')
