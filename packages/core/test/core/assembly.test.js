@@ -9,14 +9,13 @@ import {
   fitMemories,
   buildIterationBlock,
 } from '@presence/core/core/prompt.js'
-import { PHASE, RESULT } from '@presence/core/core/policies.js'
-import { Phase, beginTurn, finishSuccess } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 
 const initState = (overrides = {}) =>
-  createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 import { assert, summary } from '../../../../test/lib/assert.js'
 

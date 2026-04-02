@@ -1,6 +1,5 @@
 ---
-description: 인터프리터 설계 규칙
-globs:
+paths:
   - "packages/*/src/interpreter/**/*.js"
 ---
 

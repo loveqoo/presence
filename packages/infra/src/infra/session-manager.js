@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createSession } from './session-factory.js'
-import { SESSION_TYPE } from '@presence/core/core/policies.js'
+import { SESSION_TYPE } from './constants.js'
 
 // =============================================================================
 // SessionManager

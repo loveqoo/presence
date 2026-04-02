@@ -2,7 +2,7 @@ import { Repl, COMMANDS } from '@presence/core/core/repl.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools.js'
 import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { TurnState } from '@presence/core/core/policies.js'
 
 import { assert, summary } from '../../../../test/lib/assert.js'
 
@@ -11,7 +11,7 @@ const mockAgent = (response) => ({
 })
 
 const mockState = () => createReactiveState({
-  turnState: Phase.idle(),
+  turnState: TurnState.idle(),
   lastTurn: null,
   turn: 3,
   events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },

@@ -7,7 +7,7 @@ import { createJobTools } from '@presence/infra/infra/job-tools.js'
 import { eventActorR, turnActorR } from '@presence/infra/infra/actors.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { eventToPrompt } from '@presence/infra/infra/events.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
@@ -351,7 +351,7 @@ async function run() {
     const runId = store.startRun(job.id, 1)
 
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
@@ -393,7 +393,7 @@ async function run() {
     const runId = store.startRun(job.id, 1)
 
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
@@ -690,7 +690,7 @@ async function run() {
   {
     const TODO_REVIEW_JOB_NAME = '__todo_review__'
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
         { id: 't1', type: 'task', title: '작업1', done: false, createdAt: Date.now() },
@@ -716,7 +716,7 @@ async function run() {
   {
     const TODO_REVIEW_JOB_NAME = '__todo_review__'
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
@@ -736,7 +736,7 @@ async function run() {
   // TR1. todo_review: todos 없으면 turn 시작 안 함 (no-op:no-todos)
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
@@ -754,7 +754,7 @@ async function run() {
   // TR2. todo_review: todos 있으면 동적 프롬프트로 turn 실행
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
         { id: 't1', type: 'task', title: '주간 리포트 작성', done: false, createdAt: Date.now() },
@@ -777,7 +777,7 @@ async function run() {
   // TR3. todo_review: done=true인 항목은 제외
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
         { id: 't1', type: 'task', title: '완료됨', done: true, createdAt: Date.now() },
@@ -800,7 +800,7 @@ async function run() {
   // TR4. todo_review: 모두 done이면 no-op
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
         { id: 't1', type: 'task', title: '완료', done: true, createdAt: Date.now() },

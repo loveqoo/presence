@@ -1,7 +1,7 @@
 import { createHeartbeat } from '@presence/infra/infra/heartbeat.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { forkTask } from '@presence/infra/infra/actors.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 // 테스트용: EventActor 내부 큐 enqueue를 추적하는 mock eventActor

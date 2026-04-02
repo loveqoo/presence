@@ -1,15 +1,6 @@
 import { Interpreter } from './compose.js'
 
-// --- ControlInterpreter ---
-// Respond, Observe, Spawn — 순수 제어 Op. 외부 I/O 없음.
-
-/**
- * Create an interpreter for the `Respond`, `Observe`, and `Spawn` ops.
- * Pure control ops — no async I/O; all branches return `ST.of(...)`.
- * @param {object} ST - StateT instance.
- * @returns {Interpreter}
- */
-
+// 순수 제어 Op. 외부 I/O 없음.
 const createControlInterpreter = (ST) =>
   new Interpreter(['Respond', 'Observe', 'Spawn'], (f) => {
     switch (f.tag) {

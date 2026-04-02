@@ -5,8 +5,7 @@
  */
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { PHASE, RESULT } from '@presence/core/core/policies.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
@@ -17,7 +16,7 @@ import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { assert, summary } from '../lib/assert.js'
 
 const initState = () =>
-  createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] } })
+  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] } })
 
 const tools = createLocalTools({ allowedDirs: ['/tmp/test'] })
 const toolRegistry = createToolRegistry()

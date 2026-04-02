@@ -2,7 +2,7 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import fp from '@presence/core/lib/fun-fp.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { HISTORY } from '@presence/core/core/policies.js'
+import { HISTORY, PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import {
   memoryActorR, compactionActorR, persistenceActorR,
   applyCompaction, forkTask,
@@ -11,8 +11,6 @@ import {
   extractForCompaction, createSummaryEntry, SUMMARY_MARKER,
 } from '@presence/infra/infra/history-compaction.js'
 import { Agent } from '@presence/core/core/agent.js'
-import { PHASE, RESULT } from '@presence/core/core/policies.js'
-import { Phase, TurnResult } from '@presence/core/core/turn.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -472,7 +470,7 @@ async function run() {
     const memActor = memoryActorR.run({ mem0: mockMem0, adapter: null, logger: null })
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     const { interpret, ST } = createTestInterpreter({
@@ -502,7 +500,7 @@ async function run() {
     const mockLogger = { warn: (msg, meta) => logs.push({ msg, meta }) }
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: ['stale'] },
     })
     const { interpret, ST } = createTestInterpreter({
@@ -530,7 +528,7 @@ async function run() {
     })
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     const { interpret, ST } = createTestInterpreter({
@@ -558,7 +556,7 @@ async function run() {
     })
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     const { interpret, ST } = createTestInterpreter({
@@ -581,7 +579,7 @@ async function run() {
     const pActor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     const { interpret, ST } = createTestInterpreter({
@@ -604,7 +602,7 @@ async function run() {
     const pActor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [] },
     })
     const { interpret, ST } = createTestInterpreter({

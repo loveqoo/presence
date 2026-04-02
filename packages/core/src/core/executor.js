@@ -1,8 +1,7 @@
 import { runFreeWithStateT } from '../lib/runner.js'
 import { forkTask, fireAndForget } from '../lib/task.js'
-import { RESULT, ERROR_KIND } from './policies.js'
+import { RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError } from './policies.js'
 import { getByPath } from '../lib/path.js'
-import { Phase, TurnResult, ErrorInfo } from './turn.js'
 import { applyFinalState } from './stateCommit.js'
 
 class Executor {
@@ -32,7 +31,7 @@ class Executor {
 
   beginLifecycle(input) {
     if (!this.state) return
-    this.state.set('turnState', Phase.working(input))
+    this.state.set('turnState', TurnState.working(input))
     this.state.set('turn', (this.state.get('turn') || 0) + 1)
     this.state.set('_debug.iterationHistory', [])
   }
@@ -87,8 +86,8 @@ class Executor {
     if (this.state) {
       const recovery = {
         _streaming: null,
-        lastTurn: TurnResult.failure(input, ErrorInfo(err.message || String(err), ERROR_KIND.INTERPRETER), null),
-        turnState: Phase.idle(),
+        lastTurn: TurnOutcome.failure(input, TurnError(err.message || String(err), ERROR_KIND.INTERPRETER), null),
+        turnState: TurnState.idle(),
       }
       for (const [key, value] of Object.entries(recovery)) this.state.set(key, value)
     }

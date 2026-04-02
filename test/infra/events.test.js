@@ -7,7 +7,7 @@ import {
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {
@@ -20,7 +20,7 @@ async function run() {
   // emit → EventActor enqueue → projection 반영
   {
     const state = createReactiveState({
-      turnState: Phase.working('busy'),
+      turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
@@ -40,7 +40,7 @@ async function run() {
   // 연속 emit → 유실 없이 큐에 누적
   {
     const state = createReactiveState({
-      turnState: Phase.working('busy'),
+      turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
@@ -61,7 +61,7 @@ async function run() {
   // emit with custom id → 그대로 유지
   {
     const state = createReactiveState({
-      turnState: Phase.working('busy'),
+      turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
@@ -78,7 +78,7 @@ async function run() {
   // idle 상태에서 enqueue → 자동 drain → turnActor 호출
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -106,7 +106,7 @@ async function run() {
   // working 상태에서 enqueue → drain no-op (큐에 남음)
   {
     const state = createReactiveState({
-      turnState: Phase.working('busy'),
+      turnState: TurnState.working('busy'),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -124,7 +124,7 @@ async function run() {
   // turnActor 실패 → deadLetter
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -146,7 +146,7 @@ async function run() {
   // enqueue 3개 + drain → 순차 처리
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -177,7 +177,7 @@ async function run() {
   // drain idempotency: 큐 비었을 때 no-op
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
@@ -190,7 +190,7 @@ async function run() {
   // drain idempotency: not-idle → no-op
   {
     const state = createReactiveState({
-      turnState: Phase.working('busy'),
+      turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
@@ -241,7 +241,7 @@ async function run() {
   // EventActor drain 성공 → applyTodo 자동 호출
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],

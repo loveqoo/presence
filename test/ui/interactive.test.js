@@ -4,8 +4,7 @@ import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { App } from '@presence/tui/ui/App.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { ERROR_KIND } from '@presence/core/core/policies.js'
-import { Phase, TurnResult, ErrorInfo } from '@presence/core/core/turn.js'
+import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 const h = React.createElement
@@ -80,7 +79,7 @@ async function run() {
   // idle → working → idle 전이
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
       context: { memories: [] },
@@ -97,7 +96,7 @@ async function run() {
     assert(!frame.includes('[TestAgent]'), 'App initial: agent name not shown')
 
     // working 전이
-    state.set('turnState', Phase.working('test input'))
+    state.set('turnState', TurnState.working('test input'))
     await new Promise(r => setTimeout(r, 50))
     frame = lastFrame()
     assert(frame.includes('thinking'), 'App working: shows thinking')
@@ -109,8 +108,8 @@ async function run() {
     assert(frame.includes('retry 1/2'), 'App retry: shows retry status')
 
     // idle 복귀
-    state.set('lastTurn', TurnResult.success('test', 'result'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('test', 'result'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 50))
     frame = lastFrame()
     assert(frame.includes('idle'), 'App idle again: back to idle')
@@ -122,8 +121,8 @@ async function run() {
   // failure 상태 표시
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.failure('q', ErrorInfo('parse error', ERROR_KIND.PLANNER_PARSE), 'err'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.failure('q', TurnError('parse error', ERROR_KIND.PLANNER_PARSE), 'err'),
       turn: 1,
       context: { memories: [] },
     })
@@ -140,7 +139,7 @@ async function run() {
   // App에서 model prop이 StatusBar까지 전달되는지 확인
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
       context: { memories: [] },
@@ -177,7 +176,7 @@ async function run() {
   // _toolResults 상태 변경 → App이 tool 메시지로 변환
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
       context: { memories: [] },
@@ -217,7 +216,7 @@ async function run() {
   // 턴 시작 시 _toolResults 초기화 확인
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
       context: { memories: [] },
@@ -236,7 +235,7 @@ async function run() {
     assert(lastFrame().includes('= 2'), 'toolResult reset: first turn result shown')
 
     // 새 턴 시작 → _toolResults 초기화됨
-    state.set('turnState', Phase.working('new turn'))
+    state.set('turnState', TurnState.working('new turn'))
     await new Promise(r => setTimeout(r, 100))
 
     const toolResults = state.get('_toolResults')

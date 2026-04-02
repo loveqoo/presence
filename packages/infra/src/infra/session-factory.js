@@ -3,8 +3,8 @@ import { createToolRegistry } from './tools.js'
 import { createPersistence, migrateHistoryIds } from './persistence.js'
 import { createTracedInterpreter } from '@presence/core/interpreter/traced.js'
 import { createProdInterpreter } from '../interpreter/prod.js'
-import { PHASE, PROMPT, SYSTEM_JOBS, SESSION_TYPE } from '@presence/core/core/policies.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { PHASE, PROMPT, TurnState } from '@presence/core/core/policies.js'
+import { SYSTEM_JOBS, SESSION_TYPE } from './constants.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createJobTools } from './job-tools.js'
 import { createSchedulerActor, calcNextRun } from './scheduler-actor.js'
@@ -56,7 +56,7 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
 
   // --- State ---
   const state = createReactiveState({
-    turnState: Phase.idle(),
+    turnState: TurnState.idle(),
     lastTurn: null,
     turn: 0,
     context: { memories: [], conversationHistory: [] },

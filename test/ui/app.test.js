@@ -9,8 +9,7 @@ import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/
 import { detectWholeCodeLang } from '@presence/tui/ui/components/MarkdownText.js'
 import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgentState.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { ERROR_KIND } from '@presence/core/core/policies.js'
-import { Phase, TurnResult, ErrorInfo } from '@presence/core/core/turn.js'
+import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 console.log('UI component tests (renderToString)')
@@ -80,15 +79,15 @@ console.log('UI component tests (renderToString)')
 
 // 7. turnState=working → 'working'
 {
-  const state = createReactiveState({ turnState: Phase.working('test'), lastTurn: null })
+  const state = createReactiveState({ turnState: TurnState.working('test'), lastTurn: null })
   assert(deriveStatus(state) === 'working', 'deriveStatus: working when turnState=working')
 }
 
 // 8. turnState=idle, lastTurn=failure → 'error'
 {
   const state = createReactiveState({
-    turnState: Phase.idle(),
-    lastTurn: TurnResult.failure('q', ErrorInfo('err', ERROR_KIND.PLANNER_PARSE), 'msg'),
+    turnState: TurnState.idle(),
+    lastTurn: TurnOutcome.failure('q', TurnError('err', ERROR_KIND.PLANNER_PARSE), 'msg'),
   })
   assert(deriveStatus(state) === 'error', 'deriveStatus: error when lastTurn=failure')
 }
@@ -96,15 +95,15 @@ console.log('UI component tests (renderToString)')
 // 9. turnState=idle, lastTurn=success → 'idle'
 {
   const state = createReactiveState({
-    turnState: Phase.idle(),
-    lastTurn: TurnResult.success('q', 'ok'),
+    turnState: TurnState.idle(),
+    lastTurn: TurnOutcome.success('q', 'ok'),
   })
   assert(deriveStatus(state) === 'idle', 'deriveStatus: idle when lastTurn=success')
 }
 
 // 10. turnState=idle, lastTurn=null → 'idle'
 {
-  const state = createReactiveState({ turnState: Phase.idle(), lastTurn: null })
+  const state = createReactiveState({ turnState: TurnState.idle(), lastTurn: null })
   assert(deriveStatus(state) === 'idle', 'deriveStatus: idle when lastTurn=null')
 }
 
@@ -576,8 +575,8 @@ import { buildReport, formatDuration, truncate } from '@presence/tui/ui/report.j
     ],
     lastResponse: '{"type":"direct_response","message":"안녕하세요!"}',
     state: createReactiveState({
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       turn: 5,
       context: { memories: ['m1'], conversationHistory: [{ input: 'a', output: 'b' }] },
     }),

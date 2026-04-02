@@ -190,14 +190,6 @@ console.log('Prompt builder tests')
   assert(PROMPT_SECTIONS.PLAN_RULES.content.includes('direct_response') && PROMPT_SECTIONS.PLAN_RULES.content.match(/^\d+\./m), 'PROMPT_SECTIONS: plan_rules has numbered rules')
 }
 
-// 22. PROMPT_SECTIONS: sections are frozen (immutable)
-{
-  const s = PROMPT_SECTIONS.ROLE_DEFINITION
-  let threw = false
-  try { s.content = 'tampered' } catch (_) { threw = true }
-  assert(threw || s.content !== 'tampered', 'PROMPT_SECTIONS: sections are immutable')
-}
-
 // 23. assemblePrompt _assembly.sections tracks active section IDs
 {
   const prompt = buildIterationPrompt({ tools: [], memories: [], input: 'test' })

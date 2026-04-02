@@ -9,8 +9,7 @@ initI18n('ko')
 import { loadInstanceConfig } from '@presence/infra/infra/config.js'
 import { LLMClient } from '@presence/infra/infra/llm.js'
 import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
-import { PHASE, RESULT } from '@presence/core/core/policies.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createLocalTools } from '@presence/infra/infra/local-tools.js'
@@ -50,7 +49,7 @@ const agentRegistry = createAgentRegistry()
 
 const initState = () =>
   createReactiveState({
-    turnState: Phase.idle(),
+    turnState: TurnState.idle(),
     lastTurn: null,
     turn: 0,
     context: { memories: [], conversationHistory: [] },

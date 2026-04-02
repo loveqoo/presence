@@ -1,7 +1,6 @@
 import { createMemoryGraph, TIERS } from '@presence/infra/infra/memory.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { PHASE, RESULT, ERROR_KIND } from '@presence/core/core/policies.js'
-import { Phase, TurnResult, ErrorInfo } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 // Wire up memory hooks (same logic that main.js uses)
@@ -66,7 +65,7 @@ async function run() {
   // 1. Turn start without embedder → no memories recalled
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, context: {}
+      turnState: TurnState.idle(), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
@@ -75,7 +74,7 @@ async function run() {
 
     wireMemoryHooks(state, memory)
 
-    state.set('turnState', Phase.working('회의 안건'))
+    state.set('turnState', TurnState.working('회의 안건'))
     await new Promise(r => setTimeout(r, 50))
 
     const mems = state.get('context.memories')
@@ -86,7 +85,7 @@ async function run() {
   // 2. Turn end → working memory cleaned
   {
     const state = createReactiveState({
-      turnState: Phase.working('test'), lastTurn: null, context: {}
+      turnState: TurnState.working('test'), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
@@ -95,8 +94,8 @@ async function run() {
 
     wireMemoryHooks(state, memory)
 
-    state.set('lastTurn', TurnResult.success('test', 'done'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('test', 'done'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 50))
 
     assert(memory.getNodesByTier(TIERS.WORKING).length === 0, 'turn end: working memory cleaned')
@@ -105,14 +104,14 @@ async function run() {
   // 3. Turn end → episodic record added
   {
     const state = createReactiveState({
-      turnState: Phase.working('PR 현황'), lastTurn: null, context: {}
+      turnState: TurnState.working('PR 현황'), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
     wireMemoryHooks(state, memory)
 
-    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('PR 현황', 'PR 3건'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 50))
 
     const episodic = memory.getNodesByTier(TIERS.EPISODIC)
@@ -124,7 +123,7 @@ async function run() {
   // 4. Failed turn → episodic NOT saved, working memory still cleaned
   {
     const state = createReactiveState({
-      turnState: Phase.working('crash me'), lastTurn: null, context: {}
+      turnState: TurnState.working('crash me'), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
@@ -133,9 +132,9 @@ async function run() {
 
     wireMemoryHooks(state, memory)
 
-    state.set('lastTurn', TurnResult.failure('crash me',
-      ErrorInfo('parse error', ERROR_KIND.PLANNER_PARSE), '오류 메시지'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.failure('crash me',
+      TurnError('parse error', ERROR_KIND.PLANNER_PARSE), '오류 메시지'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 50))
 
     assert(memory.getNodesByTier(TIERS.EPISODIC).length === 0, 'failed turn: no episodic record')
@@ -145,28 +144,28 @@ async function run() {
   // 5. Success after failure → only success saved
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, context: {}
+      turnState: TurnState.idle(), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
     wireMemoryHooks(state, memory)
 
     // Turn 1: failure
-    state.set('turnState', Phase.working('bad input'))
+    state.set('turnState', TurnState.working('bad input'))
     await new Promise(r => setTimeout(r, 20))
-    state.set('lastTurn', TurnResult.failure('bad input',
-      ErrorInfo('err', ERROR_KIND.PLANNER_PARSE), '오류'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.failure('bad input',
+      TurnError('err', ERROR_KIND.PLANNER_PARSE), '오류'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 20))
 
     assert(memory.getNodesByTier(TIERS.EPISODIC).length === 0,
       'after failed turn: no episodic record')
 
     // Turn 2: success
-    state.set('turnState', Phase.working('good input'))
+    state.set('turnState', TurnState.working('good input'))
     await new Promise(r => setTimeout(r, 20))
-    state.set('lastTurn', TurnResult.success('good input', '성공 응답'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('good input', '성공 응답'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 20))
 
     const episodic = memory.getNodesByTier(TIERS.EPISODIC)
@@ -176,41 +175,41 @@ async function run() {
 
   // 6. Promotion: 3+ mentions → episodic → semantic
   {
-    const state = createReactiveState({ turnState: Phase.idle() })
+    const state = createReactiveState({ turnState: TurnState.idle() })
     const memory = await createMemoryGraph()
 
     const node = memory.addNode({ label: 'React', tier: TIERS.EPISODIC })
     wirePromotionHook(state, memory)
 
-    state.set('turnState', Phase.working('React 배우기'))
-    state.set('turnState', Phase.working('React 컴포넌트'))
+    state.set('turnState', TurnState.working('React 배우기'))
+    state.set('turnState', TurnState.working('React 컴포넌트'))
     assert(memory.findNode(node.id).value.tier === TIERS.EPISODIC, 'before 3rd: still episodic')
 
-    state.set('turnState', Phase.working('React hooks'))
+    state.set('turnState', TurnState.working('React hooks'))
     assert(memory.findNode(node.id).value.tier === TIERS.SEMANTIC, 'after 3rd: promoted to semantic')
   }
 
   // 7. 동일 턴 반복 → episodic 중복 없음
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, context: {}
+      turnState: TurnState.idle(), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
     wireMemoryHooks(state, memory)
 
     // Turn 1
-    state.set('turnState', Phase.working('PR 현황'))
+    state.set('turnState', TurnState.working('PR 현황'))
     await new Promise(r => setTimeout(r, 20))
-    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('PR 현황', 'PR 3건'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 20))
 
     // Turn 2 — 동일 입력/출력
-    state.set('turnState', Phase.working('PR 현황'))
+    state.set('turnState', TurnState.working('PR 현황'))
     await new Promise(r => setTimeout(r, 20))
-    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('PR 현황', 'PR 3건'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 20))
 
     const episodic = memory.getNodesByTier(TIERS.EPISODIC)
@@ -220,22 +219,22 @@ async function run() {
   // 8. 같은 질문, 다른 응답 → 최신으로 갱신 (1개 유지)
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, context: {}
+      turnState: TurnState.idle(), lastTurn: null, context: {}
     })
     const memory = await createMemoryGraph()
 
     wireMemoryHooks(state, memory)
 
-    state.set('turnState', Phase.working('PR 현황'))
+    state.set('turnState', TurnState.working('PR 현황'))
     await new Promise(r => setTimeout(r, 20))
-    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 3건'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('PR 현황', 'PR 3건'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 20))
 
-    state.set('turnState', Phase.working('PR 현황'))
+    state.set('turnState', TurnState.working('PR 현황'))
     await new Promise(r => setTimeout(r, 20))
-    state.set('lastTurn', TurnResult.success('PR 현황', 'PR 5건'))
-    state.set('turnState', Phase.idle())
+    state.set('lastTurn', TurnOutcome.success('PR 현황', 'PR 5건'))
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 20))
 
     const episodic = memory.getNodesByTier(TIERS.EPISODIC)

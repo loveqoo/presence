@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createGlobalContext, createSession } from '@presence/tui'
-import { Phase } from '@presence/core/core/turn.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
@@ -166,9 +166,9 @@ async function run() {
       })
 
       // turnState를 비-idle로 변경 후 idle로 돌아오면 타이머 시작
-      session.state.set('turnState', Phase.working())
+      session.state.set('turnState', TurnState.working())
       await delay(10)
-      session.state.set('turnState', Phase.idle())
+      session.state.set('turnState', TurnState.idle())
       await delay(200)
 
       assert(idled.length === 1, 'SD4: onIdle called after idle timeout')
@@ -185,17 +185,17 @@ async function run() {
       })
 
       // idle → working (타이머 취소) → idle
-      session.state.set('turnState', Phase.working())
+      session.state.set('turnState', TurnState.working())
       await delay(10)
-      session.state.set('turnState', Phase.idle())
+      session.state.set('turnState', TurnState.idle())
       await delay(50)  // 아직 timeout 전
-      session.state.set('turnState', Phase.working())  // 타이머 취소
+      session.state.set('turnState', TurnState.working())  // 타이머 취소
       await delay(300)  // timeout 지났어도 canceled
 
       assert(idled.length === 0, 'SD5: onIdle not called when turn interrupted timer')
 
       // idle로 돌아오면 새 타이머 시작
-      session.state.set('turnState', Phase.idle())
+      session.state.set('turnState', TurnState.idle())
       await delay(300)
       assert(idled.length === 1, 'SD5: onIdle fires after second idle')
       await session.shutdown()

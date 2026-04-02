@@ -9,6 +9,18 @@ export const ERROR_KIND = Object.freeze({
   MAX_ITERATIONS:  'max_iterations',
 })
 
+export const TurnState = Object.freeze({
+  idle:    ()      => ({ tag: PHASE.IDLE }),
+  working: (input) => ({ tag: PHASE.WORKING, input }),
+})
+
+export const TurnOutcome = Object.freeze({
+  success: (input, result)          => ({ tag: RESULT.SUCCESS, input, result }),
+  failure: (input, error, response) => ({ tag: RESULT.FAILURE, input, error, response }),
+})
+
+export const TurnError = (message, kind) => ({ message, kind })
+
 // --- 실행 설정 ---
 
 export const DEBUG = Object.freeze({
@@ -30,14 +42,3 @@ export const PROMPT = Object.freeze({
   DEFAULT_RESERVED_OUTPUT_TOKENS: 1000,
 })
 
-// --- 인프라 식별자 ---
-
-export const SYSTEM_JOBS = Object.freeze({
-  TODO_REVIEW: '__todo_review__',
-})
-
-export const SESSION_TYPE = Object.freeze({
-  USER: 'user',
-  SCHEDULED: 'scheduled',
-  AGENT: 'agent',
-})

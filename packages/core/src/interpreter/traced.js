@@ -12,11 +12,6 @@ const { Task, Writer } = fp
 // TraceEntry = { tag, detail, timestamp, duration?, error?, result? }
 // =============================================================================
 
-/**
- * Extract a short display detail string from an op functor for trace tree rendering.
- * @param {object} f - AgentOp functor.
- * @returns {string|null}
- */
 // Op에서 트리 표시용 detail 추출
 const extractDetail = (f) => {
   switch (f.tag) {
@@ -35,14 +30,6 @@ const extractDetail = (f) => {
   }
 }
 
-/**
- * Wrap an existing interpreter bundle with Writer-based immutable trace accumulation.
- * Records timing, errors, and op details for every functor dispatched.
- * @param {{ interpret: Function, ST: object }} inner - Interpreter bundle to wrap.
- * @param {{ logger?: object, onOp?: (phase: string, entry: object) => void }} [opts]
- * @returns {{ interpret: Function, ST: object, getTrace: () => object[], resetTrace: () => void }}
- */
-// inner: { interpret, ST } — StateT(Task) 인터프리터 번들
 const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}) => {
   // Writer mutable accumulator — 턴 시작 시 resetTrace()로 초기화
   let traceWriter = Writer.of(null)

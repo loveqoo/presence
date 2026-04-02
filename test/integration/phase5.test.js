@@ -1,5 +1,4 @@
-import { PHASE, RESULT, ERROR_KIND } from '@presence/core/core/policies.js'
-import { Phase, ErrorInfo } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, ERROR_KIND, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { applyFinalState } from '@presence/core/core/stateCommit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
@@ -21,7 +20,7 @@ async function run() {
   // E2E: heartbeat emits → EventActor processes → turnActor called
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
       context: { memories: [] },
@@ -59,7 +58,7 @@ async function run() {
   // heartbeat → event 큐 → agent busy → 큐에 대기 → idle 후 처리
   {
     const state = createReactiveState({
-      turnState: Phase.working('user turn'),
+      turnState: TurnState.working('user turn'),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -84,7 +83,7 @@ async function run() {
     assert(state.get('events.queue').length === 1, 'Step 29 busy: 1 event in queue')
 
     // idle로 전환 → 브릿지 hook → drain
-    state.set('turnState', Phase.idle())
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 100))
 
     assert(runCount === 1, 'Step 29 busy→idle: event processed after idle')
@@ -98,7 +97,7 @@ async function run() {
   // E2E: planner generates DELEGATE step → interpreter dispatches → result in plan
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       context: { memories: [] },
     })
@@ -146,7 +145,7 @@ async function run() {
   // Delegate 실패 → plan이 실패로 닫힘
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       lastTurn: null,
       context: { memories: [] },
     })
@@ -187,7 +186,7 @@ async function run() {
   // Parallel 내에서 여러 프로그램이 독립 실행
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       context: {},
     })
 
@@ -214,7 +213,7 @@ async function run() {
   // 큐에 3개 쌓인 후 idle 전이 → EventActor drain이 순차 처리
   {
     const state = createReactiveState({
-      turnState: Phase.working('busy'),
+      turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
@@ -239,7 +238,7 @@ async function run() {
     assert(processed.length === 0, 'FIFO: queued while working')
 
     // idle 전이 → drain이 3개 순차 처리
-    state.set('turnState', Phase.idle())
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 300))
 
     assert(processed.length === 3, 'FIFO: all 3 processed')
@@ -254,7 +253,7 @@ async function run() {
 
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })

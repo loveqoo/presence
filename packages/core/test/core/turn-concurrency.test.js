@@ -1,7 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { PHASE, RESULT } from '@presence/core/core/policies.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
@@ -21,7 +20,7 @@ async function run() {
   //     TurnActor로 직렬화 → 턴 번호 순차 보장
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     let llmCallOrder = []
@@ -53,7 +52,7 @@ async function run() {
   // C2. TurnActor: 1st 턴 실패해도 2nd 턴 정상 실행
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     let callCount = 0
@@ -81,7 +80,7 @@ async function run() {
   // C3. handleInput 시뮬레이션: TurnActor 경유 시 동시 요청이 순차 처리
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     const executionOrder = []
@@ -122,7 +121,7 @@ async function run() {
     }
 
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     const { interpret, ST } = createTestInterpreter({
@@ -143,7 +142,7 @@ async function run() {
   // C5. save가 applyFinalState 이전에 큐잉되는지 (turnState=working 중에 전송)
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
     let saveBeforeIdle = false
@@ -177,7 +176,7 @@ async function run() {
   // C6. event 도착 + user input 동시 → TurnActor가 직렬화
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],

@@ -1,7 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { PHASE, RESULT, ERROR_KIND } from '@presence/core/core/policies.js'
-import { Phase, TurnResult, ErrorInfo, beginTurn, finishSuccess, finishFailure } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, ERROR_KIND, TurnState, TurnOutcome } from '@presence/core/core/policies.js'
 import { validatePlan, safeJsonParse, extractJson } from '@presence/core/core/validate.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { applyFinalState, MANAGED_PATHS } from '@presence/core/core/stateCommit.js'
@@ -20,11 +19,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // --- 초기 상태 헬퍼 ---
 // reactive state (createAgent/safeRunTurn 경유 테스트용)
 const initState = (overrides = {}) =>
-  createReactiveState({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 // plain object (runFreeWithStateT 직접 실행 테스트용)
 const initSnapshot = (overrides = {}) =>
-  ({ turnState: Phase.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+  ({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 import { assert, summary } from '../../../../test/lib/assert.js'
 
@@ -34,14 +33,6 @@ async function run() {
   // ===========================================
   // 상태 전이 단위 테스트
   // ===========================================
-
-  // T1. beginTurn is no-op (lifecycle owned by safeRunTurn)
-  {
-    const { interpret, ST } = createTestInterpreter({})
-    const [, finalState] = await runFreeWithStateT(interpret, ST)(beginTurn('new input'))(initSnapshot())
-
-    assert(finalState.turnState.tag === PHASE.IDLE, 'beginTurn: no-op, turnState stays idle')
-  }
 
   // T1b. safeRunTurn sets turnState=working before Free execution
   {
@@ -61,37 +52,7 @@ async function run() {
     assert(turnStateAtFreeStart.input === 'new input', 'safeRunTurn: input stored in working state')
   }
 
-  // T2. finishSuccess → lastTurn = success, turnState = idle
-  {
-    const initial = initSnapshot({ turnState: Phase.working('q') })
-    const { interpret, ST } = createTestInterpreter({})
-
-    const [result, finalState] = await runFreeWithStateT(interpret, ST)(finishSuccess('q', 'ok'))(initial)
-
-    assert(result === 'ok', 'finishSuccess: returns result')
-    const lt = finalState.lastTurn
-    assert(lt.tag === RESULT.SUCCESS, 'finishSuccess: lastTurn tag is success')
-    assert(lt.input === 'q', 'finishSuccess: lastTurn.input preserved')
-    assert(lt.result === 'ok', 'finishSuccess: lastTurn.result stored')
-    assert(finalState.turnState.tag === PHASE.IDLE, 'finishSuccess: turnState idle')
-  }
-
-  // T3. finishFailure → lastTurn = failure, turnState = idle
-  {
-    const initial = initSnapshot({ turnState: Phase.working('q') })
-    const { interpret, ST } = createTestInterpreter({})
-
-    const error = ErrorInfo('bad', ERROR_KIND.PLANNER_PARSE)
-    const [result, finalState] = await runFreeWithStateT(interpret, ST)(finishFailure('q', error, 'error resp'))(initial)
-
-    assert(result === 'error resp', 'finishFailure: returns response')
-    const lt = finalState.lastTurn
-    assert(lt.tag === RESULT.FAILURE, 'finishFailure: lastTurn tag is failure')
-    assert(lt.error.message === 'bad', 'finishFailure: error.message stored')
-    assert(lt.error.kind === ERROR_KIND.PLANNER_PARSE, 'finishFailure: error.kind stored')
-    assert(lt.response === 'error resp', 'finishFailure: response stored')
-    assert(finalState.turnState.tag === PHASE.IDLE, 'finishFailure: turnState idle')
-  }
+  // T2-T3: finishSuccess/finishFailure 단위 테스트 제거됨 (planner.js 내부 함수로 이동)
 
   // T4. 실패 후 성공 → lastTurn이 success로 교체됨
   {
@@ -190,7 +151,6 @@ async function run() {
     const plannerSrc = readFileSync(join(__dirname, '../../src/core/planner.js'), 'utf-8')
     const executorSrc = readFileSync(join(__dirname, '../../src/core/executor.js'), 'utf-8')
     const validateSrc = readFileSync(join(__dirname, '../../src/core/validate.js'), 'utf-8')
-    const turnSrc = readFileSync(join(__dirname, '../../src/core/turn.js'), 'utf-8')
 
     // Agent: Planner + Executor 조합
     assert(agentSrc.includes('class Agent'), 'structural: Agent class exists')
@@ -209,20 +169,6 @@ async function run() {
 
     // Validate: Either 기반
     assert(validateSrc.includes('Either.catch'), 'structural: Either.catch used for JSON parse (validate.js)')
-
-    // finishSuccess/finishFailure 상호 독립 (turn.js)
-    const lines = turnSrc.split('\n')
-    const successStart = lines.findIndex(l => l.startsWith('const finishSuccess'))
-    const failureStart = lines.findIndex(l => l.startsWith('const finishFailure'))
-    const nextBoundary = (start) => {
-      const idx = lines.findIndex((l, i) => i > start && /^(const \w|export\s)/.test(l))
-      return idx === -1 ? lines.length : idx
-    }
-    const successBody = lines.slice(successStart, nextBoundary(successStart)).join('\n')
-    const failureBody = lines.slice(failureStart, nextBoundary(failureStart)).join('\n')
-
-    assert(!successBody.includes('finishFailure'), 'structural: finishSuccess independent')
-    assert(!failureBody.includes('finishSuccess'), 'structural: finishFailure independent')
   }
 
   // T6. invalid plan shape → finishFailure
@@ -770,8 +716,8 @@ async function run() {
   {
     const state = initState()
     const finalState = {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       _streaming: null,
     }
     applyFinalState(state, finalState, { initialEpoch: 0 })
@@ -783,8 +729,8 @@ async function run() {
   {
     const state = initState({ _compactionEpoch: 1, context: { conversationHistory: [] } })
     const finalState = {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       context: { conversationHistory: [{ id: 'h-1', input: 'old', output: 'data' }] },
     }
     applyFinalState(state, finalState, { initialEpoch: 0 }) // epoch mismatch

@@ -4,7 +4,7 @@ import {
 } from '@presence/infra/infra/a2a-client.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { Phase } from '@presence/core/core/turn.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { delegateActorR, eventActorR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -248,7 +248,7 @@ async function run() {
   // poll → pending delegate 폴링 → completed → eventActor.enqueue → drain → 처리
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       delegates: { pending: [
         { target: 'remote-agent', taskId: 'tid-1', endpoint: 'https://a2a.test/rpc' },
       ]},
@@ -287,7 +287,7 @@ async function run() {
   // tick 중복에도 poll 1회만
   {
     const state = createReactiveState({
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       delegates: { pending: [
         { target: 'slow', taskId: 'tid-2', endpoint: 'https://a2a.test/rpc' },
       ]},

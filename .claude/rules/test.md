@@ -1,8 +1,7 @@
 ---
-description: 테스트 작성 규칙
-globs:
+paths:
   - "test/**/*.js"
-  - "packages/web/e2e/**/*.js"
+  - "packages/*/test/**/*.js"
 ---
 
 # 테스트 규칙
@@ -16,8 +15,7 @@ globs:
 ## 횡단 관심사 검증
 
 - 인증 변경 시: mock E2E + live E2E 모두 검증
-- 쿠키/토큰 변경 시: WS 연결, API 요청, 브라우저 모든 경로 검증
-- 상태 초기화 변경 시: 렌더링 순서, 비동기 타이밍 검증
+- 토큰 변경 시: WS 연결, API 요청 경로 검증
 
 ## 브릿지 동치 테스트
 
@@ -29,5 +27,4 @@ assert.deepStrictEqual(createX(mockDeps), xR.run(mockDeps))
 ## 라이브 테스트
 
 - 인증 필요 서버: --username/--password 또는 loginIfRequired 헬퍼 사용
-- refresh token rotation 주의: storageState 대신 공유 context 사용
 - 이전 테스트 잔여 상태: /clear로 초기화 후 진행

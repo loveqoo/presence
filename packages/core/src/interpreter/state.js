@@ -1,17 +1,7 @@
 import { getByPath, setByPathPure } from '../lib/path.js'
 import { Interpreter } from './compose.js'
 
-// --- StateInterpreter ---
-// UpdateState, GetState 처리. prod/test 공용.
 // dryrun은 실제 상태를 쓰지 않으므로 별도.
-
-/**
- * Create an interpreter for the `UpdateState` and `GetState` ops.
- * Shared between prod and test interpreters; dry-run uses its own stub instead.
- * @param {object} ST - StateT instance.
- * @returns {Interpreter}
- */
-
 const createStateInterpreter = (ST) =>
   new Interpreter(['UpdateState', 'GetState'], (f) => {
     if (f.tag === 'UpdateState') {

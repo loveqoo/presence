@@ -1,7 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { PHASE, RESULT } from '@presence/core/core/policies.js'
-import { Phase, TurnResult } from '@presence/core/core/turn.js'
+import { PHASE, RESULT, TurnState, TurnOutcome } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { applyFinalState, MANAGED_PATHS } from '@presence/core/core/stateCommit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
@@ -19,7 +18,7 @@ async function run() {
 
   // F1. turnState=idle 시점에 lastTurn이 이미 반영되어야 함
   {
-    const state = createReactiveState({ turnState: Phase.working('q'), lastTurn: null })
+    const state = createReactiveState({ turnState: TurnState.working('q'), lastTurn: null })
     let lastTurnAtIdleHook = 'NOT_CAPTURED'
 
     state.hooks.on('turnState', (phase) => {
@@ -30,8 +29,8 @@ async function run() {
 
     applyFinalState(state, {
       _streaming: null,
-      lastTurn: TurnResult.success('q', 'result'),
-      turnState: Phase.idle(),
+      lastTurn: TurnOutcome.success('q', 'result'),
+      turnState: TurnState.idle(),
     }, {})
 
     assert(lastTurnAtIdleHook !== null, 'F1: lastTurn captured at idle hook')
@@ -42,7 +41,7 @@ async function run() {
   // F2. turnState=idle 시점에 conversationHistory가 이미 반영되어야 함
   {
     const state = createReactiveState({
-      turnState: Phase.working('q'),
+      turnState: TurnState.working('q'),
       context: { conversationHistory: [] },
     })
     let historyAtIdleHook = null
@@ -54,8 +53,8 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       context: { conversationHistory: [{ id: 'h-1', input: 'q', output: 'ok' }] },
     }, { initialEpoch: 0 })
 
@@ -65,7 +64,7 @@ async function run() {
 
   // F3. turnState=idle 시점에 _debug.* 가 이미 반영되어야 함
   {
-    const state = createReactiveState({ turnState: Phase.working('q') })
+    const state = createReactiveState({ turnState: TurnState.working('q') })
     let debugAtIdleHook = 'NOT_SET'
 
     state.hooks.on('turnState', (phase) => {
@@ -75,8 +74,8 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       _debug: { lastTurn: { input: 'q', iteration: 0 } },
     }, {})
 
@@ -87,7 +86,7 @@ async function run() {
   // F4. turnState=idle 시점에 _streaming이 이미 null이어야 함
   {
     const state = createReactiveState({
-      turnState: Phase.working('q'),
+      turnState: TurnState.working('q'),
       _streaming: { content: 'partial', status: 'streaming' },
     })
     let streamingAtIdleHook = 'NOT_CHECKED'
@@ -99,8 +98,8 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       _streaming: null,
     }, {})
 
@@ -120,7 +119,7 @@ async function run() {
   // F6. 1st 턴(user) 완료 → idle hook에서 2nd 턴(auto) 시작 → 2nd가 1st의 history를 보는지
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
 
@@ -162,7 +161,7 @@ async function run() {
   // F7. 연쇄 턴에서 2nd 턴의 snapshot이 1st 턴의 lastTurn을 포함하는지
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
 
@@ -195,7 +194,7 @@ async function run() {
   // F8. epoch 불일치: history 스킵되지만 turnState idle hook은 정상 발동
   {
     const state = createReactiveState({
-      turnState: Phase.working('q'),
+      turnState: TurnState.working('q'),
       _compactionEpoch: 1,
       context: { conversationHistory: [{ id: 'old', input: 'old' }] },
     })
@@ -206,8 +205,8 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       context: { conversationHistory: [{ id: 'old' }, { id: 'new' }] },
     }, { initialEpoch: 0 }) // epoch 불일치
 
@@ -221,14 +220,14 @@ async function run() {
   // F9. epoch 일치: history 정상 반영
   {
     const state = createReactiveState({
-      turnState: Phase.working('q'),
+      turnState: TurnState.working('q'),
       _compactionEpoch: 0,
       context: { conversationHistory: [] },
     })
 
     applyFinalState(state, {
-      turnState: Phase.idle(),
-      lastTurn: TurnResult.success('q', 'ok'),
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('q', 'ok'),
       context: { conversationHistory: [{ id: 'h-1', input: 'q', output: 'ok' }] },
     }, { initialEpoch: 0 }) // epoch 일치
 
@@ -243,7 +242,7 @@ async function run() {
   // F10. memoryActor 없이 safeRunTurn → applyFinalState → idle hook에서 상태 일관성
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
 
@@ -273,7 +272,7 @@ async function run() {
   // F11. 1st 턴 실패 → idle hook 발동 → 상태가 failure로 정확히 반영
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
 
@@ -297,7 +296,7 @@ async function run() {
   // F12. 실패 턴 후 성공 턴 연쇄: lastTurn이 success로 교체되는지
   {
     const state = createReactiveState({
-      turnState: Phase.idle(), lastTurn: null, turn: 0,
+      turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
 
@@ -333,13 +332,13 @@ async function run() {
   // F13. finalState에 undefined 경로 → 기존 값 보존 (덮어쓰지 않음)
   {
     const state = createReactiveState({
-      turnState: Phase.working('q'),
-      lastTurn: TurnResult.success('old', 'old result'),
+      turnState: TurnState.working('q'),
+      lastTurn: TurnOutcome.success('old', 'old result'),
       _debug: { lastTurn: { input: 'old' } },
     })
 
     applyFinalState(state, {
-      turnState: Phase.idle(),
+      turnState: TurnState.idle(),
       // lastTurn, _debug.lastTurn 없음 (undefined)
     }, {})
 

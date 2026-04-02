@@ -1,5 +1,5 @@
 import { ops } from '@presence/core/core/opHandler.js'
-import { parsePlan } from '@presence/core/core/planner.js'
+import { Planner } from '@presence/core/core/planner.js'
 import { validateStep } from '@presence/core/core/validate.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import fp from '@presence/core/lib/fun-fp.js'
@@ -8,6 +8,8 @@ const { Either } = fp
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 
 import { assert, summary } from '../../../../test/lib/assert.js'
+
+const planner = new Planner({})
 
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b)
@@ -72,7 +74,7 @@ async function run() {
   {
     const { interpret, ST, log } = createTestInterpreter()
     const plan = { type: 'direct_response', message: 'hi there' }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(result), 'direct_response: Right')
     assert(result.value === 'hi there', 'direct_response: returns message')
     assert(log[0].tag === 'Respond', 'direct_response: uses Respond op')
@@ -85,7 +87,7 @@ async function run() {
       type: 'plan',
       steps: [{ op: 'EXEC', args: { tool: 'test_tool', tool_args: { x: 1 } } }]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(result), 'single EXEC: Right')
     assert(log[0].tag === 'ExecuteTool', 'single EXEC: ExecuteTool op')
     assert(result.value.length === 1, 'single EXEC: 1 result')
@@ -109,7 +111,7 @@ async function run() {
         { op: 'RESPOND', args: { ref: 2 } },
       ]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(result), 'multi-step: Right')
     assert(log.length === 3, 'multi-step: 3 ops executed')
     assert(result.value[2] === 'llm-said-tool-result-for-github', 'multi-step: ctx reference works')
@@ -125,7 +127,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'test', tool_args: {} } },
       ]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isLeft(result), 'unknown op: Left')
     assert(result.value.includes('UNKNOWN_OP'), 'unknown op: error mentions op name')
     assert(log.filter(l => l.tag === 'ExecuteTool').length === 0, 'unknown op: EXEC not executed')
@@ -135,7 +137,7 @@ async function run() {
   {
     const { interpret, ST, log } = createTestInterpreter()
     const plan = { type: 'plan', steps: [] }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(result), 'empty steps: Right')
     assert(result.value.length === 0, 'empty steps: empty array')
     assert(log.length === 0, 'empty steps: no ops executed')
@@ -151,7 +153,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'slack', tool_args: {} } },
       ]
     }
-    const [r1] = await runFreeWithStateT(i1, ST)(parsePlan(plan))({})
+    const [r1] = await runFreeWithStateT(i1, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(r1), 'APPROVE: Right')
     assert(r1.value[0] === true, 'APPROVE: returns true when approved')
     assert(l1[0].tag === 'Approve', 'APPROVE: logged as Approve')
@@ -165,7 +167,7 @@ async function run() {
       type: 'plan',
       steps: [{ op: 'LOOKUP_MEMORY', args: { query: '회의' } }]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))(initialState)
     assert(result.value[0].length === 2, 'LOOKUP_MEMORY: filters by query (2 of 3 match)')
     assert(result.value[0].includes('회의 안건'), 'LOOKUP_MEMORY: includes matching memory')
     assert(!result.value[0].includes('PR 현황'), 'LOOKUP_MEMORY: excludes non-matching')
@@ -179,7 +181,7 @@ async function run() {
       type: 'plan',
       steps: [{ op: 'LOOKUP_MEMORY', args: {} }]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))(initialState)
     assert(result.value[0].length === 2, 'LOOKUP_MEMORY no query: returns all')
   }
 
@@ -196,7 +198,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'slack', tool_args: { channel: '#team', message: '$1' } } },
       ]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(result.value[1] === 'sent: formatted-message', 'EXEC $N: tool_args reference resolved')
   }
 
@@ -207,7 +209,7 @@ async function run() {
     const { interpret, ST } = createTestInterpreter()
     const initialState = { context: { memories: ['Hello World', 'foo bar'] } }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'HELLO' } }] }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))(initialState)
     assert(result.value[0].length === 1 && result.value[0][0] === 'Hello World', 'LOOKUP_MEMORY: case-insensitive')
   }
 
@@ -216,7 +218,7 @@ async function run() {
     const { interpret, ST } = createTestInterpreter()
     const initialState = { context: {} }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'x' } }] }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))(initialState)
     assert(result.value[0].length === 0, 'LOOKUP_MEMORY: undefined memories → []')
   }
 
@@ -225,7 +227,7 @@ async function run() {
     const { interpret, ST } = createTestInterpreter()
     const initialState = { context: { memories: [{ text: 'meeting' }, 42, null, 'meeting room'] } }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'meeting' } }] }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))(initialState)
     assert(result.value[0].length === 1, 'LOOKUP_MEMORY: non-string memories handled')
     assert(result.value[0][0] === 'meeting room', 'LOOKUP_MEMORY: only string memory matched')
   }
@@ -235,7 +237,7 @@ async function run() {
     const { interpret, ST } = createTestInterpreter()
     const initialState = { context: { memories: ['a', 'b', 'c'] } }
     const plan = { type: 'plan', steps: [{ op: 'LOOKUP_MEMORY', args: { query: 'zzz' } }] }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))(initialState)
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))(initialState)
     assert(result.value[0].length === 0, 'LOOKUP_MEMORY: no match → empty')
   }
 
@@ -248,7 +250,7 @@ async function run() {
       AskLLM: (op) => { capturedOp = op; return 'ok' }
     })
     const plan = { type: 'plan', steps: [{ op: 'ASK_LLM', args: { prompt: 'hello' } }] }
-    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(capturedOp.context === undefined, 'ASK_LLM no ctx: context is undefined')
     assert(capturedOp.messages[0].content === 'hello', 'ASK_LLM no ctx: prompt in messages')
   }
@@ -260,7 +262,7 @@ async function run() {
       AskLLM: (op) => { capturedOp = op; return 'ok' }
     })
     const plan = { type: 'plan', steps: [{ op: 'ASK_LLM', args: { prompt: 'hi', ctx: [] } }] }
-    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(capturedOp.context === undefined, 'ASK_LLM empty ctx: context is undefined')
   }
 
@@ -278,7 +280,7 @@ async function run() {
         { op: 'ASK_LLM', args: { prompt: 'summarize', ctx: [99] } },
       ]
     }
-    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(capturedOp.context === undefined, 'ASK_LLM out-of-range ctx: context undefined')
   }
 
@@ -297,7 +299,7 @@ async function run() {
         { op: 'ASK_LLM', args: { prompt: 'no ctx' } },
       ]
     }
-    await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Array.isArray(captured[0].context) && captured[0].context[0] === 'data',
       'mixed ASK_LLM: first has context')
     assert(captured[1].context === undefined,
@@ -313,7 +315,7 @@ async function run() {
       type: 'plan',
       steps: [{ op: 'EXEC', args: { tool_args: { x: 1 } } }]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isLeft(result), 'EXEC no tool: Left')
     assert(result.value.includes('EXEC'), 'EXEC no tool: error mentions EXEC')
     assert(log.filter(l => l.tag === 'ExecuteTool').length === 0, 'EXEC no tool: not dispatched')
@@ -326,7 +328,7 @@ async function run() {
       type: 'plan',
       steps: [{ op: 'RESPOND', args: {} }]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isLeft(result), 'RESPOND no args: Left')
     assert(result.value.includes('RESPOND'), 'RESPOND no args: error mentions RESPOND')
   }
@@ -343,7 +345,7 @@ async function run() {
         { op: 'RESPOND', args: { ref: 99 } },
       ]
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isLeft(result), 'RESPOND bad ref: Left')
     assert(result.value.includes('99'), 'RESPOND bad ref: error mentions index')
   }
@@ -360,7 +362,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'delegate', target: 'summarizer', task: 'summarize this' } },
       ],
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(result), 'normalizeStep integration: Right')
     assert(delegateResults.length === 1, 'normalizeStep integration: delegate called')
     assert(delegateResults[0].target === 'summarizer', 'normalizeStep integration: correct target')
@@ -379,7 +381,7 @@ async function run() {
         { op: 'EXEC', args: { tool: 'deploy', tool_args: {} } },
       ],
     }
-    const [result] = await runFreeWithStateT(interpret, ST)(parsePlan(plan))({})
+    const [result] = await runFreeWithStateT(interpret, ST)(planner.parsePlan(plan))({})
     assert(Either.isRight(result), 'normalizeStep approve integration: Right')
     assert(approveResults.length === 1, 'normalizeStep approve integration: approve called')
     assert(approveResults[0].description === 'deploy to prod?', 'normalizeStep approve integration: correct description')
