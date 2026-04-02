@@ -1,6 +1,6 @@
 import fp from '../lib/fun-fp.js'
 
-const { Task, Writer } = fp
+const { Task, Writer, Reader } = fp
 
 // =============================================================================
 // Traced Interpreter: Writer 기반 불변 trace 축적
@@ -30,7 +30,7 @@ const extractDetail = (f) => {
   }
 }
 
-const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}) => {
+const tracedInterpreterR = Reader.asks(({ interpret: inner, ST, logger, onOp }) => {
   // Writer mutable accumulator — 턴 시작 시 resetTrace()로 초기화
   let traceWriter = Writer.of(null)
 
@@ -85,6 +85,6 @@ const createTracedInterpreter = ({ interpret: inner, ST }, { logger, onOp } = {}
   }
 
   return { interpret, ST, getTrace, resetTrace }
-}
+})
 
-export { createTracedInterpreter }
+export { tracedInterpreterR }

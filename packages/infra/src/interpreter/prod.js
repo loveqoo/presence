@@ -1,13 +1,13 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
-import { createStateInterpreter } from '@presence/core/interpreter/state.js'
-import { createLlmInterpreter, extractStreamingMessage } from '@presence/core/interpreter/llm.js'
-import { createToolInterpreter } from '@presence/core/interpreter/tool.js'
-import { createDelegateInterpreter } from './delegate.js'
-import { createApprovalInterpreter } from '@presence/core/interpreter/approval.js'
-import { createControlInterpreter } from '@presence/core/interpreter/control.js'
-import { createParallelInterpreter } from '@presence/core/interpreter/parallel.js'
+import { stateInterpreterR } from '@presence/core/interpreter/state.js'
+import { llmInterpreterR } from '@presence/core/interpreter/llm.js'
+import { toolInterpreterR } from '@presence/core/interpreter/tool.js'
+import { delegateInterpreterR } from './delegate.js'
+import { approvalInterpreterR } from '@presence/core/interpreter/approval.js'
+import { controlInterpreterR } from '@presence/core/interpreter/control.js'
+import { parallelInterpreterR } from '@presence/core/interpreter/parallel.js'
 
 const { StateT } = fp
 const ST = StateT('task')
@@ -70,13 +70,13 @@ const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry
   }
 
   const composed = Interpreter.compose(ST,
-    createStateInterpreter(ST),
-    createLlmInterpreter({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
-    createToolInterpreter({ ST, toolRegistry, toolResultUi: ui.toolResultUi }),
-    createDelegateInterpreter({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn }),
-    createApprovalInterpreter({ ST, onApprove }),
-    createControlInterpreter(ST),
-    createParallelInterpreter({ ST, runProgram }),
+    stateInterpreterR.run({ ST }),
+    llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
+    toolInterpreterR.run({ ST, toolRegistry, toolResultUi: ui.toolResultUi }),
+    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn }),
+    approvalInterpreterR.run({ ST, onApprove }),
+    controlInterpreterR.run({ ST }),
+    parallelInterpreterR.run({ ST, runProgram }),
   )
 
   interpret = composed
@@ -89,6 +89,5 @@ const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry
  * @param {{ llm, toolRegistry, reactiveState?, agentRegistry?, fetchFn?, onApprove?, getAbortSignal? }} deps
  * @returns {{ interpret: Function, ST: object }}
  *
- * `extractStreamingMessage` — Re-exported from the LLM interpreter; extracts the final message from a streaming response.
  */
-export { createProdInterpreter, extractStreamingMessage }
+export { createProdInterpreter }

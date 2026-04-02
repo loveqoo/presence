@@ -1,7 +1,7 @@
 import { createReactiveState } from './state.js'
 import { createToolRegistry } from './tools.js'
 import { createPersistence, migrateHistoryIds } from './persistence.js'
-import { createTracedInterpreter } from '@presence/core/interpreter/traced.js'
+import { tracedInterpreterR } from '@presence/core/interpreter/traced.js'
 import { createProdInterpreter } from '../interpreter/prod.js'
 import { PHASE, PROMPT, TurnState } from '@presence/core/core/policies.js'
 import { SYSTEM_JOBS, SESSION_TYPE } from './constants.js'
@@ -132,7 +132,9 @@ const createSession = (globalCtx, { persistenceCwd, type = SESSION_TYPE.USER, on
 
   // --- Interpreter ---
   const prodInterpreter = createProdInterpreter({ llm, toolRegistry: sessionToolRegistry, reactiveState: state, agentRegistry, onApprove, getAbortSignal })
-  const { interpret: tracedInterpret, ST, getTrace, resetTrace } = createTracedInterpreter(prodInterpreter, {
+  const { interpret: tracedInterpret, ST, getTrace, resetTrace } = tracedInterpreterR.run({
+    interpret: prodInterpreter.interpret,
+    ST: prodInterpreter.ST,
     logger,
     onOp: (event, _entry) => {
       if (event !== 'start') {

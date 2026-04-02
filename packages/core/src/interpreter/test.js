@@ -1,5 +1,5 @@
 import fp from '../lib/fun-fp.js'
-import { createStateInterpreter } from './state.js'
+import { stateInterpreterR } from './state.js'
 import { Interpreter } from './compose.js'
 
 const { Task, StateT } = fp
@@ -35,7 +35,7 @@ const createTestInterpreter = (handlers = {}) => {
   const merged = { ...defaultHandlers, ...handlers }
 
   // State 인터프리터 공유 + mock 핸들러를 Interpreter로 변환
-  const stateI = createStateInterpreter(ST)
+  const stateI = stateInterpreterR.run({ ST })
   const mockInterpreters = Object.entries(merged)
     .filter(([tag]) => !stateI.handles.has(tag))
     .map(([tag, handler]) => handlerToInterpreter(tag, handler))

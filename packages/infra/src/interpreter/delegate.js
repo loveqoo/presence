@@ -3,12 +3,12 @@ import { DelegateResult } from '../infra/agent-registry.js'
 import { sendA2ATask } from '../infra/a2a-client.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
 
-const { Task, Maybe } = fp
+const { Task, Maybe, Reader } = fp
 
 // --- DelegateInterpreter ---
 // Delegate — 로컬/리모트 에이전트 위임.
 
-const createDelegateInterpreter = ({ ST, agentRegistry, delegateUi, fetchFn }) =>
+const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn }) =>
   new Interpreter(['Delegate'], (f) => {
     const maybeEntry = agentRegistry ? agentRegistry.get(f.target) : Maybe.Nothing()
 
@@ -39,11 +39,11 @@ const createDelegateInterpreter = ({ ST, agentRegistry, delegateUi, fetchFn }) =
         : ST.of(f.next(DelegateResult.failed(f.target, `Agent '${f.target}' has no run function or endpoint`))),
       maybeEntry,
     )
-  })
+  }))
 
 /**
- * `createDelegateInterpreter({ ST, agentRegistry, delegateUi, fetchFn })` — Handles `Delegate` ops.
+ * `delegateInterpreterR` — Reader that creates Delegate op handler.
  * Routes to a local `run()` function or a remote A2A endpoint based on the registry entry type.
  * Adds pending remote tasks to `delegateUi` for UI tracking.
  */
-export { createDelegateInterpreter }
+export { delegateInterpreterR }

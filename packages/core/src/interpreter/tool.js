@@ -1,10 +1,10 @@
 import fp from '../lib/fun-fp.js'
 import { Interpreter } from './compose.js'
 
-const { Task } = fp
+const { Task, Reader } = fp
 
 // 에러는 문자열로 반환 (턴 계속 진행, LLM이 re-plan).
-const createToolInterpreter = ({ ST, toolRegistry, toolResultUi }) =>
+const toolInterpreterR = Reader.asks(({ ST, toolRegistry, toolResultUi }) =>
   new Interpreter(['ExecuteTool'], (f) => {
     const tool = toolRegistry.get(f.name)
     if (!tool) return ST.of(f.next(`[ERROR] Unknown tool: ${f.name}`))
@@ -17,6 +17,6 @@ const createToolInterpreter = ({ ST, toolRegistry, toolResultUi }) =>
         toolResultUi.append({ tool: f.name, args: f.args, result })
         return f.next(result)
       })
-  })
+  }))
 
-export { createToolInterpreter }
+export { toolInterpreterR }

@@ -19,7 +19,7 @@ import { createSession } from '@presence/infra/infra/session-factory.js'
 import { createSessionManager } from '@presence/infra/infra/session-manager.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
-import { createDelegateInterpreter } from '@presence/infra/interpreter/delegate.js'
+import { delegateInterpreterR } from '@presence/infra/interpreter/delegate.js'
 import { initI18n, t } from '@presence/infra/i18n'
 
 console.log('Workspace smoke tests')
@@ -48,7 +48,7 @@ assert(typeof createSession === 'function',         'infra: createSession is a f
 assert(typeof createSessionManager === 'function',  'infra: createSessionManager is a function')
 assert(typeof createReactiveState === 'function',   'infra: createReactiveState is a function')
 assert(typeof createProdInterpreter === 'function', 'infra: createProdInterpreter is a function')
-assert(typeof createDelegateInterpreter === 'function', 'infra: createDelegateInterpreter is a function')
+assert(delegateInterpreterR != null && typeof delegateInterpreterR.run === 'function', 'infra: delegateInterpreterR is a Reader')
 
 initI18n('ko')
 assert(typeof t === 'function',                     'infra: i18n t is a function')

@@ -1,4 +1,4 @@
-import { createTracedInterpreter } from '@presence/core/interpreter/traced.js'
+import { tracedInterpreterR } from '@presence/core/interpreter/traced.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { askLLM, executeTool, respond } from '@presence/core/core/op.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
@@ -13,7 +13,7 @@ async function run() {
   // 1. Trace records op tags and timing (Writer 기반 getTrace)
   {
     const { interpret: inner, ST } = createTestInterpreter()
-    const { interpret, getTrace } = createTracedInterpreter({ interpret: inner, ST })
+    const { interpret, getTrace } = tracedInterpreterR.run({ interpret: inner, ST })
     const [result, finalState] = await runFreeWithStateT(interpret, ST)(
       askLLM({ messages: msg('hi') }).chain(r => respond(r))
     )(initialState)
@@ -30,7 +30,7 @@ async function run() {
     const { interpret: inner, ST } = createTestInterpreter({
       ExecuteTool: () => { throw new Error('fail') }
     })
-    const { interpret, getTrace } = createTracedInterpreter({ interpret: inner, ST })
+    const { interpret, getTrace } = tracedInterpreterR.run({ interpret: inner, ST })
     const [result] = await runFreeWithStateT(interpret, ST)(executeTool('x', {}))(initialState)
     const trace = getTrace()
 
@@ -43,7 +43,7 @@ async function run() {
   {
     const events = []
     const { interpret: inner, ST } = createTestInterpreter()
-    const { interpret } = createTracedInterpreter({ interpret: inner, ST }, {
+    const { interpret } = tracedInterpreterR.run({ interpret: inner, ST,
       onOp: (phase, entry) => events.push({ phase, tag: entry.tag })
     })
     await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
@@ -58,7 +58,7 @@ async function run() {
     const { interpret: inner, ST } = createTestInterpreter({
       AskLLM: () => { throw new Error('boom') }
     })
-    const { interpret } = createTracedInterpreter({ interpret: inner, ST }, {
+    const { interpret } = tracedInterpreterR.run({ interpret: inner, ST,
       onOp: (phase, entry) => events.push({ phase, tag: entry.tag })
     })
     try { await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState) }
@@ -74,7 +74,7 @@ async function run() {
       warn: (msg) => logs.push({ level: 'warn', msg }),
     }
     const { interpret: inner, ST } = createTestInterpreter()
-    const { interpret } = createTracedInterpreter({ interpret: inner, ST }, { logger: mockLogger })
+    const { interpret } = tracedInterpreterR.run({ interpret: inner, ST, logger: mockLogger })
     await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     assert(logs.some(l => l.level === 'debug' && l.msg.includes('op:start')), 'logger: start logged')
     assert(logs.some(l => l.level === 'debug' && l.msg.includes('op:done')), 'logger: done logged')
@@ -85,7 +85,7 @@ async function run() {
     const { interpret: inner, ST } = createTestInterpreter({
       AskLLM: () => 'custom'
     })
-    const { interpret } = createTracedInterpreter({ interpret: inner, ST })
+    const { interpret } = tracedInterpreterR.run({ interpret: inner, ST })
     const [result] = await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     assert(result === 'custom', 'passthrough: inner result preserved')
   }
@@ -93,7 +93,7 @@ async function run() {
   // 7. resetTrace clears accumulated trace
   {
     const { interpret: inner, ST } = createTestInterpreter()
-    const { interpret, getTrace, resetTrace } = createTracedInterpreter({ interpret: inner, ST })
+    const { interpret, getTrace, resetTrace } = tracedInterpreterR.run({ interpret: inner, ST })
     await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     assert(getTrace().length === 1, 'resetTrace: trace has 1 entry before reset')
     resetTrace()
@@ -106,7 +106,7 @@ async function run() {
   // 8. getTrace returns immutable snapshot (Writer log)
   {
     const { interpret: inner, ST } = createTestInterpreter()
-    const { interpret, getTrace } = createTracedInterpreter({ interpret: inner, ST })
+    const { interpret, getTrace } = tracedInterpreterR.run({ interpret: inner, ST })
     await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     const snap1 = getTrace()
     await runFreeWithStateT(interpret, ST)(respond('done'))(initialState)
@@ -118,7 +118,7 @@ async function run() {
   // 9. getTrace는 방어적 복사 — 외부 변경이 내부 상태를 오염시키지 않음
   {
     const { interpret: inner, ST } = createTestInterpreter()
-    const { interpret, getTrace } = createTracedInterpreter({ interpret: inner, ST })
+    const { interpret, getTrace } = tracedInterpreterR.run({ interpret: inner, ST })
     await runFreeWithStateT(interpret, ST)(askLLM({ messages: msg('x') }))(initialState)
     const snap = getTrace()
     snap.push({ tag: 'Injected', detail: null, timestamp: 0 })

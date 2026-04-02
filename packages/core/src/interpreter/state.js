@@ -1,8 +1,11 @@
+import fp from '../lib/fun-fp.js'
 import { getByPath, setByPathPure } from '../lib/path.js'
 import { Interpreter } from './compose.js'
 
+const { Reader } = fp
+
 // dryrun은 실제 상태를 쓰지 않으므로 별도.
-const createStateInterpreter = (ST) =>
+const stateInterpreterR = Reader.asks(({ ST }) =>
   new Interpreter(['UpdateState', 'GetState'], (f) => {
     if (f.tag === 'UpdateState') {
       return ST.modify(s => setByPathPure(s, f.path, f.value))
@@ -12,6 +15,6 @@ const createStateInterpreter = (ST) =>
     // GetState
     return ST.gets(s => getByPath(s, f.path))
       .map(value => f.next(value))
-  })
+  }))
 
-export { createStateInterpreter }
+export { stateInterpreterR }

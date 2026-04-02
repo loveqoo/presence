@@ -1,7 +1,7 @@
 import fp from '../lib/fun-fp.js'
 import { Interpreter } from './compose.js'
 
-const { Task } = fp
+const { Task, Reader } = fp
 
 // JSON이 부분적으로 도착해도 "message":"..." 내용을 점진적으로 보여준다.
 const extractStreamingMessage = (accumulated) => {
@@ -42,18 +42,14 @@ const extractStreamingMessage = (accumulated) => {
   return result || null
 }
 
-const appendContext = (messages, context) => {
-  if (!context || context.length === 0) return messages
-  const ctxText = context
-    .map((c, i) => `[${i + 1}] ${typeof c === 'string' ? c : JSON.stringify(c)}`)
-    .join('\n')
-  return [...messages, { role: 'user', content: `참조 컨텍스트:\n${ctxText}` }]
-}
-
-const createLlmInterpreter = ({ ST, llm, streamingUi, getAbortSignal }) =>
+const llmInterpreterR = Reader.asks(({ ST, llm, streamingUi, getAbortSignal }) =>
   new Interpreter(['AskLLM'], (f) =>
     ST.lift(Task.fromPromise(async () => {
-      const messages = appendContext(f.messages, f.context)
+      const ctx = f.context
+      const messages = (!ctx || ctx.length === 0) ? f.messages : [
+        ...f.messages,
+        { role: 'user', content: `참조 컨텍스트:\n${ctx.map((c, i) => `[${i + 1}] ${typeof c === 'string' ? c : JSON.stringify(c)}`).join('\n')}` },
+      ]
       const signal = getAbortSignal ? getAbortSignal() : undefined
 
       // 스트리밍: streamingUi가 활성이고 tool_calls가 아닌 경우
@@ -84,6 +80,6 @@ const createLlmInterpreter = ({ ST, llm, streamingUi, getAbortSignal }) =>
       return result.type === 'tool_calls'
         ? { type: 'tool_calls', toolCalls: result.toolCalls }
         : result.content
-    })()).map(value => f.next(value)))
+    })()).map(value => f.next(value))))
 
-export { createLlmInterpreter, extractStreamingMessage, appendContext }
+export { llmInterpreterR }
