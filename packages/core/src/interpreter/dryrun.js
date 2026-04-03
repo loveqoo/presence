@@ -59,4 +59,4 @@ const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
   return { interpret, ST, plan }
 }
 
-export { createDryRunInterpreter, DEFAULT_STUBS }
+export { createDryRunInterpreter }

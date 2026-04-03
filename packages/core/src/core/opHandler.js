@@ -36,7 +36,7 @@ class LookupMemoryOp extends Op {
   validate(a) {
     return (a.query == null || typeof a.query === 'string')
       ? Either.Right(true)
-      : Either.Left('LOOKUP_MEMORY: query는 string이거나 생략해야 합니다.')
+      : Either.Left('LOOKUP_MEMORY: query must be a string or omitted')
   }
   execute(a) {
     return getState('context.memories').chain(memories => {
@@ -57,9 +57,9 @@ class AskLlmOp extends Op {
       .map(m => m.value)
   }
   validate(a) {
-    if (typeof a.prompt !== 'string') return Either.Left('ASK_LLM: prompt(string)가 필요합니다.')
+    if (typeof a.prompt !== 'string') return Either.Left('ASK_LLM: prompt (string) is required')
     if (a.ctx != null && !this.isPositiveIntArray(a.ctx)) {
-      return Either.Left('ASK_LLM: ctx는 양의 정수 배열이어야 합니다.')
+      return Either.Left('ASK_LLM: ctx must be an array of positive integers')
     }
     return Either.Right(true)
   }
@@ -92,7 +92,7 @@ class ExecOp extends Op {
   validate(a) {
     return typeof a.tool === 'string'
       ? Either.Right(true)
-      : Either.Left('EXEC: tool(string)이 필요합니다.')
+      : Either.Left('EXEC: tool (string) is required')
   }
   execute(a, results) {
     const toolArgs = a.tool_args || (() => {
@@ -108,15 +108,15 @@ class RespondOp extends Op {
     if (a.ref != null) {
       return this.isPositiveInt(a.ref)
         ? Either.Right(true)
-        : Either.Left('RESPOND: ref는 양의 정수(1-based)여야 합니다.')
+        : Either.Left('RESPOND: ref must be a positive integer (1-based)')
     }
     return typeof a.message === 'string'
       ? Either.Right(true)
-      : Either.Left('RESPOND: ref(positive integer) 또는 message(string)가 필요합니다.')
+      : Either.Left('RESPOND: ref (positive integer) or message (string) is required')
   }
   validateRef(a, results) {
     if (a.ref != null && this.safeLookup(results, a.ref - 1).isNothing()) {
-      return Either.Left(`RESPOND: 참조 인덱스 ${a.ref}에 해당하는 결과가 없습니다.`)
+      return Either.Left(`RESPOND: no result at ref index ${a.ref}`)
     }
     return Either.Right(true)
   }
@@ -131,7 +131,7 @@ class ApproveOp extends Op {
   validate(a) {
     return typeof a.description === 'string'
       ? Either.Right(true)
-      : Either.Left('APPROVE: description(string)이 필요합니다.')
+      : Either.Left('APPROVE: description (string) is required')
   }
   execute(a) { return approve(a.description) }
 }
@@ -140,7 +140,7 @@ class DelegateOp extends Op {
   validate(a) {
     return (typeof a.target === 'string' && typeof a.task === 'string')
       ? Either.Right(true)
-      : Either.Left('DELEGATE: target(string)과 task(string)가 필요합니다.')
+      : Either.Left('DELEGATE: target (string) and task (string) are required')
   }
   execute(a) { return delegate(a.target, a.task) }
 }

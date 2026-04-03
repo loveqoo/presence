@@ -252,7 +252,7 @@ class Planner {
         if (Either.isLeft(acc)) return Free.of(acc)
         const normalized = this.normalizeStep(step)
         const op = ops[normalized.op]
-        if (!op) return Free.of(Either.Left(`알 수 없는 op: ${normalized.op}`))
+        if (!op) return Free.of(Either.Left(`unknown op: ${normalized.op}`))
         return op.run(normalized, acc.value).chain(stepResult =>
           Either.fold(
             err => Free.of(Either.Left(err)),

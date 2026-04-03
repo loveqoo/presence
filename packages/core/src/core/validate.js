@@ -4,9 +4,9 @@ import { ops } from './opHandler.js'
 import { ERROR_KIND, TurnError } from './policies.js'
 
 const validateStep = (step) => {
-  if (!step || typeof step !== 'object') return Either.Left(`유효하지 않은 step: ${String(step)}`)
-  if (!step.op || typeof step.op !== 'string') return Either.Left(`step에 op이 없거나 문자열이 아닙니다.`)
-  if (!ops[step.op]) return Either.Left(`알 수 없는 op: ${step.op}`)
+  if (!step || typeof step !== 'object') return Either.Left(`invalid step: ${String(step)}`)
+  if (!step.op || typeof step.op !== 'string') return Either.Left('step.op must be a non-empty string')
+  if (!ops[step.op]) return Either.Left(`unknown op: ${step.op}`)
   return ops[step.op].validate(step.args || {}).chain(() => Either.Right(step))
 }
 
@@ -79,16 +79,16 @@ const validateStepFull = (step, index, tools) => {
 const validatePlan = (plan, { tools = [] } = {}) => {
   if (plan == null || typeof plan !== 'object' || Array.isArray(plan)) {
     return Either.Left(TurnError(
-      `플래너 응답이 올바른 객체가 아닙니다: ${String(plan)}`, ERROR_KIND.PLANNER_SHAPE))
+      `planner response is not a valid object: ${String(plan)}`, ERROR_KIND.PLANNER_SHAPE))
   }
   if (plan.type === 'direct_response') {
     return typeof plan.message === 'string'
       ? Either.Right(plan)
-      : Either.Left(TurnError('direct_response에 유효한 message(string)가 필요합니다.', ERROR_KIND.PLANNER_SHAPE))
+      : Either.Left(TurnError('direct_response requires a valid message (string)', ERROR_KIND.PLANNER_SHAPE))
   }
   if (plan.type === 'plan') {
     if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
-      return Either.Left(TurnError('plan에 비어있지 않은 steps 배열이 필요합니다.', ERROR_KIND.PLANNER_SHAPE))
+      return Either.Left(TurnError('plan requires a non-empty steps array', ERROR_KIND.PLANNER_SHAPE))
     }
     const respondIndex = plan.steps.findIndex(s => s?.op === 'RESPOND')
     if (respondIndex !== -1 && respondIndex !== plan.steps.length - 1) {
@@ -102,8 +102,7 @@ const validatePlan = (plan, { tools = [] } = {}) => {
     ).chain(() => Either.Right(plan))
   }
   return Either.Left(TurnError(
-    `플래너 응답 형식이 잘못되었습니다 (type: ${plan.type ?? 'undefined'}). `
-    + `"direct_response" 또는 steps가 포함된 "plan"이어야 합니다.`,
+    `invalid planner response type: ${plan.type ?? 'undefined'}. Expected "direct_response" or "plan" with steps.`,
     ERROR_KIND.PLANNER_SHAPE))
 }
 
