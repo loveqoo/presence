@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
-import { defaultPresenceDir } from './config.js'
+import { Config } from './config.js'
 
 // =============================================================================
 // UserStore: 사용자 CRUD + refreshSessions 관리
@@ -32,7 +32,7 @@ const UserStoreFileSchema = z.object({
  * @returns {string}
  */
 const usersFilePath = (basePath) => {
-  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const dir = basePath || process.env.PRESENCE_DIR || Config.presenceDir()
   return join(dir, 'users.json')
 }
 

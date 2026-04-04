@@ -1,6 +1,6 @@
 import { runFreeWithStateT } from '../lib/runner.js'
 import { forkTask, fireAndForget } from '../lib/task.js'
-import { RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError } from './policies.js'
+import { RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError, STATE_PATH } from './policies.js'
 import { getByPath } from '../lib/path.js'
 import { applyFinalState } from './stateCommit.js'
 
@@ -31,24 +31,24 @@ class Executor {
 
   beginLifecycle(input) {
     if (!this.state) return
-    this.state.set('turnState', TurnState.working(input))
-    this.state.set('turn', (this.state.get('turn') || 0) + 1)
-    this.state.set('_debug.iterationHistory', [])
+    this.state.set(STATE_PATH.TURN_STATE, TurnState.working(input))
+    this.state.set(STATE_PATH.TURN, (this.state.get(STATE_PATH.TURN) || 0) + 1)
+    this.state.set(STATE_PATH.DEBUG_ITERATION_HISTORY, [])
   }
 
   async recallMemories(input) {
     const { state, actors: { memoryActor, logger } } = this
     if (!memoryActor || !state) return
     try {
-      const memories = await forkTask(memoryActor.send({ type: 'recall', input }))
-      state.set('context.memories', memories.map(n => n.label))
-      state.set('_debug.recalledMemories', memories.map(n => ({
+      const memories = await forkTask(memoryActor.recall(input))
+      state.set(STATE_PATH.CONTEXT_MEMORIES, memories.map(n => n.label))
+      state.set(STATE_PATH.DEBUG_RECALLED_MEMORIES, memories.map(n => ({
         label: n.label, type: n.type, tier: n.tier,
         createdAt: n.createdAt, embeddedAt: n.embeddedAt,
       })))
     } catch (e) {
-      state.set('context.memories', [])
-      state.set('_debug.recalledMemories', [])
+      state.set(STATE_PATH.CONTEXT_MEMORIES, [])
+      state.set(STATE_PATH.DEBUG_RECALLED_MEMORIES, [])
       ;(logger || console).warn('Memory recall failed', { error: e.message })
     }
   }
@@ -58,7 +58,7 @@ class Executor {
     if (memoryActor) this.postTurnMemory(memoryActor, finalState)
     if (compactionActor) {
       const history = getByPath(finalState, 'context.conversationHistory') || []
-      fireAndForget(compactionActor.send({ type: 'check', history, epoch: initialEpoch }))
+      fireAndForget(compactionActor.check(history, initialEpoch))
     }
     applyFinalState(this.state, finalState, { initialEpoch })
     this.persist()
@@ -67,27 +67,27 @@ class Executor {
   postTurnMemory(memoryActor, finalState) {
     const lastTurn = getByPath(finalState, 'lastTurn')
     if (lastTurn?.tag === RESULT.SUCCESS) {
-      fireAndForget(memoryActor.send({ type: 'save', node: {
+      fireAndForget(memoryActor.save({
         label: lastTurn.input || 'unknown',
         type: 'conversation', tier: 'episodic',
         data: { input: lastTurn.input, output: lastTurn.result },
-      }}))
+      }))
     }
   }
 
   persist() {
     const { actors: { persistenceActor } } = this
     if (persistenceActor && this.state) {
-      fireAndForget(persistenceActor.send({ type: 'save', snapshot: this.state.snapshot() }))
+      fireAndForget(persistenceActor.save(this.state.snapshot()))
     }
   }
 
   recover(input, err) {
     if (this.state) {
       const recovery = {
-        _streaming: null,
-        lastTurn: TurnOutcome.failure(input, TurnError(err.message || String(err), ERROR_KIND.INTERPRETER), null),
-        turnState: TurnState.idle(),
+        [STATE_PATH.STREAMING]: null,
+        [STATE_PATH.LAST_TURN]: TurnOutcome.failure(input, TurnError(err.message || String(err), ERROR_KIND.INTERPRETER), null),
+        [STATE_PATH.TURN_STATE]: TurnState.idle(),
       }
       for (const [key, value] of Object.entries(recovery)) this.state.set(key, value)
     }

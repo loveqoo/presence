@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs'
 import { join } from 'path'
-import { defaultPresenceDir } from './config.js'
+import { Config } from './config.js'
 import fp from '@presence/core/lib/fun-fp.js'
 
 const { Either } = fp
@@ -35,7 +35,7 @@ const base64urlDecode = (str) =>
  * @returns {string}
  */
 const secretFilePath = (basePath) => {
-  const dir = basePath || process.env.PRESENCE_DIR || defaultPresenceDir()
+  const dir = basePath || process.env.PRESENCE_DIR || Config.presenceDir()
   return join(dir, 'server.secret.json')
 }
 

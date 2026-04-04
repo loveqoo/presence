@@ -1,7 +1,7 @@
 import { askLLM, respond, updateState, getState } from './op.js'
 import { ops } from './opHandler.js'
 import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
-import { DEBUG, HISTORY, ERROR_KIND, TurnState, TurnOutcome, TurnError } from './policies.js'
+import { DEBUG, HISTORY, ERROR_KIND, TurnState, TurnOutcome, TurnError, TURN_SOURCE } from './policies.js'
 import { safeJsonParse, validatePlan } from './validate.js'
 import fp from '../lib/fun-fp.js'
 
@@ -16,7 +16,7 @@ class TurnLifecycle {
 
   finish(turn, turnResult, response, historyExtra = {}) {
     return updateState('_streaming', null)
-      .chain(() => turn.source === 'user'
+      .chain(() => turn.source === TURN_SOURCE.USER
         ? getState('context.conversationHistory').chain(history => {
             const entry = {
               id: `h-${Date.now()}-${++this.historySeq}`,

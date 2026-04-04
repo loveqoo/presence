@@ -1,4 +1,5 @@
 import fp from '../lib/fun-fp.js'
+import { STATE_PATH } from './policies.js'
 const { identity } = fp
 
 const COMMANDS = Object.freeze({
@@ -43,15 +44,15 @@ class Repl {
   }
 
   cmdStatus() {
-    const ts = this.state.get('turnState')
-    const lt = this.state.get('lastTurn')
+    const ts = this.state.get(STATE_PATH.TURN_STATE)
+    const lt = this.state.get(STATE_PATH.LAST_TURN)
     const lines = [
       `turnState: ${ts?.tag || 'unknown'}`,
-      `turn: ${this.state.get('turn') || 0} (session: ${this._turnCount})`,
+      `turn: ${this.state.get(STATE_PATH.TURN) || 0} (session: ${this._turnCount})`,
       `lastTurn: ${lt ? `${lt.tag}${lt.tag === 'failure' ? ` (${lt.error?.kind})` : ''}` : 'none'}`,
-      `events queue: ${(this.state.get('events.queue') || []).length}`,
-      `delegates pending: ${(this.state.get('delegates.pending') || []).length}`,
-      `todos: ${(this.state.get('todos') || []).length}`,
+      `events queue: ${(this.state.get(STATE_PATH.EVENTS_QUEUE) || []).length}`,
+      `delegates pending: ${(this.state.get(STATE_PATH.DELEGATES_PENDING) || []).length}`,
+      `todos: ${(this.state.get(STATE_PATH.TODOS) || []).length}`,
     ]
     this._output(lines.join('\n'))
   }
@@ -79,16 +80,16 @@ class Repl {
   }
 
   cmdTodos() {
-    const todos = this.state.get('todos') || []
+    const todos = this.state.get(STATE_PATH.TODOS) || []
     if (todos.length === 0) { this._output(this.t('repl.no_todos')); return }
     const lines = todos.map(todo => `  ${todo.done ? '✓' : '○'} [${todo.type}] ${todo.title}`)
     this._output(`TODOs (${todos.length}):\n${lines.join('\n')}`)
   }
 
   cmdEvents() {
-    const queue = this.state.get('events.queue') || []
-    const dl = this.state.get('events.deadLetter') || []
-    const inFlight = this.state.get('events.inFlight')
+    const queue = this.state.get(STATE_PATH.EVENTS_QUEUE) || []
+    const dl = this.state.get(STATE_PATH.EVENTS_DEAD_LETTER) || []
+    const inFlight = this.state.get(STATE_PATH.EVENTS_IN_FLIGHT)
     const lines = [
       `queue: ${queue.length} event(s)`,
       ...queue.slice(0, 5).map(e => `  [${e.type}] ${e.id?.slice(0, 8) || '?'}`),

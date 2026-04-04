@@ -5,7 +5,9 @@ import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
-import { eventActorR, emitR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
+import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
+import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
+import { forkTask } from '@presence/core/lib/task.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 
 import { assert, summary } from '../lib/assert.js'
@@ -40,13 +42,13 @@ async function run() {
     // 브릿지 hook
     state.hooks.on('turnState', (phase) => {
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
     // scheduled_job 이벤트를 직접 enqueue (scheduler 역할)
     const event = withEventMeta({ type: 'scheduled_job', jobId: 'test-job', jobName: '정기 점검', prompt: '정기 점검', runId: 'run-1', attempt: 1 })
-    eventActor.send({ type: 'enqueue', event }).fork(() => {}, () => {})
+    eventActor.enqueue(event).fork(() => {}, () => {})
 
     await new Promise(r => setTimeout(r, 150))
 
@@ -67,12 +69,12 @@ async function run() {
     let runCount = 0
     const turnActor = turnActorR.run({ runTurn: async () => { runCount++; return 'done' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
 
     // 브릿지 hook
     state.hooks.on('turnState', (phase) => {
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
@@ -221,12 +223,12 @@ async function run() {
     const processed = []
     const turnActor = turnActorR.run({ runTurn: async (input) => { processed.push(input); return 'ok' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
 
     // 브릿지 hook
     state.hooks.on('turnState', (phase) => {
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
@@ -260,7 +262,7 @@ async function run() {
 
     const turnActor = turnActorR.run({ runTurn: async () => { throw new Error('agent crashed') } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
 
     emit({ type: 'bad-event', prompt: 'crash' })
 

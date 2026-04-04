@@ -1,0 +1,157 @@
+import fp from '@presence/core/lib/fun-fp.js'
+import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
+import { PHASE, STATE_PATH, TURN_SOURCE } from '@presence/core/core/policies.js'
+import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent } from '../events.js'
+import { ActorWrapper } from './actor-wrapper.js'
+
+const { Task, Maybe, Reader } = fp
+
+class EventActor extends ActorWrapper {
+  static MSG = Object.freeze({ ENQUEUE: 'enqueue', DRAIN: 'drain' })
+  static RESULT = Object.freeze({
+    ENQUEUED: 'enqueued', DRAINED: 'drained', DEAD_LETTER: 'dead-letter',
+    NO_OP_EMPTY: 'no-op:empty', NO_OP_IN_FLIGHT: 'no-op:inFlight',
+    NO_OP_BUSY: 'no-op:busy', NO_OP_NO_TODOS: 'no-op:no-todos', UNKNOWN: 'unknown',
+  })
+
+  constructor(turnActor, state, opts = {}) {
+    const { logger, onEventDone, todoReviewJobName } = opts
+    const R = EventActor.RESULT
+    // queue: 처리 대기 이벤트. inFlight: 현재 처리 중인 이벤트. deadLetter: 실패한 이벤트.
+    super(
+      { queue: [], inFlight: null, deadLetter: [], lastProcessed: null },
+      (actorState, msg) => {
+        switch (msg.type) {
+          // 큐에 이벤트 추가. idle 상태면 즉시 drain 시작.
+          case EventActor.MSG.ENQUEUE: {
+            const next = { ...actorState, queue: [...actorState.queue, msg.event] }
+            this.projectEvents(next)
+            const ts = state.get(STATE_PATH.TURN_STATE)
+            if (ts && ts.tag === PHASE.IDLE && !actorState.inFlight) {
+              fireAndForget(this.drain())
+            }
+            return [R.ENQUEUED, next]
+          }
+
+          // 큐 선두 이벤트를 꺼내 turnActor로 실행. 성공→다음 drain, 실패→deadLetter.
+          case EventActor.MSG.DRAIN: {
+            if (actorState.queue.length === 0) return [R.NO_OP_EMPTY, actorState]
+            if (actorState.inFlight !== null) return [R.NO_OP_IN_FLIGHT, actorState]
+            const ts = state.get(STATE_PATH.TURN_STATE)
+            if (!ts || ts.tag !== 'idle') return [R.NO_OP_BUSY, actorState]
+
+            const [head, ...rest] = actorState.queue
+            const todoResult = this.resolveTodoReview(head, state, todoReviewJobName)
+            if (todoResult.skip) return this.skipTodoReview(actorState, rest)
+            const event = todoResult.event
+
+            const draining = { ...actorState, queue: rest, inFlight: event }
+            this.projectEvents(draining)
+
+            const runEvent = () => forkTask(
+              turnActor.run(eventToPrompt(event), { source: TURN_SOURCE.EVENT, allowedTools: event.allowedTools || [] }),
+            )
+
+            return Task.fromPromise(runEvent)()
+              .map(result => this.onDrainSuccess(draining, event, result))
+              .catchError(err => this.onDrainFailure(draining, event, err))
+          }
+
+          default:
+            return [R.UNKNOWN, actorState]
+        }
+      },
+    )
+
+    this.state = state
+    this.logger = logger
+    this.onEventDone = onEventDone
+  }
+
+  projectEvents({ queue, inFlight, deadLetter, lastProcessed }) {
+    this.state.set(STATE_PATH.EVENTS_QUEUE, queue.map(e => ({ ...e })))
+    this.state.set(STATE_PATH.EVENTS_IN_FLIGHT, inFlight ? { ...inFlight } : null)
+    this.state.set(STATE_PATH.EVENTS_DEAD_LETTER, deadLetter.map(e => ({ ...e })))
+    if (lastProcessed !== undefined) this.state.set(STATE_PATH.EVENTS_LAST_PROCESSED, lastProcessed)
+  }
+
+  applyTodo(event) {
+    Maybe.fold(
+      () => {},
+      todo => {
+        const todos = this.state.get(STATE_PATH.TODOS) || []
+        if (isDuplicate(todos, event.id)) return
+        this.state.set(STATE_PATH.TODOS, [...todos, todo])
+      },
+      todoFromEvent(event),
+    )
+  }
+
+  resolveTodoReview(event, state, todoReviewJobName) {
+    const isTodoReview = event.type === 'todo_review' ||
+      (todoReviewJobName && event.jobName === todoReviewJobName)
+    if (!isTodoReview) return { event, skip: false }
+    const pending = (state.get(STATE_PATH.TODOS) || []).filter(todo => !todo.done)
+    if (pending.length === 0) return { event, skip: true }
+    return { event: { ...event, prompt: buildTodoReviewPrompt(pending) }, skip: false }
+  }
+
+  onDrainSuccess(draining, event, result) {
+    const R = EventActor.RESULT
+    return [R.DRAINED, this.handleDrainSuccess(draining, event, result)]
+  }
+
+  onDrainFailure(draining, event, err) {
+    const R = EventActor.RESULT
+    return Task.of([R.DEAD_LETTER, this.handleDrainFailure(draining, event, err)])
+  }
+
+  handleDrainSuccess(draining, event, result) {
+    this.applyTodo(event)
+    if (this.onEventDone) this.onEventDone(event, { success: true, result })
+    const done = { ...draining, queue: [...draining.queue], inFlight: null, lastProcessed: event }
+    this.projectEvents(done)
+    if (done.queue.length > 0) fireAndForget(this.drain())
+    return done
+  }
+
+  handleDrainFailure(draining, event, err) {
+    const deadLetterEntry = {
+      ...event,
+      error: err.message || String(err),
+      failedAt: Date.now(),
+    }
+    const failed = {
+      ...draining,
+      queue: [...draining.queue],
+      inFlight: null,
+      deadLetter: [...draining.deadLetter, deadLetterEntry],
+    }
+    this.projectEvents(failed)
+    if (this.onEventDone) this.onEventDone(event, { success: false, error: err.message })
+    ;(this.logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
+    if (failed.queue.length > 0) fireAndForget(this.drain())
+    return failed
+  }
+
+  enqueue(event) { return this.send({ type: EventActor.MSG.ENQUEUE, event }) }
+  drain() { return this.send({ type: EventActor.MSG.DRAIN }) }
+
+  emit(event) {
+    const enriched = withEventMeta(event)
+    fireAndForget(this.enqueue(enriched))
+    return enriched
+  }
+
+  skipTodoReview(actorState, rest) {
+    const skipped = { ...actorState, queue: rest }
+    this.projectEvents(skipped)
+    if (rest.length > 0) fireAndForget(this.drain())
+    return [EventActor.RESULT.NO_OP_NO_TODOS, skipped]
+  }
+}
+
+const eventActorR = Reader.asks(({ turnActor, state, ...opts }) =>
+  new EventActor(turnActor, state, opts))
+
+export { EventActor, eventActorR }

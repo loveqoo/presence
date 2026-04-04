@@ -4,7 +4,9 @@ import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { turnActorR, eventActorR, emitR, forkTask } from '@presence/infra/infra/actors.js'
+import { TurnActor, turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
+import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
+import { forkTask } from '@presence/core/lib/task.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
 
 import { assert, summary } from '../../../../test/lib/assert.js'
@@ -36,9 +38,9 @@ async function run() {
 
     // 3개 동시 요청 — Actor가 직렬화
     const results = await Promise.all([
-      forkTask(turnActor.send({ input: 'A', source: 'user' })),
-      forkTask(turnActor.send({ input: 'B', source: 'user' })),
-      forkTask(turnActor.send({ input: 'C', source: 'user' })),
+      forkTask(turnActor.run('A')),
+      forkTask(turnActor.run('B')),
+      forkTask(turnActor.run('C')),
     ])
 
     assert(state.get('turn') === 3, 'C1: 3 turns completed')
@@ -68,12 +70,12 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     const [r1, r2] = await Promise.all([
-      forkTask(turnActor.send({ input: 'fail' })),
-      forkTask(turnActor.send({ input: 'succeed' })),
+      forkTask(turnActor.run('fail')),
+      forkTask(turnActor.run('succeed')),
     ])
 
     assert(state.get('turn') === 2, 'C2: both turns ran')
-    assert(r1?._turnError || (typeof r1 === 'string' && (r1.includes('오류') || r1.includes('error'))), 'C2: 1st turn error captured')
+    assert(TurnActor.TurnFailure.is(r1) || (typeof r1 === 'string' && (r1.includes('오류') || r1.includes('error'))), 'C2: 1st turn error captured')
     assert(r2 === 'recovered', 'C2: 2nd turn succeeded')
   }
 
@@ -96,7 +98,7 @@ async function run() {
 
     // 빠르게 5개 요청 (브라우저 탭 5개 동시 전송 시뮬레이션)
     const promises = Array.from({ length: 5 }, (_, i) =>
-      forkTask(turnActor.send({ input: `req-${i}`, source: 'user' }))
+      forkTask(turnActor.run(`req-${i}`))
     )
     await Promise.all(promises)
 
@@ -113,9 +115,12 @@ async function run() {
   {
     const memoryActorOps = []
     const trackingMemoryActor = {
-      send: (msg) => {
-        memoryActorOps.push(msg.type)
-        if (msg.type === 'recall') return { fork: (_, cb) => cb([]) }
+      recall: (input) => {
+        memoryActorOps.push('recall')
+        return { fork: (_, cb) => cb([]) }
+      },
+      save: (node) => {
+        memoryActorOps.push('save')
         return { fork: (_, cb) => cb('ok') }
       },
     }
@@ -148,12 +153,13 @@ async function run() {
     let saveBeforeIdle = false
     const memoryOps = []
     const trackingActor = {
-      send: (msg) => {
-        memoryOps.push(msg.type)
-        if (msg.type === 'save') {
-          saveBeforeIdle = state.get('turnState')?.tag === 'working'
-        }
-        if (msg.type === 'recall') return { fork: (_, cb) => cb([]) }
+      recall: (input) => {
+        memoryOps.push('recall')
+        return { fork: (_, cb) => cb([]) }
+      },
+      save: (node) => {
+        memoryOps.push('save')
+        saveBeforeIdle = state.get('turnState')?.tag === 'working'
         return { fork: (_, cb) => cb('ok') }
       },
     }
@@ -196,16 +202,16 @@ async function run() {
 
     // EventActor + 브릿지 hook 연결
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
 
     state.hooks.on('turnState', (phase) => {
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
     // user input + event 동시 발생
-    const userPromise = forkTask(turnActor.send({ input: 'user question', source: 'user' }))
+    const userPromise = forkTask(turnActor.run('user question'))
     emit({ type: 'github', prompt: 'event prompt' })
 
     await userPromise

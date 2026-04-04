@@ -142,7 +142,7 @@ const createJobTools = ({ store, eventActor }) => {
           attempt: 1,
           allowedTools: job.allowedTools || [],
         })
-        fireAndForget(eventActor.send({ type: 'enqueue', event }))
+        fireAndForget(eventActor.enqueue(event))
         return `Job 즉시 실행 요청됨: ${job.name} (runId: ${runId})`
       },
     },

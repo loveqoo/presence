@@ -2,21 +2,31 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import fp from '@presence/core/lib/fun-fp.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { HISTORY, PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
-import {
-  memoryActorR, compactionActorR, persistenceActorR,
-  applyCompaction, forkTask,
-} from '@presence/infra/infra/actors.js'
-import {
-  extractForCompaction, createSummaryEntry, SUMMARY_MARKER,
-} from '@presence/infra/infra/history-compaction.js'
+import { HISTORY, PHASE, RESULT, TurnState, STATE_PATH } from '@presence/core/core/policies.js'
+import { MemoryActor, memoryActorR } from '@presence/infra/infra/actors/memory-actor.js'
+import { CompactionActor, compactionActorR, SUMMARY_MARKER } from '@presence/infra/infra/actors/compaction-actor.js'
+import { PersistenceActor, persistenceActorR } from '@presence/infra/infra/actors/persistence-actor.js'
+import { forkTask } from '@presence/core/lib/task.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp
+const mockLlmNoop = { chat: async () => ({ content: '' }) }
+const compactor = new CompactionActor(mockLlmNoop)
 
 // --- Helpers ---
+
+// applyCompaction: session-factory.js にインラインされたロジックのテスト用コピー
+const applyCompaction = (reactiveState, { summary, extractedIds }) => {
+  const current = reactiveState.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || []
+  const filtered = current.filter(h => !h.id || !extractedIds.has(h.id))
+  const merged = [summary, ...filtered]
+  const trimmed = merged.length > HISTORY.MAX_CONVERSATION
+    ? [merged[0], ...merged.slice(-(HISTORY.MAX_CONVERSATION - 1))]
+    : merged
+  reactiveState.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, trimmed)
+}
 
 const makeHistory = (n) => Array.from({ length: n }, (_, i) => ({
   id: `h-${i}`, input: `q${i}`, output: `a${i}`, ts: 1000 + i,
@@ -56,7 +66,7 @@ async function run() {
     ]})
     const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
-    const result = await forkTask(actor.send({ type: 'recall', input: '회의' }))
+    const result = await forkTask(actor.recall('회의'))
     assert(Array.isArray(result), 'MemoryActor recall: returns array')
     assert(result.length === 2, 'MemoryActor recall: correct count')
     assert(result[0].label === '회의 안건 A', 'MemoryActor recall: label mapped')
@@ -68,11 +78,10 @@ async function run() {
     const mem0 = makeMockMem0()
     const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
-    const result = await forkTask(actor.send({
-      type: 'save',
-      node: { label: 'test', type: 'conversation', data: { input: 'q', output: 'a' } },
-    }))
-    assert(result === 'ok', 'MemoryActor save: returns ok')
+    const result = await forkTask(actor.save(
+      { label: 'test', type: 'conversation', data: { input: 'q', output: 'a' } },
+    ))
+    assert(result === MemoryActor.RESULT.OK, 'MemoryActor save: returns ok')
     assert(mem0.calls.add.length === 1, 'MemoryActor save: add called')
     assert(mem0.calls.add[0].messages[0].content === 'q', 'MemoryActor save: user message')
     assert(mem0.calls.add[0].messages[1].content === 'a', 'MemoryActor save: assistant message')
@@ -82,14 +91,13 @@ async function run() {
   {
     const actor = memoryActorR.run({ mem0: null, adapter: null, logger: null })
 
-    const recalled = await forkTask(actor.send({ type: 'recall', input: '회의' }))
+    const recalled = await forkTask(actor.recall('회의'))
     assert(Array.isArray(recalled) && recalled.length === 0, 'MemoryActor null: recall returns []')
 
-    const saved = await forkTask(actor.send({
-      type: 'save',
-      node: { data: { input: 'q', output: 'a' } },
-    }))
-    assert(saved === 'skip', 'MemoryActor null: save returns skip')
+    const saved = await forkTask(actor.save(
+      { data: { input: 'q', output: 'a' } },
+    ))
+    assert(saved === MemoryActor.RESULT.SKIP, 'MemoryActor null: save returns skip')
   }
 
   // M4. save data.input 없음 → skip
@@ -97,8 +105,8 @@ async function run() {
     const mem0 = makeMockMem0()
     const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
-    const result = await forkTask(actor.send({ type: 'save', node: { data: {} } }))
-    assert(result === 'skip', 'MemoryActor save: no input → skip')
+    const result = await forkTask(actor.save({ data: {} }))
+    assert(result === MemoryActor.RESULT.SKIP, 'MemoryActor save: no input → skip')
     assert(mem0.calls.add.length === 0, 'MemoryActor save: add not called')
   }
 
@@ -109,7 +117,7 @@ async function run() {
 
     for (const type of ['embed', 'prune', 'promote', 'removeWorking', 'saveDisk']) {
       const result = await forkTask(actor.send({ type }))
-      assert(result === 'no-op', `MemoryActor no-op: ${type}`)
+      assert(result === MemoryActor.RESULT.NO_OP, `MemoryActor no-op: ${type}`)
     }
     assert(mem0.calls.search.length === 0, 'MemoryActor no-op: no mem0 calls')
   }
@@ -119,12 +127,12 @@ async function run() {
     const mem0 = makeMockMem0({ failSearch: true })
     const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
-    const result = await forkTask(actor.send({ type: 'recall', input: 'x' }))
+    const result = await forkTask(actor.recall('x'))
     assert(Array.isArray(result) && result.length === 0, 'MemoryActor recall error: returns []')
 
     // 다음 메시지 정상 처리
     const next = await forkTask(actor.send({ type: 'embed' }))
-    assert(next === 'no-op', 'MemoryActor recall error: next message ok')
+    assert(next === MemoryActor.RESULT.NO_OP, 'MemoryActor recall error: next message ok')
   }
 
   // M7. save 오류 → skip 반환 (격리)
@@ -132,11 +140,10 @@ async function run() {
     const mem0 = makeMockMem0({ failAdd: true })
     const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
-    const result = await forkTask(actor.send({
-      type: 'save',
-      node: { data: { input: 'q', output: 'a' } },
-    }))
-    assert(result === 'skip', 'MemoryActor save error: returns skip')
+    const result = await forkTask(actor.save(
+      { data: { input: 'q', output: 'a' } },
+    ))
+    assert(result === MemoryActor.RESULT.SKIP, 'MemoryActor save error: returns skip')
   }
 
   // M8. 메시지 큐 직렬화: recall + save 연속 → 순서대로 처리
@@ -148,9 +155,9 @@ async function run() {
     }
     const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
 
-    const p1 = forkTask(actor.send({ type: 'recall', input: 'x' }))
-    const p2 = forkTask(actor.send({ type: 'save', node: { data: { input: 'q', output: 'a' } } }))
-    const p3 = forkTask(actor.send({ type: 'recall', input: 'y' }))
+    const p1 = forkTask(actor.recall('x'))
+    const p2 = forkTask(actor.save({ data: { input: 'q', output: 'a' } }))
+    const p3 = forkTask(actor.recall('y'))
 
     await Promise.all([p1, p2, p3])
     assert(order[0] === 'search', 'MemoryActor queue: recall first')
@@ -165,11 +172,8 @@ async function run() {
   // C1. threshold 미만 → skip
   {
     const actor = compactionActorR.run({ llm: null, logger: null })
-    const result = await forkTask(actor.send({
-      type: 'check',
-      history: makeHistory(10),
-    }))
-    assert(result === 'skip', 'CompactionActor: below threshold → skip')
+    const result = await forkTask(actor.check(makeHistory(10)))
+    assert(result === CompactionActor.RESULT.SKIP, 'CompactionActor: below threshold → skip')
   }
 
   // C2. 정상 → summary + extractedIds 반환
@@ -177,11 +181,8 @@ async function run() {
     const mockLlm = { chat: async () => ({ content: 'summarized conversation' }) }
     const actor = compactionActorR.run({ llm: mockLlm, logger: null })
 
-    const result = await forkTask(actor.send({
-      type: 'check',
-      history: makeHistory(20),
-    }))
-    assert(result !== 'skip', 'CompactionActor: above threshold → not skip')
+    const result = await forkTask(actor.check(makeHistory(20)))
+    assert(result !== CompactionActor.RESULT.SKIP, 'CompactionActor: above threshold → not skip')
     assert(result.summary.input === SUMMARY_MARKER, 'CompactionActor: summary has SUMMARY_MARKER')
     assert(result.summary.output === 'summarized conversation', 'CompactionActor: summary content')
     assert(result.extractedIds instanceof Set, 'CompactionActor: extractedIds is Set')
@@ -195,11 +196,8 @@ async function run() {
     const mockLogger = { warn: (msg, meta) => logs.push({ msg, meta }) }
     const actor = compactionActorR.run({ llm: mockLlm, logger: mockLogger })
 
-    const result = await forkTask(actor.send({
-      type: 'check',
-      history: makeHistory(20),
-    }))
-    assert(result === 'skip', 'CompactionActor LLM failure: resolves as skip')
+    const result = await forkTask(actor.check(makeHistory(20)))
+    assert(result === CompactionActor.RESULT.SKIP, 'CompactionActor LLM failure: resolves as skip')
     assert(logs.some(l => l.msg === 'Compaction failed'), 'CompactionActor LLM failure: logged')
   }
 
@@ -222,13 +220,13 @@ async function run() {
     }
     const actor = compactionActorR.run({ llm: slowLlm, logger: null })
 
-    const p1 = forkTask(actor.send({ type: 'check', history: makeHistory(20) }))
-    const p2 = forkTask(actor.send({ type: 'check', history: makeHistory(20) }))
+    const p1 = forkTask(actor.check(makeHistory(20)))
+    const p2 = forkTask(actor.check(makeHistory(20)))
 
     const [r1, r2] = await Promise.all([p1, p2])
     assert(maxConcurrency === 1, 'CompactionActor queue: max concurrency 1 (serialized)')
     assert(callCount === 2, 'CompactionActor queue: both messages processed')
-    assert(r1 !== 'skip' && r2 !== 'skip', 'CompactionActor queue: both returned results')
+    assert(r1 !== CompactionActor.RESULT.SKIP && r2 !== CompactionActor.RESULT.SKIP, 'CompactionActor queue: both returned results')
   }
 
   // C5. epoch passthrough: 결과에 요청 시점 epoch 포함
@@ -236,10 +234,8 @@ async function run() {
     const mockLlm = { chat: async () => ({ content: 'epoch test' }) }
     const actor = compactionActorR.run({ llm: mockLlm, logger: null })
 
-    const result = await forkTask(actor.send({
-      type: 'check', history: makeHistory(20), epoch: 7,
-    }))
-    assert(result !== 'skip', 'CompactionActor epoch: not skip')
+    const result = await forkTask(actor.check(makeHistory(20), 7))
+    assert(result !== CompactionActor.RESULT.SKIP, 'CompactionActor epoch: not skip')
     assert(result.epoch === 7, 'CompactionActor epoch: passes through from request')
   }
 
@@ -262,7 +258,7 @@ async function run() {
     actor.subscribe((result) => subscribedResults.push(result))
 
     // 요청 시점 epoch=0
-    actor.send({ type: 'check', history: makeHistory(20), epoch: 0 }).fork(() => {}, () => {})
+    actor.check(makeHistory(20), 0).fork(() => {}, () => {})
 
     // /clear 시뮬레이션: epoch 증가 + history 초기화
     state.set('context.conversationHistory', [])
@@ -294,7 +290,7 @@ async function run() {
       context: { conversationHistory: makeHistory(20) },
     })
     const extractedIds = new Set(makeHistory(15).map(h => h.id))
-    const summary = createSummaryEntry('test summary')
+    const summary = compactor.summaryEntry('test summary')
 
     applyCompaction(state, { summary, extractedIds })
 
@@ -314,7 +310,7 @@ async function run() {
       context: { conversationHistory: historyWithNoId },
     })
     const extractedIds = new Set(['h-0', 'h-1'])
-    const summary = createSummaryEntry('merged')
+    const summary = compactor.summaryEntry('merged')
 
     applyCompaction(state, { summary, extractedIds })
 
@@ -329,7 +325,7 @@ async function run() {
       context: { conversationHistory: makeHistory(HISTORY.MAX_CONVERSATION) },
     })
     const extractedIds = new Set()  // nothing extracted → all preserved
-    const summary = createSummaryEntry('big summary')
+    const summary = compactor.summaryEntry('big summary')
 
     applyCompaction(state, { summary, extractedIds })
 
@@ -348,11 +344,10 @@ async function run() {
     const mockStore = { set: (k, v) => { stored[k] = v } }
     const actor = persistenceActorR.run({ store: mockStore, debounceMs: 50 })
 
-    const result = await forkTask(actor.send({
-      type: 'save',
-      snapshot: { turn: 1, _debug: { x: 1 } },
-    }))
-    assert(result === 'deferred', 'PersistenceActor save: returns deferred')
+    const result = await forkTask(actor.save(
+      { turn: 1, _debug: { x: 1 } },
+    ))
+    assert(result === PersistenceActor.RESULT.DEFERRED, 'PersistenceActor save: returns deferred')
     assert(stored.agentState === undefined, 'PersistenceActor save: not saved immediately')
 
     await delay(100)
@@ -367,9 +362,9 @@ async function run() {
     const mockStore = { set: (k, v) => { stored[k] = v } }
     const actor = persistenceActorR.run({ store: mockStore, debounceMs: 50 })
 
-    await forkTask(actor.send({ type: 'save', snapshot: { turn: 1 } }))
-    await forkTask(actor.send({ type: 'save', snapshot: { turn: 2 } }))
-    await forkTask(actor.send({ type: 'save', snapshot: { turn: 3 } }))
+    await forkTask(actor.save({ turn: 1 }))
+    await forkTask(actor.save({ turn: 2 }))
+    await forkTask(actor.save({ turn: 3 }))
 
     await delay(100)
     assert(stored.agentState.turn === 3, 'PersistenceActor debounce: last snapshot saved')
@@ -381,10 +376,9 @@ async function run() {
     const mockStore = { set: (k, v) => { stored[k] = v } }
     const actor = persistenceActorR.run({ store: mockStore, debounceMs: 500 })
 
-    await forkTask(actor.send({
-      type: 'flush',
-      snapshot: { turn: 42 },
-    }))
+    await forkTask(actor.flush(
+      { turn: 42 },
+    ))
     assert(stored.agentState != null, 'PersistenceActor flush: saved immediately')
     assert(stored.agentState.turn === 42, 'PersistenceActor flush: correct value')
   }
@@ -397,9 +391,9 @@ async function run() {
     const actor = persistenceActorR.run({ store: mockStore, debounceMs: 200 })
 
     // save triggers timer
-    await forkTask(actor.send({ type: 'save', snapshot: { turn: 1 } }))
+    await forkTask(actor.save({ turn: 1 }))
     // flush cancels timer and saves immediately
-    await forkTask(actor.send({ type: 'flush', snapshot: { turn: 2 } }))
+    await forkTask(actor.flush({ turn: 2 }))
 
     assert(stored.agentState.turn === 2, 'PersistenceActor flush+timer: flush value saved')
 
@@ -415,11 +409,11 @@ async function run() {
     const actor = persistenceActorR.run({ store: mockStore, debounceMs: 5000 })
 
     // save triggers a long timer
-    await forkTask(actor.send({ type: 'save', snapshot: { turn: 10 } }))
+    await forkTask(actor.save({ turn: 10 }))
     assert(stored.agentState === undefined, 'PersistenceActor shutdown: not saved yet')
 
     // shutdown: explicit flush
-    await forkTask(actor.send({ type: 'flush', snapshot: { turn: 10 } }))
+    await forkTask(actor.flush({ turn: 10 }))
     assert(stored.agentState.turn === 10, 'PersistenceActor shutdown: flushed immediately')
   }
 
@@ -430,7 +424,7 @@ async function run() {
 
     let threw = false
     try {
-      await forkTask(actor.send({ type: 'flush', snapshot: { turn: 1 } }))
+      await forkTask(actor.flush({ turn: 1 }))
     } catch (_) {
       threw = true
     }
@@ -439,8 +433,8 @@ async function run() {
     // Actor still works after error
     const stored2 = {}
     // Can't change store, but verify actor doesn't crash
-    const result = await forkTask(actor.send({ type: 'flush', snapshot: { turn: 2 } }))
-    assert(result === 'flushed', 'PersistenceActor error: actor still works after failure')
+    const result = await forkTask(actor.flush({ turn: 2 }))
+    assert(result === PersistenceActor.RESULT.FLUSHED, 'PersistenceActor error: actor still works after failure')
   }
 
   // P7. self-send flush: timer 후 store.set 호출 확인
@@ -449,7 +443,7 @@ async function run() {
     const mockStore = { set: (k, v) => { stored[k] = v } }
     const actor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
-    await forkTask(actor.send({ type: 'save', snapshot: { turn: 99, _temp: true } }))
+    await forkTask(actor.save({ turn: 99, _temp: true }))
 
     // Wait for self-send flush to fire
     await delay(80)
@@ -488,13 +482,17 @@ async function run() {
   {
 
     // Create a mock actor that fails on recall
-    const failActor = fp.Actor({
+    const failActorBase = fp.Actor({
       init: {},
       handle: (state, msg) => {
         if (msg.type === 'recall') return new Task((reject) => reject(new Error('recall broke')))
         return ['ok', state]
       },
     })
+    const failActor = {
+      recall: (input) => failActorBase.send({ type: 'recall', input }),
+      save: (node) => failActorBase.send({ type: 'save', node }),
+    }
 
     const logs = []
     const mockLogger = { warn: (msg, meta) => logs.push({ msg, meta }) }
@@ -519,13 +517,17 @@ async function run() {
   // I3. 후처리 순서: recall → save (성공 턴)
   {
     const order = []
-    const mockActor = fp.Actor({
+    const mockActorBase = fp.Actor({
       init: {},
       handle: (state, msg) => {
         order.push(msg.type)
         return ['ok', state]
       },
     })
+    const mockActor = {
+      recall: (input) => mockActorBase.send({ type: 'recall', input }),
+      save: (node) => mockActorBase.send({ type: 'save', node }),
+    }
 
     const state = createReactiveState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
@@ -547,13 +549,17 @@ async function run() {
   // I4. 실패 턴 → save 메시지 안 보냄
   {
     const messages = []
-    const mockActor = fp.Actor({
+    const mockActorBase = fp.Actor({
       init: {},
       handle: (state, msg) => {
         messages.push(msg.type)
         return ['ok', state]
       },
     })
+    const mockActor = {
+      recall: (input) => mockActorBase.send({ type: 'recall', input }),
+      save: (node) => mockActorBase.send({ type: 'save', node }),
+    }
 
     const state = createReactiveState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,

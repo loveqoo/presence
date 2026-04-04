@@ -4,7 +4,8 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { createJobStore } from '@presence/infra/infra/job-store.js'
 import { createSchedulerActor, calcNextRun, validateCron } from '@presence/infra/infra/scheduler-actor.js'
 import { createJobTools } from '@presence/infra/infra/job-tools.js'
-import { eventActorR, turnActorR } from '@presence/infra/infra/actors.js'
+import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
+import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { eventToPrompt } from '@presence/infra/infra/events.js'
 import { TurnState } from '@presence/core/core/policies.js'
@@ -24,6 +25,7 @@ const createMockEventActor = () => {
   return {
     enqueued,
     onDispatch,
+    enqueue: (event) => ({ fork: (_, resolve) => { enqueued.push(event); resolve('ok') } }),
     send: (msg) => ({ fork: (_, resolve) => { if (msg.type === 'enqueue') enqueued.push(msg.event); resolve('ok') } }),
   }
 }

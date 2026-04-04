@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import fp from '@presence/core/lib/fun-fp.js'
+import { STATE_PATH } from '@presence/core/core/policies.js'
 
 const { Maybe } = fp
 
@@ -42,8 +43,8 @@ const isDuplicate = (todos, eventId) =>
 const createEventReceiver = (state) => {
   const emit = (event) => {
     const withMeta = withEventMeta(event)
-    const queue = state.get('events.queue') || []
-    state.set('events.queue', [...queue, withMeta])
+    const queue = state.get(STATE_PATH.EVENTS_QUEUE) || []
+    state.set(STATE_PATH.EVENTS_QUEUE, [...queue, withMeta])
     return withMeta
   }
 

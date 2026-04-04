@@ -1,4 +1,5 @@
 import Conf from 'conf'
+import { PERSISTENCE } from '@presence/core/core/policies.js'
 
 /**
  * Removes transient keys (prefixed with `_`) from a state snapshot before persisting.
@@ -20,7 +21,7 @@ export const stripTransient = (snap) => {
  * @param {{ projectName?: string, debounceMs?: number, cwd?: string }} [options]
  * @returns {{ save: Function, saveImmediate: Function, restore: Function, clear: Function, store: object }}
  */
-const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } = {}) => {
+const createPersistence = ({ projectName = 'presence', debounceMs = PERSISTENCE.DEBOUNCE_MS, cwd } = {}) => {
   const confOpts = cwd
     ? { cwd, configName: 'state' }
     : { projectName, configName: 'state' }
@@ -32,7 +33,7 @@ const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } =
     timer = setTimeout(() => {
       try {
         const snap = typeof state.snapshot === 'function' ? state.snapshot() : state
-        store.set('agentState', stripTransient(snap))
+        store.set(PERSISTENCE.STORE_KEY, stripTransient(snap))
       } catch (_) {
         // non-fatal: state will be re-saved on next change
       }
@@ -44,7 +45,7 @@ const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } =
     if (timer) clearTimeout(timer)
     try {
       const snap = typeof state.snapshot === 'function' ? state.snapshot() : state
-      store.set('agentState', stripTransient(snap))
+      store.set(PERSISTENCE.STORE_KEY, stripTransient(snap))
     } catch (_) {
       // non-fatal: state will be re-saved on next change
     }
@@ -52,11 +53,11 @@ const createPersistence = ({ projectName = 'presence', debounceMs = 500, cwd } =
   }
 
   const restore = () => {
-    try { return store.get('agentState', null) }
+    try { return store.get(PERSISTENCE.STORE_KEY, null) }
     catch (_) { return null }
   }
 
-  const clear = () => store.delete('agentState')
+  const clear = () => store.delete(PERSISTENCE.STORE_KEY)
 
   return { save, saveImmediate, restore, clear, store }
 }

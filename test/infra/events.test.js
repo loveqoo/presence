@@ -1,9 +1,9 @@
 import {
   withEventMeta, eventToPrompt, todoFromEvent, isDuplicate,
 } from '@presence/infra/infra/events.js'
-import {
-  eventActorR, emitR, applyTodo, forkTask, turnActorR,
-} from '@presence/infra/infra/actors.js'
+import { EventActor, eventActorR } from '@presence/infra/infra/actors/event-actor.js'
+import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
+import { forkTask } from '@presence/core/lib/task.js'
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
 import { createReactiveState } from '@presence/infra/infra/state.js'
@@ -25,7 +25,7 @@ async function run() {
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
 
     const event = emit({ type: 'test', data: 'hello' })
     assert(event.id !== undefined, 'emit: assigns id')
@@ -45,7 +45,7 @@ async function run() {
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
 
     emit({ type: 'a' })
     emit({ type: 'b' })
@@ -66,7 +66,7 @@ async function run() {
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
-    const emit = emitR.run({ eventActor })
+    const emit = (event) => eventActor.emit(event)
     const event = emit({ type: 'x', id: 'custom-id' })
     assert(event.id === 'custom-id', 'emit custom id: preserved')
   }
@@ -94,7 +94,7 @@ async function run() {
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({ type: 'heartbeat', prompt: '점검' })
-    await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
+    await forkTask(eventActor.enqueue(enriched))
     await new Promise(r => setTimeout(r, 100))
 
     assert(runCalled, 'EventActor: turnActor called')
@@ -115,7 +115,7 @@ async function run() {
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({ type: 'test' })
-    await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
+    await forkTask(eventActor.enqueue(enriched))
     await new Promise(r => setTimeout(r, 50))
 
     assert(state.get('events.queue').length === 1, 'busy agent: event stays in queue')
@@ -133,7 +133,7 @@ async function run() {
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     const enriched = withEventMeta({ type: 'bad' })
-    await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
+    await forkTask(eventActor.enqueue(enriched))
     await new Promise(r => setTimeout(r, 100))
 
     assert(state.get('events.queue').length === 0, 'failed event: removed from queue')
@@ -160,9 +160,9 @@ async function run() {
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     // 3개 enqueue (idle이므로 첫 enqueue에서 자동 drain)
-    await forkTask(eventActor.send({ type: 'enqueue', event: withEventMeta({ type: 'a', prompt: 'first' }) }))
-    await forkTask(eventActor.send({ type: 'enqueue', event: withEventMeta({ type: 'b', prompt: 'second' }) }))
-    await forkTask(eventActor.send({ type: 'enqueue', event: withEventMeta({ type: 'c', prompt: 'third' }) }))
+    await forkTask(eventActor.enqueue(withEventMeta({ type: 'a', prompt: 'first' })))
+    await forkTask(eventActor.enqueue(withEventMeta({ type: 'b', prompt: 'second' })))
+    await forkTask(eventActor.enqueue(withEventMeta({ type: 'c', prompt: 'third' })))
 
     // drain 완료 대기
     await new Promise(r => setTimeout(r, 300))
@@ -183,8 +183,8 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
-    const result = await forkTask(eventActor.send({ type: 'drain' }))
-    assert(result === 'no-op:empty', 'drain idempotency: empty queue → no-op')
+    const result = await forkTask(eventActor.drain())
+    assert(result === EventActor.RESULT.NO_OP_EMPTY, 'drain idempotency: empty queue → no-op')
   }
 
   // drain idempotency: not-idle → no-op
@@ -198,8 +198,8 @@ async function run() {
 
     // enqueue 후 drain 시도 (working이므로 no-op)
     await forkTask(eventActor.send({ type: 'enqueue', event: withEventMeta({ type: 'x' }) }))
-    const result = await forkTask(eventActor.send({ type: 'drain' }))
-    assert(result === 'no-op:busy', 'drain idempotency: not-idle → no-op')
+    const result = await forkTask(eventActor.drain())
+    assert(result === EventActor.RESULT.NO_OP_BUSY, 'drain idempotency: not-idle → no-op')
   }
 
   // ===========================================
@@ -208,8 +208,10 @@ async function run() {
 
   // 이벤트에 todo 필드 → TODO 생성
   {
-    const state = createReactiveState({ todos: [] })
-    applyTodo(state, {
+    const state = createReactiveState({ turnState: TurnState.idle(), todos: [] })
+    const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = new EventActor(mockTurnActor, state)
+    eventActor.applyTodo({
       id: 'evt-1',
       type: 'pr_assigned',
       todo: { type: 'pr_review', title: 'Review PR #42', data: { url: '/pr/42' } },
@@ -224,17 +226,21 @@ async function run() {
 
   // todo 필드 없는 이벤트 → TODO 미생성
   {
-    const state = createReactiveState({ todos: [] })
-    applyTodo(state, { id: 'evt-2', type: 'heartbeat' })
+    const state = createReactiveState({ turnState: TurnState.idle(), todos: [] })
+    const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = new EventActor(mockTurnActor, state)
+    eventActor.applyTodo({ id: 'evt-2', type: 'heartbeat' })
     assert(state.get('todos').length === 0, 'applyTodo no todo: no todo created')
   }
 
   // 멱등성: 같은 이벤트 재처리 → TODO 중복 없음
   {
-    const state = createReactiveState({ todos: [] })
+    const state = createReactiveState({ turnState: TurnState.idle(), todos: [] })
+    const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
+    const eventActor = new EventActor(mockTurnActor, state)
     const event = { id: 'evt-dup', type: 'issue', todo: { type: 'issue_review', title: 'Check issue' } }
-    applyTodo(state, event)
-    applyTodo(state, event) // 재처리
+    eventActor.applyTodo(event)
+    eventActor.applyTodo(event) // 재처리
     assert(state.get('todos').length === 1, 'applyTodo idempotent: no duplicate')
   }
 
@@ -253,7 +259,7 @@ async function run() {
       type: 'pr_assigned',
       todo: { type: 'pr_review', title: 'Review PR' },
     })
-    await forkTask(eventActor.send({ type: 'enqueue', event: enriched }))
+    await forkTask(eventActor.enqueue(enriched))
     await new Promise(r => setTimeout(r, 150))
 
     const todos = state.get('todos')

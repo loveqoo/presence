@@ -8,7 +8,7 @@ import { createAgentRegistry } from './agent-registry.js'
 import { connectMCPServer } from './mcp.js'
 import { createEmbedder } from './embedding.js'
 import { createJobStore, defaultJobDbPath } from './job-store.js'
-import { loadUserMergedConfig, defaultUserDataPath, validateConfig } from './config.js'
+import { Config } from './config.js'
 import { createLocalTools } from './local-tools.js'
 import { initI18n, t } from '../i18n/index.js'
 
@@ -25,19 +25,19 @@ import { initI18n, t } from '../i18n/index.js'
  * @returns {Promise<{config, logger, persona, personaConfig, mem0, memory, embedder, memoryPath, toolRegistry, mcpControl, mcpConnections, agentRegistry, llm, jobStore, shutdown: () => Promise<void>}>}
  */
 const createGlobalContext = async (configOverride, { username } = {}) => {
-  const config = configOverride || loadUserMergedConfig(username)
+  const config = configOverride || Config.loadUserMerged(username)
   initI18n(config.locale)
   const { logger } = createLogger()
 
   // --- Startup validation ---
-  const warnings = validateConfig(config)
+  const warnings = Config.validate(config)
   for (const w of warnings) logger.warn(`[config] ${w}`)
 
   const persona = createPersona()
   const personaConfig = persona.get()
 
   // --- Memory ---
-  const memoryPath = config.memory.path || (username ? defaultUserDataPath(username) : defaultMemoryPath())
+  const memoryPath = config.memory.path || (username ? Config.userDataPath(username) : defaultMemoryPath())
   const mem0Result = await createMem0Memory(config, { memoryPath }).catch(e => {
     logger.warn('mem0 init failed, memory disabled', { error: e.message })
     return null

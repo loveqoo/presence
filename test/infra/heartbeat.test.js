@@ -1,6 +1,6 @@
 import { createHeartbeat } from '@presence/infra/infra/heartbeat.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { forkTask } from '@presence/infra/infra/actors.js'
+import { forkTask } from '@presence/core/lib/task.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 

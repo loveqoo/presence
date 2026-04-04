@@ -35,10 +35,58 @@ export const HISTORY = Object.freeze({
   MAX_OUTPUT_CHARS: 1000,
 })
 
+export const TURN_SOURCE = Object.freeze({
+  USER: 'user',
+  EVENT: 'event',
+})
+
+export const PERSISTENCE = Object.freeze({
+  DEBOUNCE_MS: 500,
+  STORE_KEY: 'agentState',
+})
+
+export const DELEGATE = Object.freeze({
+  POLL_INTERVAL_MS: 10_000,
+})
+
+export const STATE_PATH = Object.freeze({
+  TURN_STATE: 'turnState',
+  TURN: 'turn',
+  LAST_TURN: 'lastTurn',
+  TODOS: 'todos',
+  // context
+  CONTEXT: 'context',
+  CONTEXT_MEMORIES: 'context.memories',
+  CONTEXT_CONVERSATION_HISTORY: 'context.conversationHistory',
+  // events
+  EVENTS: 'events',
+  EVENTS_QUEUE: 'events.queue',
+  EVENTS_IN_FLIGHT: 'events.inFlight',
+  EVENTS_DEAD_LETTER: 'events.deadLetter',
+  EVENTS_LAST_PROCESSED: 'events.lastProcessed',
+  // delegates
+  DELEGATES: 'delegates',
+  DELEGATES_PENDING: 'delegates.pending',
+  // transient (_ prefix)
+  APPROVE: '_approve',
+  BUDGET_WARNING: '_budgetWarning',
+  COMPACTION_EPOCH: '_compactionEpoch',
+  STREAMING: '_streaming',
+  TOOL_RESULTS: '_toolResults',
+  // debug
+  DEBUG_LAST_TURN: '_debug.lastTurn',
+  DEBUG_LAST_PROMPT: '_debug.lastPrompt',
+  DEBUG_LAST_RESPONSE: '_debug.lastResponse',
+  DEBUG_OP_TRACE: '_debug.opTrace',
+  DEBUG_RECALLED_MEMORIES: '_debug.recalledMemories',
+  DEBUG_ITERATION_HISTORY: '_debug.iterationHistory',
+})
+
 export const PROMPT = Object.freeze({
   RESULT_MAX_LEN: 500,
   SUMMARIZED_RESULT_MAX_LEN: 200,
   DEFAULT_MAX_CONTEXT_TOKENS: 8000,
   DEFAULT_RESERVED_OUTPUT_TOKENS: 1000,
+  BUDGET_WARN_PCT: 90,
 })
 

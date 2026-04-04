@@ -6,9 +6,9 @@
  */
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { loadInstanceConfig } from '@presence/infra/infra/config.js'
+import { Config } from '@presence/infra/infra/config.js'
 import { LLMClient } from '@presence/infra/infra/llm.js'
-import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
+import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
@@ -18,7 +18,7 @@ import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
 import { Free } from '@presence/core/core/op.js'
 import { MemoryGraph } from '@presence/infra/infra/memory.js'
 import { createMemoryEmbedder } from '@presence/infra/infra/memory-embedder.js'
-import { memoryActorR } from '@presence/infra/infra/actors.js'
+import { memoryActorR } from '@presence/infra/infra/actors/memory-actor.js'
 
 import { createEmbedder } from '@presence/infra/infra/embedding.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
@@ -34,7 +34,7 @@ mkdirSync(join(testDir, 'subdir'))
 writeFileSync(join(testDir, 'subdir', 'nested.txt'), 'nested file content')
 
 // --- 인프라 구성 ---
-const config = loadInstanceConfig(process.env.PRESENCE_INSTANCE_ID || 'default')
+const config = Config.loadUserMerged(process.env.PRESENCE_USERNAME || 'default')
 const llm = new LLMClient({
   baseUrl: config.llm.baseUrl,
   model: config.llm.model,
@@ -67,7 +67,7 @@ function assert(condition, msg) {
 const runScenario = async (label, input, opts = {}) => {
   const { maxRetries = 2, maxIterations = 5, validate } = opts
   const state = initState()
-  const { interpret, ST } = createProdInterpreter({
+  const { interpret, ST } = prodInterpreterR.run({
     llm, toolRegistry, state, agentRegistry,
     onApprove: async () => true,  // 자동 승인
   })
@@ -297,7 +297,7 @@ async function run() {
     const { maxRetries = 2, maxIterations = 5, budget, validate, setupState } = opts
     const state = initState()
     if (setupState) setupState(state)
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
@@ -414,7 +414,7 @@ async function run() {
 
     const memActor = memoryActorR.run({ graph: memory, embedder: null, logger: null })
 
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
@@ -504,7 +504,7 @@ async function run() {
 
     const memActor2 = memoryActorR.run({ graph: memory, embedder, logger: null })
 
-    const { interpret: interpret2, ST: ST2 } = createProdInterpreter({
+    const { interpret: interpret2, ST: ST2 } = prodInterpreterR.run({
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })

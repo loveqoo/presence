@@ -13,7 +13,7 @@ class Mem0Adapter {
     this._cache = []
   }
 
-  async _refreshCache() {
+  async refreshCache() {
     try {
       const result = await this._mem0.getAll({ userId: MEM0_USER_ID })
       this._cache = (result.results || []).map(r => ({
@@ -31,7 +31,7 @@ class Mem0Adapter {
   allNodes() { return this._cache }
 
   async getAll() {
-    await this._refreshCache()
+    await this.refreshCache()
     return this._cache
   }
 
@@ -93,7 +93,7 @@ const createMem0Memory = async (config, { memoryPath } = {}) => {
   })
 
   const adapter = new Mem0Adapter(mem0)
-  await adapter._refreshCache()
+  await adapter.refreshCache()
 
   return { mem0, adapter }
 }

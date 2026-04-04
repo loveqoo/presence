@@ -5,7 +5,10 @@ import {
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { TurnState } from '@presence/core/core/policies.js'
-import { delegateActorR, eventActorR, turnActorR, forkTask } from '@presence/infra/infra/actors.js'
+import { delegateActorR } from '@presence/infra/infra/actors/delegate-actor.js'
+import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
+import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
+import { forkTask } from '@presence/core/lib/task.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {
@@ -272,7 +275,7 @@ async function run() {
       state, eventActor, agentRegistry: agentReg, fetchFn: mockFetch,
     })
 
-    await forkTask(delegateActor.send({ type: 'poll' }))
+    await forkTask(delegateActor.poll())
     // eventActor.enqueue + drain은 fire-and-forget이므로 처리 완료 대기
     await new Promise(r => setTimeout(r, 200))
 
@@ -320,7 +323,7 @@ async function run() {
       state, eventActor, agentRegistry: agentReg,
       fetchFn: mockFetch, pollIntervalMs: 30,
     })
-    await forkTask(delegateActor.send({ type: 'start' }))
+    await forkTask(delegateActor.start())
 
     // 첫 tick: working → pending 유지
     await new Promise(r => setTimeout(r, 50))
@@ -328,7 +331,7 @@ async function run() {
 
     // 두 번째 tick: completed → eventActor.enqueue → drain
     await new Promise(r => setTimeout(r, 200))
-    await forkTask(delegateActor.send({ type: 'stop' }))
+    await forkTask(delegateActor.stop())
 
     // drain이 이미 처리했으므로 lastProcessed 확인
     const lastProcessed = state.get('events.lastProcessed')
