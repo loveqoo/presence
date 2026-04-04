@@ -1,4 +1,4 @@
-import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
+import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
@@ -14,7 +14,7 @@ const mockLLM = () => ({ chat: async () => ({ type: 'text', content: '' }) })
 const runProg = (interpret, ST) => (program) =>
   runFreeWithStateT(interpret, ST)(program)({})
 
-const makeInterpreter = (agentRegistry) => createProdInterpreter({
+const makeInterpreter = (agentRegistry) => prodInterpreterR.run({
   llm: mockLLM(),
   toolRegistry: createToolRegistry(),
   reactiveState: createReactiveState({}),
@@ -99,7 +99,7 @@ async function run() {
   // 5. agentRegistry 없이 생성 → DelegateResult.failed("Unknown agent: ...")
   // ==========================================================================
   {
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(),
       toolRegistry: createToolRegistry(),
       reactiveState: createReactiveState({}),
@@ -180,7 +180,7 @@ async function run() {
       }
     }
 
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(),
       toolRegistry: createToolRegistry(),
       reactiveState: createReactiveState({}),

@@ -1,4 +1,4 @@
-import { createProdInterpreter } from '@presence/infra/interpreter/prod.js'
+import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
@@ -48,7 +48,7 @@ async function run() {
         return { type: 'text', content: 'llm response' }
       }
     }
-    const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(askLLM({ messages: msg('hi') }))
     assert(result === 'llm response', 'AskLLM: returns content')
     assert(capturedArgs.messages[0].content === 'hi', 'AskLLM: passes messages to llm')
@@ -63,7 +63,7 @@ async function run() {
         return { type: 'text', content: '{"type":"plan"}' }
       }
     }
-    const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState })
     await runProg(interpret, ST)(askLLM({
       messages: msg('plan'),
       responseFormat: { type: 'json_schema', json_schema: { name: 'test' } },
@@ -73,21 +73,21 @@ async function run() {
 
   // 3. ExecuteTool → calls registered tool handler
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(executeTool('echo', { text: 'hello' }))
     assert(result === 'echo: hello', 'ExecuteTool: handler called with args')
   }
 
   // 4. ExecuteTool async handler
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(executeTool('async_tool', { val: 42 }))
     assert(result === 'async: 42', 'ExecuteTool: async handler works')
   }
 
   // 5. ExecuteTool unknown tool → error result string (not rejected)
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(executeTool('nonexistent', {}))
     assert(typeof result === 'string' && result.startsWith('[ERROR]'), 'unknown tool: returns error string')
     assert(result.includes('Unknown tool'), 'unknown tool: correct error message')
@@ -95,14 +95,14 @@ async function run() {
 
   // 6. Respond → passes message through
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(respond('final answer'))
     assert(result === 'final answer', 'Respond: passes message')
   }
 
   // 7. Approve → auto-approve (Phase 1)
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(approve('send email?'))
     assert(result === true, 'Approve: auto-approve returns true')
   }
@@ -110,7 +110,7 @@ async function run() {
   // 8. UpdateState + GetState — state changes are in finalState (pure StateT)
   {
     const localReactive = createReactiveState({ x: 0 })
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState: localReactive })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState: localReactive })
     const initialState = { x: 0 }
     const [result, finalState] = await runFreeWithStateT(interpret, ST)(
       updateState('x', 99).chain(() => getState('x'))
@@ -122,7 +122,7 @@ async function run() {
   // 9. Full chain: AskLLM → ExecuteTool → Respond
   {
     const localReactive = createReactiveState({ status: 'idle', context: {} })
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM('use echo tool'),
       toolRegistry: registry,
       reactiveState: localReactive,
@@ -137,7 +137,7 @@ async function run() {
 
   // 10. Unknown op → rejected
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const FUNCTOR = Symbol.for('fun-fp-js/Functor')
     const unknownOp = {
       tag: 'Bogus', next: x => x,
@@ -155,7 +155,7 @@ async function run() {
   // 11. LLM failure → rejected
   {
     const badLLM = { chat: async () => { throw new Error('connection refused') } }
-    const { interpret, ST } = createProdInterpreter({ llm: badLLM, toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: badLLM, toolRegistry: registry, reactiveState })
     try {
       await runProg(interpret, ST)(askLLM({ messages: msg('fail') }))
       assert(false, 'LLM failure: should reject')
@@ -168,7 +168,7 @@ async function run() {
   {
     const throwRegistry = createToolRegistry()
     throwRegistry.register({ name: 'bomb', handler: () => { throw new Error('boom') } })
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: throwRegistry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: throwRegistry, reactiveState })
     try {
       await runProg(interpret, ST)(executeTool('bomb', {}))
       assert(false, 'tool throw: should reject')
@@ -188,7 +188,7 @@ async function run() {
         raw: {}
       })
     }
-    const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(askLLM({ messages: msg('find') }))
     // 현재 코드는 result.content만 읽으므로 tool_calls 시 undefined가 됨
     assert(result !== undefined, 'tool_calls: result is not undefined')
@@ -202,7 +202,7 @@ async function run() {
   {
     const failRegistry = createToolRegistry()
     failRegistry.register({ name: 'ok-tool', handler: () => 'ok' })
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: failRegistry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: failRegistry, reactiveState })
     const programs = [
       respond('ok'),
       executeTool('nonexistent-tool', {}),  // unknown tool → error result string (not rejected)
@@ -218,7 +218,7 @@ async function run() {
 
   // 14b. Parallel: 빈 배열 → 빈 배열 반환
   {
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(parallel([]))
     assert(Array.isArray(result) && result.length === 0, 'Parallel empty: returns []')
   }
@@ -233,7 +233,7 @@ async function run() {
       description: 'Code reviewer',
       run: async (task) => `reviewed: ${task}`,
     })
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg
     })
     const [result] = await runProg(interpret, ST)(delegate('reviewer', 'check PR'))
@@ -244,7 +244,7 @@ async function run() {
 
   // 14d. Delegate: unknown agent → failed
   {
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: createAgentRegistry()
     })
     const [result] = await runProg(interpret, ST)(delegate('nonexistent', 'task'))
@@ -260,7 +260,7 @@ async function run() {
       description: 'Agent that crashes',
       run: async () => { throw new Error('agent crash') },
     })
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg
     })
     const [result] = await runProg(interpret, ST)(delegate('crasher', 'task'))
@@ -289,7 +289,7 @@ async function run() {
         },
       }),
     })
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch,
     })
     const [result] = await runProg(interpret, ST)(delegate('remote-helper', 'task'))
@@ -308,7 +308,7 @@ async function run() {
       endpoint: 'https://a2a.test/rpc',
     })
     const mockFetch = async () => { throw new Error('ECONNREFUSED') }
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch,
     })
     const [result] = await runProg(interpret, ST)(delegate('remote-down', 'task'))
@@ -333,7 +333,7 @@ async function run() {
         result: { id: 'task-slow-1', status: { state: 'submitted' } },
       }),
     })
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState: testReactive, agentRegistry: agentReg, fetchFn: mockFetch,
     })
     const [result] = await runProg(interpret, ST)(delegate('slow-agent', 'long task'))
@@ -346,7 +346,7 @@ async function run() {
 
   // 14g. Delegate: no agentRegistry → failed
   {
-    const { interpret, ST } = createProdInterpreter({
+    const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(''), toolRegistry: registry, reactiveState
     })
     const [result] = await runProg(interpret, ST)(delegate('any', 'task'))
@@ -381,7 +381,7 @@ async function run() {
       }
     }
 
-    const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg })
 
     const { Agent } = await import('@presence/core/core/agent.js')
     const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
@@ -402,7 +402,7 @@ async function run() {
         return { type: 'text', content: 'summary' }
       }
     }
-    const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState })
     const [result] = await runProg(interpret, ST)(askLLM({
       messages: [{ role: 'user', content: '요약해줘' }],
       context: ['PR 3건 조회됨', '이슈 2건 진행중'],
@@ -424,7 +424,7 @@ async function run() {
         return { type: 'text', content: 'ok' }
       }
     }
-    const { interpret, ST } = createProdInterpreter({ llm, toolRegistry: registry, reactiveState })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState })
     await runProg(interpret, ST)(askLLM({
       messages: [{ role: 'user', content: 'hello' }],
     }))
@@ -444,7 +444,7 @@ async function run() {
     const toolReg = createToolRegistry()
     toolReg.register({ name: 'branch-tool', handler: (args) => `result-${args.id}` })
     const rs = createReactiveState({ _toolResults: [] })
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
     const programs = [
       executeTool('branch-tool', { id: 'a' }),
       executeTool('branch-tool', { id: 'b' }),
@@ -462,7 +462,7 @@ async function run() {
     const toolReg = createToolRegistry()
     toolReg.register({ name: 'main-tool', handler: () => 'main-result' })
     const rs = createReactiveState({ _toolResults: [] })
-    const { interpret, ST } = createProdInterpreter({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
     // parallel 실행 후 uiState 복원 확인
     const program = parallel([executeTool('main-tool', {})]).chain(() => executeTool('main-tool', { after: true }))
     const [result, finalState] = await runProg(interpret, ST)(program)

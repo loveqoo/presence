@@ -2,7 +2,7 @@ import http from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createGlobalContext, createSession } from '@presence/tui'
+import { createGlobalContext, Session } from '@presence/tui'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -62,13 +62,13 @@ async function run() {
     {
       // USER 세션으로 먼저 turn 진행 후 flush
       const userDir = join(tmpDir, 'sa1-user')
-      const userSession = createSession(globalCtx, { type: SESSION_TYPE.USER, persistenceCwd: userDir })
+      const userSession = Session.create(globalCtx, { type: SESSION_TYPE.USER, persistenceCwd: userDir })
       await userSession.handleInput('저장용 입력')
       assert(userSession.state.get('turn') === 1, 'SA1 setup: user turn incremented')
       await userSession.shutdown()  // flush to disk
 
       // AGENT 세션: 같은 디렉토리여도 restore 안 함
-      const agentSession = createSession(globalCtx, { type: SESSION_TYPE.AGENT, persistenceCwd: userDir })
+      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT, persistenceCwd: userDir })
       assert(agentSession.state.get('turn') === 0, 'SA1: agent session starts at turn 0 (no restore)')
       await agentSession.shutdown()
     }
@@ -77,7 +77,7 @@ async function run() {
     // SA2. AGENT 세션: schedulerActor === null
     // ========================================================================
     {
-      const agentSession = createSession(globalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT })
       assert(agentSession.schedulerActor === null, 'SA2: no schedulerActor in agent session')
       await agentSession.shutdown()
     }
@@ -90,13 +90,13 @@ async function run() {
       const freshGlobalCtx = await createGlobalContext(config)
 
       // USER 세션 먼저 생성 (job 툴 등록)
-      const userSession = createSession(freshGlobalCtx, { type: SESSION_TYPE.USER })
+      const userSession = Session.create(freshGlobalCtx, { type: SESSION_TYPE.USER })
       const userToolNames = userSession.tools.map(t => t.name)
       assert(userToolNames.includes('schedule_job'), 'SA3 setup: user session has schedule_job')
       assert(userToolNames.includes('read_todos'), 'SA3 setup: user session has read_todos')
 
       // AGENT 세션 이후 생성 — job 툴 누수가 없어야 함
-      const agentSession = createSession(freshGlobalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(freshGlobalCtx, { type: SESSION_TYPE.AGENT })
       const agentToolNames = agentSession.tools.map(t => t.name)
       assert(!agentToolNames.includes('schedule_job'), 'SA3: no schedule_job in agent tools (even after user session)')
       assert(!agentToolNames.includes('read_todos'), 'SA3: no read_todos in agent tools (even after user session)')
@@ -111,7 +111,7 @@ async function run() {
     // SA4. AGENT 세션: handleInput 정상 동작 (LLM 응답 반환)
     // ========================================================================
     {
-      const agentSession = createSession(globalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT })
       const result = await agentSession.handleInput('안녕')
       assert(typeof result === 'string', 'SA4: handleInput returns string')
       assert(result === '응답', 'SA4: correct LLM response')
@@ -124,13 +124,13 @@ async function run() {
     // ========================================================================
     {
       const agentDir = join(tmpDir, 'sa5-agent')
-      const agentSession = createSession(globalCtx, { type: SESSION_TYPE.AGENT, persistenceCwd: agentDir })
+      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT, persistenceCwd: agentDir })
       await agentSession.handleInput('저장되지 않아야 함')
       assert(agentSession.state.get('turn') === 1, 'SA5 setup: turn is 1')
       await agentSession.shutdown()
 
       // 다시 USER 세션으로 같은 경로 로드 → agent 저장 내용 없어야 함
-      const freshUserSession = createSession(globalCtx, { type: SESSION_TYPE.USER, persistenceCwd: agentDir })
+      const freshUserSession = Session.create(globalCtx, { type: SESSION_TYPE.USER, persistenceCwd: agentDir })
       assert(freshUserSession.state.get('turn') === 0, 'SA5: agent shutdown did not flush state')
       await freshUserSession.shutdown()
     }
@@ -143,8 +143,8 @@ async function run() {
       const freshCtx = await createGlobalContext(config)
       const sa6Dir = join(tmpDir, 'sa6')
       try {
-        const userSession = createSession(freshCtx, { type: SESSION_TYPE.USER, persistenceCwd: sa6Dir })
-        const agentSession = createSession(freshCtx, { type: SESSION_TYPE.AGENT })
+        const userSession = Session.create(freshCtx, { type: SESSION_TYPE.USER, persistenceCwd: sa6Dir })
+        const agentSession = Session.create(freshCtx, { type: SESSION_TYPE.AGENT })
 
         // 두 세션 state 객체가 독립적인지 확인
         assert(userSession.state !== agentSession.state, 'SA6: different state objects')
@@ -175,7 +175,7 @@ async function run() {
     {
       const freshCtx = await createGlobalContext(config)
       try {
-        const agentSession = createSession(freshCtx, { type: SESSION_TYPE.AGENT })
+        const agentSession = Session.create(freshCtx, { type: SESSION_TYPE.AGENT })
         freshCtx.agentRegistry.register({
           name: 'test-agent-sa7',
           description: '테스트용',
@@ -199,10 +199,10 @@ async function run() {
     // SA8. AGENT 세션의 delegateActor는 start 가능
     // ========================================================================
     {
-      const agentSession = createSession(globalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT })
       assert(agentSession.delegateActor !== undefined, 'SA8: delegateActor exists')
       // start 후 에러 없음
-      agentSession.delegateActor.send({ type: 'start' }).fork(() => {}, () => {})
+      agentSession.delegateActor.start().fork(() => {}, () => {})
       await delay(50)
       await agentSession.shutdown()
     }

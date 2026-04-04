@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createSession } from './session-factory.js'
+import { Session } from './sessions/index.js'
 import { SESSION_TYPE } from './constants.js'
 
 // =============================================================================
@@ -14,13 +14,6 @@ import { SESSION_TYPE } from './constants.js'
 // onSessionCreated: 세션 생성 직후 호출되는 콜백. WS 브릿지 구독 등에 사용.
 // =============================================================================
 
-/**
- * Creates a session lifecycle manager that shares global infrastructure across independent sessions.
- * @param {object} globalCtx - Shared infrastructure from createGlobalContext().
- * @param {{ onSessionCreated?: (entry: { id: string, type: string, owner: string|null, session: object }) => void }} [options]
- * @returns {{ create: Function, get: Function, list: Function, destroy: Function }}
- */
-
 const createSessionManager = (globalCtx, { onSessionCreated } = {}) => {
   const sessions = new Map()  // id → { id, type, owner, session }
 
@@ -28,20 +21,15 @@ const createSessionManager = (globalCtx, { onSessionCreated } = {}) => {
     const sessionId = id ?? `user-${randomUUID()}`
     if (sessions.has(sessionId)) return sessions.get(sessionId)
 
-    const session = createSession(globalCtx, { persistenceCwd, type, onScheduledJobDone, idleTimeoutMs, onIdle })
+    const session = Session.create(globalCtx, { persistenceCwd, type, onScheduledJobDone, idleTimeoutMs, onIdle })
     const entry = Object.freeze({ id: sessionId, type, owner, session })
     sessions.set(sessionId, entry)
     onSessionCreated?.(entry)
     return entry
   }
 
-  /** @param {string} id @returns {{ id: string, type: string, owner: string|null, session: object } | null} */
   const get = (id) => sessions.get(id) ?? null
-
-  /** @returns {Array<{ id: string, type: string, owner: string|null, session: object }>} */
   const list = () => [...sessions.values()]
-
-  /** @param {string} id - Session id to destroy. Calls session.shutdown() before removal. */
   const destroy = async (id) => {
     const entry = sessions.get(id)
     if (!entry) return

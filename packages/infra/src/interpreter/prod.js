@@ -9,7 +9,7 @@ import { approvalInterpreterR } from '@presence/core/interpreter/approval.js'
 import { controlInterpreterR } from '@presence/core/interpreter/control.js'
 import { parallelInterpreterR } from '@presence/core/interpreter/parallel.js'
 
-const { StateT } = fp
+const { StateT, Reader } = fp
 const ST = StateT('task')
 
 // --- UI 헬퍼 ---
@@ -53,10 +53,9 @@ const createUiHelpers = (reactiveState) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
   const ui = createUiHelpers(reactiveState)
 
-  // interpret를 클로저로 참조 — runProgram에서 사용
   let interpret
 
   const runProgram = async (program, state) => {
@@ -82,12 +81,6 @@ const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry
   interpret = composed
 
   return { interpret, ST }
-}
+})
 
-/**
- * `createProdInterpreter(deps)` — Composes all seven production interpreters into a single StateT(Task) interpreter.
- * @param {{ llm, toolRegistry, reactiveState?, agentRegistry?, fetchFn?, onApprove?, getAbortSignal? }} deps
- * @returns {{ interpret: Function, ST: object }}
- *
- */
-export { createProdInterpreter }
+export { prodInterpreterR }

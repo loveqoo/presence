@@ -2,7 +2,7 @@ import http from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createGlobalContext, createSession } from '@presence/tui'
+import { createGlobalContext, Session } from '@presence/tui'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -62,7 +62,7 @@ async function run() {
     // SD1. user 세션: 정상 동작
     {
       const sessionDir = join(tmpDir, 'sd1')
-      const session = createSession(globalCtx, { type: 'user', persistenceCwd: sessionDir })
+      const session = Session.create(globalCtx, { type: 'user', persistenceCwd: sessionDir })
       assert(session.schedulerActor !== null, 'SD1: user session has local schedulerActor')
       const result = await session.handleInput('안녕')
       assert(result === '응답', 'SD1: response returned')
@@ -74,12 +74,12 @@ async function run() {
     {
       const userDir = join(tmpDir, 'user-restore-test')
       // user 세션으로 상태를 먼저 저장
-      const userSession = createSession(globalCtx, { type: 'user', persistenceCwd: userDir })
+      const userSession = Session.create(globalCtx, { type: 'user', persistenceCwd: userDir })
       await userSession.handleInput('저장용 입력')
       await userSession.shutdown()  // flush
 
       // ephemeral 세션: 같은 경로여도 restore 안 함
-      const ephSession = createSession(globalCtx, { type: 'scheduled', persistenceCwd: userDir })
+      const ephSession = Session.create(globalCtx, { type: 'scheduled', persistenceCwd: userDir })
       assert(ephSession.state.get('turn') === 0, 'SD2: ephemeral starts at turn 0 (no restore)')
       assert(ephSession.schedulerActor === null, 'SD2: ephemeral has no local schedulerActor')
       await ephSession.shutdown()
@@ -88,7 +88,7 @@ async function run() {
     // SD3. ephemeral 세션: onScheduledJobDone 콜백
     {
       const done = []
-      const session = createSession(globalCtx, {
+      const session = Session.create(globalCtx, {
         type: 'scheduled',
         onScheduledJobDone: (event, outcome) => done.push({ event, outcome }),
       })
@@ -129,7 +129,7 @@ async function run() {
 
       // allowedTools를 사용하는 session: USER로 만들어야 job 툴 포함
       const freshCtx = await createGlobalContext(config)
-      const sd3bSession = createSession(freshCtx, {
+      const sd3bSession = Session.create(freshCtx, {
         type: 'user',
         onScheduledJobDone: (event, outcome) => done.push({ event, outcome }),
       })
@@ -159,7 +159,7 @@ async function run() {
     // SD4. idle timeout: turnState idle 전환 후 콜백 실행
     {
       const idled = []
-      const session = createSession(globalCtx, {
+      const session = Session.create(globalCtx, {
         type: 'user',
         idleTimeoutMs: 100,
         onIdle: () => idled.push(Date.now()),
@@ -178,7 +178,7 @@ async function run() {
     // SD5. idle timeout: 턴 시작 시 타이머 취소
     {
       const idled = []
-      const session = createSession(globalCtx, {
+      const session = Session.create(globalCtx, {
         type: 'user',
         idleTimeoutMs: 200,
         onIdle: () => idled.push(Date.now()),
