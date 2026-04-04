@@ -7,17 +7,13 @@
     "packages/core",
     "packages/infra",
     "packages/server",
-    "packages/tui",
-    "packages/web"
+    "packages/tui"
   ],
   "scripts": {
     "test": "node test/run.js",
-    "test:live": "node test/e2e/tui-live.test.js && cd packages/web && npx playwright test --config=playwright.live.config.js",
+    "test:live": "node test/e2e/tui-live.test.js",
     "start": "npm run start --workspace=@presence/server",
     "start:cli": "npm run start --workspace=@presence/tui",
-    "dev": "npm run start & npm run dev --workspace=@presence/web",
-    "dev:web": "npm run dev --workspace=@presence/web",
-    "build:web": "npm run build --workspace=@presence/web",
     "user": "node packages/infra/src/infra/auth-cli.js"
   },
   "devDependencies": {
