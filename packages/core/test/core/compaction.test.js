@@ -3,7 +3,7 @@ initI18n('ko')
 import fp from '@presence/core/lib/fun-fp.js'
 import { CompactionActor, SUMMARY_MARKER } from '@presence/infra/infra/actors/compaction-actor.js'
 import { migrateHistoryIds } from '@presence/infra/infra/persistence.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 
 import { assert, assertDeepEqual, summary } from '../../../../test/lib/assert.js'
 
@@ -206,7 +206,7 @@ async function run() {
 
   // I1. 전체 흐름: 16항목 → placeholder+remaining → 요약 → replace → 6항목
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -252,7 +252,7 @@ async function run() {
 
   // I3. /clear epoch → 폐기 (placeholder 포함 전부 초기화)
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -274,7 +274,7 @@ async function run() {
 
   // I4. LLM 실패 → placeholder 제거, remaining 유지
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -303,7 +303,7 @@ async function run() {
 
   // I5. 새 턴 append → placeholder 유지, 새 턴 보존, 교체 후 전부 유지
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -367,7 +367,7 @@ async function run() {
   // I7. append + rolling trim → placeholder 소실, prepend fallback이 MAX_HISTORY 상한 유지
   {
     const MAX_HISTORY = 20  // policies.js HISTORY.MAX_CONVERSATION과 동일
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(20) },
     })
@@ -415,7 +415,7 @@ async function run() {
 
   // I8. _compactionEpoch는 transient → persistence에서 제외
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       _compactionEpoch: 3,
     })
@@ -430,7 +430,7 @@ async function run() {
 
   // I9. /clear + 새 턴 → epoch 불일치 + 새 턴 유지
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -472,7 +472,7 @@ async function run() {
 
   // P1. Phase 1 직후 프롬프트 빌드 시 placeholder가 맥락 힌트 제공
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -496,7 +496,7 @@ async function run() {
 
   // P2. Phase 3 성공 후 placeholder가 실제 요약으로 교체 확인
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })
@@ -519,7 +519,7 @@ async function run() {
 
   // P3. LLM 실패 시 placeholder 제거 → history에 placeholder 잔류 없음
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       context: { conversationHistory: makeHistory(16) },
     })

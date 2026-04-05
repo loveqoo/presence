@@ -7,9 +7,9 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { PHASE, RESULT, ERROR_KIND, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
-import { applyFinalState } from '@presence/core/core/stateCommit.js'
+import { applyFinalState } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
@@ -30,7 +30,7 @@ for (const t of localTools) toolRegistry.register(t)
 const tools = toolRegistry.list()
 
 const initState = (overrides = {}) =>
-  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+  createOriginState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 async function run() {
   console.log('E2E scenario regression tests')

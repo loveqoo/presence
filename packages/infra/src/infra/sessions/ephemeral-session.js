@@ -1,4 +1,4 @@
-import { createReactiveState } from '../state.js'
+import { createOriginState } from '../states/origin-state.js'
 import { createToolRegistry } from '../tools/tool-registry.js'
 import { PROMPT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
@@ -31,7 +31,7 @@ class EphemeralSession extends Session {
   // --- 생성 단계 구현 ---
 
   initState() {
-    this.state = createReactiveState({
+    this.state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
@@ -52,26 +52,26 @@ class EphemeralSession extends Session {
 
   restoreState() {}
 
-  initToolRegistry(globalCtx) {
+  initToolRegistry(userContext) {
     this.sessionToolRegistry = createToolRegistry()
-    for (const tool of globalCtx.toolRegistry.list()) this.sessionToolRegistry.register(tool)
-    this.getTools = () => globalCtx.persona.filterTools(this.sessionToolRegistry.list())
+    for (const tool of userContext.toolRegistry.list()) this.sessionToolRegistry.register(tool)
+    this.getTools = () => userContext.persona.filterTools(this.sessionToolRegistry.list())
   }
 
-  initInterpreter(globalCtx) {
+  initInterpreter(userContext) {
     this.interpreter = sessionInterpreterR.run({
-      llm: globalCtx.llm,
+      llm: userContext.llm,
       toolRegistry: this.sessionToolRegistry,
       state: this.state,
-      agentRegistry: globalCtx.agentRegistry,
+      agentRegistry: userContext.agentRegistry,
       turnController: this.turnController,
       logger: this.logger,
     })
   }
 
-  initActors(globalCtx, opts) {
+  initActors(userContext, opts) {
     this.actors = new SessionActors({
-      globalCtx, state: this.state, logger: this.logger,
+      userContext, state: this.state, logger: this.logger,
       persistenceActor: this.persistenceActor,
       dispatchTurn: (input, turnOpts) => this.runAgent(input, turnOpts),
       onScheduledJobDone: this.resolveJobDoneHandler(opts),
@@ -80,15 +80,15 @@ class EphemeralSession extends Session {
 
   resolveJobDoneHandler(opts) { return opts.onScheduledJobDone || null }
 
-  initAgent(globalCtx) {
+  initAgent(userContext) {
     this.agent = new Agent({
       resolveTools: this.getTools,
-      resolveAgents: () => globalCtx.agentRegistry.list(),
-      persona: globalCtx.persona.get(),
-      responseFormatMode: globalCtx.config.llm.responseFormat,
-      maxRetries: globalCtx.config.llm.maxRetries,
-      maxIterations: globalCtx.config.maxIterations,
-      budget: resolveBudget(globalCtx.config.prompt),
+      resolveAgents: () => userContext.agentRegistry.list(),
+      persona: userContext.persona.get(),
+      responseFormatMode: userContext.config.llm.responseFormat,
+      maxRetries: userContext.config.llm.maxRetries,
+      maxIterations: userContext.config.maxIterations,
+      budget: resolveBudget(userContext.config.prompt),
       t,
       interpret: this.interpreter.interpret,
       ST: this.interpreter.ST,

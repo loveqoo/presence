@@ -1,7 +1,15 @@
 import { askLLM, respond, updateState, getState } from './op.js'
-import { ops } from './opHandler.js'
-import { assemblePrompt, buildRetryPrompt, summarizeResults } from './prompt.js'
-import { DEBUG, HISTORY, ERROR_KIND, TurnState, TurnOutcome, TurnError, TURN_SOURCE } from './policies.js'
+import { ops } from './op-handler.js'
+import { assemblePrompt, buildRetryPrompt } from './prompt/assembly.js'
+import { DEBUG, HISTORY, PROMPT as PROMPT_POLICY, ERROR_KIND, TurnState, TurnOutcome, TurnError, TURN_SOURCE } from './policies.js'
+
+// step 결과를 budget 제한하여 텍스트로 직렬화.
+const summarizeResults = (results) =>
+  (Array.isArray(results) ? results : [results])
+    .map((r, i) => {
+      const text = typeof r === 'string' ? r : JSON.stringify(r)
+      return `[Step ${i + 1}] ${text.length > PROMPT_POLICY.RESULT_MAX_LEN ? text.slice(0, PROMPT_POLICY.RESULT_MAX_LEN) + '...(truncated)' : text}`
+    }).join('\n')
 import { safeJsonParse, validatePlan } from './validate.js'
 import fp from '../lib/fun-fp.js'
 
@@ -281,4 +289,4 @@ class Planner {
   }
 }
 
-export { Planner }
+export { Planner, summarizeResults }

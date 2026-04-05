@@ -1,46 +1,39 @@
-import { createState } from '@presence/infra/infra/state.js'
+import { createStateCell } from '@presence/infra/infra/states/origin-state.js'
 import { assert, summary } from '../lib/assert.js'
 
-console.log('createState tests')
+console.log('createStateCell tests')
 
-// 1. Basic set/get
-const s1 = createState()
-s1.set('a', 1)
-assert(s1.get('a') === 1, 'set/get simple key')
+// 1. Basic apply/get (set은 cell에 없음. apply로 new data 교체)
+const s1 = createStateCell()
+s1.apply({ a: 1 })
+assert(s1.get('a') === 1, 'apply + get simple key')
 
-// 2. Nested path
-s1.set('a.b.c', 42)
-assert(s1.get('a.b.c') === 42, 'set/get nested path')
+// 2. Nested path 조회
+s1.apply({ a: { b: { c: 42 } } })
+assert(s1.get('a.b.c') === 42, 'get nested path')
 
-// 3. Nested path creates intermediate objects
-const s2 = createState()
-s2.set('x.y.z', 'deep')
-assert(s2.get('x.y.z') === 'deep', 'creates intermediate objects')
-assert(typeof s2.get('x.y') === 'object', 'intermediate is object')
+// 3. Initial input aliasing 차단 (생성 시 1회 clone)
+const initialInput = { a: { b: 1 } }
+const s2 = createStateCell(initialInput)
+initialInput.a.b = 999
+assert(s2.get('a.b') === 1, 'mutating initial input does not affect cell')
 
-// 4. Snapshot returns deep copy
-const s3 = createState({ a: { b: 1 } })
-const snap = s3.snapshot()
-snap.a.b = 999
-assert(s3.get('a.b') === 1, 'snapshot is deep copy (original unchanged)')
+// 4. Non-existent path returns undefined
+assert(s2.get('x.y.z') === undefined, 'non-existent path returns undefined')
 
-// 5. Non-existent path returns undefined
-assert(s3.get('x.y.z') === undefined, 'non-existent path returns undefined')
-
-// 6. Initial state preserved
-const s4 = createState({ status: 'idle', turn: 0 })
-assert(s4.get('status') === 'idle', 'initial state: status')
-assert(s4.get('turn') === 0, 'initial state: turn')
-
-// 7. Overwrite existing value
-s4.set('status', 'working')
-assert(s4.get('status') === 'working', 'overwrite existing value')
-
-// 8. get with no args returns full state copy
-const s5 = createState({ a: 1, b: { c: 2 } })
-const full = s5.get()
+// 5. get() returns full state
+const s3 = createStateCell({ a: 1, b: { c: 2 } })
+const full = s3.get()
 assert(full.a === 1 && full.b.c === 2, 'get() returns full state')
-full.a = 999
-assert(s5.get('a') === 1, 'get() returns deep copy')
+
+// 6. snapshot과 get()은 동일 참조 (apply 전까지 stable)
+const s4 = createStateCell({ x: 1 })
+const ref1 = s4.snapshot()
+assert(s4.get() === ref1, 'snapshot and get share reference between applies')
+s4.apply({ x: 2 })
+const ref2 = s4.snapshot()
+assert(ref2 !== ref1, 'apply swaps internal reference')
+assert(ref1.x === 1, 'prior snapshot remains unchanged (immutable cell)')
+assert(ref2.x === 2, 'new snapshot reflects latest value')
 
 summary()

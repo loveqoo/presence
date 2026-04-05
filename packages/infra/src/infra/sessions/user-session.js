@@ -3,7 +3,8 @@ import { STATE_PATH } from '@presence/core/core/policies.js'
 import { SYSTEM_JOBS } from '../constants.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
 import { persistenceActorR } from '../actors/persistence-actor.js'
-import { createSchedulerActor, calcNextRun } from '../jobs/scheduler-actor.js'
+import { createSchedulerActor } from '../actors/scheduler-actor.js'
+import { calcNextRun } from '../jobs/job-tools.js'
 import { createJobTools } from '../jobs/job-tools.js'
 import { formatTodosAsLines } from '../events.js'
 import { EphemeralSession } from './ephemeral-session.js'
@@ -22,7 +23,7 @@ class UserSession extends EphemeralSession {
     this.persistenceActor = persistenceActorR.run({ store: this.persistence.store })
   }
 
-  // --- State 복원: 디스크 → ReactiveState ---
+  // --- State 복원: 디스크 → OriginState ---
 
   restoreState() {
     const restored = this.persistence.restore()
@@ -61,19 +62,19 @@ class UserSession extends EphemeralSession {
 
   // --- Scheduler: cron 기반 잡 실행 ---
 
-  initScheduler(globalCtx, opts) {
+  initScheduler(userContext, opts) {
     this.localSchedulerActor = opts.onScheduledJobDone ? null : createSchedulerActor({
-      store: globalCtx.jobStore,
+      store: userContext.jobStore,
       onDispatch: (event) => fireAndForget(this.actors.eventActor.enqueue(event)),
       logger: this.logger,
-      pollIntervalMs: globalCtx.config.scheduler.pollIntervalMs,
+      pollIntervalMs: userContext.config.scheduler.pollIntervalMs,
     })
   }
 
   // --- Tools: job/todo 툴 등록 ---
 
-  initTools(globalCtx) {
-    const jobTools = createJobTools({ store: globalCtx.jobStore, eventActor: this.actors.eventActor })
+  initTools(userContext) {
+    const jobTools = createJobTools({ store: userContext.jobStore, eventActor: this.actors.eventActor })
     for (const tool of jobTools) this.sessionToolRegistry.register(tool)
 
     this.sessionToolRegistry.register({
@@ -87,11 +88,11 @@ class UserSession extends EphemeralSession {
       },
     })
 
-    if (globalCtx.config.scheduler.todoReview.enabled) {
-      const exists = globalCtx.jobStore.listJobs().find(job => job.name === SYSTEM_JOBS.TODO_REVIEW)
+    if (userContext.config.scheduler.todoReview.enabled) {
+      const exists = userContext.jobStore.listJobs().find(job => job.name === SYSTEM_JOBS.TODO_REVIEW)
       if (!exists) {
-        const cron = globalCtx.config.scheduler.todoReview.cron
-        globalCtx.jobStore.createJob({
+        const cron = userContext.config.scheduler.todoReview.cron
+        userContext.jobStore.createJob({
           name: SYSTEM_JOBS.TODO_REVIEW,
           prompt: SYSTEM_JOBS.TODO_REVIEW,
           cron,

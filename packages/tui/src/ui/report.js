@@ -4,6 +4,7 @@
  * /report 커맨드에서 호출. state 데이터를 읽어
  * 사람과 LLM 모두 이해할 수 있는 마크다운 리포트를 생성한다.
  */
+import { STATE_PATH } from '@presence/core/core/policies.js'
 
 const formatDuration = (ms) => {
   if (ms == null) return '?'
@@ -148,11 +149,11 @@ const buildReport = ({ debug, opTrace, iterationHistory, lastPrompt, lastRespons
   // --- State Summary ---
   if (state) {
     add('## State')
-    const turnState = state.get('turnState')
-    const lastTurn = state.get('lastTurn')
-    const turn = state.get('turn') || 0
-    const mems = state.get('context.memories') || []
-    const history = state.get('context.conversationHistory') || []
+    const turnState = state.get(STATE_PATH.TURN_STATE)
+    const lastTurn = state.get(STATE_PATH.LAST_TURN)
+    const turn = state.get(STATE_PATH.TURN) || 0
+    const mems = state.get(STATE_PATH.CONTEXT_MEMORIES) || []
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || []
     add(`- **Turn:** ${turn}`)
     add(`- **Status:** ${turnState?.tag || '?'}`)
     add(`- **Last Result:** ${lastTurn?.tag || 'none'}`)

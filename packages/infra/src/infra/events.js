@@ -62,6 +62,6 @@ const createEventReceiver = (state) => {
  *
  * `isDuplicate(todos, eventId)` — Returns true if a TODO derived from the given event already exists.
  *
- * `createEventReceiver(state)` — (Deprecated) Legacy event emitter backed by ReactiveState. Use EventActor instead.
+ * `createEventReceiver(state)` — (Deprecated) Legacy event emitter backed by OriginState. Use EventActor instead.
  */
 export { createEventReceiver, withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate }

@@ -1,5 +1,5 @@
 import { createPersistence } from '@presence/infra/infra/persistence.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -18,7 +18,7 @@ async function run() {
     const p = createPersistence({ cwd, debounceMs: 0 })
     p.clear()
 
-    const state = createReactiveState({ turnState: { tag: 'idle' }, turn: 5 })
+    const state = createOriginState({ turnState: { tag: 'idle' }, turn: 5 })
     p.saveImmediate(state)
 
     const restored = p.restore()
@@ -65,7 +65,7 @@ async function run() {
     const p = createPersistence({ cwd, debounceMs: 0 })
     p.clear()
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: { tag: 'idle' },
       turn: 3,
       _toolResults: [{ tool: 'file_list', args: {}, result: 'data' }],

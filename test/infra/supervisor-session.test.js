@@ -2,7 +2,8 @@ import http from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createGlobalContext, Session } from '@presence/tui'
+import { UserContext } from '@presence/tui'
+import { Session } from '@presence/infra/infra/sessions/index.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -52,7 +53,7 @@ async function run() {
   const mockLLM = createMockLLM()
   const llmPort = await mockLLM.start()
   const config = baseConfig(llmPort, tmpDir)
-  const globalCtx = await createGlobalContext(config)
+  const userContext = await UserContext.create(config)
 
   try {
 
@@ -62,13 +63,13 @@ async function run() {
     {
       // USER 세션으로 먼저 turn 진행 후 flush
       const userDir = join(tmpDir, 'sa1-user')
-      const userSession = Session.create(globalCtx, { type: SESSION_TYPE.USER, persistenceCwd: userDir })
+      const userSession = Session.create(userContext, { type: SESSION_TYPE.USER, persistenceCwd: userDir })
       await userSession.handleInput('저장용 입력')
       assert(userSession.state.get('turn') === 1, 'SA1 setup: user turn incremented')
       await userSession.shutdown()  // flush to disk
 
       // AGENT 세션: 같은 디렉토리여도 restore 안 함
-      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT, persistenceCwd: userDir })
+      const agentSession = Session.create(userContext, { type: SESSION_TYPE.AGENT, persistenceCwd: userDir })
       assert(agentSession.state.get('turn') === 0, 'SA1: agent session starts at turn 0 (no restore)')
       await agentSession.shutdown()
     }
@@ -77,17 +78,17 @@ async function run() {
     // SA2. AGENT 세션: schedulerActor === null
     // ========================================================================
     {
-      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(userContext, { type: SESSION_TYPE.AGENT })
       assert(agentSession.schedulerActor === null, 'SA2: no schedulerActor in agent session')
       await agentSession.shutdown()
     }
 
     // ========================================================================
     // SA3. AGENT 세션: job/todo 툴이 없음 — USER 세션이 먼저 만들어진 후여도 마찬가지
-    // job 툴은 세션 로컬 registry에만 등록되므로 globalCtx.toolRegistry를 공유해도 누수 없음
+    // job 툴은 세션 로컬 registry에만 등록되므로 userContext.toolRegistry를 공유해도 누수 없음
     // ========================================================================
     {
-      const freshGlobalCtx = await createGlobalContext(config)
+      const freshGlobalCtx = await UserContext.create(config)
 
       // USER 세션 먼저 생성 (job 툴 등록)
       const userSession = Session.create(freshGlobalCtx, { type: SESSION_TYPE.USER })
@@ -111,7 +112,7 @@ async function run() {
     // SA4. AGENT 세션: handleInput 정상 동작 (LLM 응답 반환)
     // ========================================================================
     {
-      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(userContext, { type: SESSION_TYPE.AGENT })
       const result = await agentSession.handleInput('안녕')
       assert(typeof result === 'string', 'SA4: handleInput returns string')
       assert(result === '응답', 'SA4: correct LLM response')
@@ -124,23 +125,23 @@ async function run() {
     // ========================================================================
     {
       const agentDir = join(tmpDir, 'sa5-agent')
-      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT, persistenceCwd: agentDir })
+      const agentSession = Session.create(userContext, { type: SESSION_TYPE.AGENT, persistenceCwd: agentDir })
       await agentSession.handleInput('저장되지 않아야 함')
       assert(agentSession.state.get('turn') === 1, 'SA5 setup: turn is 1')
       await agentSession.shutdown()
 
       // 다시 USER 세션으로 같은 경로 로드 → agent 저장 내용 없어야 함
-      const freshUserSession = Session.create(globalCtx, { type: SESSION_TYPE.USER, persistenceCwd: agentDir })
+      const freshUserSession = Session.create(userContext, { type: SESSION_TYPE.USER, persistenceCwd: agentDir })
       assert(freshUserSession.state.get('turn') === 0, 'SA5: agent shutdown did not flush state')
       await freshUserSession.shutdown()
     }
 
     // ========================================================================
-    // SA6. USER 세션과 AGENT 세션은 독립적인 state (같은 globalCtx 공유)
+    // SA6. USER 세션과 AGENT 세션은 독립적인 state (같은 userContext 공유)
     // persistenceCwd를 명시해 restore 영향 제거, turn 증분으로 검증
     // ========================================================================
     {
-      const freshCtx = await createGlobalContext(config)
+      const freshCtx = await UserContext.create(config)
       const sa6Dir = join(tmpDir, 'sa6')
       try {
         const userSession = Session.create(freshCtx, { type: SESSION_TYPE.USER, persistenceCwd: sa6Dir })
@@ -173,7 +174,7 @@ async function run() {
     // SA7. AGENT 세션을 agentRegistry에 등록 후 run() 직접 호출
     // ========================================================================
     {
-      const freshCtx = await createGlobalContext(config)
+      const freshCtx = await UserContext.create(config)
       try {
         const agentSession = Session.create(freshCtx, { type: SESSION_TYPE.AGENT })
         freshCtx.agentRegistry.register({
@@ -199,7 +200,7 @@ async function run() {
     // SA8. AGENT 세션의 delegateActor는 start 가능
     // ========================================================================
     {
-      const agentSession = Session.create(globalCtx, { type: SESSION_TYPE.AGENT })
+      const agentSession = Session.create(userContext, { type: SESSION_TYPE.AGENT })
       assert(agentSession.delegateActor !== undefined, 'SA8: delegateActor exists')
       // start 후 에러 없음
       agentSession.delegateActor.start().fork(() => {}, () => {})
@@ -218,7 +219,7 @@ async function run() {
     }
 
   } finally {
-    await globalCtx.shutdown()
+    await userContext.shutdown()
     await mockLLM.close()
     rmSync(tmpDir, { recursive: true, force: true })
   }

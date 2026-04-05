@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Box, Text, useApp, useInput } from 'ink'
-import { StatusBar, DEFAULT_ITEMS, TOGGLEABLE_ITEMS } from './components/StatusBar.js'
+import { StatusBar, DEFAULT_ITEMS } from './components/StatusBar.js'
 import { ChatArea } from './components/ChatArea.js'
 import { InputBar } from './components/InputBar.js'
 import { SidePanel } from './components/SidePanel.js'
@@ -8,123 +8,22 @@ import { ApprovePrompt } from './components/ApprovePrompt.js'
 import { TranscriptOverlay } from './components/TranscriptOverlay.js'
 import { useAgentState } from './hooks/useAgentState.js'
 import { MarkdownText } from './components/MarkdownText.js'
-import { buildReport } from './report.js'
-import { clearDebugState } from '@presence/core/core/stateCommit.js'
+import { STATE_PATH } from '@presence/core/core/policies.js'
 import { t } from '@presence/infra/i18n'
+import { dispatchSlashCommand } from './slash-commands.js'
 
 const h = React.createElement
 
-// --- /memory 커맨드 핸들러 ---
-
-const DURATION_RE = /^(\d+)(d|h|m)$/
-const parseDuration = (str) => {
-  const m = str.match(DURATION_RE)
-  if (!m) return null
-  const n = parseInt(m[1])
-  if (m[2] === 'd') return n * 86400000
-  if (m[2] === 'h') return n * 3600000
-  if (m[2] === 'm') return n * 60000
-  return null
-}
-
-const TIER_SET = new Set(['episodic', 'semantic', 'working'])
-
-const formatAge = (ts) => {
-  if (!ts) return '?'
-  const sec = Math.floor((Date.now() - ts) / 1000)
-  if (sec < 60) return `${sec}s`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m`
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h`
-  return `${Math.floor(sec / 86400)}d`
-}
-
-const handleMemoryCommand = (input, memory, addMessage) => {
-  if (!memory) {
-    addMessage({ role: 'system', content: t('memory_cmd.not_available') })
-    return
-  }
-
-  const args = input.slice('/memory'.length).trim()
-
-  // /memory (no args) — summary
-  if (!args) {
-    const nodes = memory.allNodes()
-    const byTier = {}
-    for (const n of nodes) {
-      byTier[n.tier] = (byTier[n.tier] || 0) + 1
-    }
-    const parts = Object.entries(byTier).map(([k, v]) => `${k}: ${v}`).join(', ')
-    addMessage({ role: 'system', content: t('memory_cmd.summary', { count: nodes.length, detail: parts || t('memory_cmd.empty') }) })
-    return
-  }
-
-  // /memory help
-  if (args === 'help') {
-    addMessage({ role: 'system', content: t('memory_cmd.help') })
-    return
-  }
-
-  // /memory list [tier]
-  if (args === 'list' || args.startsWith('list ')) {
-    const tierArg = args.slice(4).trim() || null
-    let nodes = memory.allNodes()
-    if (tierArg && TIER_SET.has(tierArg)) {
-      nodes = nodes.filter(n => n.tier === tierArg)
-    }
-    if (nodes.length === 0) {
-      addMessage({ role: 'system', content: t('memory_cmd.not_found') })
-      return
-    }
-    // 최신순 정렬
-    nodes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-    const lines = nodes.slice(0, 30).map((n, i) => {
-      const age = formatAge(n.createdAt)
-      const label = String(n.label).length > 50 ? String(n.label).slice(0, 47) + '...' : n.label
-      return `${String(i + 1).padStart(3)}. ${label}  [${n.tier} · ${n.type} · ${age}]`
-    })
-    if (nodes.length > 30) lines.push(`... +${nodes.length - 30} more`)
-    addMessage({ role: 'system', content: lines.join('\n') })
-    return
-  }
-
-  // /memory clear [tier] [age]
-  if (args === 'clear' || args.startsWith('clear ')) {
-    const clearArgs = args.slice(5).trim().split(/\s+/).filter(Boolean)
-    let tier = null
-    let maxAgeMs = null
-
-    for (const a of clearArgs) {
-      if (TIER_SET.has(a)) tier = a
-      else {
-        const ms = parseDuration(a)
-        if (ms) maxAgeMs = ms
-        else {
-          addMessage({ role: 'system', content: t('memory_cmd.unknown_arg', { arg: a }) })
-          return
-        }
-      }
-    }
-
-    let removed
-    if (!tier && !maxAgeMs) {
-      removed = memory.clearAll()
-    } else if (maxAgeMs) {
-      removed = memory.removeOlderThan(maxAgeMs, { tier })
-    } else {
-      memory.removeNodesByTier(tier)
-      removed = '?'
-    }
-
-    memory.save().catch(() => {})
-    const desc = [tier, maxAgeMs ? `older than ${clearArgs.find(a => DURATION_RE.test(a))}` : null].filter(Boolean).join(', ')
-    addMessage({ role: 'system', content: t('memory_cmd.cleared', { count: removed, desc: desc ? ` (${desc})` : '' }) })
-    return
-  }
-
-  addMessage({ role: 'system', content: t('memory_cmd.unknown_sub') })
-}
-
-const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tools = [], agents = [], initialMessages = [], cwd = '', gitBranch = '', model: initialModel = '', config = null, memory = null, llm = null, mcpControl = null, sessionId = 'user-default', onListSessions = null, onCreateSession = null, onDeleteSession = null, onSwitchSession = null }) => {
+const App = (props) => {
+  const {
+    state, onInput, onApprove, onCancel,
+    agentName = 'Presence', tools = [], agents = [],
+    initialMessages = [], cwd = '', gitBranch = '',
+    model: initialModel = '', config = null, memory = null,
+    llm = null, mcpControl = null, sessionId = 'user-default',
+    onListSessions = null, onCreateSession = null,
+    onDeleteSession = null, onSwitchSession = null,
+  } = props
   const { exit } = useApp()
   const agentState = useAgentState(state)
   const [messages, setMessages] = useState(initialMessages)
@@ -134,29 +33,23 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
   const [statusItems, setStatusItems] = useState([...DEFAULT_ITEMS])
   const [toolExpanded, setToolExpanded] = useState(false)
   const inputHistoryRef = useRef([])
+  const toolCountRef = useRef(0)
 
   // App-level key handlers (overlay가 열려있지 않을 때만)
   useInput((input, key) => {
-    if (key.escape && agentState.status === 'working' && onCancel) {
-      onCancel()
-    }
-    // ESC 중 idle → help 메시지 제거
+    if (key.escape && agentState.status === 'working' && onCancel) onCancel()
     if (key.escape && agentState.status !== 'working') {
       setMessages(prev => prev.filter(m => m.tag !== 'help'))
     }
-    if (key.ctrl && input === 't') {
-      setShowTranscript(true)
-    }
-    if (key.ctrl && input === 'o') {
-      setToolExpanded(prev => !prev)
-    }
+    if (key.ctrl && input === 't') setShowTranscript(true)
+    if (key.ctrl && input === 'o') setToolExpanded(prev => !prev)
   }, { isActive: !showTranscript })
 
   const addMessage = useCallback((msg) => {
     setMessages(prev => [...prev, msg])
   }, [])
 
-  // conversationHistory → messages 동기화 (다른 클라이언트에서 입력된 대화 반영)
+  // conversationHistory → messages 동기화
   useEffect(() => {
     const history = agentState.conversationHistory
     if (!Array.isArray(history)) return
@@ -165,7 +58,6 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
       if (entry.input) historyMsgs.push({ role: 'user', content: entry.input })
       if (entry.output) historyMsgs.push({ role: entry.failed ? 'error' : 'agent', content: entry.output })
     }
-    // system/tool 등 로컬 전용 메시지 보존, user/agent/error만 히스토리에서 교체
     setMessages(prev => {
       const localOnly = prev.filter(m => m.role !== 'user' && m.role !== 'agent' && m.role !== 'error')
       return [...historyMsgs, ...localOnly]
@@ -184,7 +76,6 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
   }, [agentState.budgetWarning, addMessage])
 
   // Tool result → message conversion
-  const toolCountRef = useRef(0)
   useEffect(() => {
     const results = agentState.toolResults
     if (results.length > toolCountRef.current) {
@@ -196,241 +87,25 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
     }
   }, [agentState.toolResults, addMessage])
 
-  // 턴 시작 시 _toolResults 초기화 — 이전 턴 결과가 state에 누적되지 않도록
+  // 턴 시작 시 _toolResults 초기화
   useEffect(() => {
     if (agentState.status === 'working') {
-      if (state) state.set('_toolResults', [])
+      if (state) state.set(STATE_PATH.TOOL_RESULTS, [])
       toolCountRef.current = 0
     }
   }, [agentState.status, state])
 
   const handleInput = useCallback((input) => {
-    // Slash commands
-    if (input === '/quit' || input === '/exit') {
-      exit()
-      return
+    const slashCtx = {
+      addMessage, exit, state, agentState, config,
+      tools, memory, llm, mcpControl,
+      currentModel, setCurrentModel,
+      setMessages, setShowPanel, statusItems, setStatusItems,
+      sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
     }
-    if (input === '/panel') {
-      setShowPanel(p => !p)
-      return
-    }
-    if (input === '/clear') {
-      setMessages([])
-      if (state) clearDebugState(state)
-      return
-    }
-    if (input === '/help') {
-      addMessage({ role: 'system', content: t('help.commands'), tag: 'help' })
-      return
-    }
-    if (input.startsWith('/mcp')) {
-      if (!mcpControl || mcpControl.list().length === 0) {
-        addMessage({ role: 'system', content: 'No MCP servers configured.' })
-        return
-      }
-      const args = input.trim().split(/\s+/).slice(1)
-      const sub = args[0] || 'list'
-      if (sub === 'list') {
-        const lines = mcpControl.list().map(s => `${s.enabled ? '●' : '○'} ${s.prefix}  ${s.serverName}  (${s.toolCount} tools)`)
-        addMessage({ role: 'system', content: `MCP servers:\n${lines.join('\n')}` })
-      } else if (sub === 'enable' || sub === 'disable') {
-        const prefix = args[1]
-        if (!prefix) { addMessage({ role: 'system', content: `Usage: /mcp ${sub} <id>  (e.g. mcp0)` }); return }
-        const ok = sub === 'enable' ? mcpControl.enable(prefix) : mcpControl.disable(prefix)
-        addMessage({ role: 'system', content: ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}` })
-      } else {
-        addMessage({ role: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' })
-      }
-      return
-    }
-    if (input === '/report') {
-      const lastPrompt = state ? state.get('_debug.lastPrompt') : null
-      const lastResponse = state ? state.get('_debug.lastResponse') : null
-      const report = buildReport({
-        debug: agentState.debug,
-        opTrace: agentState.opTrace,
-        iterationHistory: agentState.iterationHistory,
-        lastPrompt,
-        lastResponse,
-        state,
-        config,
-      })
-      // 파일 저장 + 클립보드 복사
-      import('fs').then(({ mkdirSync, writeFileSync }) => {
-        import('path').then(({ join }) => {
-          import('child_process').then(({ execSync }) => {
-            const home = process.env.HOME || process.env.USERPROFILE || '.'
-            const dir = join(home, '.presence', 'reports')
-            mkdirSync(dir, { recursive: true })
-            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-            const filePath = join(dir, `report-${ts}.md`)
-            writeFileSync(filePath, report, 'utf-8')
-            // macOS pbcopy
-            try {
-              execSync('pbcopy', { input: report, stdio: ['pipe', 'pipe', 'pipe'] })
-              addMessage({ role: 'system', content: `report saved: ${filePath}\n(clipboard copied)` })
-            } catch (_) {
-              addMessage({ role: 'system', content: `report saved: ${filePath}` })
-            }
-          })
-        })
-      }).catch(() => {
-        // fallback: 파일 저장 실패 시 콘솔 출력
-        addMessage({ role: 'system', content: report })
-      })
-      return
-    }
-    if (input === '/status') {
-      const lt = agentState.lastTurn
-      addMessage({ role: 'system', content: `status: ${agentState.status} | turn: ${agentState.turn} | mem: ${agentState.memoryCount} | last: ${lt?.tag || 'none'}` })
-      return
-    }
-    if (input === '/tools') {
-      const list = tools.map(t => t.name).join(', ') || '(none)'
-      addMessage({ role: 'system', content: `tools: ${list}` })
-      return
-    }
-    if (input === '/memory' || input.startsWith('/memory ')) {
-      handleMemoryCommand(input, memory, addMessage)
-      return
-    }
-    if (input === '/models' || input.startsWith('/models ')) {
-      const arg = input.slice('/models'.length).trim()
-      if (!llm) { addMessage({ role: 'system', content: t('models_cmd.not_available') }); return }
-      if (!arg) {
-        // 모델 목록 조회
-        addMessage({ role: 'system', content: t('models_cmd.loading') })
-        llm.listModels().then(all => {
-          const embedModel = config?.embed?.model
-          const models = all.filter(m =>
-            m !== embedModel && !m.toLowerCase().includes('embed')
-          )
-          if (models.length === 0) {
-            addMessage({ role: 'system', content: t('models_cmd.not_found') })
-            return
-          }
-          const lines = models.map(m => m === currentModel ? `  ● ${m} ${t('models_cmd.current')}` : `    ${m}`)
-          addMessage({ role: 'system', content: `${t('models_cmd.available')}\n${lines.join('\n')}` })
-        })
-      } else {
-        // 모델 변경
-        llm.setModel(arg)
-        setCurrentModel(arg)
-        addMessage({ role: 'system', content: t('models_cmd.changed', { model: arg }) })
-      }
-      return
-    }
-    if (input === '/todos') {
-      const list = agentState.todos.length > 0
-        ? agentState.todos.map(t => `• ${t.title || t.type}`).join('\n')
-        : '(none)'
-      addMessage({ role: 'system', content: `todos:\n${list}` })
-      return
-    }
+    if (dispatchSlashCommand(input, slashCtx)) return
 
-    // /sessions 커맨드
-    if (input === '/sessions' || input.startsWith('/sessions ')) {
-      const args = input.slice('/sessions'.length).trim().split(/\s+/).filter(Boolean)
-      const sub = args[0] || 'list'
-
-      if (sub === 'list') {
-        if (!onListSessions) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
-        onListSessions().then(sessions => {
-          const lines = sessions.map(s => {
-            const marker = s.id === sessionId ? '●' : ' '
-            const current = s.id === sessionId ? ` ${t('sessions_cmd.current_marker')}` : ''
-            return `${marker} ${s.id}  [${s.type}]${current}`
-          })
-          addMessage({ role: 'system', content: `${t('sessions_cmd.list_header')}\n${lines.join('\n')}` })
-        }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
-        return
-      }
-
-      if (sub === 'new') {
-        const name = args[1] || null
-        if (!onCreateSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
-        onCreateSession(name).then(s => {
-          addMessage({ role: 'system', content: t('sessions_cmd.created', { id: s.id }) })
-        }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
-        return
-      }
-
-      if (sub === 'switch') {
-        const id = args[1]
-        if (!id) { addMessage({ role: 'system', content: t('sessions_cmd.usage_switch') }); return }
-        if (!onSwitchSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
-        addMessage({ role: 'system', content: t('sessions_cmd.switching', { id }) })
-        onSwitchSession(id).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
-        return
-      }
-
-      if (sub === 'delete') {
-        const id = args[1]
-        if (!id) { addMessage({ role: 'system', content: t('sessions_cmd.usage_delete') }); return }
-        if (id === sessionId) { addMessage({ role: 'system', content: t('sessions_cmd.cannot_delete_current') }); return }
-        if (!onDeleteSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
-        onDeleteSession(id).then(() => {
-          addMessage({ role: 'system', content: t('sessions_cmd.deleted', { id }) })
-        }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
-        return
-      }
-
-      addMessage({ role: 'system', content: t('sessions_cmd.usage') })
-      return
-    }
-
-    // /statusline command
-    if (input.startsWith('/statusline')) {
-      const arg = input.slice('/statusline'.length).trim()
-
-      // No argument: show current items
-      if (!arg) {
-        const visible = statusItems.join(', ')
-        const available = TOGGLEABLE_ITEMS.filter(k => !statusItems.includes(k)).join(', ')
-        addMessage({
-          role: 'system',
-          content: `statusline items: ${visible} (status: always on)\navailable: ${available || '(all shown)'}\nusage: /statusline +item  /statusline -item`,
-        })
-        return
-      }
-
-      // +item: add
-      if (arg.startsWith('+')) {
-        const item = arg.slice(1)
-        if (!TOGGLEABLE_ITEMS.includes(item)) {
-          addMessage({ role: 'system', content: `unknown item: ${item}. available: ${TOGGLEABLE_ITEMS.join(', ')}` })
-          return
-        }
-        if (statusItems.includes(item)) {
-          addMessage({ role: 'system', content: `${item} is already visible` })
-          return
-        }
-        setStatusItems(prev => [...prev, item])
-        addMessage({ role: 'system', content: `+${item}` })
-        return
-      }
-
-      // -item: remove (status는 제거 불가)
-      if (arg.startsWith('-')) {
-        const item = arg.slice(1)
-        if (item === 'status') {
-          addMessage({ role: 'system', content: 'status is always visible' })
-          return
-        }
-        if (!statusItems.includes(item)) {
-          addMessage({ role: 'system', content: `${item} is not currently visible` })
-          return
-        }
-        setStatusItems(prev => prev.filter(i => i !== item))
-        addMessage({ role: 'system', content: `-${item}` })
-        return
-      }
-
-      addMessage({ role: 'system', content: `usage: /statusline  /statusline +item  /statusline -item` })
-      return
-    }
-
-    // 일반 입력 → 에이전트 실행 (user/agent 메시지는 conversationHistory push에서 반영)
+    // 일반 입력 → 에이전트 실행
     if (onInput) {
       onInput(input).then(() => {}).catch(err => {
         const isAbort = err.name === 'AbortError' || err.message?.includes('aborted')
@@ -441,7 +116,7 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
         })
       })
     }
-  }, [onInput, exit, agentState, tools, addMessage, statusItems, currentModel, llm, memory, config, onCancel])
+  }, [onInput, exit, agentState, tools, addMessage, statusItems, currentModel, llm, memory, config, state, mcpControl, sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession])
 
   const handleApprove = useCallback((approved) => {
     if (onApprove) onApprove(approved)
@@ -451,29 +126,28 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
 
   // Transcript overlay
   if (showTranscript) {
-    const lastPrompt = state ? state.get('_debug.lastPrompt') : null
-    const lastResponse = state ? state.get('_debug.lastResponse') : null
+    const lastPrompt = state ? state.get(STATE_PATH.DEBUG_LAST_PROMPT) : null
+    const lastResponse = state ? state.get(STATE_PATH.DEBUG_LAST_RESPONSE) : null
     return h(TranscriptOverlay, {
-      debug: agentState.debug,
-      lastPrompt,
-      lastResponse,
-      opTrace: agentState.opTrace,
-      recalledMemories: agentState.recalledMemories,
+      debug: agentState.debug, lastPrompt, lastResponse,
+      opTrace: agentState.opTrace, recalledMemories: agentState.recalledMemories,
       onClose: () => {
         setShowTranscript(false)
-        // ink가 이전 프레임 잔상을 남기는 문제 방지: 화면 클리어
         process.stdout.write('\x1b[2J\x1b[H')
       },
     })
   }
 
-  // 스트리밍 표시 — ChatArea agent 메시지와 동일한 스타일 (marginTop + 들여쓰기)
   const streamingView = agentState.streaming
     ? h(Box, { paddingX: 1, paddingLeft: 2, marginTop: 1, flexDirection: 'column' },
         agentState.streaming.content
           ? h(MarkdownText, { content: agentState.streaming.content + '▌' })
           : h(Text, { color: 'gray' }, `receiving ${agentState.streaming.length || 0} chars...`),
       )
+    : null
+
+  const budgetPct = agentState.debug?.assembly?.budget && agentState.debug.assembly.budget !== Infinity
+    ? Math.round(agentState.debug.assembly.used / agentState.debug.assembly.budget * 100)
     : null
 
   return h(Box, { flexDirection: 'column', height: '100%' },
@@ -487,8 +161,7 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
       ),
       showPanel
         ? h(SidePanel, {
-            agents,
-            tools,
+            agents, tools,
             todos: agentState.todos,
             memoryCount: agentState.memoryCount,
             events: agentState.events,
@@ -503,19 +176,11 @@ const App = ({ state, onInput, onApprove, onCancel, agentName = 'Presence', tool
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
     h(StatusBar, {
-      status: agentState.status,
-      turn: agentState.turn,
-      memoryCount: agentState.memoryCount,
-      agentName,
-      activity: agentState.activity,
-      toolCount: tools.length,
-      cwd,
-      gitBranch,
-      model: currentModel,
-      budgetPct: agentState.debug?.assembly?.budget && agentState.debug.assembly.budget !== Infinity
-        ? Math.round(agentState.debug.assembly.used / agentState.debug.assembly.budget * 100)
-        : null,
-      visibleItems: statusItems,
+      status: agentState.status, turn: agentState.turn,
+      memoryCount: agentState.memoryCount, agentName,
+      activity: agentState.activity, toolCount: tools.length,
+      cwd, gitBranch, model: currentModel,
+      budgetPct, visibleItems: statusItems,
     }),
   )
 }

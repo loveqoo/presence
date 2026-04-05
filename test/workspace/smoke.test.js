@@ -14,10 +14,10 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { getByPath } from '@presence/core/lib/path.js'
 
 // --- @presence/infra ---
-import { createGlobalContext } from '@presence/infra/infra/global-context.js'
+import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Session } from '@presence/infra/infra/sessions/index.js'
-import { createSessionManager } from '@presence/infra/infra/session-manager.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createSessionManager } from '@presence/infra/infra/sessions/session-manager.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { delegateInterpreterR } from '@presence/infra/interpreter/delegate.js'
 import { initI18n, t } from '@presence/infra/i18n'
@@ -43,10 +43,10 @@ assert(fp != null,                                  'core: fun-fp default export
 assert(getByPath({ a: { b: 42 } }, 'a.b') === 42,  'core: getByPath utility works')
 
 // @presence/infra
-assert(typeof createGlobalContext === 'function',   'infra: createGlobalContext is a function')
+assert(typeof UserContext === 'function',   'infra: createGlobalContext is a function')
 assert(typeof Session === 'function',               'infra: Session is a class')
 assert(typeof createSessionManager === 'function',  'infra: createSessionManager is a function')
-assert(typeof createReactiveState === 'function',   'infra: createReactiveState is a function')
+assert(typeof createOriginState === 'function',   'infra: createOriginState is a function')
 assert(prodInterpreterR != null && typeof prodInterpreterR.run === 'function', 'infra: prodInterpreterR is a Reader')
 assert(delegateInterpreterR != null && typeof delegateInterpreterR.run === 'function', 'infra: delegateInterpreterR is a Reader')
 

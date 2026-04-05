@@ -1,7 +1,7 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import fp from '@presence/core/lib/fun-fp.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { HISTORY, PHASE, RESULT, TurnState, STATE_PATH } from '@presence/core/core/policies.js'
 import { MemoryActor, memoryActorR } from '@presence/infra/infra/actors/memory-actor.js'
 import { CompactionActor, compactionActorR, SUMMARY_MARKER } from '@presence/infra/infra/actors/compaction-actor.js'
@@ -41,55 +41,54 @@ async function run() {
   // MemoryActor (mem0 기반)
   // =============================================
 
-  const makeMockMem0 = ({ searchResult = [], addResult = {}, failSearch = false, failAdd = false } = {}) => {
+  const makeMockMemory = ({ searchResult = [], failSearch = false, failAdd = false } = {}) => {
     const calls = { search: [], add: [] }
     return {
       calls,
-      search: async (query, config) => {
-        calls.search.push({ query, config })
+      search: async (input) => {
+        calls.search.push({ input })
         if (failSearch) throw new Error('search failed')
-        return { results: searchResult }
+        return searchResult.map(r => ({ label: r.memory }))
       },
-      add: async (messages, config) => {
-        calls.add.push({ messages, config })
+      add: async (userInput, assistantOutput) => {
+        calls.add.push({ userInput, assistantOutput })
         if (failAdd) throw new Error('add failed')
-        return addResult
       },
     }
   }
 
-  // M1. recall → mem0.search 호출, { label } 배열 반환
+  // M1. recall → memory.search 호출, { label } 배열 반환
   {
-    const mem0 = makeMockMem0({ searchResult: [
+    const memory = makeMockMemory({ searchResult: [
       { id: '1', memory: '회의 안건 A', score: 0.9 },
       { id: '2', memory: '회의 안건 B', score: 0.8 },
     ]})
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ memory, logger: null })
 
     const result = await forkTask(actor.recall('회의'))
     assert(Array.isArray(result), 'MemoryActor recall: returns array')
     assert(result.length === 2, 'MemoryActor recall: correct count')
     assert(result[0].label === '회의 안건 A', 'MemoryActor recall: label mapped')
-    assert(mem0.calls.search[0].query === '회의', 'MemoryActor recall: correct query')
+    assert(memory.calls.search[0].input === '회의', 'MemoryActor recall: correct query')
   }
 
-  // M2. save → mem0.add 호출, 'ok' 반환
+  // M2. save → memory.add 호출, 'ok' 반환
   {
-    const mem0 = makeMockMem0()
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const memory = makeMockMemory()
+    const actor = memoryActorR.run({ memory, logger: null })
 
     const result = await forkTask(actor.save(
       { label: 'test', type: 'conversation', data: { input: 'q', output: 'a' } },
     ))
     assert(result === MemoryActor.RESULT.OK, 'MemoryActor save: returns ok')
-    assert(mem0.calls.add.length === 1, 'MemoryActor save: add called')
-    assert(mem0.calls.add[0].messages[0].content === 'q', 'MemoryActor save: user message')
-    assert(mem0.calls.add[0].messages[1].content === 'a', 'MemoryActor save: assistant message')
+    assert(memory.calls.add.length === 1, 'MemoryActor save: add called')
+    assert(memory.calls.add[0].userInput === 'q', 'MemoryActor save: user input')
+    assert(memory.calls.add[0].assistantOutput === 'a', 'MemoryActor save: assistant output')
   }
 
-  // M3. mem0=null → recall 빈 배열, save skip
+  // M3. memory=null → recall 빈 배열, save skip
   {
-    const actor = memoryActorR.run({ mem0: null, adapter: null, logger: null })
+    const actor = memoryActorR.run({ memory: null, logger: null })
 
     const recalled = await forkTask(actor.recall('회의'))
     assert(Array.isArray(recalled) && recalled.length === 0, 'MemoryActor null: recall returns []')
@@ -102,30 +101,30 @@ async function run() {
 
   // M4. save data.input 없음 → skip
   {
-    const mem0 = makeMockMem0()
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const memory = makeMockMemory()
+    const actor = memoryActorR.run({ memory, logger: null })
 
     const result = await forkTask(actor.save({ data: {} }))
     assert(result === MemoryActor.RESULT.SKIP, 'MemoryActor save: no input → skip')
-    assert(mem0.calls.add.length === 0, 'MemoryActor save: add not called')
+    assert(memory.calls.add.length === 0, 'MemoryActor save: add not called')
   }
 
   // M5. 미지원 메시지 → no-op (embed/prune/promote/removeWorking/saveDisk)
   {
-    const mem0 = makeMockMem0()
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const memory = makeMockMemory()
+    const actor = memoryActorR.run({ memory, logger: null })
 
     for (const type of ['embed', 'prune', 'promote', 'removeWorking', 'saveDisk']) {
       const result = await forkTask(actor.send({ type }))
       assert(result === MemoryActor.RESULT.NO_OP, `MemoryActor no-op: ${type}`)
     }
-    assert(mem0.calls.search.length === 0, 'MemoryActor no-op: no mem0 calls')
+    assert(memory.calls.search.length === 0, 'MemoryActor no-op: no mem0 calls')
   }
 
   // M6. recall 오류 → 빈 배열 반환 (격리)
   {
-    const mem0 = makeMockMem0({ failSearch: true })
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const memory = makeMockMemory({ failSearch: true })
+    const actor = memoryActorR.run({ memory, logger: null })
 
     const result = await forkTask(actor.recall('x'))
     assert(Array.isArray(result) && result.length === 0, 'MemoryActor recall error: returns []')
@@ -137,8 +136,8 @@ async function run() {
 
   // M7. save 오류 → skip 반환 (격리)
   {
-    const mem0 = makeMockMem0({ failAdd: true })
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const memory = makeMockMemory({ failAdd: true })
+    const actor = memoryActorR.run({ memory, logger: null })
 
     const result = await forkTask(actor.save(
       { data: { input: 'q', output: 'a' } },
@@ -149,11 +148,11 @@ async function run() {
   // M8. 메시지 큐 직렬화: recall + save 연속 → 순서대로 처리
   {
     const order = []
-    const mem0 = {
-      search: async () => { order.push('search'); return { results: [] } },
+    const memory = {
+      search: async () => { order.push('search'); return [] },
       add: async () => { order.push('add') },
     }
-    const actor = memoryActorR.run({ mem0, adapter: null, logger: null })
+    const actor = memoryActorR.run({ memory, logger: null })
 
     const p1 = forkTask(actor.recall('x'))
     const p2 = forkTask(actor.save({ data: { input: 'q', output: 'a' } }))
@@ -241,7 +240,7 @@ async function run() {
 
   // C6. epoch guard 시뮬레이션: /clear 후 stale 결과 차단
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       context: { conversationHistory: makeHistory(20) },
       _compactionEpoch: 0,
     })
@@ -286,7 +285,7 @@ async function run() {
 
   // AC1. extractedIds 기반 필터 + summary prepend
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       context: { conversationHistory: makeHistory(20) },
     })
     const extractedIds = new Set(makeHistory(15).map(h => h.id))
@@ -306,7 +305,7 @@ async function run() {
       { input: 'old', output: 'legacy', ts: 1 },  // no id
       ...makeHistory(5),
     ]
-    const state = createReactiveState({
+    const state = createOriginState({
       context: { conversationHistory: historyWithNoId },
     })
     const extractedIds = new Set(['h-0', 'h-1'])
@@ -321,7 +320,7 @@ async function run() {
 
   // AC3. MAX_CONVERSATION 상한 유지
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       context: { conversationHistory: makeHistory(HISTORY.MAX_CONVERSATION) },
     })
     const extractedIds = new Set()  // nothing extracted → all preserved
@@ -460,10 +459,10 @@ async function run() {
   // I1. recall 성공 → context.memories 반영
   {
 
-    const mockMem0 = makeMockMem0({ searchResult: [{ memory: 'recall target' }] })
-    const memActor = memoryActorR.run({ mem0: mockMem0, adapter: null, logger: null })
+    const mockMemory = makeMockMemory({ searchResult: [{ memory: 'recall target' }] })
+    const memActor = memoryActorR.run({ memory: mockMemory, logger: null })
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -497,7 +496,7 @@ async function run() {
     const logs = []
     const mockLogger = { warn: (msg, meta) => logs.push({ msg, meta }) }
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: ['stale'] },
     })
@@ -529,7 +528,7 @@ async function run() {
       save: (node) => mockActorBase.send({ type: 'save', node }),
     }
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -561,7 +560,7 @@ async function run() {
       save: (node) => mockActorBase.send({ type: 'save', node }),
     }
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -584,7 +583,7 @@ async function run() {
     const mockStore = { set: (k, v) => { stored[k] = v } }
     const pActor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -607,7 +606,7 @@ async function run() {
     const mockStore = { set: (k, v) => { stored[k] = v } }
     const pActor = persistenceActorR.run({ store: mockStore, debounceMs: 30 })
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [] },
     })

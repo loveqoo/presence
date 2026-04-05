@@ -1,21 +1,15 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import {
-  assemblePrompt,
-  buildIterationPrompt,
-  measureMessages,
-  flattenHistory,
-  fitHistory,
-  fitMemories,
-  buildIterationBlock,
-} from '@presence/core/core/prompt.js'
+import { assemblePrompt, buildIterationPrompt } from '@presence/core/core/prompt/assembly.js'
+import { flattenHistory, fitHistory, fitMemories, buildIterationBlock } from '@presence/core/core/prompt/budget.js'
+import { measureMessages } from '@presence/core/lib/tokenizer.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 
 const initState = (overrides = {}) =>
-  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+  createOriginState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 import { assert, summary } from '../../../../test/lib/assert.js'
 

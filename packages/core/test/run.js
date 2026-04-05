@@ -6,7 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '../../..')
 
 const tests = [
-  'packages/core/test/core/makeOp.test.js',
+  'packages/core/test/core/make-op.test.js',
   'packages/core/test/core/op.test.js',
   'packages/core/test/core/free-integration.test.js',
   'packages/core/test/core/fp-laws.test.js',

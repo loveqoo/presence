@@ -1,6 +1,6 @@
 import fp from '../lib/fun-fp.js'
 const { Either } = fp
-import { ops } from './opHandler.js'
+import { ops } from './op-handler.js'
 import { ERROR_KIND, TurnError } from './policies.js'
 
 const validateStep = (step) => {

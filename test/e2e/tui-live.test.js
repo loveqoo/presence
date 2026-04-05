@@ -10,7 +10,7 @@
 import React from 'react'
 import { render } from 'ink-testing-library'
 import http from 'node:http'
-import { createRemoteState } from '@presence/infra/infra/remote-state.js'
+import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { App } from '@presence/tui/ui/App.js'
 import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../lib/assert.js'
@@ -89,8 +89,8 @@ if (instanceRes.body?.authRequired) {
   }
 }
 
-const connectRemoteState = () => new Promise((resolve) => {
-  const rs = createRemoteState({ wsUrl, sessionId: 'user-default' })
+const connectMirrorState = () => new Promise((resolve) => {
+  const rs = createMirrorState({ wsUrl, sessionId: 'user-default' })
   const check = () => {
     if (rs.get('turnState') !== undefined) { resolve(rs); return }
     setTimeout(check, 20)
@@ -126,7 +126,7 @@ const config = configRes.body || {}
 console.log(`TUI live e2e tests (서버: ${baseUrl}, 모델: ${config.llm?.model || '?'})`)
 
 // ---------------------------------------------------------------------------
-// 공통 setup — RemoteState + App 렌더
+// 공통 setup — MirrorState + App 렌더
 // ---------------------------------------------------------------------------
 
 const setupLive = async ({ sessionId = 'user-default' } = {}) => {
@@ -136,7 +136,7 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
 
   const remoteState = new Promise((resolve) => {
     const wsHeaders = authToken ? { Authorization: `Bearer ${authToken}` } : {}
-    const rs = createRemoteState({ wsUrl, sessionId, headers: wsHeaders })
+    const rs = createMirrorState({ wsUrl, sessionId, headers: wsHeaders })
     const check = () => {
       if (rs.get('turnState') !== undefined) { resolve(rs); return }
       setTimeout(check, 20)

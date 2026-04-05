@@ -3,7 +3,7 @@ initI18n('ko')
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { TurnActor, turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
 import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
 import { forkTask } from '@presence/core/lib/task.js'
@@ -21,7 +21,7 @@ async function run() {
   // C1. TurnActor 없이 동시 호출 → 턴 번호 충돌 가능성
   //     TurnActor로 직렬화 → 턴 번호 순차 보장
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -53,7 +53,7 @@ async function run() {
 
   // C2. TurnActor: 1st 턴 실패해도 2nd 턴 정상 실행
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -81,7 +81,7 @@ async function run() {
 
   // C3. handleInput 시뮬레이션: TurnActor 경유 시 동시 요청이 순차 처리
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -125,7 +125,7 @@ async function run() {
       },
     }
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -146,7 +146,7 @@ async function run() {
 
   // C5. save가 applyFinalState 이전에 큐잉되는지 (turnState=working 중에 전송)
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
     })
@@ -181,7 +181,7 @@ async function run() {
 
   // C6. event 도착 + user input 동시 → TurnActor가 직렬화
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,
       context: { memories: [], conversationHistory: [] },
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -204,7 +204,7 @@ async function run() {
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
     const emit = (event) => eventActor.emit(event)
 
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
         eventActor.drain().fork(() => {}, () => {})
       }

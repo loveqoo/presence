@@ -3,9 +3,10 @@ initI18n('ko')
 import { PHASE, RESULT, ERROR_KIND, TurnState, TurnOutcome } from '@presence/core/core/policies.js'
 import { validatePlan, safeJsonParse, extractJson } from '@presence/core/core/validate.js'
 import { Agent } from '@presence/core/core/agent.js'
-import { applyFinalState, MANAGED_PATHS } from '@presence/core/core/stateCommit.js'
+import { applyFinalState, MANAGED_PATHS } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState, getByPath } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
+import { getByPath } from '@presence/core/lib/path.js'
 import fp from '@presence/core/lib/fun-fp.js'
 
 const { Free, Either } = fp
@@ -19,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // --- 초기 상태 헬퍼 ---
 // reactive state (createAgent/safeRunTurn 경유 테스트용)
 const initState = (overrides = {}) =>
-  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
+  createOriginState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] }, ...overrides })
 
 // plain object (runFreeWithStateT 직접 실행 테스트용)
 const initSnapshot = (overrides = {}) =>
@@ -332,7 +333,7 @@ async function run() {
   {
     const state = initState()
     const history = []
-    state.hooks.on('turnState', (phase) => { history.push(phase.tag) })
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue; history.push(phase.tag) })
 
     const { interpret, ST } = createTestInterpreter({
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' })
@@ -350,7 +351,7 @@ async function run() {
   {
     const state = initState()
     let idleFired = false
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === PHASE.IDLE) idleFired = true
     })
 

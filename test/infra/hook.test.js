@@ -1,90 +1,100 @@
-import { createHooks, createState } from '@presence/infra/infra/state.js'
+import { createHookBus, StateChange } from '@presence/infra/infra/states/state.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {
-  console.log('createHooks tests')
+  console.log('createHookBus tests')
 
-  // 1. Basic registration + firing
-  const h1 = createHooks()
+  // 테스트용 StateChange 생성 헬퍼
+  const mkChange = (path, prevValue, nextValue) => ({ path, prevValue, nextValue })
+
+  // 1. Basic on/publish
+  const bus1 = createHookBus()
   let called = false
-  h1.on('a', (val) => { called = val })
-  h1.fire('a', true, null)
-  assert(called === true, 'basic: on + fire calls callback')
+  bus1.on('a', (change) => { called = change.nextValue })
+  bus1.publish(mkChange('a', undefined, true), null)
+  assert(called === true, 'basic: on + publish calls handler')
 
-  // 2. Multiple hooks on same path, order preserved
-  const h2 = createHooks()
+  // 2. Multiple handlers on same path, order preserved
+  const bus2 = createHookBus()
   const order = []
-  h2.on('x', () => order.push(1))
-  h2.on('x', () => order.push(2))
-  h2.fire('x', null, null)
-  assert(order[0] === 1 && order[1] === 2, 'multiple hooks: both called in order')
+  bus2.on('x', () => order.push(1))
+  bus2.on('x', () => order.push(2))
+  bus2.publish(mkChange('x', null, null), null)
+  assert(order[0] === 1 && order[1] === 2, 'multiple handlers: both called in order')
 
   // 3. off: unregister
-  const h3 = createHooks()
+  const bus3 = createHookBus()
   let count = 0
-  const cb = () => count++
-  h3.on('y', cb)
-  h3.fire('y', null, null)
+  const handler = () => count++
+  bus3.on('y', handler)
+  bus3.publish(mkChange('y', null, null), null)
   assert(count === 1, 'off: called before off')
-  h3.off('y', cb)
-  h3.fire('y', null, null)
+  bus3.off('y', handler)
+  bus3.publish(mkChange('y', null, null), null)
   assert(count === 1, 'off: not called after off')
 
-  // 4. Error isolation: first hook throws, second still runs
-  const h4 = createHooks()
+  // 4. Error isolation: first handler throws, second still runs
+  const bus4 = createHookBus()
   let secondRan = false
-  h4.on('err', () => { throw new Error('boom') })
-  h4.on('err', () => { secondRan = true })
-  h4.fire('err', null, null)
-  assert(secondRan === true, 'error isolation: second hook runs despite first throwing')
+  bus4.on('err', () => { throw new Error('boom') })
+  bus4.on('err', () => { secondRan = true })
+  bus4.publish(mkChange('err', null, null), null)
+  assert(secondRan === true, 'error isolation: second handler runs despite first throwing')
 
-  // 5. Sync fire: all hooks called immediately (async hooks are fire-and-forget)
-  const h5 = createHooks()
+  // 5. Sync publish: all handlers called immediately
+  const bus5 = createHookBus()
   const syncOrder = []
-  h5.on('sync', () => { syncOrder.push(1) })
-  h5.on('sync', () => { syncOrder.push(2) })
-  h5.fire('sync', null, null)
-  assert(syncOrder[0] === 1 && syncOrder[1] === 2, 'sync fire: both hooks called in order immediately')
+  bus5.on('sync', () => { syncOrder.push(1) })
+  bus5.on('sync', () => { syncOrder.push(2) })
+  bus5.publish(mkChange('sync', null, null), null)
+  assert(syncOrder[0] === 1 && syncOrder[1] === 2, 'sync publish: both handlers called in order immediately')
 
-  // 5b. Async hooks: fire-and-forget (not awaited)
-  const h5b = createHooks()
+  // 5b. Async handlers: fire-and-forget (not awaited)
+  const bus5b = createHookBus()
   let asyncDone = false
-  h5b.on('async', async () => {
+  bus5b.on('async', async () => {
     await new Promise(r => setTimeout(r, 10))
     asyncDone = true
   })
-  h5b.fire('async', null, null) // sync return, async work in background
-  assert(asyncDone === false, 'async hooks: not awaited (fire-and-forget)')
+  bus5b.publish(mkChange('async', null, null), null)
+  assert(asyncDone === false, 'async handlers: not awaited (fire-and-forget)')
   await new Promise(r => setTimeout(r, 20))
-  assert(asyncDone === true, 'async hooks: completes in background')
+  assert(asyncDone === true, 'async handlers: completes in background')
 
   // 6. Recursion prevention (depth limit)
-  const h6 = createHooks()
-  const state6 = createState()
+  const bus6 = createHookBus()
   let depth = 0
-  h6.on('recurse', (val, s) => {
+  bus6.on('recurse', (change, state) => {
     depth++
-    h6.fire('recurse', val, s) // recursive (sync)
+    bus6.publish(mkChange('recurse', null, change.nextValue), state)
   })
-  h6.fire('recurse', 1, state6)
+  bus6.publish(mkChange('recurse', null, 1), null)
   assert(depth === 10, `recursion prevention: depth capped at 10 (got ${depth})`)
 
   // 7. Wildcard matching
-  const h7 = createHooks()
+  const bus7 = createHookBus()
   let wildcardVal = null
-  h7.on('events.*', (val) => { wildcardVal = val })
-  h7.fire('events.github', 'pr-data', null)
+  bus7.on('events.*', (change) => { wildcardVal = change.nextValue })
+  bus7.publish(mkChange('events.github', null, 'pr-data'), null)
   assert(wildcardVal === 'pr-data', 'wildcard: events.* matches events.github')
 
   // Wildcard should NOT match deeper paths
   wildcardVal = null
-  h7.fire('events.github.pr', 'deep', null)
+  bus7.publish(mkChange('events.github.pr', null, 'deep'), null)
   assert(wildcardVal === null, 'wildcard: events.* does not match events.github.pr')
 
-  // 8. Fire on unregistered path does nothing
-  const h8 = createHooks()
-  h8.fire('nothing', 1, null) // should not throw
-  assert(true, 'fire on unregistered path: no error')
+  // 8. Publish on unregistered path does nothing
+  const bus8 = createHookBus()
+  bus8.publish(mkChange('nothing', null, 1), null)
+  assert(true, 'publish on unregistered path: no error')
+
+  // 9. StateChange ADT: full shape
+  const change = StateChange('a.b', { a: { b: 1 } }, { a: { b: 2 } })
+  assert(change.path === 'a.b', 'StateChange: path')
+  assert(change.prevValue === 1, 'StateChange: prevValue')
+  assert(change.nextValue === 2, 'StateChange: nextValue')
+  assert(change.prevRoot.a.b === 1, 'StateChange: prevRoot')
+  assert(change.nextRoot.a.b === 2, 'StateChange: nextRoot')
 
   summary()
 }

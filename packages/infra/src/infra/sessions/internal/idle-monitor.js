@@ -21,7 +21,8 @@ class IdleMonitor {
   }
 
   bind() {
-    this.state.hooks.on(STATE_PATH.TURN_STATE, (phase) => {
+    this.state.hooks.on(STATE_PATH.TURN_STATE, (change) => {
+      const phase = change.nextValue
       // idle 진입 시 이벤트 드레인 + 위임 폴링
       if (phase.tag === PHASE.IDLE) {
         fireAndForget(this.eventActor.drain())
@@ -42,8 +43,8 @@ class IdleMonitor {
       }
     })
 
-    this.state.hooks.on(STATE_PATH.DEBUG_LAST_TURN, (debug, stateRef) => {
-      fireAndForget(this.budgetActor.check(debug, stateRef.get(STATE_PATH.TURN)))
+    this.state.hooks.on(STATE_PATH.DEBUG_LAST_TURN, (change, stateRef) => {
+      fireAndForget(this.budgetActor.check(change.nextValue, stateRef.get(STATE_PATH.TURN)))
     })
   }
 

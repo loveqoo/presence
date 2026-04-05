@@ -19,7 +19,7 @@
 import React from 'react'
 import { render } from 'ink-testing-library'
 import { App } from '@presence/tui/ui/App.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../lib/assert.js'
 
@@ -56,7 +56,7 @@ const typeInput = async (stdin, text) => {
 }
 
 const makeState = () => {
-  const state = createReactiveState()
+  const state = createOriginState()
   state.set('turnState', { tag: 'idle' })
   state.set('turn', 0)
   state.set('todos', [])

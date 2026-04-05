@@ -6,7 +6,7 @@ import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
 import { forkTask } from '@presence/core/lib/task.js'
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -19,7 +19,7 @@ async function run() {
 
   // emit → EventActor enqueue → projection 반영
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -39,7 +39,7 @@ async function run() {
 
   // 연속 emit → 유실 없이 큐에 누적
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -60,7 +60,7 @@ async function run() {
 
   // emit with custom id → 그대로 유지
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -77,7 +77,7 @@ async function run() {
 
   // idle 상태에서 enqueue → 자동 drain → turnActor 호출
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -105,7 +105,7 @@ async function run() {
 
   // working 상태에서 enqueue → drain no-op (큐에 남음)
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('busy'),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -123,7 +123,7 @@ async function run() {
 
   // turnActor 실패 → deadLetter
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -145,7 +145,7 @@ async function run() {
 
   // enqueue 3개 + drain → 순차 처리
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -176,7 +176,7 @@ async function run() {
 
   // drain idempotency: 큐 비었을 때 no-op
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -189,7 +189,7 @@ async function run() {
 
   // drain idempotency: not-idle → no-op
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
     })
@@ -208,7 +208,7 @@ async function run() {
 
   // 이벤트에 todo 필드 → TODO 생성
   {
-    const state = createReactiveState({ turnState: TurnState.idle(), todos: [] })
+    const state = createOriginState({ turnState: TurnState.idle(), todos: [] })
     const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = new EventActor(mockTurnActor, state)
     eventActor.applyTodo({
@@ -226,7 +226,7 @@ async function run() {
 
   // todo 필드 없는 이벤트 → TODO 미생성
   {
-    const state = createReactiveState({ turnState: TurnState.idle(), todos: [] })
+    const state = createOriginState({ turnState: TurnState.idle(), todos: [] })
     const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = new EventActor(mockTurnActor, state)
     eventActor.applyTodo({ id: 'evt-2', type: 'heartbeat' })
@@ -235,7 +235,7 @@ async function run() {
 
   // 멱등성: 같은 이벤트 재처리 → TODO 중복 없음
   {
-    const state = createReactiveState({ turnState: TurnState.idle(), todos: [] })
+    const state = createOriginState({ turnState: TurnState.idle(), todos: [] })
     const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
     const eventActor = new EventActor(mockTurnActor, state)
     const event = { id: 'evt-dup', type: 'issue', todo: { type: 'issue_review', title: 'Check issue' } }
@@ -246,7 +246,7 @@ async function run() {
 
   // EventActor drain 성공 → applyTodo 자동 호출
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },

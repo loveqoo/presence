@@ -2,11 +2,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdirSync, rmSync } from 'node:fs'
 import { createJobStore } from '@presence/infra/infra/jobs/job-store.js'
-import { createSchedulerActor, calcNextRun, validateCron } from '@presence/infra/infra/jobs/scheduler-actor.js'
+import { createSchedulerActor } from '@presence/infra/infra/actors/scheduler-actor.js'
+import { calcNextRun, validateCron } from '@presence/infra/infra/jobs/job-tools.js'
 import { createJobTools } from '@presence/infra/infra/jobs/job-tools.js'
 import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
 import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { eventToPrompt } from '@presence/infra/infra/events.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
@@ -352,7 +353,7 @@ async function run() {
     const job = store.createJob({ name: 'j', prompt: '리포트', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -394,7 +395,7 @@ async function run() {
     const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 1 })
     const runId = store.startRun(job.id, 1)
 
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -691,7 +692,7 @@ async function run() {
   // TR0. scheduled_job 이벤트에서 jobName으로 todo_review 감지 (실제 프로덕션 경로)
   {
     const TODO_REVIEW_JOB_NAME = '__todo_review__'
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
@@ -717,7 +718,7 @@ async function run() {
   // TR0b. scheduled_job + todoReviewJobName, todos 없으면 no-op
   {
     const TODO_REVIEW_JOB_NAME = '__todo_review__'
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -737,7 +738,7 @@ async function run() {
 
   // TR1. todo_review: todos 없으면 turn 시작 안 함 (no-op:no-todos)
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -755,7 +756,7 @@ async function run() {
 
   // TR2. todo_review: todos 있으면 동적 프롬프트로 turn 실행
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
@@ -778,7 +779,7 @@ async function run() {
 
   // TR3. todo_review: done=true인 항목은 제외
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [
@@ -801,7 +802,7 @@ async function run() {
 
   // TR4. todo_review: 모두 done이면 no-op
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [

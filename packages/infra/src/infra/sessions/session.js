@@ -7,18 +7,18 @@ class Session {
 
   // --- 생성 알고리즘 ---
 
-  constructor(globalCtx, opts = {}) {
-    this.logger = globalCtx.logger
+  constructor(userContext, opts = {}) {
+    this.logger = userContext.logger
     this.initState()
     this.initTurnControl()
     this.initPersistence(opts)
     this.restoreState()
-    this.initToolRegistry(globalCtx)
-    this.initInterpreter(globalCtx)
-    this.initActors(globalCtx, opts)
-    this.initAgent(globalCtx)
-    this.initScheduler(globalCtx, opts)
-    this.initTools(globalCtx, opts)
+    this.initToolRegistry(userContext)
+    this.initInterpreter(userContext)
+    this.initActors(userContext, opts)
+    this.initAgent(userContext)
+    this.initScheduler(userContext, opts)
+    this.initTools(userContext, opts)
     this.initMonitor(opts)
   }
 

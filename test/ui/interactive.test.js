@@ -3,7 +3,7 @@ import { render } from 'ink-testing-library'
 import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { App } from '@presence/tui/ui/App.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -78,7 +78,7 @@ async function run() {
 
   // idle → working → idle 전이
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
@@ -120,7 +120,7 @@ async function run() {
 
   // failure 상태 표시
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: TurnOutcome.failure('q', TurnError('parse error', ERROR_KIND.PLANNER_PARSE), 'err'),
       turn: 1,
@@ -138,7 +138,7 @@ async function run() {
 
   // App에서 model prop이 StatusBar까지 전달되는지 확인
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
@@ -175,7 +175,7 @@ async function run() {
 
   // _toolResults 상태 변경 → App이 tool 메시지로 변환
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
@@ -215,7 +215,7 @@ async function run() {
 
   // 턴 시작 시 _toolResults 초기화 확인
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,

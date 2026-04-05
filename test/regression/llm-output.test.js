@@ -8,7 +8,7 @@ initI18n('ko')
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
@@ -16,7 +16,7 @@ import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { assert, summary } from '../lib/assert.js'
 
 const initState = () =>
-  createReactiveState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] } })
+  createOriginState({ turnState: TurnState.idle(), lastTurn: null, turn: 0, context: { memories: [] } })
 
 const tools = createLocalTools({ allowedDirs: ['/tmp/test'] })
 const toolRegistry = createToolRegistry()

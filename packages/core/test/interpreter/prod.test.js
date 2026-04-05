@@ -1,5 +1,5 @@
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import fp from '@presence/core/lib/fun-fp.js'
@@ -26,7 +26,7 @@ const runProg = (interpret, ST, initialState = {}) => (program) =>
 async function run() {
   console.log('Production interpreter tests')
 
-  const reactiveState = createReactiveState({ status: 'idle', context: {} })
+  const reactiveState = createOriginState({ status: 'idle', context: {} })
   const registry = createToolRegistry()
   registry.register({
     name: 'echo',
@@ -109,7 +109,7 @@ async function run() {
 
   // 8. UpdateState + GetState — state changes are in finalState (pure StateT)
   {
-    const localReactive = createReactiveState({ x: 0 })
+    const localReactive = createOriginState({ x: 0 })
     const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: registry, reactiveState: localReactive })
     const initialState = { x: 0 }
     const [result, finalState] = await runFreeWithStateT(interpret, ST)(
@@ -121,7 +121,7 @@ async function run() {
 
   // 9. Full chain: AskLLM → ExecuteTool → Respond
   {
-    const localReactive = createReactiveState({ status: 'idle', context: {} })
+    const localReactive = createOriginState({ status: 'idle', context: {} })
     const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM('use echo tool'),
       toolRegistry: registry,
@@ -318,7 +318,7 @@ async function run() {
 
   // 14f3. Delegate: remote submitted → pending에 등록
   {
-    const testReactive = createReactiveState({ delegates: { pending: [] } })
+    const testReactive = createOriginState({ delegates: { pending: [] } })
     const agentReg = createAgentRegistry()
     agentReg.register({
       name: 'slow-agent',
@@ -443,7 +443,7 @@ async function run() {
   {
     const toolReg = createToolRegistry()
     toolReg.register({ name: 'branch-tool', handler: (args) => `result-${args.id}` })
-    const rs = createReactiveState({ _toolResults: [] })
+    const rs = createOriginState({ _toolResults: [] })
     const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
     const programs = [
       executeTool('branch-tool', { id: 'a' }),
@@ -461,7 +461,7 @@ async function run() {
   {
     const toolReg = createToolRegistry()
     toolReg.register({ name: 'main-tool', handler: () => 'main-result' })
-    const rs = createReactiveState({ _toolResults: [] })
+    const rs = createOriginState({ _toolResults: [] })
     const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
     // parallel 실행 후 uiState 복원 확인
     const program = parallel([executeTool('main-tool', {})]).chain(() => executeTool('main-tool', { after: true }))

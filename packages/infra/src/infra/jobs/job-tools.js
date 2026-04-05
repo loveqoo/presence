@@ -1,6 +1,29 @@
-import { calcNextRun, validateCron } from './scheduler-actor.js'
+import { Cron } from 'croner'
 import { withEventMeta } from '../events.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
+
+// --- Cron 유틸리티 (jobs 도메인 공용) ---
+
+// 다음 실행 시각 계산 (epoch ms). 잘못된 표현식은 null 반환.
+const calcNextRun = (cronExpr) => {
+  try {
+    const job = new Cron(cronExpr, { paused: true })
+    const next = job.nextRun()
+    return next ? next.getTime() : null
+  } catch (_) {
+    return null
+  }
+}
+
+// cron 표현식 유효성 검사.
+const validateCron = (expr) => {
+  try {
+    new Cron(expr, { paused: true })
+    return true
+  } catch (_) {
+    return false
+  }
+}
 
 // --- Job 관리 에이전트 툴 ---
 // toolRegistry.register()로 등록. store + eventActor 클로저로 캡처.
@@ -149,4 +172,4 @@ const createJobTools = ({ store, eventActor }) => {
   ]
 }
 
-export { createJobTools }
+export { createJobTools, calcNextRun, validateCron }

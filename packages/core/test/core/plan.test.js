@@ -1,4 +1,4 @@
-import { ops } from '@presence/core/core/opHandler.js'
+import { ops } from '@presence/core/core/op-handler.js'
 import { Planner } from '@presence/core/core/planner.js'
 import { validateStep } from '@presence/core/core/validate.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'

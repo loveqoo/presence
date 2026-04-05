@@ -14,9 +14,9 @@ import { delegateActorR } from '../../actors/delegate-actor.js'
 // =============================================================================
 
 class SessionActors {
-  constructor({ globalCtx, state, logger, persistenceActor, dispatchTurn, onScheduledJobDone }) {
+  constructor({ userContext, state, logger, persistenceActor, dispatchTurn, onScheduledJobDone }) {
     // --- 메모리/압축 Actor ---
-    const sessionEnv = { mem0: globalCtx.mem0, adapter: globalCtx.memory, logger, llm: globalCtx.llm, state }
+    const sessionEnv = { memory: userContext.memory, logger, llm: userContext.llm, state }
     this.memoryActor = memoryActorR.run(sessionEnv)
     this.compactionActor = compactionActorR.run(sessionEnv)
     this.persistenceActor = persistenceActor
@@ -36,8 +36,8 @@ class SessionActors {
     this.budgetActor = budgetActorR.run({ state })
     this.delegateActor = delegateActorR.run({
       state, eventActor: this.eventActor,
-      agentRegistry: globalCtx.agentRegistry, logger,
-      pollIntervalMs: globalCtx.config.delegatePolling.intervalMs,
+      agentRegistry: userContext.agentRegistry, logger,
+      pollIntervalMs: userContext.config.delegatePolling.intervalMs,
     })
   }
 

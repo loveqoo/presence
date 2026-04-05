@@ -1,6 +1,6 @@
 /**
  * Fun-FP-JS - Functional Programming Library
- * Built: 2026-04-03T14:59:03.170Z
+ * Built: 2026-04-05T07:47:44.175Z
  * Static Land specification compliant
  */
 const polyfills = {
@@ -2257,6 +2257,38 @@ class FreeMonad extends Monad {
 modules.push(FreeMonad);
 load(...modules);
 
+/* Optics */
+// 내부 전용 Identity/Const Functor (Static Land 형태, public registry 미노출)
+const _Identity = { of: v => ({ value: v }), map: (f, x) => ({ value: f(x.value) }) };
+const _Const = { of: v => ({ value: v }), map: (_, x) => x };
+// Van Laarhoven Lens (F-explicit): Lens s a = forall F. Functor F => F -> (a -> F a) -> s -> F s
+// F 파라미터가 첫 인자이므로 plain compose로는 합성 불가 → composeLens 제공
+const Lens = (getter, setter) => {
+    typeof getter !== 'function' && raise(new TypeError('Lens: getter must be a function'));
+    typeof setter !== 'function' && raise(new TypeError('Lens: setter must be a function'));
+    return F => f => s => F.map(b => setter(b, s), f(getter(s)));
+};
+const view = (lens, s) => {
+    typeof lens !== 'function' && raise(new TypeError('view: lens must be a function'));
+    return lens(_Const)(_Const.of)(s).value;
+};
+const over = (lens, f, s) => {
+    typeof lens !== 'function' && raise(new TypeError('over: lens must be a function'));
+    typeof f !== 'function' && raise(new TypeError('over: f must be a function'));
+    return lens(_Identity)(a => _Identity.of(f(a)))(s).value;
+};
+const set = (lens, b, s) => {
+    typeof lens !== 'function' && raise(new TypeError('set: lens must be a function'));
+    return over(lens, () => b, s);
+};
+// Lens 합성: F를 양쪽에 주입한 후 concrete-F 레벨에서 함수 합성
+const composeLens = (...lenses) => {
+    lenses.forEach((l, i) => {
+        typeof l !== 'function' && raise(new TypeError(`composeLens: argument ${i} must be a Lens`));
+    });
+    return F => compose(...lenses.map(l => l(F)));
+};
+
 /* ═══════════════════════════════════════════════════════════════
    Monad Transformer
    - load() 이후에 위치: Monad.of(), Functor.of() 등이 로드된 상태 필요
@@ -2697,6 +2729,7 @@ export default {
     Apply, Applicative, Alt, Plus, Alternative, Chain, ChainRec, Monad, Foldable,
     Extend, Comonad, Traversable, Maybe, Either, Task, Free, Validation, Reader, Writer, State,
     StateT, EitherT, ReaderT, WriterT, Actor,
+    Lens, composeLens, view, set, over,
     identity, compose, compose2, sequence, foldMap, lift, pipeK, composeK, runCatch,
     constant, tuple, apply, unapply, unapply2, curry, curry2, uncurry, uncurry2,
     predicate, predicateN, negate, negateN,

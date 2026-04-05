@@ -1,27 +1,29 @@
 import { randomUUID } from 'node:crypto'
-import { Session } from './sessions/index.js'
-import { SESSION_TYPE } from './constants.js'
+import { Session } from './index.js'
+import { SESSION_TYPE } from '../constants.js'
 
 // =============================================================================
-// SessionManager
-// 세션 생명주기 관리. createGlobalContext()의 전역 인프라를 공유하면서
-// 각 세션(대화 컨텍스트)을 독립적으로 생성/소멸.
+// SessionManager: UserContext 하위에서 세션 생명주기 관리.
+// UserContext의 인프라를 공유하면서 각 세션을 독립적으로 생성/소멸.
 //
 // 세션 유형:
-//   'user'      — 클라이언트 연결 기반. idle timeout 지원 예정 (Phase D).
-//   'scheduled' — 스케줄 잡 전용 ephemeral 세션. 잡 완료 후 자동 소멸 (Phase D).
+//   'user'      — 클라이언트 연결 기반
+//   'scheduled' — 스케줄 잡 전용 ephemeral 세션
+//   'agent'     — 에이전트 위임 전용 세션
 //
 // onSessionCreated: 세션 생성 직후 호출되는 콜백. WS 브릿지 구독 등에 사용.
 // =============================================================================
 
-const createSessionManager = (globalCtx, { onSessionCreated } = {}) => {
+const createSessionManager = (userContext, opts = {}) => {
+  const { onSessionCreated } = opts
   const sessions = new Map()  // id → { id, type, owner, session }
 
-  const create = ({ id, type = SESSION_TYPE.USER, owner = null, persistenceCwd, onScheduledJobDone, idleTimeoutMs, onIdle } = {}) => {
+  const create = (params = {}) => {
+    const { id, type = SESSION_TYPE.USER, owner = null, persistenceCwd, onScheduledJobDone, idleTimeoutMs, onIdle } = params
     const sessionId = id ?? `user-${randomUUID()}`
     if (sessions.has(sessionId)) return sessions.get(sessionId)
 
-    const session = Session.create(globalCtx, { persistenceCwd, type, onScheduledJobDone, idleTimeoutMs, onIdle })
+    const session = Session.create(userContext, { persistenceCwd, type, onScheduledJobDone, idleTimeoutMs, onIdle })
     const entry = Object.freeze({ id: sessionId, type, owner, session })
     sessions.set(sessionId, entry)
     onSessionCreated?.(entry)

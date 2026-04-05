@@ -1,5 +1,5 @@
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import fp from '@presence/core/lib/fun-fp.js'
@@ -17,7 +17,7 @@ const runProg = (interpret, ST) => (program) =>
 const makeInterpreter = (agentRegistry) => prodInterpreterR.run({
   llm: mockLLM(),
   toolRegistry: createToolRegistry(),
-  reactiveState: createReactiveState({}),
+  reactiveState: createOriginState({}),
   agentRegistry,
 })
 
@@ -102,7 +102,7 @@ async function run() {
     const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(),
       toolRegistry: createToolRegistry(),
-      reactiveState: createReactiveState({}),
+      reactiveState: createOriginState({}),
       // agentRegistry 미전달
     })
     const [result] = await runProg(interpret, ST)(delegate('anyone', 'task'))
@@ -183,7 +183,7 @@ async function run() {
     const { interpret, ST } = prodInterpreterR.run({
       llm: mockLLM(),
       toolRegistry: createToolRegistry(),
-      reactiveState: createReactiveState({}),
+      reactiveState: createOriginState({}),
       agentRegistry: reg,
       fetchFn: mockFetch,
     })

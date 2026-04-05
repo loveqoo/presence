@@ -11,16 +11,12 @@ import { LLMClient } from '@presence/infra/infra/llm.js'
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
 import { Free } from '@presence/core/core/op.js'
-import { MemoryGraph } from '@presence/infra/infra/memory/memory.js'
-import { createMemoryEmbedder } from '@presence/infra/infra/memory/memory-embedder.js'
-import { memoryActorR } from '@presence/infra/infra/actors/memory-actor.js'
 
-import { createEmbedder } from '@presence/infra/infra/embedding.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -48,7 +44,7 @@ for (const t of localTools) toolRegistry.register(t)
 const agentRegistry = createAgentRegistry()
 
 const initState = () =>
-  createReactiveState({
+  createOriginState({
     turnState: TurnState.idle(),
     lastTurn: null,
     turn: 0,
@@ -397,140 +393,6 @@ async function run() {
       assert(lastTurn?.tag === RESULT.SUCCESS, 'budget제약: last turn succeeded')
     }
   })
-
-  // =============================================
-  // 19. embedder 없을 때 memory 미주입 확인
-  // =============================================
-  await (async () => {
-    const label = 'memory미주입'
-    const state = initState()
-    const memory = MemoryGraph.create()
-
-    memory.addNode({
-      label: '프로젝트 X 중요 정보',
-      type: 'entity',
-      data: { content: '프로젝트 X는 2025년 완료 예정' },
-    })
-
-    const memActor = memoryActorR.run({ graph: memory, embedder: null, logger: null })
-
-    const { interpret, ST } = prodInterpreterR.run({
-      llm, toolRegistry, state, agentRegistry,
-      onApprove: async () => true,
-    })
-    const agent = new Agent({
-      resolveTools: () => toolRegistry.list(),
-      resolveAgents: () => agentRegistry.list(),
-      responseFormatMode: config.llm.responseFormat,
-      maxRetries: 2, maxIterations: 5, interpret, ST, state,
-      actors: { memoryActor: memActor },
-    })
-
-    console.log(`\n  [${label}] embedder=null memory recall test`)
-    try {
-      const result = await agent.run('함수형 프로그래밍의 핵심 원칙을 간단히 설명해줘', { source: 'user' })
-      console.log(`  [${label}] result: ${String(result).slice(0, 100)}`)
-      const memories = state.get('context.memories') || []
-      assert(memories.length === 0, `${label}: memories is empty (embedder=null)`)
-      assert(state.get('lastTurn')?.tag === RESULT.SUCCESS, `${label}: agent responds without memory`)
-    } catch (err) {
-      console.log(`  [${label}] ERROR: ${err.message}`)
-      assert(false, `${label}: unexpected error: ${err.message}`)
-    }
-  })()
-
-  // =============================================
-  // 20. embedder 있을 때 memory recall 검증
-  // =============================================
-  await (async () => {
-    const label = 'memory주입'
-    const embedCfg = config.embed
-    const embedApiKey = embedCfg.apiKey
-      || (embedCfg.provider === 'openai' ? config.llm.apiKey : null)
-    const embedEnabled = embedApiKey || embedCfg.baseUrl
-
-    if (!embedEnabled) {
-      console.log(`\n  [${label}] SKIP — embed not configured (no apiKey or baseUrl)`)
-      skipped++
-      return
-    }
-
-    let embedder
-    try {
-      embedder = createEmbedder({
-        provider: embedCfg.provider,
-        baseUrl: embedCfg.baseUrl,
-        apiKey: embedApiKey,
-        model: embedCfg.model,
-        dimensions: embedCfg.dimensions,
-      })
-    } catch (err) {
-      console.log(`\n  [${label}] SKIP — embedder creation failed: ${err.message}`)
-      skipped++
-      return
-    }
-
-    const state = initState()
-    const memory = MemoryGraph.create()
-
-    // 의미적으로 구분되는 노드 3개 추가
-    memory.addNode({
-      label: '파리는 프랑스의 수도이다',
-      type: 'entity',
-      data: { content: '프랑스 파리 수도 정보' },
-    })
-    memory.addNode({
-      label: '강아지 산책은 하루 2회가 적당하다',
-      type: 'entity',
-      data: { content: '반려견 산책 가이드' },
-    })
-    memory.addNode({
-      label: 'Node.js의 이벤트 루프는 싱글 스레드로 동작한다',
-      type: 'entity',
-      data: { content: 'JavaScript 런타임 기술 메모' },
-    })
-
-    // 벡터 임베딩 수행
-    console.log(`\n  [${label}] embedding ${memory.allNodes().length} nodes...`)
-    try {
-      const embedded = await createMemoryEmbedder(embedder).embedPending(memory)
-      console.log(`  [${label}] embedded: ${embedded} nodes`)
-      assert(embedded === 3, `${label}: all 3 nodes embedded`)
-    } catch (err) {
-      console.log(`  [${label}] SKIP — embedding failed: ${err.message}`)
-      skipped++
-      return
-    }
-
-    const memActor2 = memoryActorR.run({ graph: memory, embedder, logger: null })
-
-    const { interpret: interpret2, ST: ST2 } = prodInterpreterR.run({
-      llm, toolRegistry, state, agentRegistry,
-      onApprove: async () => true,
-    })
-    const agent = new Agent({
-      resolveTools: () => toolRegistry.list(),
-      resolveAgents: () => agentRegistry.list(),
-      responseFormatMode: config.llm.responseFormat,
-      maxRetries: 2, maxIterations: 5, interpret: interpret2, ST: ST2, state,
-      actors: { memoryActor: memActor2 },
-    })
-
-    // 프랑스 관련 질문 → "파리는 프랑스의 수도" 노드가 recall 되어야 함
-    try {
-      const result = await agent.run('프랑스에 대해 알려줘', { source: 'user' })
-      console.log(`  [${label}] result: ${String(result).slice(0, 100)}`)
-      const memories = state.get('context.memories') || []
-      console.log(`  [${label}] recalled memories: [${memories.join(', ')}]`)
-      assert(memories.length > 0, `${label}: memories recalled (embedder active)`)
-      const hasFrance = memories.some(m => m.includes('프랑스') || m.includes('파리'))
-      assert(hasFrance, `${label}: recalled memory relates to France/Paris`)
-      assert(state.get('lastTurn')?.tag === RESULT.SUCCESS, `${label}: agent succeeded with memory`)
-    } catch (err) {
-      console.log(`  [${label}] ERROR: ${err.message}`)
-      assert(false, `${label}: unexpected error: ${err.message}`)
-    }
-  })()
 
   // Cleanup
   rmSync(testDir, { recursive: true, force: true })

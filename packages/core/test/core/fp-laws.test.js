@@ -1,6 +1,5 @@
 import fc from 'fast-check'
 import fp from '@presence/core/lib/fun-fp.js'
-import { MemoryGraph, TIERS } from '@presence/infra/infra/memory/memory.js'
 import { assert, check, summary, eqMaybe, eqEither, runTask, eqTask } from '../../../../test/lib/assert.js'
 
 const { Maybe, Either, Task, Free } = fp
@@ -10,7 +9,7 @@ const noRunner = () => { throw new Error('unexpected impure step') }
 const runFree = prog => Free.runSync(noRunner)(prog)
 
 async function run() {
-  console.log('Property-based tests (fp laws + MemoryGraph invariants)')
+  console.log('Property-based tests (fp laws)')
 
   // ─── Maybe: Functor + Monad laws ─────────────────────────────────────
   const mf = x => x > 0 ? Maybe.Just(x + 1) : Maybe.Nothing()
@@ -159,100 +158,6 @@ async function run() {
         const t = Task.of(a)
         return eqTask(t.chain(tf).chain(tg), t.chain(x => tf(x).chain(tg)))
       }))
-    ),
-  ])
-
-  // ─── MemoryGraph: structural invariants ───────────────────────────────
-  await Promise.all([
-    check('MemoryGraph: working tier — no dedup, each addNode creates a node', () =>
-      fc.assert(fc.property(
-        fc.array(fc.string({ minLength: 1 }), { minLength: 1, maxLength: 20 }),
-        labels => {
-          const g = MemoryGraph.create()
-          labels.forEach(label => g.addNode({ label, tier: TIERS.WORKING }))
-          return g.allNodes().length === labels.length
-        }
-      ))
-    ),
-    check('MemoryGraph: episodic dedup — same label+data→1 node regardless of call count', () =>
-      fc.assert(fc.property(
-        fc.string({ minLength: 1 }),
-        fc.integer({ min: 2, max: 10 }),
-        (label, n) => {
-          const g = MemoryGraph.create()
-          const data = { x: 1 }
-          for (let i = 0; i < n; i++) g.addNode({ label, type: 'entity', data, tier: TIERS.EPISODIC })
-          return g.allNodes().length === 1
-        }
-      ))
-    ),
-    check('MemoryGraph: source dedup — distinct sources → separate nodes despite same label', () =>
-      fc.assert(fc.property(
-        fc.array(fc.string({ minLength: 2 }), { minLength: 2, maxLength: 10 }),
-        tools => {
-          const unique = [...new Set(tools)]
-          if (unique.length < 2) return true
-          const g = MemoryGraph.create()
-          unique.forEach(tool => g.addNode({ label: 'same', data: {}, tier: TIERS.EPISODIC, source: { tool, toolArgs: {} } }))
-          return g.allNodes().length === unique.length
-        }
-      ))
-    ),
-    check('MemoryGraph: findNode — every addNode result is findable by id', () =>
-      fc.assert(fc.property(
-        fc.array(fc.string({ minLength: 1 }), { minLength: 1, maxLength: 15 }),
-        labels => {
-          const g = MemoryGraph.create()
-          const nodes = labels.map(label => g.addNode({ label, tier: TIERS.WORKING }))
-          return nodes.every(n => g.findNode(n.id).isJust())
-        }
-      ))
-    ),
-    check('MemoryGraph: pruneByTier — retains exactly maxCount newest nodes', () =>
-      fc.assert(fc.property(
-        fc.integer({ min: 2, max: 30 }),
-        fc.integer({ min: 1, max: 29 }),
-        (n, maxCount) => {
-          if (maxCount >= n) return true
-          const g = MemoryGraph.create()
-          for (let i = 0; i < n; i++) g.addNode({ label: `node-${i}`, tier: TIERS.EPISODIC })
-          g.pruneByTier(TIERS.EPISODIC, maxCount)
-          return g.getNodesByTier(TIERS.EPISODIC).length === maxCount
-        }
-      ))
-    ),
-    check('MemoryGraph: removeNodes — predicate removes exactly matching nodes', () =>
-      fc.assert(fc.property(
-        fc.integer({ min: 1, max: 20 }),
-        fc.integer({ min: 0, max: 19 }),
-        (n, expiredCount) => {
-          if (expiredCount > n) return true
-          const g = MemoryGraph.create()
-          const past = Date.now() - 1000
-          const future = Date.now() + 60_000
-          for (let i = 0; i < expiredCount; i++) {
-            g.addNode({ label: `e-${i}`, tier: TIERS.EPISODIC, expiresAt: past })
-          }
-          for (let i = 0; i < n - expiredCount; i++) {
-            g.addNode({ label: `v-${i}`, tier: TIERS.EPISODIC, expiresAt: future })
-          }
-          const removed = g.removeNodes(node => node.expiresAt != null && node.expiresAt <= Date.now())
-          return removed === expiredCount && g.allNodes().length === n - expiredCount
-        }
-      ))
-    ),
-    check('MemoryGraph: addEdge — orphan edges cleaned up after removeNodes', () =>
-      fc.assert(fc.property(
-        fc.integer({ min: 2, max: 10 }),
-        n => {
-          const g = MemoryGraph.create()
-          const nodes = []
-          for (let i = 0; i < n; i++) nodes.push(g.addNode({ label: `n-${i}`, tier: TIERS.WORKING }))
-          for (let i = 0; i < n - 1; i++) g.addEdge(nodes[i].id, nodes[i + 1].id, 'next')
-          g.removeNodes(node => node.id === nodes[0].id)
-          return g.allEdges().every(e => e.from !== nodes[0].id && e.to !== nodes[0].id)
-        }
-      ))
     ),
   ])
 

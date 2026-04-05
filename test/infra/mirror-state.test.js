@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
-import { createRemoteState } from '@presence/infra/infra/remote-state.js'
+import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
@@ -32,13 +32,13 @@ const createMockWsServer = () => {
 }
 
 async function run() {
-  console.log('createRemoteState tests')
+  console.log('createMirrorState tests')
 
   // RS1. init 메시지로 cache 초기화
   {
     const mock = createMockWsServer()
     const port = await mock.start()
-    const rs = createRemoteState({ wsUrl: `ws://127.0.0.1:${port}` })
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
 
     await delay(100)
     assert(rs.get('turn') === 0, 'RS1: turn from init snapshot')
@@ -53,8 +53,8 @@ async function run() {
     const mock = createMockWsServer()
     const port = await mock.start()
     const changes = []
-    const rs = createRemoteState({ wsUrl: `ws://127.0.0.1:${port}` })
-    rs.hooks.on('turn', (v) => changes.push(v))
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
+    rs.hooks.on('turn', (change) => changes.push(change.nextValue))
 
     await delay(100)
 
@@ -75,7 +75,7 @@ async function run() {
   {
     const mock = createMockWsServer()
     const port = await mock.start()
-    const rs = createRemoteState({ wsUrl: `ws://127.0.0.1:${port}` })
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
 
     await delay(100)
     const connsBefore = mock.connections.length
@@ -94,7 +94,7 @@ async function run() {
   {
     const mock = createMockWsServer()
     const port = await mock.start()
-    const rs = createRemoteState({ wsUrl: `ws://127.0.0.1:${port}` })
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
 
     await delay(100)
     assert(mock.connections.length === 1, 'RS4 setup: connected')
@@ -114,7 +114,7 @@ async function run() {
   {
     const mock = createMockWsServer()
     const port = await mock.start()
-    const rs = createRemoteState({ wsUrl: `ws://127.0.0.1:${port}` })
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
 
     await delay(100)
     rs.disconnect()
@@ -132,7 +132,7 @@ async function run() {
   {
     const mock = createMockWsServer()
     const port = await mock.start()
-    const rs = createRemoteState({ wsUrl: `ws://127.0.0.1:${port}` })
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
 
     await delay(50)
     let threw = false

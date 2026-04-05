@@ -2,7 +2,7 @@ import { runFreeWithStateT } from '../lib/runner.js'
 import { forkTask, fireAndForget } from '../lib/task.js'
 import { RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError, STATE_PATH } from './policies.js'
 import { getByPath } from '../lib/path.js'
-import { applyFinalState } from './stateCommit.js'
+import { applyFinalState } from './state-commit.js'
 
 class Executor {
   constructor({ interpret, ST, state, actors = {} }) {

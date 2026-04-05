@@ -1,6 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { getByPath } from '@presence/infra/infra/state.js'
+import { getByPath } from '@presence/core/lib/path.js'
 import {
   askLLM, executeTool, respond, updateState, getState,
 } from '@presence/core/core/op.js'

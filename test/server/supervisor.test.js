@@ -82,12 +82,12 @@ async function run() {
       ],
     })
 
-    const { server, shutdown, globalCtx } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
+    const { server, shutdown, userContext } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
 
     try {
       // researcher 등록 확인
-      assert(globalCtx.agentRegistry.has('researcher'), 'SV1: researcher registered')
-      const researcher = globalCtx.agentRegistry.get('researcher').value
+      assert(userContext.agentRegistry.has('researcher'), 'SV1: researcher registered')
+      const researcher = userContext.agentRegistry.get('researcher').value
       assert(researcher.name === 'researcher', 'SV1: researcher name')
       assert(researcher.description === '정보를 조사합니다.', 'SV1: researcher description')
       assert(researcher.type === 'local', 'SV1: researcher type local')
@@ -97,15 +97,15 @@ async function run() {
       assert(researcher.capabilities.includes('read'), 'SV1: researcher capability read')
 
       // writer 등록 확인
-      assert(globalCtx.agentRegistry.has('writer'), 'SV1: writer registered')
-      const writer = globalCtx.agentRegistry.get('writer').value
+      assert(userContext.agentRegistry.has('writer'), 'SV1: writer registered')
+      const writer = userContext.agentRegistry.get('writer').value
       assert(writer.capabilities.includes('write'), 'SV1: writer capability write')
 
       // summarizer(main.js 하드코딩)도 유지
-      assert(globalCtx.agentRegistry.has('summarizer'), 'SV1: summarizer still registered')
+      assert(userContext.agentRegistry.has('summarizer'), 'SV1: summarizer still registered')
 
       // agentRegistry.list()에 모두 포함
-      const names = globalCtx.agentRegistry.list().map(a => a.name)
+      const names = userContext.agentRegistry.list().map(a => a.name)
       assert(names.includes('researcher'), 'SV1: list includes researcher')
       assert(names.includes('writer'), 'SV1: list includes writer')
       assert(names.includes('summarizer'), 'SV1: list includes summarizer')
@@ -297,19 +297,19 @@ async function run() {
       ],
     })
 
-    const { server, shutdown, globalCtx } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
+    const { server, shutdown, userContext } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
     const port = server.address().port
 
     try {
       // 3개 에이전트 모두 등록
-      assert(globalCtx.agentRegistry.has('agent-a'), 'SV6: agent-a registered')
-      assert(globalCtx.agentRegistry.has('agent-b'), 'SV6: agent-b registered')
-      assert(globalCtx.agentRegistry.has('agent-c'), 'SV6: agent-c registered')
+      assert(userContext.agentRegistry.has('agent-a'), 'SV6: agent-a registered')
+      assert(userContext.agentRegistry.has('agent-b'), 'SV6: agent-b registered')
+      assert(userContext.agentRegistry.has('agent-c'), 'SV6: agent-c registered')
 
       // run()이 각자 독립적으로 동작
-      const aResult = await globalCtx.agentRegistry.get('agent-a').value.run('test')
-      const bResult = await globalCtx.agentRegistry.get('agent-b').value.run('test')
-      const cResult = await globalCtx.agentRegistry.get('agent-c').value.run('test')
+      const aResult = await userContext.agentRegistry.get('agent-a').value.run('test')
+      const bResult = await userContext.agentRegistry.get('agent-b').value.run('test')
+      const cResult = await userContext.agentRegistry.get('agent-c').value.run('test')
       assert(aResult === 'ok', 'SV6: agent-a run returns ok')
       assert(bResult === 'ok', 'SV6: agent-b run returns ok')
       assert(cResult === 'ok', 'SV6: agent-c run returns ok')
@@ -319,7 +319,7 @@ async function run() {
       assert(sessions.body.length === 4, 'SV6: 4 sessions total')
 
       // 각 agent 세션 state 독립
-      await globalCtx.agentRegistry.get('agent-a').value.run('extra')
+      await userContext.agentRegistry.get('agent-a').value.run('extra')
       const aState = await request(port, 'GET', '/api/sessions/agent-agent-a/state')
       const bState = await request(port, 'GET', '/api/sessions/agent-agent-b/state')
       assert(aState.body.turn === 2, 'SV6: agent-a turn is 2 after 2 runs')
@@ -340,13 +340,13 @@ async function run() {
     const llmPort = await mockLLM.start()
 
     const config = baseConfig(llmPort, tmpDir, { agents: [] })
-    const { server, shutdown, globalCtx } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
+    const { server, shutdown, userContext } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
     const port = server.address().port
 
     try {
       // summarizer만 등록
-      assert(globalCtx.agentRegistry.has('summarizer'), 'SV7: summarizer still present')
-      assert(!globalCtx.agentRegistry.has('researcher'), 'SV7: no researcher')
+      assert(userContext.agentRegistry.has('summarizer'), 'SV7: summarizer still present')
+      assert(!userContext.agentRegistry.has('researcher'), 'SV7: no researcher')
 
       // 세션 1개만 (user-default)
       const sessions = await request(port, 'GET', '/api/sessions')

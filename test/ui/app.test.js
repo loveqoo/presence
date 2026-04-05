@@ -8,7 +8,7 @@ import { ToolResultView, parseFileEntries, toGrid, truncateLines, getSummary } f
 import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/ui/components/CodeView.js'
 import { detectWholeCodeLang } from '@presence/tui/ui/components/MarkdownText.js'
 import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgentState.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
@@ -79,13 +79,13 @@ console.log('UI component tests (renderToString)')
 
 // 7. turnState=working → 'working'
 {
-  const state = createReactiveState({ turnState: TurnState.working('test'), lastTurn: null })
+  const state = createOriginState({ turnState: TurnState.working('test'), lastTurn: null })
   assert(deriveStatus(state) === 'working', 'deriveStatus: working when turnState=working')
 }
 
 // 8. turnState=idle, lastTurn=failure → 'error'
 {
-  const state = createReactiveState({
+  const state = createOriginState({
     turnState: TurnState.idle(),
     lastTurn: TurnOutcome.failure('q', TurnError('err', ERROR_KIND.PLANNER_PARSE), 'msg'),
   })
@@ -94,7 +94,7 @@ console.log('UI component tests (renderToString)')
 
 // 9. turnState=idle, lastTurn=success → 'idle'
 {
-  const state = createReactiveState({
+  const state = createOriginState({
     turnState: TurnState.idle(),
     lastTurn: TurnOutcome.success('q', 'ok'),
   })
@@ -103,7 +103,7 @@ console.log('UI component tests (renderToString)')
 
 // 10. turnState=idle, lastTurn=null → 'idle'
 {
-  const state = createReactiveState({ turnState: TurnState.idle(), lastTurn: null })
+  const state = createOriginState({ turnState: TurnState.idle(), lastTurn: null })
   assert(deriveStatus(state) === 'idle', 'deriveStatus: idle when lastTurn=null')
 }
 
@@ -111,19 +111,19 @@ console.log('UI component tests (renderToString)')
 
 // 11. context.memories가 배열이면 길이 반환
 {
-  const state = createReactiveState({ context: { memories: ['a', 'b', 'c'] } })
+  const state = createOriginState({ context: { memories: ['a', 'b', 'c'] } })
   assert(deriveMemoryCount(state) === 3, 'deriveMemoryCount: returns array length')
 }
 
 // 12. context.memories가 없으면 0
 {
-  const state = createReactiveState({ context: {} })
+  const state = createOriginState({ context: {} })
   assert(deriveMemoryCount(state) === 0, 'deriveMemoryCount: 0 when no memories')
 }
 
 // 13. context.memories가 배열이 아니면 0
 {
-  const state = createReactiveState({ context: { memories: 'not-array' } })
+  const state = createOriginState({ context: { memories: 'not-array' } })
   assert(deriveMemoryCount(state) === 0, 'deriveMemoryCount: 0 when not array')
 }
 
@@ -574,7 +574,7 @@ import { buildReport, formatDuration, truncate } from '@presence/tui/ui/report.j
       { role: 'user', content: '안녕하세요' },
     ],
     lastResponse: '{"type":"direct_response","message":"안녕하세요!"}',
-    state: createReactiveState({
+    state: createOriginState({
       turnState: TurnState.idle(),
       lastTurn: TurnOutcome.success('q', 'ok'),
       turn: 5,

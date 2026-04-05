@@ -1,5 +1,5 @@
 import { Repl, COMMANDS } from '@presence/core/core/repl.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
 import { TurnState } from '@presence/core/core/policies.js'
@@ -10,7 +10,7 @@ const mockAgent = (response) => ({
   run: async () => response,
 })
 
-const mockState = () => createReactiveState({
+const mockState = () => createOriginState({
   turnState: TurnState.idle(),
   lastTurn: null,
   turn: 3,

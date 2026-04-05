@@ -1,8 +1,8 @@
 import { PHASE, RESULT, ERROR_KIND, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
-import { applyFinalState } from '@presence/core/core/stateCommit.js'
+import { applyFinalState } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
 import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
@@ -21,7 +21,7 @@ async function run() {
 
   // E2E: heartbeat emits → EventActor processes → turnActor called
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
@@ -40,7 +40,7 @@ async function run() {
     const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     // 브릿지 hook
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
         eventActor.drain().fork(() => {}, () => {})
       }
@@ -59,7 +59,7 @@ async function run() {
 
   // heartbeat → event 큐 → agent busy → 큐에 대기 → idle 후 처리
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('user turn'),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -72,7 +72,7 @@ async function run() {
     const emit = (event) => eventActor.emit(event)
 
     // 브릿지 hook
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
         eventActor.drain().fork(() => {}, () => {})
       }
@@ -98,7 +98,7 @@ async function run() {
 
   // E2E: planner generates DELEGATE step → interpreter dispatches → result in plan
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       context: { memories: [] },
@@ -146,7 +146,7 @@ async function run() {
 
   // Delegate 실패 → plan이 실패로 닫힘
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
       context: { memories: [] },
@@ -187,7 +187,7 @@ async function run() {
 
   // Parallel 내에서 여러 프로그램이 독립 실행
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       context: {},
     })
@@ -214,7 +214,7 @@ async function run() {
 
   // 큐에 3개 쌓인 후 idle 전이 → EventActor drain이 순차 처리
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
@@ -226,7 +226,7 @@ async function run() {
     const emit = (event) => eventActor.emit(event)
 
     // 브릿지 hook
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
         eventActor.drain().fork(() => {}, () => {})
       }
@@ -254,7 +254,7 @@ async function run() {
   // ===========================================
 
   {
-    const state = createReactiveState({
+    const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
