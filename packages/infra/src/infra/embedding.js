@@ -73,30 +73,30 @@ const mergeSearchResults = (keywordScored, vectorScored) => {
 // --- Provider dispatch ---
 
 // timeout 헬퍼
-const fetchWithTimeout = async (_fetch, url, opts, timeoutMs = 30_000) => {
+const fetchWithTimeout = async (fetchFn, url, opts, timeoutMs = 30_000) => {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    return await _fetch(url, { ...opts, signal: controller.signal })
+    return await fetchFn(url, { ...opts, signal: controller.signal })
   } finally {
-    clearTimeout(timeout)
+    clearTimeout(timer)
   }
 }
 
 const providers = {
-  openai: ({ apiKey, model, dimensions, baseUrl, fetchFn, timeoutMs = 30_000 }) => {
-    const _fetch = fetchFn || globalThis.fetch
-    const _model = model || 'text-embedding-3-small'
-    const _baseUrl = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
-
-    const _key = apiKey || process.env.OPENAI_API_KEY || null
+  openai: (opts) => {
+    const fetchFn = opts.fetchFn || globalThis.fetch
+    const model = opts.model || 'text-embedding-3-small'
+    const apiUrl = (opts.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '')
+    const apiKey = opts.apiKey || process.env.OPENAI_API_KEY || null
+    const { dimensions, timeoutMs = 30_000 } = opts
 
     return async (text) => {
-      const body = { input: text, model: _model }
+      const body = { input: text, model }
       if (dimensions) body.dimensions = dimensions
       const headers = { 'Content-Type': 'application/json' }
-      if (_key) headers['Authorization'] = `Bearer ${_key}`
-      const res = await fetchWithTimeout(_fetch, `${_baseUrl}/embeddings`, {
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
+      const res = await fetchWithTimeout(fetchFn, `${apiUrl}/embeddings`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
@@ -110,20 +110,21 @@ const providers = {
     }
   },
 
-  cohere: ({ apiKey, model, baseUrl, fetchFn, timeoutMs = 30_000 }) => {
-    const _fetch = fetchFn || globalThis.fetch
-    const _model = model || 'embed-v4.0'
-    const _baseUrl = (baseUrl || 'https://api.cohere.com/v2').replace(/\/+$/, '')
+  cohere: (opts) => {
+    const fetchFn = opts.fetchFn || globalThis.fetch
+    const model = opts.model || 'embed-v4.0'
+    const apiUrl = (opts.baseUrl || 'https://api.cohere.com/v2').replace(/\/+$/, '')
+    const { apiKey, timeoutMs = 30_000 } = opts
 
     return async (text) => {
       const headers = { 'Content-Type': 'application/json' }
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-      const res = await fetchWithTimeout(_fetch, `${_baseUrl}/embed`, {
+      const res = await fetchWithTimeout(fetchFn, `${apiUrl}/embed`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           texts: [text],
-          model: _model,
+          model,
           input_type: 'search_query',
           embedding_types: ['float'],
         }),

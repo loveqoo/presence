@@ -1,8 +1,8 @@
 import {
   loginHandlerR, refreshHandlerR, logoutHandlerR,
   authMiddlewareR,
-  issueTokensR, validateRefreshChainR, rotateRefreshTokenR,
 } from '@presence/infra/infra/auth/auth-middleware.js'
+import { issueTokensR, validateRefreshChainR, rotateRefreshTokenR } from '@presence/infra/infra/auth/auth-tokens.js'
 import { authenticateWsR } from '@presence/infra/infra/auth/auth-ws.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { assert, summary } from '../lib/assert.js'

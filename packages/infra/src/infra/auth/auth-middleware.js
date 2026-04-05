@@ -1,9 +1,10 @@
 import fp from '@presence/core/lib/fun-fp.js'
+import { issueTokensR, validateRefreshChainR, rotateRefreshTokenR } from './auth-tokens.js'
 
 const { Either, Reader } = fp
 
 // =============================================================================
-// Auth Middleware: Express HTTP 인증
+// Auth Middleware: Express HTTP 인증 미들웨어 + login/refresh/logout handlers.
 // 의존성 전파: Reader(AuthEnv)
 // 검증: Either
 // Express 경계에서 Task.fork() 실행
@@ -49,76 +50,11 @@ const setRefreshCookie = (res, token, opts = {}) => {
 const clearRefreshCookie = (res) => setRefreshCookie(res, '', { maxAge: 0 })
 
 // =============================================================================
-// Reader 기반 토큰 연산
-// =============================================================================
-
-/**
- * Issues access and refresh tokens for the given user.
- * @param {object} user - Authenticated user object with username, roles, tokenVersion
- * @returns {Reader} Reader(AuthEnv → { accessToken, refreshToken, user })
- */
-const issueTokensR = (user) =>
-  Reader.asks(({ tokenService, userStore }) => {
-    const accessToken = tokenService.signAccessToken({ sub: user.username, roles: user.roles, mustChangePassword: user.mustChangePassword || false })
-    const { token: refreshToken, jti } = tokenService.signRefreshToken({
-      sub: user.username,
-      tokenVersion: user.tokenVersion,
-    })
-    userStore.addRefreshSession(user.username, jti)
-    return { accessToken, refreshToken, user }
-  })
-
-/**
- * Validates a refresh token and checks active session + tokenVersion.
- * Revokes all sessions if a stolen token is detected.
- * @param {string} refreshToken
- * @returns {Reader} Reader(AuthEnv → Either<error, { user, jti }>)
- */
-const validateRefreshChainR = (refreshToken) =>
-  Reader.asks(({ tokenService, userStore }) => {
-    if (!refreshToken) return Either.Left('Refresh token required')
-
-    return Either.fold(
-      () => Either.Left('Invalid refresh token'),
-      payload => {
-        const { sub, jti, tokenVersion } = payload
-
-        if (!userStore.hasRefreshSession(sub, jti)) {
-          userStore.revokeAllRefreshSessions(sub)
-          return Either.Left('Refresh token revoked (possible theft detected)')
-        }
-
-        const user = userStore.findUser(sub)
-        if (!user || user.tokenVersion !== tokenVersion) {
-          userStore.revokeAllRefreshSessions(sub)
-          return Either.Left('Token invalidated (password changed)')
-        }
-
-        return Either.Right({ user, jti })
-      },
-      tokenService.verifyRefreshToken(refreshToken),
-    )
-  })
-
-/**
- * Rotates a refresh token: removes the old session and issues new tokens.
- * @param {{ user: object, jti: string }} validated - Result from validateRefreshChainR
- * @returns {Reader} Reader(AuthEnv → { accessToken, refreshToken, user })
- */
-const rotateRefreshTokenR = (validated) =>
-  Reader.asks(({ userStore }) => userStore.removeRefreshSession(validated.user.username, validated.jti))
-    .chain(() => issueTokensR(validated.user))
-
-// =============================================================================
 // Express Middleware / Handlers
 // =============================================================================
 
 const MUST_CHANGE_PASSWORD_ALLOWLIST = ['/auth/change-password', '/auth/refresh', '/auth/logout']
 
-/**
- * Express middleware that verifies Bearer access tokens, bypassing publicPaths.
- * @type {Reader} Reader({ tokenService, publicPaths? } → ExpressMiddleware)
- */
 const authMiddlewareR = Reader.asks(({ tokenService, publicPaths = [] }) =>
   (req, res, next) => {
     if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) return next()
@@ -145,11 +81,6 @@ const authMiddlewareR = Reader.asks(({ tokenService, publicPaths = [] }) =>
   }
 )
 
-/**
- * Express handler for POST /api/auth/login with rate limiting.
- * Sets refreshToken HttpOnly cookie and returns accessToken on success.
- * @type {Reader} Reader({ authProvider, tokenService, userStore } → ExpressHandler)
- */
 const loginHandlerR = Reader.ask.map(env => {
   const { authProvider } = env
   const rateLimiter = createRateLimiter()
@@ -188,10 +119,6 @@ const loginHandlerR = Reader.ask.map(env => {
   }
 })
 
-/**
- * Express handler for POST /api/auth/refresh. Rotates the refresh token and returns new tokens.
- * @type {Reader} Reader({ tokenService, userStore } → ExpressHandler)
- */
 const refreshHandlerR = Reader.ask.map(env =>
   (req, res) => {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
@@ -208,10 +135,6 @@ const refreshHandlerR = Reader.ask.map(env =>
   }
 )
 
-/**
- * Express handler for POST /api/auth/logout. Revokes the refresh session and clears the cookie.
- * @type {Reader} Reader({ tokenService, userStore } → ExpressHandler)
- */
 const logoutHandlerR = Reader.asks(({ tokenService, userStore }) =>
   (req, res) => {
     const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
@@ -227,12 +150,4 @@ const logoutHandlerR = Reader.asks(({ tokenService, userStore }) =>
   }
 )
 
-export {
-  loginHandlerR,
-  refreshHandlerR,
-  logoutHandlerR,
-  authMiddlewareR,
-  issueTokensR,
-  validateRefreshChainR,
-  rotateRefreshTokenR,
-}
+export { loginHandlerR, refreshHandlerR, logoutHandlerR, authMiddlewareR }
