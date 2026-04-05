@@ -1,4 +1,4 @@
-import { createMemoryGraph, TIERS } from '@presence/infra/infra/memory.js'
+import { createMemoryGraph, TIERS } from '@presence/infra/infra/memory/memory.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
 import { PHASE, RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'

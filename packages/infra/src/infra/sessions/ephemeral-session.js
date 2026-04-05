@@ -1,5 +1,5 @@
 import { createReactiveState } from '../state.js'
-import { createToolRegistry } from '../tools.js'
+import { createToolRegistry } from '../tools/tool-registry.js'
 import { PROMPT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { charsToTokens } from '@presence/core/lib/tokenizer.js'

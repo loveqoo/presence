@@ -1,4 +1,4 @@
-import { toEmbeddingText, textHash } from './embedding.js'
+import { toEmbeddingText, textHash } from '../embedding.js'
 
 const needsEmbedding = (node, embedder) => {
   if (node.vector == null) return true

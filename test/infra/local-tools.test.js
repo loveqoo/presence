@@ -1,6 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools, isPathAllowed, normalizePath } from '@presence/infra/infra/local-tools.js'
+import { createLocalTools, isPathAllowed, normalizePath } from '@presence/infra/infra/tools/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

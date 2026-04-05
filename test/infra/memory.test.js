@@ -1,5 +1,5 @@
-import { createMemoryGraph, MemoryGraph, InMemoryStore, LowdbStore, TIERS } from '@presence/infra/infra/memory.js'
-import { createMemoryEmbedder } from '@presence/infra/infra/memory-embedder.js'
+import { createMemoryGraph, MemoryGraph, InMemoryStore, LowdbStore, TIERS } from '@presence/infra/infra/memory/memory.js'
+import { createMemoryEmbedder } from '@presence/infra/infra/memory/memory-embedder.js'
 import { existsSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'

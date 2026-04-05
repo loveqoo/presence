@@ -1,6 +1,6 @@
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { createReactiveState } from '@presence/infra/infra/state.js'
-import { createToolRegistry } from '@presence/infra/infra/tools.js'
+import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { delegate, respond } from '@presence/core/core/op.js'

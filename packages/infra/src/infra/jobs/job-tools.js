@@ -1,5 +1,5 @@
 import { calcNextRun, validateCron } from './scheduler-actor.js'
-import { withEventMeta } from './events.js'
+import { withEventMeta } from '../events.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 
 // --- Job 관리 에이전트 툴 ---

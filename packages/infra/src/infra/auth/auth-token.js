@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs'
 import { join } from 'path'
-import { Config } from './config.js'
+import { Config } from '../config.js'
 import fp from '@presence/core/lib/fun-fp.js'
 
 const { Either } = fp

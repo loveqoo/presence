@@ -24,9 +24,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { WebSocket } from 'ws'
 import { startServer } from '@presence/server'
-import { createUserStore } from '@presence/infra/infra/auth-user-store.js'
-import { createTokenService, sign } from '@presence/infra/infra/auth-token.js'
-import { ensureSecret } from '@presence/infra/infra/auth-token.js'
+import { createUserStore } from '@presence/infra/infra/auth/auth-user-store.js'
+import { createTokenService, sign } from '@presence/infra/infra/auth/auth-token.js'
+import { ensureSecret } from '@presence/infra/infra/auth/auth-token.js'
 import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))

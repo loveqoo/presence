@@ -1,6 +1,6 @@
 import {
   createTokenService, ensureSecret,
-} from '@presence/infra/infra/auth-token.js'
+} from '@presence/infra/infra/auth/auth-token.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { mkdirSync, rmSync, existsSync, statSync } from 'fs'
 import { join } from 'path'

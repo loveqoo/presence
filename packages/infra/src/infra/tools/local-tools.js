@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from '
 import { execSync } from 'child_process'
 import { resolve, join } from 'path'
 import { z } from 'zod'
-import { t } from '../i18n/index.js'
+import { t } from '../../i18n/index.js'
 import fp from '@presence/core/lib/fun-fp.js'
 
 const { Maybe } = fp

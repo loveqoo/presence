@@ -2,7 +2,7 @@ import { JSONFilePreset } from 'lowdb/node'
 import { mkdirSync } from 'fs'
 import { dirname } from 'path'
 import fp from '@presence/core/lib/fun-fp.js'
-import { dotSimilarity, topK, mergeSearchResults, textHash } from './embedding.js'
+import { dotSimilarity, topK, mergeSearchResults, textHash } from '../embedding.js'
 
 const { Maybe } = fp
 

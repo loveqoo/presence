@@ -1,4 +1,4 @@
-import { createUserStore, MIN_PASSWORD_LENGTH } from '@presence/infra/infra/auth-user-store.js'
+import { createUserStore, MIN_PASSWORD_LENGTH } from '@presence/infra/infra/auth/auth-user-store.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'

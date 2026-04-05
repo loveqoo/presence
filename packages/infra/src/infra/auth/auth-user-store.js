@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
-import { Config } from './config.js'
+import { Config } from '../config.js'
 
 // =============================================================================
 // UserStore: 사용자 CRUD + refreshSessions 관리
