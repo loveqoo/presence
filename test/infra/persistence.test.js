@@ -1,5 +1,6 @@
-import { createPersistence } from '@presence/infra/infra/persistence.js'
+import { createPersistence, stripTransient } from '@presence/infra/infra/persistence.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
+import { PERSISTENCE } from '@presence/core/core/policies.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -11,15 +12,21 @@ async function run() {
   const testDir = join(tmpdir(), `presence-persist-test-${Date.now()}`)
   mkdirSync(testDir, { recursive: true })
 
-  // 1. Save and restore state
+  // 헬퍼: store에 직접 쓰기 (PersistenceActor 없이 테스트)
+  const saveDirect = (p, state) => {
+    const snap = typeof state.snapshot === 'function' ? state.snapshot() : state
+    p.store.set(PERSISTENCE.STORE_KEY, stripTransient(snap))
+  }
+
+  // 1. Save → restore
   {
     const cwd = join(testDir, 'test1')
     mkdirSync(cwd, { recursive: true })
-    const p = createPersistence({ cwd, debounceMs: 0 })
+    const p = createPersistence({ cwd })
     p.clear()
 
     const state = createOriginState({ turnState: { tag: 'idle' }, turn: 5 })
-    p.saveImmediate(state)
+    saveDirect(p, state)
 
     const restored = p.restore()
     assert(restored !== null, 'save → restore: data exists')
@@ -28,7 +35,7 @@ async function run() {
     p.clear()
   }
 
-  // 2. Restore from empty → null
+  // 2. Empty restore → null
   {
     const cwd = join(testDir, 'test2')
     mkdirSync(cwd, { recursive: true })
@@ -38,31 +45,11 @@ async function run() {
     assert(restored === null, 'empty restore: returns null')
   }
 
-  // 3. Debounce: multiple saves → single write
+  // 3. _접두사 키는 persistence에서 제외
   {
     const cwd = join(testDir, 'test3')
     mkdirSync(cwd, { recursive: true })
-    const p = createPersistence({ cwd, debounceMs: 50 })
-    p.clear()
-
-    p.save({ snapshot: () => ({ count: 1 }) })
-    p.save({ snapshot: () => ({ count: 2 }) })
-    p.save({ snapshot: () => ({ count: 3 }) })
-
-    const before = p.restore()
-    assert(before === null, 'debounce: not saved immediately')
-
-    await new Promise(r => setTimeout(r, 100))
-    const after = p.restore()
-    assert(after !== null && after.count === 3, 'debounce: last value saved')
-    p.clear()
-  }
-
-  // 4. _접두사 키는 persistence에서 제외
-  {
-    const cwd = join(testDir, 'test5')
-    mkdirSync(cwd, { recursive: true })
-    const p = createPersistence({ cwd, debounceMs: 0 })
+    const p = createPersistence({ cwd })
     p.clear()
 
     const state = createOriginState({
@@ -72,7 +59,7 @@ async function run() {
       _streaming: { content: 'hello' },
       _debug: { lastTurn: { input: 'test' } },
     })
-    p.saveImmediate(state)
+    saveDirect(p, state)
 
     const restored = p.restore()
     assert(restored.turn === 3, 'transient exclusion: turn preserved')
@@ -83,20 +70,12 @@ async function run() {
     p.clear()
   }
 
-  // 6. debounce save도 _접두사 제외
+  // 4. stripTransient 단위 테스트
   {
-    const cwd = join(testDir, 'test6')
-    mkdirSync(cwd, { recursive: true })
-    const p = createPersistence({ cwd, debounceMs: 10 })
-    p.clear()
-
-    p.save({ snapshot: () => ({ turn: 1, _toolResults: [1, 2, 3] }) })
-    await new Promise(r => setTimeout(r, 50))
-
-    const restored = p.restore()
-    assert(restored.turn === 1, 'debounce transient: turn saved')
-    assert(restored._toolResults === undefined, 'debounce transient: _toolResults excluded')
-    p.clear()
+    const input = { a: 1, b: 2, _x: 'transient', _y: 'skip' }
+    const result = stripTransient(input)
+    assert(result.a === 1 && result.b === 2, 'stripTransient: keeps non-prefix keys')
+    assert(result._x === undefined && result._y === undefined, 'stripTransient: removes _ prefixed keys')
   }
 
   // Cleanup

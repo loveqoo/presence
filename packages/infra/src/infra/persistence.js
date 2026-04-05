@@ -1,13 +1,13 @@
 import Conf from 'conf'
 import { PERSISTENCE } from '@presence/core/core/policies.js'
 
-/**
- * Removes transient keys (prefixed with `_`) from a state snapshot before persisting.
- * @param {object} snap - State snapshot object.
- * @returns {object} Snapshot with transient keys stripped.
- */
-// _접두사 키는 일시적 UI 상태 (_streaming, _debug, _toolResults 등)
-export const stripTransient = (snap) => {
+// =============================================================================
+// Persistence: 디스크 저장소(Conf JSON 파일) 접근.
+// Debounced save는 PersistenceActor가 담당 (actors/persistence-actor.js).
+// =============================================================================
+
+// _접두사 키는 일시적 UI 상태 (_streaming, _debug, _toolResults 등). 저장 전 제거.
+const stripTransient = (snap) => {
   const out = {}
   for (const key of Object.keys(snap)) {
     if (!key.startsWith('_')) out[key] = snap[key]
@@ -15,42 +15,12 @@ export const stripTransient = (snap) => {
   return out
 }
 
-/**
- * Creates a debounced persistence layer backed by Conf (JSON file store).
- * Strips transient (_-prefixed) keys before saving.
- * @param {{ projectName?: string, debounceMs?: number, cwd?: string }} [options]
- * @returns {{ save: Function, saveImmediate: Function, restore: Function, clear: Function, store: object }}
- */
-const createPersistence = ({ projectName = 'presence', debounceMs = PERSISTENCE.DEBOUNCE_MS, cwd } = {}) => {
+const createPersistence = (opts = {}) => {
+  const { projectName = 'presence', cwd } = opts
   const confOpts = cwd
     ? { cwd, configName: 'state' }
     : { projectName, configName: 'state' }
   const store = new Conf(confOpts)
-  let timer = null
-
-  const save = (state) => {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => {
-      try {
-        const snap = typeof state.snapshot === 'function' ? state.snapshot() : state
-        store.set(PERSISTENCE.STORE_KEY, stripTransient(snap))
-      } catch (_) {
-        // non-fatal: state will be re-saved on next change
-      }
-      timer = null
-    }, debounceMs)
-  }
-
-  const saveImmediate = (state) => {
-    if (timer) clearTimeout(timer)
-    try {
-      const snap = typeof state.snapshot === 'function' ? state.snapshot() : state
-      store.set(PERSISTENCE.STORE_KEY, stripTransient(snap))
-    } catch (_) {
-      // non-fatal: state will be re-saved on next change
-    }
-    timer = null
-  }
 
   const restore = () => {
     try { return store.get(PERSISTENCE.STORE_KEY, null) }
@@ -59,15 +29,10 @@ const createPersistence = ({ projectName = 'presence', debounceMs = PERSISTENCE.
 
   const clear = () => store.delete(PERSISTENCE.STORE_KEY)
 
-  return { save, saveImmediate, restore, clear, store }
+  return { store, restore, clear }
 }
 
-/**
- * Assigns stable ids to history entries that lack them (migration for legacy data).
- * @param {object[]} history - Conversation history array.
- * @returns {object[]} History with ids added to any entries that were missing them.
- */
-// 순수 함수: id 없는 history 항목에 id 부여
+// id 없는 history 항목에 id 부여 (legacy data migration).
 const migrateHistoryIds = (history) => {
   if (!Array.isArray(history)) return []
   let counter = 0
@@ -79,4 +44,4 @@ const migrateHistoryIds = (history) => {
   })
 }
 
-export { createPersistence, migrateHistoryIds }
+export { createPersistence, migrateHistoryIds, stripTransient }
