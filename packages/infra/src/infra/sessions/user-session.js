@@ -48,16 +48,13 @@ class UserSession extends EphemeralSession {
     return opts.onScheduledJobDone || ((event, outcome) => this.notifyScheduler(event, outcome))
   }
 
-  notifyScheduler(event, { success, result, error }) {
+  notifyScheduler(event, outcome) {
     if (!this.localSchedulerActor) return
-    if (success) {
-      fireAndForget(this.localSchedulerActor.send({ type: 'job_done', runId: event.runId, jobId: event.jobId, result }))
-    } else {
-      fireAndForget(this.localSchedulerActor.send({
-        type: 'job_fail', runId: event.runId, jobId: event.jobId,
-        attempt: event.attempt ?? 1, error,
-      }))
-    }
+    const { success, result, error } = outcome
+    const task = success
+      ? this.localSchedulerActor.jobDone(event.runId, event.jobId, result)
+      : this.localSchedulerActor.jobFail(event.runId, event.jobId, event.attempt ?? 1, error)
+    fireAndForget(task)
   }
 
   // --- Scheduler: cron 기반 잡 실행 ---
@@ -110,7 +107,7 @@ class UserSession extends EphemeralSession {
   // --- Shutdown: scheduler 정지 + persistence flush ---
 
   shutdownScheduler() {
-    if (this.localSchedulerActor) fireAndForget(this.localSchedulerActor.send({ type: 'stop' }))
+    if (this.localSchedulerActor) fireAndForget(this.localSchedulerActor.stop())
   }
 
   async flushPersistence() {

@@ -1,8 +1,8 @@
 import {
   sendA2ATask, getA2ATaskStatus, extractArtifactText,
   buildTaskSendRequest, buildTaskGetRequest, responseToResult,
-} from '@presence/infra/infra/a2a-client.js'
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+} from '@presence/infra/infra/agents/a2a-client.js'
+import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { delegateActorR } from '@presence/infra/infra/actors/delegate-actor.js'

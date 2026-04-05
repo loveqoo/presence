@@ -183,8 +183,12 @@ class SchedulerActor extends ActorWrapper {
   }
 
   // --- Public 메시지 API ---
+  start() { return this.send({ type: SchedulerActor.MSG.START }) }
+  stop() { return this.send({ type: SchedulerActor.MSG.STOP }) }
   poll() { return this.send({ type: SchedulerActor.MSG.POLL }) }
   cleanup() { return this.send({ type: SchedulerActor.MSG.CLEANUP }) }
+  jobDone(runId, jobId, result) { return this.send({ type: SchedulerActor.MSG.JOB_DONE, runId, jobId, result }) }
+  jobFail(runId, jobId, attempt, error) { return this.send({ type: SchedulerActor.MSG.JOB_FAIL, runId, jobId, attempt, error }) }
 
   // --- Logging ---
   info(msg, meta) { (this.logger || console).info(msg, meta) }

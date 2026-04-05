@@ -16,10 +16,10 @@ const createGlobalScheduler = (userContext) => {
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
         onScheduledJobDone: (event, outcome) => {
-          const msg = outcome.success
-            ? { type: 'job_done', runId: event.runId, jobId: event.jobId, result: outcome.result }
-            : { type: 'job_fail', runId: event.runId, jobId: event.jobId, attempt: event.attempt ?? 1, error: outcome.error }
-          scheduler.send(msg).fork(() => {}, () => {})
+          const task = outcome.success
+            ? scheduler.jobDone(event.runId, event.jobId, outcome.result)
+            : scheduler.jobFail(event.runId, event.jobId, event.attempt ?? 1, outcome.error)
+          task.fork(() => {}, () => {})
           userContext.sessions.destroy(sessionId).catch(() => {})
         },
       })

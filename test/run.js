@@ -70,7 +70,6 @@ const tests = [
   'packages/core/test/interpreter/prod.test.js',
   'packages/core/test/interpreter/traced.test.js',
   'packages/core/test/interpreter/dryrun.test.js',
-  'test/infra/input.test.js',
   'packages/core/test/core/repl.test.js',
   // Phase 5 integration
   'test/integration/phase5.test.js',

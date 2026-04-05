@@ -1,4 +1,4 @@
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { assert, summary } from '../lib/assert.js'
 const { Maybe } = fp

@@ -1,6 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
-import { DelegateResult } from '../infra/agent-registry.js'
-import { sendA2ATask } from '../infra/a2a-client.js'
+import { DelegateResult } from '../infra/agents/agent-registry.js'
+import { sendA2ATask } from '../infra/agents/a2a-client.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
 
 const { Task, Maybe, Reader } = fp

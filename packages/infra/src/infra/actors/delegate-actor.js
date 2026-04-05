@@ -2,7 +2,7 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 import { DELEGATE, STATE_PATH } from '@presence/core/core/policies.js'
 import { withEventMeta } from '../events.js'
-import { getA2ATaskStatus } from '../a2a-client.js'
+import { getA2ATaskStatus } from '../agents/a2a-client.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
 const { Task, Maybe, Reader } = fp

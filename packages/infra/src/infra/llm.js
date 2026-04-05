@@ -10,8 +10,8 @@ class LLMClient {
     this.model = model
     this.apiKey = apiKey || process.env.OPENAI_API_KEY
     this.timeoutMs = timeoutMs
-    this._fetch = fetchFn || globalThis.fetch
-    if (!this._fetch) {
+    this.fetchFn = fetchFn || globalThis.fetch
+    if (!this.fetchFn) {
       throw new Error('LLMClient: fetch not available. Provide fetchFn or use Node 18+.')
     }
   }
@@ -58,7 +58,7 @@ class LLMClient {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 10_000)
     try {
-      const res = await this._fetch(`${this.baseUrl}/models`, {
+      const res = await this.fetchFn(`${this.baseUrl}/models`, {
         method: 'GET',
         headers: this.authHeaders(),
         signal: controller.signal,
@@ -102,7 +102,7 @@ class LLMClient {
   }
 
   async postChat(body, signal) {
-    const res = await this._fetch(`${this.baseUrl}/chat/completions`, {
+    const res = await this.fetchFn(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.authHeaders(),
       body: JSON.stringify(body),

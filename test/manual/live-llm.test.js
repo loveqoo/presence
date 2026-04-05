@@ -14,7 +14,7 @@ import { Agent } from '@presence/core/core/agent.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
-import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { Free } from '@presence/core/core/op.js'
 
 import { writeFileSync, mkdirSync, rmSync } from 'fs'

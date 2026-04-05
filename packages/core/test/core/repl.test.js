@@ -1,7 +1,7 @@
 import { Repl, COMMANDS } from '@presence/core/core/repl.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
-import { createAgentRegistry } from '@presence/infra/infra/agent-registry.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { TurnState } from '@presence/core/core/policies.js'
 
 import { assert, summary } from '../../../../test/lib/assert.js'

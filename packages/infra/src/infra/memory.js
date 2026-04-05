@@ -13,8 +13,8 @@ const MEM0_USER_ID = 'default'
 
 class Memory {
   constructor(mem0) {
-    this._mem0 = mem0
-    this._cache = []
+    this.mem0 = mem0
+    this.cache = []
   }
 
   // mem0 인스턴스 생성 + 초기 캐시 로드. embed 자격증명 없으면 null.
@@ -62,13 +62,13 @@ class Memory {
 
   // 유사 메모리 검색. 반환: [{ label }]
   async search(input, limit = 10) {
-    const result = await this._mem0.search(input, { userId: MEM0_USER_ID, limit })
+    const result = await this.mem0.search(input, { userId: MEM0_USER_ID, limit })
     return (result.results || []).map(r => ({ label: r.memory }))
   }
 
   // 대화 턴 저장 + 캐시 동기화
   async add(userInput, assistantOutput) {
-    await this._mem0.add([
+    await this.mem0.add([
       { role: 'user', content: userInput },
       { role: 'assistant', content: assistantOutput || '' },
     ], { userId: MEM0_USER_ID })
@@ -79,8 +79,8 @@ class Memory {
 
   async refreshCache() {
     try {
-      const result = await this._mem0.getAll({ userId: MEM0_USER_ID })
-      this._cache = (result.results || []).map(r => ({
+      const result = await this.mem0.getAll({ userId: MEM0_USER_ID })
+      this.cache = (result.results || []).map(r => ({
         id: r.id,
         label: r.memory,
         type: 'fact',
@@ -90,20 +90,20 @@ class Memory {
     } catch (_) {}
   }
 
-  allNodes() { return this._cache }
+  allNodes() { return this.cache }
 
   clearAll() {
-    const count = this._cache.length
-    this._cache = []
-    this._mem0.reset().catch(() => {})
+    const count = this.cache.length
+    this.cache = []
+    this.mem0.reset().catch(() => {})
     return count
   }
 
   removeOlderThan(maxAgeMs) {
     const cutoff = Date.now() - maxAgeMs
-    const toDelete = this._cache.filter(n => n.createdAt < cutoff)
-    this._cache = this._cache.filter(n => n.createdAt >= cutoff)
-    Promise.all(toDelete.map(n => this._mem0.delete(n.id).catch(() => {}))).catch(() => {})
+    const toDelete = this.cache.filter(n => n.createdAt < cutoff)
+    this.cache = this.cache.filter(n => n.createdAt >= cutoff)
+    Promise.all(toDelete.map(n => this.mem0.delete(n.id).catch(() => {}))).catch(() => {})
     return toDelete.length
   }
 }

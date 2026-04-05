@@ -1,4 +1,4 @@
-import { createPersona, DEFAULT_PERSONA } from '@presence/infra/infra/persona.js'
+import { createPersona } from '@presence/infra/infra/persona.js'
 import { buildIterationPrompt } from '@presence/core/core/prompt/assembly.js'
 import { mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
