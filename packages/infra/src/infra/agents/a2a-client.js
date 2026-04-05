@@ -1,145 +1,73 @@
 import { randomUUID } from 'crypto'
-import { DelegateResult } from './agent-registry.js'
+import { Delegation, DelegationMode } from './delegation.js'
+import { JsonRpc, Method, Message, A2ATask } from './a2a-protocol.js'
 
-// --- A2A artifact에서 텍스트 추출 (순수) ---
+// =============================================================================
+// A2A client: a2a-protocol.js 스키마를 HTTP transport에 조립.
+// 알고리즘:
+//   1. JSON-RPC request 빌드 (method + params)
+//   2. endpoint에 POST (timeout + abort)
+//   3. response 파싱 → A2ATask.fromResponse로 Delegation 매핑
+// HTTP/네트워크 오류는 Delegation.failed로 격리.
+//
+// 확장 포인트 (override):
+//   - call(target, endpoint, request, taskId, timeoutMs):
+//       요청/응답 파이프라인. caching, retry, logging 삽입
+//   - post(endpoint, body, timeoutMs):
+//       transport 레이어. HTTP → WebSocket/gRPC 교체
+// =============================================================================
 
-const extractArtifactText = (artifacts) => {
-  if (!Array.isArray(artifacts)) return null
-  return artifacts
-    .flatMap(a => (a.parts || []).filter(p => p.kind === 'text').map(p => p.text))
-    .join('\n') || null
-}
+const SEND_TIMEOUT_MS = 30_000
+const POLL_TIMEOUT_MS = 10_000
 
-// --- A2A JSON-RPC 요청 빌드 (순수) ---
-
-const buildTaskSendRequest = (taskId, messageText) => ({
-  jsonrpc: '2.0',
-  id: randomUUID(),
-  method: 'message/send',
-  params: {
-    id: taskId,
-    message: {
-      kind: 'message',
-      messageId: randomUUID(),
-      role: 'user',
-      parts: [{ kind: 'text', text: messageText }],
-    },
-  },
-})
-
-const buildTaskGetRequest = (taskId) => ({
-  jsonrpc: '2.0',
-  id: randomUUID(),
-  method: 'tasks/get',
-  params: { id: taskId },
-})
-
-// --- A2A 응답 → DelegateResult 변환 (순수) ---
-
-const responseToResult = (target, taskId, data) => {
-  if (data.error) {
-    return DelegateResult.failed(target, data.error.message || JSON.stringify(data.error), 'remote')
+class A2AClient {
+  constructor(opts = {}) {
+    this.fetchFn = opts.fetchFn || globalThis.fetch
   }
 
-  const task = data.result
-  if (!task || !task.status) {
-    return DelegateResult.failed(target, 'A2A: invalid response (no task status)', 'remote')
+  // 새 task 전송 — message/send 메서드
+  async sendTask(target, endpoint, taskText) {
+    const taskId = randomUUID()
+    const request = JsonRpc.request(Method.SEND, { id: taskId, message: Message.userText(taskText) })
+    return this.call(target, endpoint, request, taskId, SEND_TIMEOUT_MS)
   }
 
-  const state = task.status.state
-  if (state === 'completed') {
-    const output = extractArtifactText(task.artifacts)
-    return DelegateResult.completed(target, output, 'remote')
-  }
-  if (state === 'failed') {
-    const reason = task.status.message?.parts?.[0]?.text || 'unknown error'
-    return DelegateResult.failed(target, reason, 'remote')
+  // 기존 task 상태 조회 — tasks/get 메서드 (폴링용)
+  async getTaskStatus(target, endpoint, taskId) {
+    const request = JsonRpc.request(Method.GET, { id: taskId })
+    return this.call(target, endpoint, request, taskId, POLL_TIMEOUT_MS)
   }
 
-  // submitted, working, input-required 등 → 비동기 진행 중
-  return DelegateResult.submitted(target, task.id || taskId, 'remote')
-}
-
-// --- A2A task 전송 ---
-
-const a2aFetch = async (_fetch, url, body, timeoutMs = 30_000) => {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    return await _fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-  } finally {
-    clearTimeout(timeout)
-  }
-}
-
-const safeJsonParse = async (res) => {
-  try { return await res.json() }
-  catch (e) { return { error: { code: -32700, message: `Invalid JSON response: ${e.message}` } } }
-}
-
-const sendA2ATask = async (target, endpoint, task, { fetchFn, timeoutMs = 30_000 } = {}) => {
-  const _fetch = fetchFn || globalThis.fetch
-  const taskId = randomUUID()
-  const body = buildTaskSendRequest(taskId, task)
-
-  try {
-    const res = await a2aFetch(_fetch, endpoint, body, timeoutMs)
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '')
-      return DelegateResult.failed(target, `A2A HTTP ${res.status}: ${errText}`, 'remote')
+  // 공통 호출 파이프라인 (override 가능).
+  async call(target, endpoint, request, taskId, timeoutMs) {
+    try {
+      const res = await this.post(endpoint, request, timeoutMs)
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '')
+        return Delegation.failed(target, `A2A HTTP ${res.status}: ${errText}`, DelegationMode.REMOTE)
+      }
+      const data = await JsonRpc.parseResponse(res)
+      return A2ATask.fromResponse(target, taskId, data)
+    } catch (e) {
+      return Delegation.failed(target, e.message || String(e), DelegationMode.REMOTE)
     }
-
-    const data = await safeJsonParse(res)
-    return responseToResult(target, taskId, data)
-  } catch (e) {
-    return DelegateResult.failed(target, e.message || String(e), 'remote')
   }
-}
 
-// --- A2A task 상태 조회 (폴링용) ---
-
-const getA2ATaskStatus = async (target, endpoint, taskId, { fetchFn, timeoutMs = 10_000 } = {}) => {
-  const _fetch = fetchFn || globalThis.fetch
-  const body = buildTaskGetRequest(taskId)
-
-  try {
-    const res = await a2aFetch(_fetch, endpoint, body, timeoutMs)
-
-    if (!res.ok) {
-      return DelegateResult.failed(target, `A2A HTTP ${res.status}`, 'remote')
+  // HTTP transport (override 가능).
+  async post(endpoint, body, timeoutMs) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      return await this.fetchFn(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+    } finally {
+      clearTimeout(timer)
     }
-
-    const data = await safeJsonParse(res)
-    return responseToResult(target, taskId, data)
-  } catch (e) {
-    return DelegateResult.failed(target, e.message || String(e), 'remote')
   }
 }
 
-/**
- * `sendA2ATask(target, endpoint, task, opts?)` — Sends a task to a remote A2A agent via JSON-RPC and returns a DelegateResult.
- * @param {string} target - Logical agent name used in DelegateResult.
- * @param {string} endpoint - Full A2A HTTP endpoint URL.
- * @param {string} task - Free-text task description to send.
- * @param {{ fetchFn?: Function, timeoutMs?: number }} [opts]
- * @returns {Promise<DelegateResult>}
- *
- * `getA2ATaskStatus(target, endpoint, taskId, opts?)` — Polls an existing A2A task for its current status.
- * @returns {Promise<DelegateResult>}
- *
- * `extractArtifactText(artifacts)` — Extracts concatenated text parts from A2A artifact array.
- *
- * `buildTaskSendRequest / buildTaskGetRequest` — Pure JSON-RPC request builders.
- *
- * `responseToResult(target, taskId, data)` — Converts a raw A2A JSON-RPC response to a DelegateResult.
- */
-export {
-  sendA2ATask, getA2ATaskStatus, extractArtifactText,
-  buildTaskSendRequest, buildTaskGetRequest, responseToResult,
-}
+export { A2AClient }

@@ -1,7 +1,8 @@
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
+import { Delegation } from '@presence/infra/infra/agents/delegation.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import {
   askLLM, executeTool, respond, approve, delegate,
@@ -387,8 +388,8 @@ async function run() {
     const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
     const [result] = await runFreeWithStateT(interpret, ST)(agent.planner.program('보고서 요약해줘'))({})
 
-    // RESPOND가 DelegateResult를 직접 전달 (formatter 없음)
-    assert(result != null && result.status === 'completed', 'full delegate path: returns DelegateResult')
+    // RESPOND가 Delegation를 직접 전달 (formatter 없음)
+    assert(result != null && result.status === 'completed', 'full delegate path: returns Delegation')
   }
 
   // --- context 전달 ---

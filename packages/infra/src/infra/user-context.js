@@ -6,6 +6,7 @@ import { Memory } from './memory.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm.js'
 import { createAgentRegistry } from './agents/agent-registry.js'
+import { DelegationMode } from './agents/delegation.js'
 import { createEmbedder } from './embedding.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { Config } from './config.js'
@@ -41,7 +42,7 @@ const registerSummarizer = (agentRegistry, llm) => {
     name: 'summarizer',
     description: '텍스트 요약 에이전트. 긴 내용을 간결하게 정리할 때 위임하세요.',
     capabilities: ['summarize'],
-    type: 'local',
+    type: DelegationMode.LOCAL,
     run: async (task) => {
       const result = await llm.chat({
         messages: [

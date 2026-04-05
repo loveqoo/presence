@@ -1,4 +1,5 @@
 import { t } from '@presence/infra/i18n'
+import { DelegationStatus } from '@presence/infra/infra/agents/delegation.js'
 import { formatDuration, classifyPhase, PHASE_LABELS, formatOpLabel, formatSummaryLabel } from './op-chain-format.js'
 
 // =============================================================================
@@ -44,7 +45,7 @@ const appendSummaryItem = (lines, e, opts) => {
   else if (isSlowest) add(lines, `${connector}─ ${label} (${dur})  ${t('transcript.slow')}`, 'yellow')
   else add(lines, `${connector}─ ${label} (${dur})`)
 
-  if (e.result?.status === 'completed' && e.result.output) {
+  if (e.result?.status === DelegationStatus.COMPLETED && e.result.output) {  // plain trace object, no class methods
     const guide = isLast ? ' ' : '│'
     const out = typeof e.result.output === 'string' ? e.result.output : JSON.stringify(e.result.output)
     const preview = out.length > 70 ? out.slice(0, 67) + '...' : out

@@ -245,7 +245,7 @@ async function run() {
   }
 
   // ==========================================================================
-  // SV5. 알 수 없는 에이전트에 DELEGATE → DelegateResult.failed 반환, 턴 실패 아님
+  // SV5. 알 수 없는 에이전트에 DELEGATE → Delegation.failed 반환, 턴 실패 아님
   // ==========================================================================
   {
     const tmpDir = mkdtempSync(join(tmpdir(), 'presence-sv-'))
@@ -269,10 +269,10 @@ async function run() {
 
     try {
       const res = await request(port, 'POST', '/api/chat', { input: '없는 에이전트에 위임' })
-      // 턴은 실패하지 않고 계속 실행됨 (DelegateResult.failed → 다음 iteration)
+      // 턴은 실패하지 않고 계속 실행됨 (Delegation.failed → 다음 iteration)
       assert(res.status === 200, 'SV5: unknown delegate does not crash turn')
       assert(res.body.type === 'agent', 'SV5: type agent')
-      // LLM이 DelegateResult.failed를 받아 2차 호출됨
+      // LLM이 Delegation.failed를 받아 2차 호출됨
       assert(callCount >= 2, 'SV5: supervisor LLM called again after failed delegation')
     } finally {
       await shutdown()

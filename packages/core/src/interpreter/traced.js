@@ -46,7 +46,7 @@ const tracedInterpreterR = Reader.asks(({ interpret: inner, ST, logger, onOp }) 
     if (logger) logger.debug(`[op:start] ${tag}`, { tag })
     if (onOp) onOp('start', entry)
 
-    // Delegate: next를 래핑하여 DelegateResult 캡처
+    // Delegate: next를 래핑하여 Delegation 캡처
     const actual = tag === 'Delegate'
       ? { ...functor, next: (r) => {
           if (r?.status) entry.result = { status: r.status, output: r.output, mode: r.mode, error: r.error }

@@ -35,6 +35,18 @@ paths:
 
 타입 플래그로 분기하는 코드가 보이면 서브클래스로 전환한다. 공통 클래스에서 알고리즘을 정의하고, 유형별 서브클래스에서 각 단계를 구현한다.
 
+## 매직 스트링 / 매직 넘버 금지
+
+도메인 의미를 가진 리터럴 값은 반드시 `Object.freeze({...})` enum 상수로 추출한다.
+
+- **금지**: `x === 'local'`, `status === 'completed'`, `timeout === 30000`, `type === 'admin'` 등 의미 있는 리터럴 직접 비교/할당
+- **허용**: 진짜 일회성 값(에러 메시지, 로그 텍스트, 단일 문맥 suffix), wire format에 명시된 프로토콜 상수 정의부 자체, 테스트 계약 검증 assertion
+- **상수 값은 문자열 유지 가능** — 직렬화/trace/wire 호환을 위해 `Object.freeze({ LOCAL: 'local' })`처럼 값은 string, 참조만 상수로 통일
+- **배치**: 같은 도메인에서 공유되면 도메인 모듈에 (예: `DelegationStatus` in `delegation.js`). 여러 도메인 횡단이면 `policies.js`에
+- **정의와 사용은 한 enum을 공유** — getter 리턴값, 기본 파라미터, 비교문, 디스패치 조건 모두 같은 상수를 참조해야 함
+
+금지 신호: 같은 문자열/숫자 리터럴이 두 파일 이상에 등장하면 즉시 enum으로 추출.
+
 ## Extract Class 판단 기준
 
 다음 신호가 보이면 Extract Class를 적용한다.

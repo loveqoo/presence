@@ -2,7 +2,7 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 import { DELEGATE, STATE_PATH } from '@presence/core/core/policies.js'
 import { withEventMeta } from '../events.js'
-import { getA2ATaskStatus } from '../agents/a2a-client.js'
+import { A2AClient } from '../agents/a2a-client.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
 const { Task, Maybe, Reader } = fp
@@ -78,7 +78,7 @@ class DelegateActor extends ActorWrapper {
     this.eventActor = eventActor
     this.agentRegistry = agentRegistry
     this.logger = logger
-    this.fetchFn = fetchFn
+    this.a2a = new A2AClient({ fetchFn })
   }
 
   applyPollResults(state, polling, settled) {
@@ -91,8 +91,8 @@ class DelegateActor extends ActorWrapper {
   async pollEntry(entry) {
     const endpoint = this.resolveEndpoint(entry)
     if (!endpoint) return { entry, done: false }
-    const result = await getA2ATaskStatus(entry.target, endpoint, entry.taskId, { fetchFn: this.fetchFn })
-    return { entry, result, done: result.status === 'completed' || result.status === 'failed' }
+    const result = await this.a2a.getTaskStatus(entry.target, endpoint, entry.taskId)
+    return { entry, result, done: result.isTerminal() }
   }
 
   resolveEndpoint(entry) {

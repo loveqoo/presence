@@ -1,8 +1,6 @@
-import {
-  sendA2ATask, getA2ATaskStatus, extractArtifactText,
-  buildTaskSendRequest, buildTaskGetRequest, responseToResult,
-} from '@presence/infra/infra/agents/a2a-client.js'
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
+import { A2AClient } from '@presence/infra/infra/agents/a2a-client.js'
+import { Artifact, A2ATask, JsonRpc, Method, TaskState } from '@presence/infra/infra/agents/a2a-protocol.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { delegateActorR } from '@presence/infra/infra/actors/delegate-actor.js'
@@ -12,106 +10,119 @@ import { forkTask } from '@presence/core/lib/task.js'
 import { assert, summary } from '../lib/assert.js'
 
 async function run() {
-  console.log('A2A client tests')
+  console.log('A2A protocol + client tests')
 
   // ===========================================
-  // extractArtifactText (순수)
+  // Artifact.extractText (순수)
   // ===========================================
 
   {
-    const text = extractArtifactText([
+    const text = Artifact.extractText([
       { parts: [{ kind: 'text', text: 'hello' }] },
       { parts: [{ kind: 'text', text: 'world' }, { kind: 'image', data: '...' }] },
     ])
-    assert(text === 'hello\nworld', 'extractArtifact: text parts joined')
+    assert(text === 'hello\nworld', 'Artifact.extractText: text parts joined')
   }
 
   {
-    assert(extractArtifactText(null) === null, 'extractArtifact: null → null')
-    assert(extractArtifactText([]) === null, 'extractArtifact: empty → null')
-    assert(extractArtifactText([{ parts: [] }]) === null, 'extractArtifact: no text parts → null')
+    assert(Artifact.extractText(null) === null, 'Artifact.extractText: null → null')
+    assert(Artifact.extractText([]) === null, 'Artifact.extractText: empty → null')
+    assert(Artifact.extractText([{ parts: [] }]) === null, 'Artifact.extractText: no text parts → null')
   }
 
   // ===========================================
-  // buildTaskSendRequest (순수)
+  // JsonRpc.request (순수)
   // ===========================================
 
   {
-    const req = buildTaskSendRequest('t1', 'hello')
-    assert(req.jsonrpc === '2.0', 'buildRequest: jsonrpc 2.0')
-    assert(req.method === 'message/send', 'buildRequest: method')
-    assert(req.params.id === 't1', 'buildRequest: task id')
-    assert(req.params.message.role === 'user', 'buildRequest: role user')
-    assert(req.params.message.parts[0].text === 'hello', 'buildRequest: message text')
+    const req = JsonRpc.request(Method.SEND, { id: 't1', message: { role: 'user', parts: [{ kind: 'text', text: 'hello' }] } })
+    assert(req.jsonrpc === '2.0', 'JsonRpc.request: jsonrpc 2.0')
+    assert(req.method === 'message/send', 'JsonRpc.request: method SEND')
+    assert(typeof req.id === 'string' && req.id.length > 0, 'JsonRpc.request: generated id')
+    assert(req.params.id === 't1', 'JsonRpc.request: params.id')
+  }
+
+  {
+    const req = JsonRpc.request(Method.GET, { id: 'tid-42' })
+    assert(req.method === 'tasks/get', 'JsonRpc.request: method GET')
+    assert(req.params.id === 'tid-42', 'JsonRpc.request: task id')
   }
 
   // ===========================================
-  // responseToResult (순수)
+  // A2ATask.fromResponse (state machine)
   // ===========================================
 
   // completed
   {
-    const r = responseToResult('agent-x', 'tid', {
+    const r = A2ATask.fromResponse('agent-x', 'tid', {
       result: {
         id: 'tid',
-        status: { state: 'completed' },
+        status: { state: TaskState.COMPLETED },
         artifacts: [{ parts: [{ kind: 'text', text: 'done' }] }],
       },
     })
-    assert(r.status === 'completed', 'responseToResult completed: status')
-    assert(r.output === 'done', 'responseToResult completed: output')
-    assert(r.mode === 'remote', 'responseToResult completed: mode')
+    assert(r.status === 'completed', 'A2ATask.fromResponse completed: status')
+    assert(r.output === 'done', 'A2ATask.fromResponse completed: output')
+    assert(r.mode === 'remote', 'A2ATask.fromResponse completed: mode')
   }
 
   // submitted
   {
-    const r = responseToResult('agent-x', 'tid', {
-      result: { id: 'tid', status: { state: 'submitted' } },
+    const r = A2ATask.fromResponse('agent-x', 'tid', {
+      result: { id: 'tid', status: { state: TaskState.SUBMITTED } },
     })
-    assert(r.status === 'submitted', 'responseToResult submitted: status')
-    assert(r.taskId === 'tid', 'responseToResult submitted: taskId')
+    assert(r.status === 'submitted', 'A2ATask.fromResponse submitted: status')
+    assert(r.taskId === 'tid', 'A2ATask.fromResponse submitted: taskId')
   }
 
-  // working
+  // working → submitted (비동기 진행 중)
   {
-    const r = responseToResult('agent-x', 'tid', {
-      result: { id: 'tid', status: { state: 'working' } },
+    const r = A2ATask.fromResponse('agent-x', 'tid', {
+      result: { id: 'tid', status: { state: TaskState.WORKING } },
     })
-    assert(r.status === 'submitted', 'responseToResult working: maps to submitted')
+    assert(r.status === 'submitted', 'A2ATask.fromResponse working: maps to submitted')
+  }
+
+  // input-required → submitted
+  {
+    const r = A2ATask.fromResponse('agent-x', 'tid', {
+      result: { id: 'tid', status: { state: TaskState.INPUT_REQUIRED } },
+    })
+    assert(r.status === 'submitted', 'A2ATask.fromResponse input-required: maps to submitted')
   }
 
   // failed
   {
-    const r = responseToResult('agent-x', 'tid', {
+    const r = A2ATask.fromResponse('agent-x', 'tid', {
       result: {
         id: 'tid',
         status: {
-          state: 'failed',
+          state: TaskState.FAILED,
           message: { parts: [{ kind: 'text', text: 'something broke' }] },
         },
       },
     })
-    assert(r.status === 'failed', 'responseToResult failed: status')
-    assert(r.error === 'something broke', 'responseToResult failed: error')
+    assert(r.status === 'failed', 'A2ATask.fromResponse failed: status')
+    assert(r.error === 'something broke', 'A2ATask.fromResponse failed: error')
   }
 
   // JSON-RPC error
   {
-    const r = responseToResult('agent-x', 'tid', {
+    const r = A2ATask.fromResponse('agent-x', 'tid', {
       error: { code: -32600, message: 'Invalid Request' },
     })
-    assert(r.status === 'failed', 'responseToResult rpc error: failed')
-    assert(r.error.includes('Invalid Request'), 'responseToResult rpc error: message')
+    assert(r.status === 'failed', 'A2ATask.fromResponse rpc error: failed')
+    assert(r.error.includes('Invalid Request'), 'A2ATask.fromResponse rpc error: message')
   }
 
   // invalid response
   {
-    const r = responseToResult('agent-x', 'tid', { result: {} })
-    assert(r.status === 'failed', 'responseToResult invalid: failed')
+    const r = A2ATask.fromResponse('agent-x', 'tid', { result: {} })
+    assert(r.status === 'failed', 'A2ATask.fromResponse invalid: failed')
   }
 
   // ===========================================
-  // sendA2ATask (HTTP integration)
+  // sendTask (HTTP integration)
   // ===========================================
 
   // 성공: completed 즉시 반환
@@ -121,8 +132,7 @@ async function run() {
       return {
         ok: true,
         json: async () => ({
-          jsonrpc: '2.0',
-          id: body.id,
+          jsonrpc: '2.0', id: body.id,
           result: {
             id: body.params.id,
             status: { state: 'completed' },
@@ -131,7 +141,8 @@ async function run() {
         }),
       }
     }
-    const r = await sendA2ATask('remote-agent', 'https://a2a.test/rpc', '요약해줘', { fetchFn: mockFetch })
+    const client = new A2AClient({ fetchFn: mockFetch })
+    const r = await client.sendTask('remote-agent', 'https://a2a.test/rpc', '요약해줘')
     assert(r.status === 'completed', 'sendTask completed: status')
     assert(r.output === '요약 완료', 'sendTask completed: output')
     assert(r.target === 'remote-agent', 'sendTask completed: target')
@@ -140,15 +151,14 @@ async function run() {
 
   // 비동기: submitted 반환
   {
-    const mockFetch = async (url, opts) => ({
+    const mockFetch = async () => ({
       ok: true,
       json: async () => ({
-        jsonrpc: '2.0',
-        id: '1',
+        jsonrpc: '2.0', id: '1',
         result: { id: 'task-abc', status: { state: 'submitted' } },
       }),
     })
-    const r = await sendA2ATask('agent', 'https://a2a.test/rpc', 'task', { fetchFn: mockFetch })
+    const r = await new A2AClient({ fetchFn: mockFetch }).sendTask('agent', 'https://a2a.test/rpc', 'task')
     assert(r.status === 'submitted', 'sendTask submitted: status')
     assert(r.taskId === 'task-abc', 'sendTask submitted: taskId from response')
   }
@@ -156,11 +166,9 @@ async function run() {
   // HTTP 에러
   {
     const mockFetch = async () => ({
-      ok: false,
-      status: 503,
-      text: async () => 'Service Unavailable',
+      ok: false, status: 503, text: async () => 'Service Unavailable',
     })
-    const r = await sendA2ATask('agent', 'https://a2a.test/rpc', 'task', { fetchFn: mockFetch })
+    const r = await new A2AClient({ fetchFn: mockFetch }).sendTask('agent', 'https://a2a.test/rpc', 'task')
     assert(r.status === 'failed', 'sendTask http error: failed')
     assert(r.error.includes('503'), 'sendTask http error: status in error')
   }
@@ -168,7 +176,7 @@ async function run() {
   // 네트워크 에러
   {
     const mockFetch = async () => { throw new Error('ECONNREFUSED') }
-    const r = await sendA2ATask('agent', 'https://a2a.test/rpc', 'task', { fetchFn: mockFetch })
+    const r = await new A2AClient({ fetchFn: mockFetch }).sendTask('agent', 'https://a2a.test/rpc', 'task')
     assert(r.status === 'failed', 'sendTask network error: failed (not thrown)')
     assert(r.error.includes('ECONNREFUSED'), 'sendTask network error: message')
   }
@@ -182,7 +190,7 @@ async function run() {
         error: { code: -32601, message: 'Method not found' },
       }),
     })
-    const r = await sendA2ATask('agent', 'https://a2a.test/rpc', 'task', { fetchFn: mockFetch })
+    const r = await new A2AClient({ fetchFn: mockFetch }).sendTask('agent', 'https://a2a.test/rpc', 'task')
     assert(r.status === 'failed', 'sendTask rpc error: failed')
     assert(r.error.includes('Method not found'), 'sendTask rpc error: message')
   }
@@ -202,7 +210,7 @@ async function run() {
         }),
       }
     }
-    await sendA2ATask('agent', 'https://example.com/a2a', '작업 내용', { fetchFn: mockFetch })
+    await new A2AClient({ fetchFn: mockFetch }).sendTask('agent', 'https://example.com/a2a', '작업 내용')
 
     assert(capturedUrl === 'https://example.com/a2a', 'sendTask: correct endpoint')
     assert(capturedBody.jsonrpc === '2.0', 'sendTask: jsonrpc 2.0')
@@ -211,37 +219,47 @@ async function run() {
   }
 
   // ===========================================
-  // getA2ATaskStatus
+  // getTaskStatus
   // ===========================================
 
   {
-    const mockFetch = async (url, opts) => ({
+    const mockFetch = async () => ({
       ok: true,
       json: async () => ({
         jsonrpc: '2.0', id: '1',
         result: {
-          id: 'tid',
-          status: { state: 'completed' },
+          id: 'tid', status: { state: 'completed' },
           artifacts: [{ parts: [{ kind: 'text', text: 'finally done' }] }],
         },
       }),
     })
-    const r = await getA2ATaskStatus('agent', 'https://a2a.test/rpc', 'tid', { fetchFn: mockFetch })
+    const r = await new A2AClient({ fetchFn: mockFetch }).getTaskStatus('agent', 'https://a2a.test/rpc', 'tid')
     assert(r.status === 'completed', 'getTaskStatus completed: status')
     assert(r.output === 'finally done', 'getTaskStatus completed: output')
   }
 
   {
     const mockFetch = async () => { throw new Error('timeout') }
-    const r = await getA2ATaskStatus('agent', 'https://a2a.test/rpc', 'tid', { fetchFn: mockFetch })
+    const r = await new A2AClient({ fetchFn: mockFetch }).getTaskStatus('agent', 'https://a2a.test/rpc', 'tid')
     assert(r.status === 'failed', 'getTaskStatus network error: failed')
   }
 
-  // buildTaskGetRequest
+  // tasks/get 호출 시 올바른 method 전달 확인
   {
-    const req = buildTaskGetRequest('tid-42')
-    assert(req.method === 'tasks/get', 'buildGetRequest: method')
-    assert(req.params.id === 'tid-42', 'buildGetRequest: task id')
+    let capturedBody = null
+    const mockFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body)
+      return {
+        ok: true,
+        json: async () => ({
+          jsonrpc: '2.0', id: '1',
+          result: { id: 'tid-42', status: { state: 'completed' }, artifacts: [] },
+        }),
+      }
+    }
+    await new A2AClient({ fetchFn: mockFetch }).getTaskStatus('agent', 'https://a2a.test/rpc', 'tid-42')
+    assert(capturedBody.method === 'tasks/get', 'getTaskStatus: uses tasks/get method')
+    assert(capturedBody.params.id === 'tid-42', 'getTaskStatus: passes taskId')
   }
 
   // ===========================================

@@ -1,4 +1,5 @@
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
+import { Delegation } from '@presence/infra/infra/agents/delegation.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { assert, summary } from '../lib/assert.js'
 const { Maybe } = fp
@@ -7,31 +8,54 @@ async function run() {
   console.log('Agent registry tests')
 
   // ===========================================
-  // DelegateResult shape
+  // Delegation shape
   // ===========================================
 
   {
-    const c = DelegateResult.completed('reviewer', 'LGTM')
+    const c = Delegation.completed('reviewer', 'LGTM')
     assert(c.mode === 'local', 'completed: default mode local')
     assert(c.target === 'reviewer', 'completed: target')
     assert(c.status === 'completed', 'completed: status')
     assert(c.output === 'LGTM', 'completed: output')
-    assert(c.artifact === null, 'completed: artifact null')
+    assert(c.isCompleted() && c.isTerminal(), 'completed: isCompleted + isTerminal')
+    assert(c.asOutput().isJust() && c.asTaskId().isNothing() && c.asError().isNothing(), 'completed: Maybe fields')
   }
 
   {
-    const s = DelegateResult.submitted('remote-agent', 'task-123', 'remote')
+    const s = Delegation.submitted('remote-agent', 'task-123', 'remote')
     assert(s.mode === 'remote', 'submitted: mode remote')
     assert(s.status === 'submitted', 'submitted: status')
     assert(s.taskId === 'task-123', 'submitted: taskId')
-    assert(s.output === null, 'submitted: output null')
+    assert(s.isSubmitted() && s.isPending(), 'submitted: isSubmitted + isPending')
+    assert(s.asTaskId().isJust() && s.asOutput().isNothing(), 'submitted: Maybe fields')
   }
 
   {
-    const f = DelegateResult.failed('unknown', 'not found')
+    const f = Delegation.failed('unknown', 'not found')
     assert(f.status === 'failed', 'failed: status')
     assert(f.error === 'not found', 'failed: error message')
     assert(f.mode === null, 'failed: default mode null')
+    assert(f.isFailed() && f.isTerminal(), 'failed: isFailed + isTerminal')
+    assert(f.asError().isJust() && f.asOutput().isNothing(), 'failed: Maybe fields')
+  }
+
+  // match: exhaustive dispatch
+  {
+    const c = Delegation.completed('x', 'out')
+    const result = c.match({
+      completed: r => `done: ${r.output}`,
+      submitted: r => `pending: ${r.taskId}`,
+      failed: r => `err: ${r.error}`,
+    })
+    assert(result === 'done: out', 'match: completed branch')
+  }
+
+  // match: missing handler throws
+  {
+    const s = Delegation.submitted('x', 'id-1')
+    let threw = false
+    try { s.match({ completed: () => 'c', failed: () => 'f' }) } catch { threw = true }
+    assert(threw, 'match: missing handler throws')
   }
 
   // ===========================================

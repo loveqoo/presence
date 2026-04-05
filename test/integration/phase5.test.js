@@ -3,7 +3,8 @@ import { Agent } from '@presence/core/core/agent.js'
 import { applyFinalState } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
+import { Delegation } from '@presence/infra/infra/agents/delegation.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
 import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
 import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
@@ -129,8 +130,8 @@ async function run() {
       // Delegate handler: local agent run (sync for test interpreter)
       Delegate: (op) => {
         const entry = agentReg.get(op.target)
-        if (entry.isNothing()) return DelegateResult.failed(op.target, 'Unknown')
-        return DelegateResult.completed(op.target, `요약: ${op.task}`)
+        if (entry.isNothing()) return Delegation.failed(op.target, 'Unknown')
+        return Delegation.completed(op.target, `요약: ${op.task}`)
       },
     })
 
@@ -141,7 +142,7 @@ async function run() {
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 E2E: turnState idle')
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'Step 30 E2E: success')
-    assert(result != null && result.status === 'completed', 'Step 30 E2E: result is DelegateResult')
+    assert(result != null && result.status === 'completed', 'Step 30 E2E: result is Delegation')
   }
 
   // Delegate 실패 → plan이 실패로 닫힘
@@ -167,7 +168,7 @@ async function run() {
         }
         return 'should not reach'
       },
-      Delegate: (op) => DelegateResult.failed(op.target, 'Unknown agent'),
+      Delegate: (op) => Delegation.failed(op.target, 'Unknown agent'),
     })
 
     const agent = new Agent({
@@ -176,8 +177,8 @@ async function run() {
     })
     await agent.run('test')
 
-    // DELEGATE returns DelegateResult.failed → RESPOND ref=1 gets the failed result object
-    // Formatter still runs (DelegateResult is a valid result)
+    // DELEGATE returns Delegation.failed → RESPOND ref=1 gets the failed result object
+    // Formatter still runs (Delegation is a valid result)
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 delegate fail: idle')
   }
 
@@ -193,7 +194,7 @@ async function run() {
     })
 
     const { interpret, ST } = createTestInterpreter({
-      Delegate: (op) => DelegateResult.completed(op.target, `done: ${op.task}`),
+      Delegate: (op) => Delegation.completed(op.target, `done: ${op.task}`),
     })
 
     // parallel([respond('a'), respond('b')]) → allSettled 결과

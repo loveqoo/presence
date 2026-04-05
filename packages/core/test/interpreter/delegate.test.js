@@ -1,7 +1,8 @@
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agents/agent-registry.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
+import { Delegation } from '@presence/infra/infra/agents/delegation.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { delegate, respond } from '@presence/core/core/op.js'
 
@@ -25,7 +26,7 @@ async function run() {
   console.log('DelegateInterpreter unit tests')
 
   // ==========================================================================
-  // 1. local agent run() 호출 → DelegateResult.completed
+  // 1. local agent run() 호출 → Delegation.completed
   // ==========================================================================
   {
     const reg = createAgentRegistry()
@@ -46,7 +47,7 @@ async function run() {
   }
 
   // ==========================================================================
-  // 2. local agent run() throws → DelegateResult.failed (프로그램 실행은 계속)
+  // 2. local agent run() throws → Delegation.failed (프로그램 실행은 계속)
   // ==========================================================================
   {
     const reg = createAgentRegistry()
@@ -63,11 +64,11 @@ async function run() {
     assert(result.target === 'broken', '2: target broken')
     assert(result.error === 'agent crashed', '2: error message')
     assert(result.mode === 'local', '2: mode local on failure')
-    assert(result.output === null, '2: output null on failure')
+    assert(result.asOutput().isNothing(), '2: no output on failure')
   }
 
   // ==========================================================================
-  // 3. 알 수 없는 에이전트 → DelegateResult.failed("Unknown agent: ...")
+  // 3. 알 수 없는 에이전트 → Delegation.failed("Unknown agent: ...")
   // ==========================================================================
   {
     const reg = createAgentRegistry()
@@ -81,7 +82,7 @@ async function run() {
   }
 
   // ==========================================================================
-  // 4. run 없는 local 에이전트 → DelegateResult.failed
+  // 4. run 없는 local 에이전트 → Delegation.failed
   // ==========================================================================
   {
     const reg = createAgentRegistry()
@@ -96,7 +97,7 @@ async function run() {
   }
 
   // ==========================================================================
-  // 5. agentRegistry 없이 생성 → DelegateResult.failed("Unknown agent: ...")
+  // 5. agentRegistry 없이 생성 → Delegation.failed("Unknown agent: ...")
   // ==========================================================================
   {
     const { interpret, ST } = prodInterpreterR.run({

@@ -1,3 +1,5 @@
+import { Delegation } from '@presence/infra/infra/agents/delegation.js'
+
 // =============================================================================
 // Op chain formatters: op event → 사람 친화적 label/phase 매핑.
 // =============================================================================
@@ -34,10 +36,11 @@ const PHASE_LABELS = {
 
 const formatDelegateLabel = (label, result) => {
   if (!result) return label
-  if (result.status === 'completed') return `${label} → completed`
-  if (result.status === 'failed') return `${label} → failed: ${result.error || '?'}`
-  if (result.status === 'submitted') return `${label} → submitted`
-  return label
+  return Delegation.match(result, {
+    completed: () => `${label} → completed`,
+    failed: (r) => `${label} → failed: ${r.error || '?'}`,
+    submitted: () => `${label} → submitted`,
+  })
 }
 
 const formatUpdateStateLabel = (detail) => {
@@ -67,16 +70,17 @@ const formatOpLabel = (e) => {
 
 const formatDelegateSummaryLabel = (label, result) => {
   if (!result) return label
-  if (result.status === 'completed') {
-    const out = result.output || ''
-    const preview = typeof out === 'string'
-      ? (out.length > 40 ? out.slice(0, 37) + '...' : out)
-      : JSON.stringify(out).slice(0, 40)
-    return `${label} → ${preview}`
-  }
-  if (result.status === 'failed') return `${label} ✗ ${result.error || 'failed'}`
-  if (result.status === 'submitted') return `${label} → submitted`
-  return label
+  return Delegation.match(result, {
+    completed: (r) => {
+      const out = r.output || ''
+      const preview = typeof out === 'string'
+        ? (out.length > 40 ? out.slice(0, 37) + '...' : out)
+        : JSON.stringify(out).slice(0, 40)
+      return `${label} → ${preview}`
+    },
+    failed: (r) => `${label} ✗ ${r.error || 'failed'}`,
+    submitted: () => `${label} → submitted`,
+  })
 }
 
 // 요약 뷰: phase 기준 단순 label.

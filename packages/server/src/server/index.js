@@ -7,6 +7,7 @@ import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Config } from '@presence/infra/infra/config.js'
 import { createUserStore } from '@presence/infra/infra/auth/auth-user-store.js'
 import { SESSION_TYPE } from '@presence/core/core/policies.js'
+import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { sessionBridgeR } from './ws-bridge.js'
 import { sessionRoutesR } from './legacy-routes.js'
 import { buildUserContextManager } from './user-context-manager.js'
@@ -47,7 +48,7 @@ const registerAgentSessions = (userContext) => {
       name: agentDef.name,
       description: agentDef.description,
       capabilities: agentDef.capabilities || [],
-      type: 'local',
+      type: DelegationMode.LOCAL,
       run: (task) => agentEntry.session.handleInput(task),
     })
     agentEntry.session.delegateActor.start().fork(() => {}, () => {})
