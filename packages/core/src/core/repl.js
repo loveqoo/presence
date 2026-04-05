@@ -34,13 +34,13 @@ class Repl {
   get turnCount() { return this._turnCount }
   stop() { this._running = false }
 
-  _output(text) { if (this.onOutput) this.onOutput(text) }
+  emit(text) { if (this.onOutput) this.onOutput(text) }
 
   cmdHelp() {
     const lines = Object.entries(COMMANDS)
       .map(([cmd, desc]) => `  ${cmd.padEnd(12)} ${desc}`)
       .join('\n')
-    this._output(`Available commands:\n${lines}`)
+    this.emit(`Available commands:\n${lines}`)
   }
 
   cmdStatus() {
@@ -54,36 +54,36 @@ class Repl {
       `delegates pending: ${(this.state.get(STATE_PATH.DELEGATES_PENDING) || []).length}`,
       `todos: ${(this.state.get(STATE_PATH.TODOS) || []).length}`,
     ]
-    this._output(lines.join('\n'))
+    this.emit(lines.join('\n'))
   }
 
   cmdTools() {
     const tools = this.toolRegistry ? this.toolRegistry.list() : []
-    if (tools.length === 0) { this._output(this.t('repl.no_tools')); return }
+    if (tools.length === 0) { this.emit(this.t('repl.no_tools')); return }
     const lines = tools.map(tool => `  ${tool.name.padEnd(20)} ${tool.description || ''}`)
-    this._output(`Tools (${tools.length}):\n${lines.join('\n')}`)
+    this.emit(`Tools (${tools.length}):\n${lines.join('\n')}`)
   }
 
   cmdAgents() {
     const agents = this.agentRegistry ? this.agentRegistry.list() : []
-    if (agents.length === 0) { this._output(this.t('repl.no_agents')); return }
+    if (agents.length === 0) { this.emit(this.t('repl.no_agents')); return }
     const lines = agents.map(a => `  ${a.name.padEnd(20)} [${a.type}] ${a.description || ''}`)
-    this._output(`Agents (${agents.length}):\n${lines.join('\n')}`)
+    this.emit(`Agents (${agents.length}):\n${lines.join('\n')}`)
   }
 
   cmdMemory() {
-    if (!this.memory) { this._output(this.t('repl.memory_unavailable')); return }
+    if (!this.memory) { this.emit(this.t('repl.memory_unavailable')); return }
     const nodes = this.memory.allNodes().slice(-10)
-    if (nodes.length === 0) { this._output(this.t('repl.no_memories')); return }
+    if (nodes.length === 0) { this.emit(this.t('repl.no_memories')); return }
     const lines = nodes.map(n => `  [${n.tier}] ${n.label}${n.vector ? ' 🔢' : ''}`)
-    this._output(`Recent memories (${nodes.length}):\n${lines.join('\n')}`)
+    this.emit(`Recent memories (${nodes.length}):\n${lines.join('\n')}`)
   }
 
   cmdTodos() {
     const todos = this.state.get(STATE_PATH.TODOS) || []
-    if (todos.length === 0) { this._output(this.t('repl.no_todos')); return }
+    if (todos.length === 0) { this.emit(this.t('repl.no_todos')); return }
     const lines = todos.map(todo => `  ${todo.done ? '✓' : '○'} [${todo.type}] ${todo.title}`)
-    this._output(`TODOs (${todos.length}):\n${lines.join('\n')}`)
+    this.emit(`TODOs (${todos.length}):\n${lines.join('\n')}`)
   }
 
   cmdEvents() {
@@ -97,23 +97,23 @@ class Repl {
       `dead letters: ${dl.length}`,
       ...dl.slice(-3).map(e => `  [${e.type}] ${e.error?.slice(0, 50) || '?'}`),
     ]
-    this._output(lines.join('\n'))
+    this.emit(lines.join('\n'))
   }
 
   cmdMcp(input) {
-    if (!this.mcp || this.mcp.list().length === 0) { this._output('No MCP servers configured.'); return }
+    if (!this.mcp || this.mcp.list().length === 0) { this.emit('No MCP servers configured.'); return }
     const args = input.trim().split(/\s+/).slice(1)
     const sub = args[0] || 'list'
     if (sub === 'list') {
       const lines = this.mcp.list().map(s => `  ${s.enabled ? '●' : '○'} ${s.prefix}  ${s.serverName}  (${s.toolCount} tools)`)
-      this._output(`MCP servers:\n${lines.join('\n')}`)
+      this.emit(`MCP servers:\n${lines.join('\n')}`)
     } else if (sub === 'enable' || sub === 'disable') {
       const prefix = args[1]
-      if (!prefix) { this._output(`Usage: /mcp ${sub} <id>  (e.g. mcp0)`); return }
+      if (!prefix) { this.emit(`Usage: /mcp ${sub} <id>  (e.g. mcp0)`); return }
       const ok = sub === 'enable' ? this.mcp.enable(prefix) : this.mcp.disable(prefix)
-      this._output(ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}`)
+      this.emit(ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}`)
     } else {
-      this._output('Usage: /mcp [list | enable <id> | disable <id>]')
+      this.emit('Usage: /mcp [list | enable <id> | disable <id>]')
     }
   }
 
@@ -135,7 +135,7 @@ class Repl {
     this._turnCount++
     try {
       const result = await this.agent.run(input)
-      this._output(result)
+      this.emit(result)
       return result
     } catch (err) {
       if (this.onError) this.onError(err)
