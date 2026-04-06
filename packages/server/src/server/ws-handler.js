@@ -1,5 +1,5 @@
 import fp from '@presence/core/lib/fun-fp.js'
-import { authenticateWsR } from '@presence/infra/infra/auth/auth-ws.js'
+import { AUTH_ERROR } from '@presence/infra/infra/auth/policy.js'
 
 const { Either } = fp
 
@@ -20,21 +20,21 @@ const checkOrigin = (req, host) => {
   }
 }
 
+// AuthError.code → WS close 코드 매핑
+const wsCloseCode = (authError) => {
+  if (authError.code === AUTH_ERROR.PASSWORD_CHANGE_REQUIRED) return 4002
+  return 4001
+}
+
 // WS 인증 수행. 실패 시 ws 종료 + false 반환.
-const authenticateWs = (ws, req, authDeps) => {
-  const { tokenService, userStore } = authDeps
+const authenticateWs = (ws, req, wsAuth) => {
   let authenticated = false
   Either.fold(
-    () => { ws.close(4001, 'Unauthorized') },
-    payload => { ws.user = payload; authenticated = true },
-    authenticateWsR(req).run({ tokenService, userStore }),
+    error => { ws.close(wsCloseCode(error), error.message) },
+    principal => { ws.user = principal; authenticated = true },
+    wsAuth.authenticateUpgrade(req),
   )
-  if (!authenticated) return false
-  if (ws.user?.mustChangePassword) {
-    ws.close(4002, 'Password change required')
-    return false
-  }
-  return true
+  return authenticated
 }
 
 // join 메시지 처리: 세션 소유권 검증 + init 응답.
@@ -50,7 +50,7 @@ const handleJoinMessage = (ws, msg, ctx) => {
 }
 
 const attachWsHandler = (wss, deps) => {
-  const { host, authEnabled, tokenService, userStore, userContext, defaultSession, getUserContextManager } = deps
+  const { host, authEnabled, wsAuth, userContext, defaultSession, getUserContextManager } = deps
 
   wss.on('connection', (ws, req) => {
     // Origin 체크 (쿠키 기반 인증 시만)
@@ -60,7 +60,7 @@ const attachWsHandler = (wss, deps) => {
     }
 
     // WS 인증
-    if (authEnabled && !authenticateWs(ws, req, { tokenService, userStore })) return
+    if (authEnabled && !authenticateWs(ws, req, wsAuth)) return
 
     // 유저별 활동 추적
     const wsUsername = ws.user?.username ?? null

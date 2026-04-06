@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, chmodSync } from 'fs'
 import { join } from 'path'
 import { Config } from '../config.js'
 import fp from '@presence/core/lib/fun-fp.js'
+import { AUTH } from './policy.js'
 
 const { Either } = fp
 
@@ -10,10 +11,6 @@ const { Either } = fp
 // TokenService: JWT sign/verify with node:crypto HMAC-SHA256
 // Secret 파일: ~/.presence/server.secret.json (권한 0600)
 // =============================================================================
-
-const ACCESS_TOKEN_EXPIRY_S = 15 * 60       // 15분
-const REFRESH_TOKEN_EXPIRY_S = 7 * 24 * 3600 // 7일
-const ISSUER = 'presence'
 
 // --- Base64url 유틸 ---
 
@@ -122,7 +119,7 @@ const verify = (token, secret, { audience } = {}) => {
     payload => {
       const now = Math.floor(Date.now() / 1000)
       if (payload.exp && payload.exp < now) return Either.Left('token expired')
-      if (payload.iss !== ISSUER) return Either.Left('invalid issuer')
+      if (payload.iss !== AUTH.ISSUER) return Either.Left('invalid issuer')
       if (audience && payload.aud !== audience) return Either.Left('invalid audience')
       return Either.Right(payload)
     },
@@ -140,17 +137,17 @@ const verify = (token, secret, { audience } = {}) => {
 
 const createTokenService = ({ basePath } = {}) => {
   const secret = ensureSecret({ basePath })
-  const audience = 'presence'
+  const audience = AUTH.AUDIENCE
 
   const signAccessToken = ({ sub, roles, mustChangePassword }) => {
     const now = Math.floor(Date.now() / 1000)
     return sign({
       sub, roles,
       mustChangePassword: mustChangePassword || false,
-      iss: ISSUER,
+      iss: AUTH.ISSUER,
       aud: audience,
       iat: now,
-      exp: now + ACCESS_TOKEN_EXPIRY_S,
+      exp: now + AUTH.ACCESS_TOKEN_EXPIRY_S,
     }, secret)
   }
 
@@ -161,10 +158,10 @@ const createTokenService = ({ basePath } = {}) => {
       sub, tokenVersion,
       type: 'refresh',
       jti,
-      iss: ISSUER,
+      iss: AUTH.ISSUER,
       aud: audience,
       iat: now,
-      exp: now + REFRESH_TOKEN_EXPIRY_S,
+      exp: now + AUTH.REFRESH_TOKEN_EXPIRY_S,
     }, secret)
     return { token, jti }
   }

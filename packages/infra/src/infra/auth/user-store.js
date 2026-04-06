@@ -3,14 +3,12 @@ import { join } from 'path'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { Config } from '../config.js'
+import { AUTH } from './policy.js'
 
 // =============================================================================
 // UserStore: 사용자 CRUD + refreshSessions 관리
 // 파일: ~/.presence/users.json
 // =============================================================================
-
-const MIN_PASSWORD_LENGTH = 8
-const BCRYPT_ROUNDS = 12
 
 const UserSchema = z.object({
   username: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
@@ -78,8 +76,8 @@ const createUserStore = ({ basePath } = {}) => {
     if (!username || !/^[a-zA-Z0-9_-]{1,64}$/.test(username)) {
       throw new Error('Username must be 1-64 characters: letters, numbers, _ or -')
     }
-    if (!password || password.length < MIN_PASSWORD_LENGTH) {
-      throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+    if (!password || password.length < AUTH.MIN_PASSWORD_LENGTH) {
+      throw new Error(`Password must be at least ${AUTH.MIN_PASSWORD_LENGTH} characters`)
     }
 
     const store = load()
@@ -87,7 +85,7 @@ const createUserStore = ({ basePath } = {}) => {
       throw new Error(`User already exists: ${username}`)
     }
 
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
+    const passwordHash = await bcrypt.hash(password, AUTH.BCRYPT_ROUNDS)
     const user = {
       username,
       passwordHash,
@@ -112,15 +110,15 @@ const createUserStore = ({ basePath } = {}) => {
   }
 
   const changePassword = async (username, newPassword) => {
-    if (!newPassword || newPassword.length < MIN_PASSWORD_LENGTH) {
-      throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+    if (!newPassword || newPassword.length < AUTH.MIN_PASSWORD_LENGTH) {
+      throw new Error(`Password must be at least ${AUTH.MIN_PASSWORD_LENGTH} characters`)
     }
 
     const store = load()
     const user = store.users.find(u => u.username === username)
     if (!user) throw new Error(`User not found: ${username}`)
 
-    user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS)
+    user.passwordHash = await bcrypt.hash(newPassword, AUTH.BCRYPT_ROUNDS)
     user.tokenVersion += 1
     user.refreshSessions = [] // 모든 세션 무효화
     user.mustChangePassword = false
@@ -193,4 +191,4 @@ const createUserStore = ({ basePath } = {}) => {
   }
 }
 
-export { createUserStore, MIN_PASSWORD_LENGTH, UserStoreFileSchema }
+export { createUserStore, UserStoreFileSchema }

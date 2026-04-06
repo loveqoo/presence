@@ -5,7 +5,7 @@ import express from 'express'
 import { WebSocketServer } from 'ws'
 import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Config } from '@presence/infra/infra/config.js'
-import { createUserStore } from '@presence/infra/infra/auth/auth-user-store.js'
+import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { SESSION_TYPE } from '@presence/core/core/policies.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { sessionBridgeR } from './ws-bridge.js'
@@ -141,7 +141,7 @@ const startServer = async (configOverride, opts = {}) => {
   registerAgentSessions(userContext)
 
   // Auth
-  const { authEnabled } = setupAuth(expressApp)
+  const { authEnabled, wsAuth } = setupAuth(expressApp)
   let userContextManager = null
   const getUserContextManager = () => userContextManager
 
@@ -169,11 +169,8 @@ const startServer = async (configOverride, opts = {}) => {
   userContextManager = buildUserContextManager({ bridge, configOverride })
 
   // WebSocket
-  const userStore = createUserStore()
-  const { createTokenService } = await import('@presence/infra/infra/auth/auth-token.js')
-  const tokenService = createTokenService()
   attachWsHandler(wss, {
-    host, authEnabled, tokenService, userStore,
+    host, authEnabled, wsAuth,
     userContext, defaultSession, getUserContextManager,
   })
 

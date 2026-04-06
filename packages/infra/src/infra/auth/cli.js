@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { createInterface } from 'node:readline'
-import { createUserStore } from './auth-user-store.js'
-import { ensureSecret } from './auth-token.js'
+import { createUserStore } from './user-store.js'
+import { ensureSecret } from './token.js'
 
 // =============================================================================
 // Auth CLI: 사용자 관리 도구
