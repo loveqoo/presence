@@ -20,7 +20,7 @@ const App = (props) => {
     agentName = 'Presence', tools = [], agents = [],
     initialMessages = [], cwd = '', gitBranch = '',
     model: initialModel = '', config = null, memory = null,
-    llm = null, mcpControl = null, sessionId = 'user-default',
+    llm = null, toolRegistry = null, sessionId = 'user-default',
     onListSessions = null, onCreateSession = null,
     onDeleteSession = null, onSwitchSession = null,
   } = props
@@ -98,7 +98,7 @@ const App = (props) => {
   const handleInput = useCallback((input) => {
     const slashCtx = {
       addMessage, exit, state, agentState, config,
-      tools, memory, llm, mcpControl,
+      tools, memory, llm, toolRegistry,
       currentModel, setCurrentModel,
       setMessages, setShowPanel, statusItems, setStatusItems,
       sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
@@ -116,7 +116,7 @@ const App = (props) => {
         })
       })
     }
-  }, [onInput, exit, agentState, tools, addMessage, statusItems, currentModel, llm, memory, config, state, mcpControl, sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession])
+  }, [onInput, exit, agentState, tools, addMessage, statusItems, currentModel, llm, memory, config, state, toolRegistry, sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession])
 
   const handleApprove = useCallback((approved) => {
     if (onApprove) onApprove(approved)
