@@ -7,26 +7,30 @@ class MemoryActor extends ActorWrapper {
   static MSG = Object.freeze({ RECALL: 'recall', SAVE: 'save' })
   static RESULT = Object.freeze({ OK: 'ok', SKIP: 'skip', NO_OP: 'no-op' })
 
-  constructor(memory, logger) {
+  #memory
+  #logger
+
+  constructor(memory, opts = {}) {
+    const { logger } = opts
     const R = MemoryActor.RESULT
     super({}, (actorState, msg) => {
       switch (msg.type) {
         // 유사 메모리 검색
         case MemoryActor.MSG.RECALL: {
-          if (!this.memory) return [[], actorState]
-          return Task.fromPromise(() => this.memory.search(msg.input))()
+          if (!this.#memory) return [[], actorState]
+          return Task.fromPromise(() => this.#memory.search(msg.input))()
             .map(nodes => [nodes, actorState])
-            .catchError(e => this.onRecallError(e, actorState))
+            .catchError(e => this.#onRecallError(e, actorState))
         }
 
         // 대화 턴 저장 (캐시 동기화 포함)
         case MemoryActor.MSG.SAVE: {
-          if (!this.memory) return [R.SKIP, actorState]
+          if (!this.#memory) return [R.SKIP, actorState]
           const { data } = msg.node || {}
           if (!data?.input) return [R.SKIP, actorState]
-          return Task.fromPromise(() => this.memory.add(data.input, data.output))()
+          return Task.fromPromise(() => this.#memory.add(data.input, data.output))()
             .map(() => [R.OK, actorState])
-            .catchError(e => this.onSaveError(e, actorState))
+            .catchError(e => this.#onSaveError(e, actorState))
         }
 
         default:
@@ -34,18 +38,18 @@ class MemoryActor extends ActorWrapper {
       }
     })
 
-    this.memory = memory
-    this.logger = logger
+    this.#memory = memory
+    this.#logger = logger
   }
 
-  onRecallError(err, actorState) {
-    (this.logger || console).warn('memory recall failed', { error: err.message })
+  #onRecallError(err, actorState) {
+    (this.#logger || console).warn('memory recall failed', { error: err.message })
     return Task.of([[], actorState])
   }
 
-  onSaveError(err, actorState) {
+  #onSaveError(err, actorState) {
     const R = MemoryActor.RESULT
-    ;(this.logger || console).warn('memory save failed', { error: err.message })
+    ;(this.#logger || console).warn('memory save failed', { error: err.message })
     return Task.of([R.SKIP, actorState])
   }
 
@@ -53,6 +57,6 @@ class MemoryActor extends ActorWrapper {
   save(node) { return this.send({ type: MemoryActor.MSG.SAVE, node }) }
 }
 
-const memoryActorR = Reader.asks(({ memory, logger }) => new MemoryActor(memory, logger))
+const memoryActorR = Reader.asks(({ memory, ...opts }) => new MemoryActor(memory, opts))
 
 export { MemoryActor, memoryActorR }

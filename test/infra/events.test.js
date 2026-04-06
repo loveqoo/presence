@@ -202,48 +202,6 @@ async function run() {
     assert(result === EventActor.RESULT.NO_OP_BUSY, 'drain idempotency: not-idle → no-op')
   }
 
-  // ===========================================
-  // applyTodo (순수 함수)
-  // ===========================================
-
-  // 이벤트에 todo 필드 → TODO 생성
-  {
-    const state = createOriginState({ turnState: TurnState.idle(), todos: [] })
-    const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
-    const eventActor = new EventActor(mockTurnActor, state)
-    eventActor.applyTodo({
-      id: 'evt-1',
-      type: 'pr_assigned',
-      todo: { type: 'pr_review', title: 'Review PR #42', data: { url: '/pr/42' } },
-    })
-
-    const todos = state.get('todos')
-    assert(todos.length === 1, 'applyTodo: 1 todo')
-    assert(todos[0].type === 'pr_review', 'applyTodo: correct type')
-    assert(todos[0].sourceEventId === 'evt-1', 'applyTodo: sourceEventId')
-    assert(todos[0].done === false, 'applyTodo: not done')
-  }
-
-  // todo 필드 없는 이벤트 → TODO 미생성
-  {
-    const state = createOriginState({ turnState: TurnState.idle(), todos: [] })
-    const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
-    const eventActor = new EventActor(mockTurnActor, state)
-    eventActor.applyTodo({ id: 'evt-2', type: 'heartbeat' })
-    assert(state.get('todos').length === 0, 'applyTodo no todo: no todo created')
-  }
-
-  // 멱등성: 같은 이벤트 재처리 → TODO 중복 없음
-  {
-    const state = createOriginState({ turnState: TurnState.idle(), todos: [] })
-    const mockTurnActor = turnActorR.run({ runTurn: async () => 'done' })
-    const eventActor = new EventActor(mockTurnActor, state)
-    const event = { id: 'evt-dup', type: 'issue', todo: { type: 'issue_review', title: 'Check issue' } }
-    eventActor.applyTodo(event)
-    eventActor.applyTodo(event) // 재처리
-    assert(state.get('todos').length === 1, 'applyTodo idempotent: no duplicate')
-  }
-
   // EventActor drain 성공 → applyTodo 자동 호출
   {
     const state = createOriginState({

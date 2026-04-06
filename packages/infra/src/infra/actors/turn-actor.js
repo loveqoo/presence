@@ -11,20 +11,22 @@ const TurnFailure = (message) => Object.freeze({ tag: 'TurnFailure', message })
 TurnFailure.is = (result) => result != null && result.tag === 'TurnFailure'
 
 class TurnActor extends ActorWrapper {
+  static MSG = Object.freeze({ RUN: 'run' })
   static TurnFailure = TurnFailure
 
   constructor(runTurn) {
     // 에이전트 턴 1회 실행. 성공→결과 반환, 실패→TurnFailure로 래핑.
-    super({}, (actorState, { input, source, allowedTools }) =>
-      Task.fromPromise(() => runTurn(input, { source, allowedTools: allowedTools || [] }))()
+    super({}, (actorState, msg) => {
+      if (msg.type !== TurnActor.MSG.RUN) return [null, actorState]
+      return Task.fromPromise(() => runTurn(msg.input, { source: msg.source, allowedTools: msg.allowedTools || [] }))()
         .map(result => [result, actorState])
-        .catchError(err => Task.of([TurnFailure(err.message), actorState])),
-    )
+        .catchError(err => Task.of([TurnFailure(err.message), actorState]))
+    })
   }
 
   run(input, opts = {}) {
     const { source = TURN_SOURCE.USER, allowedTools = [] } = opts
-    return this.send({ input, source, allowedTools })
+    return this.send({ type: TurnActor.MSG.RUN, input, source, allowedTools })
       .map(result => {
         if (TurnFailure.is(result)) throw new Error(result.message)
         return result

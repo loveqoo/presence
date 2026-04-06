@@ -1,15 +1,13 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import fp from '@presence/core/lib/fun-fp.js'
-import { CompactionActor, SUMMARY_MARKER } from '@presence/infra/infra/actors/compaction-actor.js'
+import { SUMMARY_MARKER, extractForCompaction, summaryEntry, compactionPrompt } from '@presence/infra/infra/actors/compaction-actor.js'
 import { migrateHistoryIds } from '@presence/infra/infra/persistence.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 
 import { assert, assertDeepEqual, summary } from '../../../../test/lib/assert.js'
 
 const { Maybe } = fp
-const mockLlmNoop = { chat: async () => ({ content: '' }) }
-const compactor = new CompactionActor(mockLlmNoop)
 
 // --- 헬퍼 ---
 const makeHistory = (n) => Array.from({ length: n }, (_, i) => ({
@@ -28,21 +26,21 @@ async function run() {
   // E1. threshold 미달 → Nothing
   {
     const history = makeHistory(10)
-    const result = compactor.extractForCompaction(history, 15, 5)
+    const result = extractForCompaction(history, 15, 5)
     assert(Maybe.isNothing(result), 'extractForCompaction: below threshold → Nothing')
   }
 
   // E2. threshold 경계 (== threshold) → Nothing
   {
     const history = makeHistory(15)
-    const result = compactor.extractForCompaction(history, 15, 5)
+    const result = extractForCompaction(history, 15, 5)
     assert(Maybe.isNothing(result), 'extractForCompaction: at threshold → Nothing')
   }
 
   // E3. 정상 분리
   {
     const history = makeHistory(20)
-    const result = compactor.extractForCompaction(history, 15, 5)
+    const result = extractForCompaction(history, 15, 5)
     assert(Maybe.isJust(result), 'extractForCompaction: above threshold → Just')
     const split = unwrap(result)
     assert(split.extracted.length === 15, 'extractForCompaction: extracted count')
@@ -52,7 +50,7 @@ async function run() {
   // E4. remaining 정확성
   {
     const history = makeHistory(20)
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     assertDeepEqual(split.remaining, history.slice(15), 'extractForCompaction: remaining matches tail')
   }
 
@@ -60,35 +58,35 @@ async function run() {
   {
     const history = makeHistory(20)
     const original = JSON.parse(JSON.stringify(history))
-    compactor.extractForCompaction(history, 15, 5)
+    extractForCompaction(history, 15, 5)
     assertDeepEqual(history, original, 'extractForCompaction: input array not mutated')
   }
 
   // E6. keep <= 0 → Nothing
   {
     const history = makeHistory(20)
-    assert(Maybe.isNothing(compactor.extractForCompaction(history, 15, 0)), 'extractForCompaction: keep=0 → Nothing')
-    assert(Maybe.isNothing(compactor.extractForCompaction(history, 15, -1)), 'extractForCompaction: keep=-1 → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(history, 15, 0)), 'extractForCompaction: keep=0 → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(history, 15, -1)), 'extractForCompaction: keep=-1 → Nothing')
   }
 
   // E7. keep >= history.length → Nothing
   {
     const history = makeHistory(20)
-    assert(Maybe.isNothing(compactor.extractForCompaction(history, 15, 20)), 'extractForCompaction: keep=length → Nothing')
-    assert(Maybe.isNothing(compactor.extractForCompaction(history, 15, 25)), 'extractForCompaction: keep>length → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(history, 15, 20)), 'extractForCompaction: keep=length → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(history, 15, 25)), 'extractForCompaction: keep>length → Nothing')
   }
 
   // E8. keep >= threshold → Nothing
   {
     const history = makeHistory(20)
-    assert(Maybe.isNothing(compactor.extractForCompaction(history, 15, 15)), 'extractForCompaction: keep=threshold → Nothing')
-    assert(Maybe.isNothing(compactor.extractForCompaction(history, 15, 16)), 'extractForCompaction: keep>threshold → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(history, 15, 15)), 'extractForCompaction: keep=threshold → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(history, 15, 16)), 'extractForCompaction: keep>threshold → Nothing')
   }
 
   // E9. non-array → Nothing
   {
-    assert(Maybe.isNothing(compactor.extractForCompaction(null, 15, 5)), 'extractForCompaction: null → Nothing')
-    assert(Maybe.isNothing(compactor.extractForCompaction(undefined, 15, 5)), 'extractForCompaction: undefined → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(null, 15, 5)), 'extractForCompaction: null → Nothing')
+    assert(Maybe.isNothing(extractForCompaction(undefined, 15, 5)), 'extractForCompaction: undefined → Nothing')
   }
 
   // =============================================
@@ -98,7 +96,7 @@ async function run() {
   // B1. 일반 턴
   {
     const turns = [{ input: 'hi', output: 'hello' }, { input: 'bye', output: 'goodbye' }]
-    const prompt = compactor.compactionPrompt(turns)
+    const prompt = compactionPrompt(turns)
     assert(prompt.messages.length === 2, 'compactionPrompt: 2 messages (system + user)')
     assert(prompt.messages[1].content.includes('User: hi'), 'compactionPrompt: contains user input')
     assert(!prompt.messages[0].content.includes('이전 요약'), 'compactionPrompt: no previous summary instruction')
@@ -110,14 +108,14 @@ async function run() {
       { input: SUMMARY_MARKER, output: 'previous summary text' },
       { input: 'new q', output: 'new a' },
     ]
-    const prompt = compactor.compactionPrompt(turns)
+    const prompt = compactionPrompt(turns)
     assert(prompt.messages[0].content.includes('이전 요약'), 'compactionPrompt: summary-at-head uses merge instruction')
     assert(prompt.messages[1].content.includes('[Previous Summary]'), 'compactionPrompt: contains previous summary tag')
   }
 
   // B3. 빈 배열
   {
-    const prompt = compactor.compactionPrompt([])
+    const prompt = compactionPrompt([])
     assert(prompt.messages.length === 2, 'compactionPrompt: empty array still produces 2 messages')
   }
 
@@ -127,7 +125,7 @@ async function run() {
 
   // S1. format 검증
   {
-    const entry = compactor.summaryEntry('test summary')
+    const entry = summaryEntry('test summary')
     assert(entry.id.startsWith('summary-'), 'summaryEntry: id starts with summary-')
     assert(entry.input === SUMMARY_MARKER, 'summaryEntry: input is SUMMARY_MARKER')
     assert(entry.output === 'test summary', 'summaryEntry: output preserved')
@@ -136,8 +134,8 @@ async function run() {
 
   // S2. 두 번 호출 시 id 다름 (random suffix)
   {
-    const a = compactor.summaryEntry('a')
-    const b = compactor.summaryEntry('b')
+    const a = summaryEntry('a')
+    const b = summaryEntry('b')
     assert(a.id !== b.id, 'summaryEntry: unique ids')
   }
 
@@ -213,7 +211,7 @@ async function run() {
     const mockLlm = { chat: async () => ({ content: 'summary of conversation' }) }
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
 
     // Phase 1: 동기 추출 + placeholder
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
@@ -225,13 +223,13 @@ async function run() {
     assert(afterPhase1[0].input === SUMMARY_MARKER, 'integration: placeholder has SUMMARY_MARKER')
 
     // Phase 2: 비동기 요약
-    const result = await mockLlm.chat(compactor.compactionPrompt(split.extracted))
+    const result = await mockLlm.chat(compactionPrompt(split.extracted))
 
     // Phase 3: placeholder → 실제 summary 교체
     const epochNow = state.get('_compactionEpoch')
     assert(epochNow === epochBefore + 1, 'integration: epoch unchanged')
     const current = state.get('context.conversationHistory')
-    const entry = compactor.summaryEntry(result.content)
+    const entry = summaryEntry(result.content)
     const replaced = current.map(h => h.id === placeholderId ? entry : h)
     state.set('context.conversationHistory', replaced)
 
@@ -246,7 +244,7 @@ async function run() {
   // I2. threshold 미달 → 건너뜀
   {
     const history = makeHistory(10)
-    const result = compactor.extractForCompaction(history, 15, 5)
+    const result = extractForCompaction(history, 15, 5)
     assert(Maybe.isNothing(result), 'integration: below threshold → skip')
   }
 
@@ -258,7 +256,7 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
 
     // /clear 발생 시뮬레이션
@@ -284,7 +282,7 @@ async function run() {
     }
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
 
     // Phase 2: LLM 실패 → placeholder 제거
@@ -309,7 +307,7 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
 
     // 비동기 gap 중 새 턴 2개 append
@@ -329,7 +327,7 @@ async function run() {
     const epochNow = state.get('_compactionEpoch')
     assert(epochNow === epochBefore + 1, 'integration: epoch still matches')
     const afterAppend = state.get('context.conversationHistory')
-    const entry = compactor.summaryEntry('combined summary')
+    const entry = summaryEntry('combined summary')
     const replaced = afterAppend.map(h => h.id === placeholderId ? entry : h)
     state.set('context.conversationHistory', replaced)
 
@@ -373,7 +371,7 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
 
     // 비동기 gap 중: 다수 턴 append → rolling window가 MAX_HISTORY=20으로 trim
@@ -394,7 +392,7 @@ async function run() {
     const epochNow = state.get('_compactionEpoch')
     assert(epochNow === epochBefore + 1, 'integration: epoch matches after trim')
     const afterTrim = state.get('context.conversationHistory')
-    const entry = compactor.summaryEntry('trimmed summary')
+    const entry = summaryEntry('trimmed summary')
     const hasPlaceholder = afterTrim.some(h => h.id === placeholderId)
     const merged = hasPlaceholder
       ? afterTrim.map(h => h.id === placeholderId ? entry : h)
@@ -436,7 +434,7 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
 
     // /clear + 새 턴
@@ -460,9 +458,9 @@ async function run() {
       { id: 'summary-old', input: SUMMARY_MARKER, output: 'old summary text', ts: 100 },
       ...makeHistory(16).slice(0, 15),
     ]
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     assert(split.extracted[0].input === SUMMARY_MARKER, 'integration: summary-of-summaries → old summary in extracted')
-    const prompt = compactor.compactionPrompt(split.extracted)
+    const prompt = compactionPrompt(split.extracted)
     assert(prompt.messages[0].content.includes('이전 요약'), 'integration: summary-of-summaries → merge instruction')
   }
 
@@ -478,7 +476,7 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId } = simulatePhase1(state, split)
 
     // 비동기 gap — 사용자가 새 질문을 보냈다고 가정
@@ -502,12 +500,12 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId } = simulatePhase1(state, split)
 
     // 교체
     const current = state.get('context.conversationHistory')
-    const entry = compactor.summaryEntry('real summary')
+    const entry = summaryEntry('real summary')
     const replaced = current.map(h => h.id === placeholderId ? entry : h)
     state.set('context.conversationHistory', replaced)
 
@@ -525,7 +523,7 @@ async function run() {
     })
 
     const history = state.get('context.conversationHistory')
-    const split = unwrap(compactor.extractForCompaction(history, 15, 5))
+    const split = unwrap(extractForCompaction(history, 15, 5))
     const { placeholderId, epochBefore } = simulatePhase1(state, split)
 
     // 비동기 gap 중 새 턴 추가
@@ -556,7 +554,7 @@ async function run() {
       output: '요약 진행 중...', ts: 100,
     }
     // placeholder가 혹시 다음 compaction의 extracted에 들어가면?
-    const prompt = compactor.compactionPrompt([placeholderEntry, { input: 'q', output: 'a' }])
+    const prompt = compactionPrompt([placeholderEntry, { input: 'q', output: 'a' }])
     // SUMMARY_MARKER 이므로 [Previous Summary]로 인식됨 — 이것은 의도된 동작
     assert(prompt.messages[1].content.includes('[Previous Summary]'), 'placeholder: treated as previous summary if in extracted')
     assert(prompt.messages[0].content.includes('이전 요약'), 'placeholder: merge instruction triggered')

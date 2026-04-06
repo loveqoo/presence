@@ -49,6 +49,12 @@ export const DELEGATE = Object.freeze({
   POLL_INTERVAL_MS: 10_000,
 })
 
+export const SCHEDULER = Object.freeze({
+  POLL_INTERVAL_MS: 60_000,
+  BACKOFF_BASE_MS: 1_000,
+  BACKOFF_EXPONENT: 2,
+})
+
 export const STATE_PATH = Object.freeze({
   TURN_STATE: 'turnState',
   TURN: 'turn',

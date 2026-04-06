@@ -4,7 +4,7 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { HISTORY, PHASE, RESULT, TurnState, STATE_PATH } from '@presence/core/core/policies.js'
 import { MemoryActor, memoryActorR } from '@presence/infra/infra/actors/memory-actor.js'
-import { CompactionActor, compactionActorR, SUMMARY_MARKER } from '@presence/infra/infra/actors/compaction-actor.js'
+import { CompactionActor, compactionActorR, SUMMARY_MARKER, summaryEntry } from '@presence/infra/infra/actors/compaction-actor.js'
 import { PersistenceActor, persistenceActorR } from '@presence/infra/infra/actors/persistence-actor.js'
 import { forkTask } from '@presence/core/lib/task.js'
 import { Agent } from '@presence/core/core/agent.js'
@@ -12,8 +12,7 @@ import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { assert, summary } from '../lib/assert.js'
 
 const { Task } = fp
-const mockLlmNoop = { chat: async () => ({ content: '' }) }
-const compactor = new CompactionActor(mockLlmNoop)
+
 
 // --- Helpers ---
 
@@ -289,7 +288,7 @@ async function run() {
       context: { conversationHistory: makeHistory(20) },
     })
     const extractedIds = new Set(makeHistory(15).map(h => h.id))
-    const summary = compactor.summaryEntry('test summary')
+    const summary = summaryEntry('test summary')
 
     applyCompaction(state, { summary, extractedIds })
 
@@ -309,7 +308,7 @@ async function run() {
       context: { conversationHistory: historyWithNoId },
     })
     const extractedIds = new Set(['h-0', 'h-1'])
-    const summary = compactor.summaryEntry('merged')
+    const summary = summaryEntry('merged')
 
     applyCompaction(state, { summary, extractedIds })
 
@@ -324,7 +323,7 @@ async function run() {
       context: { conversationHistory: makeHistory(HISTORY.MAX_CONVERSATION) },
     })
     const extractedIds = new Set()  // nothing extracted → all preserved
-    const summary = compactor.summaryEntry('big summary')
+    const summary = summaryEntry('big summary')
 
     applyCompaction(state, { summary, extractedIds })
 

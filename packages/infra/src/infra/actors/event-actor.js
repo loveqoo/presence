@@ -14,6 +14,10 @@ class EventActor extends ActorWrapper {
     NO_OP_BUSY: 'no-op:busy', NO_OP_NO_TODOS: 'no-op:no-todos', UNKNOWN: 'unknown',
   })
 
+  #state
+  #logger
+  #onEventDone
+
   constructor(turnActor, state, opts = {}) {
     const { logger, onEventDone, todoReviewJobName } = opts
     const R = EventActor.RESULT
@@ -25,7 +29,7 @@ class EventActor extends ActorWrapper {
           // 큐에 이벤트 추가. idle 상태면 즉시 drain 시작.
           case EventActor.MSG.ENQUEUE: {
             const next = { ...actorState, queue: [...actorState.queue, msg.event] }
-            this.projectEvents(next)
+            this.#projectEvents(next)
             const ts = state.get(STATE_PATH.TURN_STATE)
             if (ts && ts.tag === PHASE.IDLE && !actorState.inFlight) {
               fireAndForget(this.drain())
@@ -41,20 +45,20 @@ class EventActor extends ActorWrapper {
             if (!ts || ts.tag !== 'idle') return [R.NO_OP_BUSY, actorState]
 
             const [head, ...rest] = actorState.queue
-            const todoResult = this.resolveTodoReview(head, state, todoReviewJobName)
-            if (todoResult.skip) return this.skipTodoReview(actorState, rest)
+            const todoResult = this.#resolveTodoReview(head, state, todoReviewJobName)
+            if (todoResult.skip) return this.#skipTodoReview(actorState, rest)
             const event = todoResult.event
 
             const draining = { ...actorState, queue: rest, inFlight: event }
-            this.projectEvents(draining)
+            this.#projectEvents(draining)
 
             const runEvent = () => forkTask(
               turnActor.run(eventToPrompt(event), { source: TURN_SOURCE.EVENT, allowedTools: event.allowedTools || [] }),
             )
 
             return Task.fromPromise(runEvent)()
-              .map(result => this.onDrainSuccess(draining, event, result))
-              .catchError(err => this.onDrainFailure(draining, event, err))
+              .map(result => [R.DRAINED, this.#handleDrainSuccess(draining, event, result)])
+              .catchError(err => Task.of([R.DEAD_LETTER, this.#handleDrainFailure(draining, event, err)]))
           }
 
           default:
@@ -63,31 +67,42 @@ class EventActor extends ActorWrapper {
       },
     )
 
-    this.state = state
-    this.logger = logger
-    this.onEventDone = onEventDone
+    this.#state = state
+    this.#logger = logger
+    this.#onEventDone = onEventDone
   }
 
-  projectEvents({ queue, inFlight, deadLetter, lastProcessed }) {
-    this.state.set(STATE_PATH.EVENTS_QUEUE, queue.map(e => ({ ...e })))
-    this.state.set(STATE_PATH.EVENTS_IN_FLIGHT, inFlight ? { ...inFlight } : null)
-    this.state.set(STATE_PATH.EVENTS_DEAD_LETTER, deadLetter.map(e => ({ ...e })))
-    if (lastProcessed !== undefined) this.state.set(STATE_PATH.EVENTS_LAST_PROCESSED, lastProcessed)
+  // --- Public 메시지 API ---
+  enqueue(event) { return this.send({ type: EventActor.MSG.ENQUEUE, event }) }
+  drain() { return this.send({ type: EventActor.MSG.DRAIN }) }
+
+  emit(event) {
+    const enriched = withEventMeta(event)
+    fireAndForget(this.enqueue(enriched))
+    return enriched
   }
 
-  applyTodo(event) {
+  // --- 내부: 상태 투영 ---
+  #projectEvents({ queue, inFlight, deadLetter, lastProcessed }) {
+    this.#state.set(STATE_PATH.EVENTS_QUEUE, queue.map(e => ({ ...e })))
+    this.#state.set(STATE_PATH.EVENTS_IN_FLIGHT, inFlight ? { ...inFlight } : null)
+    this.#state.set(STATE_PATH.EVENTS_DEAD_LETTER, deadLetter.map(e => ({ ...e })))
+    if (lastProcessed !== undefined) this.#state.set(STATE_PATH.EVENTS_LAST_PROCESSED, lastProcessed)
+  }
+
+  #applyTodo(event) {
     Maybe.fold(
       () => {},
       todo => {
-        const todos = this.state.get(STATE_PATH.TODOS) || []
+        const todos = this.#state.get(STATE_PATH.TODOS) || []
         if (isDuplicate(todos, event.id)) return
-        this.state.set(STATE_PATH.TODOS, [...todos, todo])
+        this.#state.set(STATE_PATH.TODOS, [...todos, todo])
       },
       todoFromEvent(event),
     )
   }
 
-  resolveTodoReview(event, state, todoReviewJobName) {
+  #resolveTodoReview(event, state, todoReviewJobName) {
     const isTodoReview = event.type === 'todo_review' ||
       (todoReviewJobName && event.jobName === todoReviewJobName)
     if (!isTodoReview) return { event, skip: false }
@@ -96,26 +111,16 @@ class EventActor extends ActorWrapper {
     return { event: { ...event, prompt: buildTodoReviewPrompt(pending) }, skip: false }
   }
 
-  onDrainSuccess(draining, event, result) {
-    const R = EventActor.RESULT
-    return [R.DRAINED, this.handleDrainSuccess(draining, event, result)]
-  }
-
-  onDrainFailure(draining, event, err) {
-    const R = EventActor.RESULT
-    return Task.of([R.DEAD_LETTER, this.handleDrainFailure(draining, event, err)])
-  }
-
-  handleDrainSuccess(draining, event, result) {
-    this.applyTodo(event)
-    if (this.onEventDone) this.onEventDone(event, { success: true, result })
+  #handleDrainSuccess(draining, event, result) {
+    this.#applyTodo(event)
+    if (this.#onEventDone) this.#onEventDone(event, { success: true, result })
     const done = { ...draining, queue: [...draining.queue], inFlight: null, lastProcessed: event }
-    this.projectEvents(done)
+    this.#projectEvents(done)
     if (done.queue.length > 0) fireAndForget(this.drain())
     return done
   }
 
-  handleDrainFailure(draining, event, err) {
+  #handleDrainFailure(draining, event, err) {
     const deadLetterEntry = {
       ...event,
       error: err.message || String(err),
@@ -127,25 +132,16 @@ class EventActor extends ActorWrapper {
       inFlight: null,
       deadLetter: [...draining.deadLetter, deadLetterEntry],
     }
-    this.projectEvents(failed)
-    if (this.onEventDone) this.onEventDone(event, { success: false, error: err.message })
-    ;(this.logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
+    this.#projectEvents(failed)
+    if (this.#onEventDone) this.#onEventDone(event, { success: false, error: err.message })
+    ;(this.#logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
     if (failed.queue.length > 0) fireAndForget(this.drain())
     return failed
   }
 
-  enqueue(event) { return this.send({ type: EventActor.MSG.ENQUEUE, event }) }
-  drain() { return this.send({ type: EventActor.MSG.DRAIN }) }
-
-  emit(event) {
-    const enriched = withEventMeta(event)
-    fireAndForget(this.enqueue(enriched))
-    return enriched
-  }
-
-  skipTodoReview(actorState, rest) {
+  #skipTodoReview(actorState, rest) {
     const skipped = { ...actorState, queue: rest }
-    this.projectEvents(skipped)
+    this.#projectEvents(skipped)
     if (rest.length > 0) fireAndForget(this.drain())
     return [EventActor.RESULT.NO_OP_NO_TODOS, skipped]
   }

@@ -10,6 +10,9 @@ class PersistenceActor extends ActorWrapper {
   static MSG = Object.freeze({ SAVE: 'save', FLUSH: 'flush' })
   static RESULT = Object.freeze({ FLUSHED: 'flushed', DEFERRED: 'deferred', SKIP: 'skip' })
 
+  #store
+  #logger
+
   constructor(store, opts = {}) {
     const { logger, debounceMs = PERSISTENCE.DEBOUNCE_MS } = opts
     let timer = null
@@ -19,7 +22,7 @@ class PersistenceActor extends ActorWrapper {
       // 즉시 디스크 기록. 디바운스 타이머가 있으면 취소.
       if (msg.type === PersistenceActor.MSG.FLUSH) {
         if (timer) { clearTimeout(timer); timer = null }
-        if (msg.snapshot) this.flushToDisk(store, msg.snapshot, logger)
+        if (msg.snapshot) this.#flushToDisk(msg.snapshot)
         return [R.FLUSHED, actorState]
       }
       if (msg.type !== PersistenceActor.MSG.SAVE) return [R.SKIP, actorState]
@@ -32,16 +35,21 @@ class PersistenceActor extends ActorWrapper {
       }, debounceMs)
       return [R.DEFERRED, actorState]
     })
+
+    this.#store = store
+    this.#logger = logger
   }
 
-  flushToDisk(store, snapshot, logger) {
-    try { store.set(PERSISTENCE.STORE_KEY, stripTransient(snapshot)) } catch (err) {
-      (logger || console).warn('Persistence flush failed', { error: err.message })
-    }
-  }
-
+  // --- Public 메시지 API ---
   save(snapshot) { return this.send({ type: PersistenceActor.MSG.SAVE, snapshot }) }
   flush(snapshot) { return this.send({ type: PersistenceActor.MSG.FLUSH, snapshot }) }
+
+  // --- 내부: 디스크 기록 ---
+  #flushToDisk(snapshot) {
+    try { this.#store.set(PERSISTENCE.STORE_KEY, stripTransient(snapshot)) } catch (err) {
+      (this.#logger || console).warn('Persistence flush failed', { error: err.message })
+    }
+  }
 }
 
 const persistenceActorR = Reader.asks(({ store, ...opts }) => new PersistenceActor(store, opts))
