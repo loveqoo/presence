@@ -12,7 +12,7 @@ const bootstrap = async (configOverride, opts = {}) => {
   const userContext = await UserContext.create(configOverride)
   const { session } = userContext.sessions.create({ id: 'user-default', persistenceCwd })
 
-  const { config, logger, personaConfig, memory, llm, mcpControl, jobStore, embedder, mcpConnections } = userContext
+  const { config, logger, personaConfig, memory, llm, toolRegistry, jobStore, embedder, mcpConnections } = userContext
   const { agent, state, tools, agents, handleInput, handleApproveResponse, handleCancel, schedulerActor, delegateActor } = session
 
   // --- Startup summary ---
@@ -38,7 +38,7 @@ const bootstrap = async (configOverride, opts = {}) => {
     tools, agents, personaConfig,
     handleInput, handleApproveResponse, handleCancel,
     schedulerActor, delegateActor, jobStore,
-    memory, llm, mcpControl,
+    memory, llm, toolRegistry,
     shutdown,
   }
 }

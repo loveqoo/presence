@@ -198,7 +198,7 @@ const setupTuiE2E = async (mockHandler) => {
     config: {},
     memory: null,
     llm: null,
-    mcpControl: null,
+    toolRegistry: null,
     initialMessages: [],
   }))
 

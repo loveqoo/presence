@@ -10,7 +10,7 @@ const toolInterpreterR = Reader.asks(({ ST, toolRegistry, toolResultUi }) =>
     if (!tool) return ST.of(f.next(`[ERROR] Unknown tool: ${f.name}`))
     if (!tool.handler) return ST.of(f.next(`[ERROR] Tool '${f.name}' has no handler`))
     return ST.lift(Task.fromPromise(() =>
-      Promise.resolve(tool.handler(f.args))
+      Promise.resolve(tool.handler(f.args, { toolRegistry }))
         .catch(err => `[ERROR] ${f.name}: ${err.message}`)
     )())
       .map(result => {

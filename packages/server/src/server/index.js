@@ -99,7 +99,7 @@ const buildAppFacade = (userContext, defaultSession, globalSchedulerActor, shutd
   personaConfig: userContext.personaConfig,
   memory: userContext.memory,
   llm: userContext.llm,
-  mcpControl: userContext.mcpControl,
+  toolRegistry: userContext.toolRegistry,
   jobStore: userContext.jobStore,
   handleInput: defaultSession.handleInput,
   handleApproveResponse: defaultSession.handleApproveResponse,

@@ -172,7 +172,7 @@ const setupLive = async ({ sessionId = 'user-default' } = {}) => {
     gitBranch: '',
     model: config.llm?.model || '',
     config,
-    memory: null, llm: null, mcpControl: null,
+    memory: null, llm: null, toolRegistry: null,
     initialMessages: [],
     sessionId,
     onListSessions,

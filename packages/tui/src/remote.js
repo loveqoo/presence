@@ -125,7 +125,7 @@ const runRemote = async (baseUrl, opts = {}) => {
       config,
       memory: null,
       llm: null,
-      mcpControl: null,
+      toolRegistry: null,
       initialMessages: [],
       sessionId: currentSessionId,
       onListSessions,

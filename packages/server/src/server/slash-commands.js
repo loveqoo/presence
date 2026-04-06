@@ -6,20 +6,21 @@ import { STATE_PATH } from '@presence/core/core/policies.js'
 // 반환: { handled: boolean, result?: { type, content } }
 // =============================================================================
 
-const mcpCommand = (args, mcpControl) => {
-  if (!mcpControl || mcpControl.list().length === 0) {
+const mcpCommand = (args, toolRegistry) => {
+  const groups = toolRegistry.groups()
+  if (groups.length === 0) {
     return { handled: true, result: { type: 'system', content: 'No MCP servers configured.' } }
   }
   const sub = args[0] || 'list'
   if (sub === 'list') {
-    const lines = mcpControl.list().map(s => `${s.enabled ? '●' : '○'} ${s.prefix}  ${s.serverName}  (${s.toolCount} tools)`)
+    const lines = groups.map(s => `${s.enabled ? '●' : '○'} ${s.group}  ${s.serverName}  (${s.toolCount} tools)`)
     return { handled: true, result: { type: 'system', content: `MCP servers:\n${lines.join('\n')}` } }
   }
   if (sub === 'enable' || sub === 'disable') {
-    const prefix = args[1]
-    if (!prefix) return { handled: true, result: { type: 'system', content: `Usage: /mcp ${sub} <id>` } }
-    const ok = sub === 'enable' ? mcpControl.enable(prefix) : mcpControl.disable(prefix)
-    return { handled: true, result: { type: 'system', content: ok ? `${prefix} ${sub}d.` : `Unknown MCP id: ${prefix}` } }
+    const group = args[1]
+    if (!group) return { handled: true, result: { type: 'system', content: `Usage: /mcp ${sub} <id>` } }
+    const ok = sub === 'enable' ? toolRegistry.enableGroup(group) : toolRegistry.disableGroup(group)
+    return { handled: true, result: { type: 'system', content: ok ? `${group} ${sub}d.` : `Unknown MCP id: ${group}` } }
   }
   return { handled: true, result: { type: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' } }
 }
@@ -43,8 +44,8 @@ const memoryListCommand = (memory) => {
 }
 
 const handleSlashCommand = (input, ctx) => {
-  const { state, tools, memory, mcpControl } = ctx
-  if (input.startsWith('/mcp')) return mcpCommand(input.trim().split(/\s+/).slice(1), mcpControl)
+  const { state, tools, memory, toolRegistry } = ctx
+  if (input.startsWith('/mcp')) return mcpCommand(input.trim().split(/\s+/).slice(1), toolRegistry)
   if (input === '/clear') {
     clearDebugState(state)
     return { handled: true, result: { type: 'system', content: 'Conversation cleared.' } }

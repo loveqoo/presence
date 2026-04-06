@@ -3,9 +3,13 @@ import { execSync } from 'child_process'
 import { resolve, join } from 'path'
 import { z } from 'zod'
 import { t } from '../../i18n/index.js'
-import fp from '@presence/core/lib/fun-fp.js'
+import { TOOL_SOURCE } from './tool-registry.js'
 
-const { Maybe } = fp
+const LOCAL_TOOLS = Object.freeze({
+  FETCH_TIMEOUT_MS: 15_000,
+  TEXT_TRUNCATE_LENGTH: 10_000,
+  SHELL_TIMEOUT_MS: 30_000,
+})
 
 // --- 도구 인자 스키마 ---
 
@@ -71,7 +75,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
 
   return [
     {
-      name: 'file_read',
+      name: 'file_read', source: TOOL_SOURCE.LOCAL, promptVisible: true,
       description: 'Read a text file. Use relative paths like "package.json" or "src/core/agent.js". Use maxLines to read the first N lines, or tailLines to read the last N lines.',
       parameters: {
         type: 'object',
@@ -96,7 +100,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
     },
 
     {
-      name: 'file_write',
+      name: 'file_write', source: TOOL_SOURCE.LOCAL, promptVisible: true,
       description: 'Write content to a file. Use relative paths. REQUIRES APPROVE before use.',
       parameters: {
         type: 'object',
@@ -116,7 +120,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
     },
 
     {
-      name: 'file_list',
+      name: 'file_list', source: TOOL_SOURCE.LOCAL, promptVisible: true,
       description: 'List files and directories. Use relative paths like "src/core" or ".".',
       parameters: {
         type: 'object',
@@ -150,7 +154,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
     },
 
     {
-      name: 'web_fetch',
+      name: 'web_fetch', source: TOOL_SOURCE.LOCAL, promptVisible: true,
       description: 'Fetch content from a URL. Returns text content.',
       parameters: {
         type: 'object',
@@ -162,12 +166,12 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
       handler: async (rawArgs) => {
         const { url } = parseArgs(WebFetchArgs, rawArgs, 'web_fetch')
         const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 15_000)
+        const timeout = setTimeout(() => controller.abort(), LOCAL_TOOLS.FETCH_TIMEOUT_MS)
         try {
           const res = await fetch(url, { signal: controller.signal })
           if (!res.ok) throw new Error(t('error.http_error', { status: res.status }))
           const text = await res.text()
-          return text.length > 10_000 ? text.slice(0, 10_000) + '\n...(truncated)' : text
+          return text.length > LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH ? text.slice(0, LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH) + '\n...(truncated)' : text
         } finally {
           clearTimeout(timeout)
         }
@@ -175,7 +179,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
     },
 
     {
-      name: 'shell_exec',
+      name: 'shell_exec', source: TOOL_SOURCE.LOCAL, promptVisible: true,
       description: 'Execute a shell command. REQUIRES APPROVE before use. Returns stdout.',
       parameters: {
         type: 'object',
@@ -187,7 +191,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
       handler: (rawArgs) => {
         const { command } = parseArgs(ShellExecArgs, rawArgs, 'shell_exec')
         try {
-          return execSync(command, { encoding: 'utf-8', timeout: 30_000 }).trim()
+          return execSync(command, { encoding: 'utf-8', timeout: LOCAL_TOOLS.SHELL_TIMEOUT_MS }).trim()
         } catch (e) {
           throw new Error(t('error.command_failed', { message: e.message }))
         }
@@ -195,7 +199,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
     },
 
     {
-      name: 'calculate',
+      name: 'calculate', source: TOOL_SOURCE.LOCAL, promptVisible: true,
       description: 'Evaluate a math expression. Returns the result as string.',
       parameters: {
         type: 'object',

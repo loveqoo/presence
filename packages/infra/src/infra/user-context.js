@@ -94,9 +94,8 @@ class UserContext {
     userContext.toolRegistry = createToolRegistry()
     const localTools = createLocalTools({ allowedDirs: userContext.config.tools?.allowedDirs || [process.cwd()] })
     for (const tool of localTools) userContext.toolRegistry.register(tool)
-    const { mcpConnections, mcpControl } = await initMcpIntegration(userContext.config, userContext.logger, userContext.toolRegistry)
+    const { mcpConnections } = await initMcpIntegration(userContext.config, userContext.logger, userContext.toolRegistry)
     userContext.mcpConnections = mcpConnections
-    userContext.mcpControl = mcpControl
 
     // --- LLM + Agents ---
     userContext.llm = new LLMClient({

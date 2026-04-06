@@ -14,7 +14,7 @@ const { Reader } = fp
  */
 const sessionRoutesR = Reader.asks(env => {
   const { session, userContext } = env
-  const { mcpControl, memory, config } = userContext
+  const { toolRegistry, memory, config } = userContext
   const router = express.Router()
   router.use(express.json())
 
@@ -24,7 +24,7 @@ const sessionRoutesR = Reader.asks(env => {
       return res.status(400).json({ error: 'input (string) required' })
     }
     if (input.startsWith('/')) {
-      const cmd = handleSlashCommand(input, { state: session.state, tools: session.tools, memory, mcpControl })
+      const cmd = handleSlashCommand(input, { state: session.state, tools: session.tools, memory, toolRegistry })
       if (cmd.handled) return res.json(cmd.result)
     }
     try {

@@ -85,23 +85,23 @@ async function run() {
 
     // ========================================================================
     // SA3. AGENT 세션: job/todo 툴이 없음 — USER 세션이 먼저 만들어진 후여도 마찬가지
-    // job 툴은 세션 로컬 registry에만 등록되므로 userContext.toolRegistry를 공유해도 누수 없음
+    // job/todo 도구는 전역 registry에 등록 — 모든 세션 타입에서 접근 가능
     // ========================================================================
     {
       const freshGlobalCtx = await UserContext.create(config)
 
-      // USER 세션 먼저 생성 (job 툴 등록)
+      // USER 세션 먼저 생성 (job 도구 전역 등록)
       const userSession = Session.create(freshGlobalCtx, { type: SESSION_TYPE.USER })
       const userToolNames = userSession.tools.map(t => t.name)
       assert(userToolNames.includes('schedule_job'), 'SA3 setup: user session has schedule_job')
       assert(userToolNames.includes('read_todos'), 'SA3 setup: user session has read_todos')
 
-      // AGENT 세션 이후 생성 — job 툴 누수가 없어야 함
+      // AGENT 세션도 전역 도구 접근 가능
       const agentSession = Session.create(freshGlobalCtx, { type: SESSION_TYPE.AGENT })
       const agentToolNames = agentSession.tools.map(t => t.name)
-      assert(!agentToolNames.includes('schedule_job'), 'SA3: no schedule_job in agent tools (even after user session)')
-      assert(!agentToolNames.includes('read_todos'), 'SA3: no read_todos in agent tools (even after user session)')
-      assert(!agentToolNames.includes('list_jobs'), 'SA3: no list_jobs in agent tools (even after user session)')
+      assert(agentToolNames.includes('schedule_job'), 'SA3: agent session sees schedule_job (global tool)')
+      assert(agentToolNames.includes('read_todos'), 'SA3: agent session sees read_todos (global tool)')
+      assert(agentToolNames.includes('list_jobs'), 'SA3: agent session sees list_jobs (global tool)')
 
       await userSession.shutdown()
       await agentSession.shutdown()

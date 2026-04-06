@@ -56,7 +56,7 @@ const mountSessionEndpoints = (expressApp, deps) => {
     if (input.startsWith('/')) {
       const cmd = handleSlashCommand(input, {
         state: session.state, tools: session.tools,
-        memory: userContext.memory, mcpControl: userContext.mcpControl,
+        memory: userContext.memory, toolRegistry: userContext.toolRegistry,
       })
       if (cmd.handled) return res.json(cmd.result)
     }

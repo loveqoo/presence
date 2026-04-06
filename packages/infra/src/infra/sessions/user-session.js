@@ -72,9 +72,9 @@ class UserSession extends EphemeralSession {
 
   initTools(userContext) {
     const jobTools = createJobTools({ store: userContext.jobStore, eventActor: this.actors.eventActor })
-    for (const tool of jobTools) this.sessionToolRegistry.register(tool)
+    for (const tool of jobTools) userContext.toolRegistry.register(tool)
 
-    this.sessionToolRegistry.register({
+    userContext.toolRegistry.register({
       name: 'read_todos',
       description: '현재 대기 중인 TODO 항목 목록을 반환합니다.',
       parameters: { type: 'object', properties: {} },

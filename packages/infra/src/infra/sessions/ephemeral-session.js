@@ -1,5 +1,5 @@
 import { createOriginState } from '../states/origin-state.js'
-import { createToolRegistry } from '../tools/tool-registry.js'
+import { ToolRegistryView } from '../tools/tool-registry.js'
 import { PROMPT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { charsToTokens } from '@presence/core/lib/tokenizer.js'
@@ -53,15 +53,19 @@ class EphemeralSession extends Session {
   restoreState() {}
 
   initToolRegistry(userContext) {
-    this.sessionToolRegistry = createToolRegistry()
-    for (const tool of userContext.toolRegistry.list()) this.sessionToolRegistry.register(tool)
-    this.getTools = () => userContext.persona.filterTools(this.sessionToolRegistry.list())
+    const personaFilter = (tool) => {
+      const persona = userContext.persona.get()
+      if (!persona.tools || persona.tools.length === 0) return true
+      return new Set(persona.tools).has(tool.name)
+    }
+    this.toolView = new ToolRegistryView(userContext.toolRegistry, personaFilter)
+    this.getTools = () => this.toolView.list()
   }
 
   initInterpreter(userContext) {
     this.interpreter = sessionInterpreterR.run({
       llm: userContext.llm,
-      toolRegistry: this.sessionToolRegistry,
+      toolRegistry: this.toolView,
       state: this.state,
       agentRegistry: userContext.agentRegistry,
       turnController: this.turnController,
