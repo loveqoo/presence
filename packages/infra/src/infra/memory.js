@@ -2,6 +2,8 @@ import { join } from 'node:path'
 
 // presence의 단일 사용자 에이전트 — 고정 userId
 const MEM0_USER_ID = 'default'
+const DEFAULT_EMBED_MODEL = 'text-embedding-3-small'
+const DEFAULT_EMBED_DIMS = 1536
 
 // =============================================================================
 // Memory: mem0 기반 메모리 + 동기 캐시 뷰.
@@ -12,9 +14,12 @@ const MEM0_USER_ID = 'default'
 // =============================================================================
 
 class Memory {
+  #mem0
+  #cache
+
   constructor(mem0) {
-    this.mem0 = mem0
-    this.cache = []
+    this.#mem0 = mem0
+    this.#cache = []
   }
 
   // mem0 인스턴스 생성 + 초기 캐시 로드. embed 자격증명 없으면 null.
@@ -25,7 +30,15 @@ class Memory {
     if (!embedApiKey && !embed.baseUrl) return null
 
     const { Memory: Mem0Memory } = await import('mem0ai/oss')
-    const mem0 = new Mem0Memory({
+    const mem0Config = Memory.#buildMem0Config({ llm, embed, embedApiKey, memoryPath })
+    const memory = new Memory(new Mem0Memory(mem0Config))
+    await memory.refreshCache()
+    return memory
+  }
+
+  static #buildMem0Config({ llm, embed, embedApiKey, memoryPath }) {
+    const dims = embed.dimensions || DEFAULT_EMBED_DIMS
+    return {
       llm: {
         provider: 'openai',
         config: {
@@ -38,37 +51,33 @@ class Memory {
         provider: 'openai',
         config: {
           apiKey: embedApiKey,
-          model: embed.model || 'text-embedding-3-small',
-          embeddingDims: embed.dimensions || 1536,
+          model: embed.model || DEFAULT_EMBED_MODEL,
+          embeddingDims: dims,
           ...(embed.baseUrl && { baseURL: embed.baseUrl }),
         },
       },
       vectorStore: {
         provider: 'memory',
-        config: { collectionName: 'presence_memories', dimension: embed.dimensions || 1536 },
+        config: { collectionName: 'presence_memories', dimension: dims },
       },
       historyStore: {
         provider: 'sqlite',
         config: { historyDbPath: memoryPath ? join(memoryPath, 'mem0_history.db') : ':memory:' },
       },
-    })
-
-    const memory = new Memory(mem0)
-    await memory.refreshCache()
-    return memory
+    }
   }
 
   // --- Write path ---
 
   // 유사 메모리 검색. 반환: [{ label }]
   async search(input, limit = 10) {
-    const result = await this.mem0.search(input, { userId: MEM0_USER_ID, limit })
-    return (result.results || []).map(r => ({ label: r.memory }))
+    const result = await this.#mem0.search(input, { userId: MEM0_USER_ID, limit })
+    return (result.results || []).map(record => ({ label: record.memory }))
   }
 
   // 대화 턴 저장 + 캐시 동기화
   async add(userInput, assistantOutput) {
-    await this.mem0.add([
+    await this.#mem0.add([
       { role: 'user', content: userInput },
       { role: 'assistant', content: assistantOutput || '' },
     ], { userId: MEM0_USER_ID })
@@ -79,31 +88,31 @@ class Memory {
 
   async refreshCache() {
     try {
-      const result = await this.mem0.getAll({ userId: MEM0_USER_ID })
-      this.cache = (result.results || []).map(r => ({
-        id: r.id,
-        label: r.memory,
+      const result = await this.#mem0.getAll({ userId: MEM0_USER_ID })
+      this.#cache = (result.results || []).map(record => ({
+        id: record.id,
+        label: record.memory,
         type: 'fact',
         tier: 'episodic',
-        createdAt: r.createdAt ? new Date(r.createdAt).getTime() : Date.now(),
+        createdAt: record.createdAt ? new Date(record.createdAt).getTime() : Date.now(),
       }))
     } catch (_) {}
   }
 
-  allNodes() { return this.cache }
+  allNodes() { return this.#cache }
 
   clearAll() {
-    const count = this.cache.length
-    this.cache = []
-    this.mem0.reset().catch(() => {})
+    const count = this.#cache.length
+    this.#cache = []
+    this.#mem0.reset().catch(() => {})
     return count
   }
 
   removeOlderThan(maxAgeMs) {
     const cutoff = Date.now() - maxAgeMs
-    const toDelete = this.cache.filter(n => n.createdAt < cutoff)
-    this.cache = this.cache.filter(n => n.createdAt >= cutoff)
-    Promise.all(toDelete.map(n => this.mem0.delete(n.id).catch(() => {}))).catch(() => {})
+    const toDelete = this.#cache.filter(node => node.createdAt < cutoff)
+    this.#cache = this.#cache.filter(node => node.createdAt >= cutoff)
+    Promise.all(toDelete.map(node => this.#mem0.delete(node.id).catch(() => {}))).catch(() => {})
     return toDelete.length
   }
 }

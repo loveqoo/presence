@@ -7,7 +7,7 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { Config } from '@presence/infra/infra/config.js'
-import { LLMClient } from '@presence/infra/infra/llm.js'
+import { LLMClient } from '@presence/infra/infra/llm/llm-client.js'
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'

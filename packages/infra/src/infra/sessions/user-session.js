@@ -1,5 +1,5 @@
 import { createPersistence, migrateHistoryIds } from '../persistence.js'
-import { STATE_PATH } from '@presence/core/core/policies.js'
+import { STATE_PATH, TODO } from '@presence/core/core/policies.js'
 import { SYSTEM_JOBS } from '../constants.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
 import { persistenceActorR } from '../actors/persistence-actor.js'
@@ -82,7 +82,7 @@ class UserSession extends EphemeralSession {
       parameters: { type: 'object', properties: {} },
       handler: (_args, context) => {
         const todos = context?.userDataStore
-          ? context.userDataStore.list({ category: 'todo', status: 'ready' })
+          ? context.userDataStore.list({ category: TODO.CATEGORY, status: TODO.STATUS_READY })
           : []
         if (todos.length === 0) return '대기 중인 TODO 항목이 없습니다.'
         return formatTodosAsLines(todos).join('\n')

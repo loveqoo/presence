@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import fp from '@presence/core/lib/fun-fp.js'
+import { TODO } from '@presence/core/core/policies.js'
 
 const { Maybe } = fp
 
@@ -20,10 +21,10 @@ const eventToPrompt = (event) =>
   event.prompt || event.message || `이벤트 처리: ${event.type}`
 
 const formatTodosAsLines = (todos) =>
-  todos.map(t => {
-    const type = t.payload?.type || t.type
+  todos.map(todo => {
+    const type = todo.payload?.type || todo.type
     const suffix = type ? ` (${type})` : ''
-    return `[${t.id}] ${t.title || 'untitled'}${suffix}`
+    return `[${todo.id}] ${todo.title || 'untitled'}${suffix}`
   })
 
 // todo_review 이벤트용 동적 프롬프트 (EventActor가 호출).
@@ -33,8 +34,8 @@ const buildTodoReviewPrompt = (pendingTodos) =>
 // 이벤트의 .todo 필드를 UserDataStore add 입력으로 변환. 없으면 Nothing.
 const todoFromEvent = (event) =>
   Maybe.fromNullable(event.todo).map(todo => ({
-    category: 'todo',
-    status: 'ready',
+    category: TODO.CATEGORY,
+    status: TODO.STATUS_READY,
     title: todo.title || event.type,
     payload: {
       sourceEventId: event.id,
@@ -45,11 +46,11 @@ const todoFromEvent = (event) =>
 
 // normalized payload 기준 중복 체크
 const isDuplicate = (todos, eventId) =>
-  todos.some(t => t.payload?.sourceEventId === eventId)
+  todos.some(todo => todo.payload?.sourceEventId === eventId)
 
 // state projection 동기화: store → state. write 직후 + session init 직후만 호출.
 const syncTodosProjection = (state, userDataStore) => {
-  const todos = userDataStore.list({ category: 'todo', orderBy: 'created_at_asc' })
+  const todos = userDataStore.list({ category: TODO.CATEGORY, orderBy: 'created_at_asc' })
   state.set('todos', todos)
 }
 

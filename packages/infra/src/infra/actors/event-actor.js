@@ -1,6 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
-import { PHASE, STATE_PATH, TURN_SOURCE } from '@presence/core/core/policies.js'
+import { PHASE, STATE_PATH, TODO, TURN_SOURCE } from '@presence/core/core/policies.js'
 import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection } from '../events.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
@@ -97,7 +97,7 @@ class EventActor extends ActorWrapper {
     Maybe.fold(
       () => {},
       todo => {
-        const existing = this.#userDataStore.list({ category: 'todo' })
+        const existing = this.#userDataStore.list({ category: TODO.CATEGORY })
         if (isDuplicate(existing, event.id)) return
         this.#userDataStore.add(todo)
         syncTodosProjection(this.#state, this.#userDataStore)
@@ -111,7 +111,7 @@ class EventActor extends ActorWrapper {
       (todoReviewJobName && event.jobName === todoReviewJobName)
     if (!isTodoReview) return { event, skip: false }
     const pending = this.#userDataStore
-      ? this.#userDataStore.list({ category: 'todo', status: 'ready' })
+      ? this.#userDataStore.list({ category: TODO.CATEGORY, status: TODO.STATUS_READY })
       : []
     if (pending.length === 0) return { event, skip: true }
     return { event: { ...event, prompt: buildTodoReviewPrompt(pending) }, skip: false }

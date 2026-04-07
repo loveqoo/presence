@@ -1,4 +1,7 @@
-import { connectMCPServer, extractContent, ensureObjectSchema, validateSchema, createTransportForConfig } from '@presence/infra/infra/mcp.js'
+import { connectMCPServer } from '@presence/infra/infra/mcp/connection.js'
+import { extractContent } from '@presence/infra/infra/mcp/content.js'
+import { ensureObjectSchema, validateSchema } from '@presence/infra/infra/mcp/schema.js'
+import { createTransport } from '@presence/infra/infra/mcp/transport.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -25,7 +28,7 @@ const mockTransport = () => {
   let closed = false
   return {
     close: async () => { closed = true },
-    get _closed() { return closed },
+    get isClosed() { return closed },
   }
 }
 
@@ -187,7 +190,7 @@ async function run() {
 
     await conn.close()
     assert(client._state.closed, 'close: client closed')
-    assert(transport._closed, 'close: transport closed')
+    assert(transport.isClosed, 'close: transport closed')
   }
 
   // close: idempotent
@@ -281,36 +284,36 @@ async function run() {
   }
 
   // ===========================================
-  // createTransportForConfig 테스트
+  // createTransport 테스트
   // ===========================================
 
   // stdio (기본값)
   {
-    const t = createTransportForConfig({ command: 'echo', args: ['hello'] })
+    const t = createTransport({ command: 'echo', args: ['hello'] })
     assert(t instanceof StdioClientTransport, 'transport: default → StdioClientTransport')
   }
 
   {
-    const t = createTransportForConfig({ transport: 'stdio', command: 'echo' })
+    const t = createTransport({ transport: 'stdio', command: 'echo' })
     assert(t instanceof StdioClientTransport, 'transport: explicit stdio → StdioClientTransport')
   }
 
   // SSE
   {
-    const t = createTransportForConfig({ transport: 'sse', url: 'http://localhost:3000/mcp/sse' })
+    const t = createTransport({ transport: 'sse', url: 'http://localhost:3000/mcp/sse' })
     assert(t instanceof SSEClientTransport, 'transport: sse → SSEClientTransport')
   }
 
   // StreamableHTTP
   {
-    const t = createTransportForConfig({ transport: 'streamable-http', url: 'http://localhost:3000/mcp' })
+    const t = createTransport({ transport: 'streamable-http', url: 'http://localhost:3000/mcp' })
     assert(t instanceof StreamableHTTPClientTransport, 'transport: streamable-http → StreamableHTTPClientTransport')
   }
 
   // unknown → 에러
   {
     try {
-      createTransportForConfig({ transport: 'unknown' })
+      createTransport({ transport: 'unknown' })
       assert(false, 'transport: unknown → should throw')
     } catch (e) {
       assert(e.message.includes('Unknown MCP transport'), 'transport: unknown → error message')
@@ -319,7 +322,7 @@ async function run() {
 
   // SSE + headers
   {
-    const t = createTransportForConfig({
+    const t = createTransport({
       transport: 'sse',
       url: 'http://localhost:3000/mcp/sse',
       headers: { 'Authorization': 'Bearer test-token' },

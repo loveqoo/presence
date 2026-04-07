@@ -1,40 +1,56 @@
 import Conf from 'conf'
+import fp from '@presence/core/lib/fun-fp.js'
 
-const DEFAULT_PERSONA = {
+const { Reader } = fp
+
+const STORE_KEY = 'persona'
+
+const DEFAULT_PERSONA = Object.freeze({
   name: 'Presence',
   systemPrompt: null, // null → use default ROLE_DEFINITION from prompt.js
   rules: [],
   tools: [], // empty → all tools allowed
-}
+})
 
-const createPersona = ({ projectName = 'presence', cwd } = {}) => {
-  const confOpts = cwd
-    ? { cwd, configName: 'persona' }
-    : { projectName, configName: 'persona' }
-  const store = new Conf(confOpts)
+class Persona {
+  #store
 
-  const get = () => {
-    const saved = store.get('persona', {})
+  constructor(store) {
+    this.#store = store
+  }
+
+  get store() { return this.#store }
+
+  get() {
+    const saved = this.#store.get(STORE_KEY, {})
     return { ...DEFAULT_PERSONA, ...saved }
   }
 
-  const set = (updates) => {
-    const current = get()
-    store.set('persona', { ...current, ...updates })
+  set(updates) {
+    const current = this.get()
+    this.#store.set(STORE_KEY, { ...current, ...updates })
   }
 
-  const reset = () => {
-    store.delete('persona')
+  reset() {
+    this.#store.delete(STORE_KEY)
   }
 
-  const filterTools = (allTools) => {
-    const persona = get()
+  filterTools(allTools) {
+    const persona = this.get()
     if (!persona.tools || persona.tools.length === 0) return allTools
     const allowed = new Set(persona.tools)
-    return allTools.filter(t => allowed.has(t.name))
+    return allTools.filter(tool => allowed.has(tool.name))
   }
-
-  return { get, set, reset, filterTools, store }
 }
 
-export { createPersona }
+const createPersonaR = Reader.asks(({ projectName = 'presence', cwd } = {}) => {
+  const confOpts = cwd
+    ? { cwd, configName: STORE_KEY }
+    : { projectName, configName: STORE_KEY }
+  return new Persona(new Conf(confOpts))
+})
+
+// 레거시 브릿지
+const createPersona = (opts = {}) => createPersonaR.run(opts)
+
+export { Persona, createPersonaR, createPersona }

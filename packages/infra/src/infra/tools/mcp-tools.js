@@ -1,4 +1,4 @@
-import { connectMCPServer } from '../mcp.js'
+import { connectMCPServer } from '../mcp/connection.js'
 import { TOOL_SOURCE } from './tool-registry.js'
 
 // =============================================================================

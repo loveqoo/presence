@@ -88,6 +88,20 @@ export const STATE_PATH = Object.freeze({
   DEBUG_ITERATION_HISTORY: '_debug.iterationHistory',
 })
 
+export const EMBEDDING = Object.freeze({
+  TIMEOUT_MS: 30_000,
+})
+
+export const LLM = Object.freeze({
+  TIMEOUT_MS: 120_000,
+  LIST_MODELS_TIMEOUT_MS: 10_000,
+})
+
+export const TODO = Object.freeze({
+  CATEGORY: 'todo',
+  STATUS_READY: 'ready',
+})
+
 export const PROMPT = Object.freeze({
   RESULT_MAX_LEN: 500,
   SUMMARIZED_RESULT_MAX_LEN: 200,
