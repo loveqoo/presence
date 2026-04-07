@@ -1,7 +1,7 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
 import { PHASE, STATE_PATH, TURN_SOURCE } from '@presence/core/core/policies.js'
-import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent } from '../events.js'
+import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection } from '../events.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
 const { Task, Maybe, Reader } = fp
@@ -17,9 +17,10 @@ class EventActor extends ActorWrapper {
   #state
   #logger
   #onEventDone
+  #userDataStore
 
   constructor(turnActor, state, opts = {}) {
-    const { logger, onEventDone, todoReviewJobName } = opts
+    const { logger, onEventDone, todoReviewJobName, userDataStore } = opts
     const R = EventActor.RESULT
     // queue: 처리 대기 이벤트. inFlight: 현재 처리 중인 이벤트. deadLetter: 실패한 이벤트.
     super(
@@ -70,6 +71,7 @@ class EventActor extends ActorWrapper {
     this.#state = state
     this.#logger = logger
     this.#onEventDone = onEventDone
+    this.#userDataStore = userDataStore
   }
 
   // --- Public 메시지 API ---
@@ -91,12 +93,14 @@ class EventActor extends ActorWrapper {
   }
 
   #applyTodo(event) {
+    if (!this.#userDataStore) return
     Maybe.fold(
       () => {},
       todo => {
-        const todos = this.#state.get(STATE_PATH.TODOS) || []
-        if (isDuplicate(todos, event.id)) return
-        this.#state.set(STATE_PATH.TODOS, [...todos, todo])
+        const existing = this.#userDataStore.list({ category: 'todo' })
+        if (isDuplicate(existing, event.id)) return
+        this.#userDataStore.add(todo)
+        syncTodosProjection(this.#state, this.#userDataStore)
       },
       todoFromEvent(event),
     )
@@ -106,7 +110,9 @@ class EventActor extends ActorWrapper {
     const isTodoReview = event.type === 'todo_review' ||
       (todoReviewJobName && event.jobName === todoReviewJobName)
     if (!isTodoReview) return { event, skip: false }
-    const pending = (state.get(STATE_PATH.TODOS) || []).filter(todo => !todo.done)
+    const pending = this.#userDataStore
+      ? this.#userDataStore.list({ category: 'todo', status: 'ready' })
+      : []
     if (pending.length === 0) return { event, skip: true }
     return { event: { ...event, prompt: buildTodoReviewPrompt(pending) }, skip: false }
   }

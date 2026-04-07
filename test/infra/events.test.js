@@ -10,6 +10,26 @@ import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../lib/assert.js'
 
+// In-memory mock UserDataStore
+const createMockUserDataStore = () => {
+  const rows = []
+  let nextId = 1
+  return {
+    list: ({ category, status } = {}) => rows
+      .filter(r => (!category || r.category === category) && (!status || r.status === status))
+      .map(r => ({ ...r, payload: typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload })),
+    add: ({ category, status, title, payload }) => {
+      const row = { id: nextId++, category, status, title, payload, createdAt: Date.now(), updatedAt: Date.now() }
+      rows.push(row)
+      return row
+    },
+    get: (id) => rows.find(r => r.id === id) || null,
+    update: () => true,
+    remove: () => true,
+    close: () => {},
+  }
+}
+
 async function run() {
   console.log('Event system tests')
 
@@ -202,8 +222,9 @@ async function run() {
     assert(result === EventActor.RESULT.NO_OP_BUSY, 'drain idempotency: not-idle → no-op')
   }
 
-  // EventActor drain 성공 → applyTodo 자동 호출
+  // EventActor drain 성공 → applyTodo → userDataStore에 저장 + state projection
   {
+    const userDataStore = createMockUserDataStore()
     const state = createOriginState({
       turnState: TurnState.idle(),
       lastTurn: null,
@@ -211,7 +232,7 @@ async function run() {
       todos: [],
     })
     const turnActor = turnActorR.run({ runTurn: async () => 'done' })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
     const enriched = withEventMeta({
       type: 'pr_assigned',
@@ -220,9 +241,13 @@ async function run() {
     await forkTask(eventActor.enqueue(enriched))
     await new Promise(r => setTimeout(r, 150))
 
-    const todos = state.get('todos')
-    assert(todos.length === 1, 'EventActor + TODO: todo created after drain')
-    assert(todos[0].type === 'pr_review', 'EventActor + TODO: correct type')
+    // store에 저장됐는지
+    const stored = userDataStore.list({ category: 'todo' })
+    assert(stored.length === 1, 'EventActor + TODO: todo stored in userDataStore')
+    assert(stored[0].payload.type === 'pr_review', 'EventActor + TODO: correct type in store')
+    // state projection 동기화
+    const projected = state.get('todos')
+    assert(projected.length === 1, 'EventActor + TODO: projection synced to state')
   }
 
   // ===========================================
@@ -253,9 +278,9 @@ async function run() {
   {
     const r1 = todoFromEvent({ id: 'e1', type: 'pr', todo: { type: 'review', title: 'PR #1' } })
     assert(r1.isJust(), 'todoFromEvent with todo: Just')
-    assert(r1.value.sourceEventId === 'e1', 'todoFromEvent: sourceEventId')
-    assert(r1.value.type === 'review', 'todoFromEvent: todo type')
-    assert(r1.value.done === false, 'todoFromEvent: done is false')
+    assert(r1.value.payload.sourceEventId === 'e1', 'todoFromEvent: sourceEventId in payload')
+    assert(r1.value.payload.type === 'review', 'todoFromEvent: todo type in payload')
+    assert(r1.value.status === 'ready', 'todoFromEvent: status is ready')
   }
   {
     assert(todoFromEvent({ id: 'e2', type: 'heartbeat' }).isNothing(), 'todoFromEvent no todo: Nothing')
@@ -265,13 +290,13 @@ async function run() {
   {
     const r = todoFromEvent({ id: 'e5', type: 'x', todo: {} })
     assert(r.isJust(), 'todoFromEvent empty todo: Just (defaults applied)')
-    assert(r.value.type === 'x', 'todoFromEvent: falls back to event.type')
+    assert(r.value.payload.type === 'x', 'todoFromEvent: falls back to event.type')
     assert(r.value.title === 'x', 'todoFromEvent: title falls back to event.type')
   }
 
   // isDuplicate
   {
-    const todos = [{ sourceEventId: 'e1' }, { sourceEventId: 'e2' }]
+    const todos = [{ payload: { sourceEventId: 'e1' } }, { payload: { sourceEventId: 'e2' } }]
     assert(isDuplicate(todos, 'e1') === true, 'isDuplicate: found')
     assert(isDuplicate(todos, 'e3') === false, 'isDuplicate: not found')
     assert(isDuplicate([], 'e1') === false, 'isDuplicate: empty list')

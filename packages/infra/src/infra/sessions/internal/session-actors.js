@@ -30,6 +30,7 @@ class SessionActors {
     this.eventActor = eventActorR.run({
       turnActor: this.turnActor, state, logger,
       todoReviewJobName: SYSTEM_JOBS.TODO_REVIEW,
+      userDataStore: userContext.userDataStore,
       onEventDone: (event, outcome) => this.handleEventDone(event, outcome, onScheduledJobDone),
     })
 

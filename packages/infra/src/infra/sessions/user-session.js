@@ -6,7 +6,7 @@ import { persistenceActorR } from '../actors/persistence-actor.js'
 import { createSchedulerActor } from '../actors/scheduler-actor.js'
 import { calcNextRun } from '../jobs/job-tools.js'
 import { createJobTools } from '../jobs/job-tools.js'
-import { formatTodosAsLines } from '../events.js'
+import { formatTodosAsLines, syncTodosProjection } from '../events.js'
 import { EphemeralSession } from './ephemeral-session.js'
 
 // =============================================================================
@@ -26,11 +26,13 @@ class UserSession extends EphemeralSession {
   // --- State 복원: 디스크 → OriginState ---
 
   restoreState() {
+    // TODO projection: snapshot 유무와 무관하게 항상 store → state 동기화
+    syncTodosProjection(this.state, this.userContext.userDataStore)
+
     const restored = this.persistence.restore()
     if (!restored || typeof restored !== 'object') return
     try {
       if (typeof restored.turn === 'number') this.state.set(STATE_PATH.TURN, restored.turn)
-      if (Array.isArray(restored.todos)) this.state.set(STATE_PATH.TODOS, restored.todos)
       if (restored.context && typeof restored.context === 'object') {
         const migrated = migrateHistoryIds(restored.context.conversationHistory)
         this.state.set(STATE_PATH.CONTEXT, { ...restored.context, conversationHistory: migrated })
@@ -78,8 +80,10 @@ class UserSession extends EphemeralSession {
       name: 'read_todos',
       description: '현재 대기 중인 TODO 항목 목록을 반환합니다.',
       parameters: { type: 'object', properties: {} },
-      handler: () => {
-        const todos = (this.state.get(STATE_PATH.TODOS) || []).filter(todo => !todo.done)
+      handler: (_args, context) => {
+        const todos = context?.userDataStore
+          ? context.userDataStore.list({ category: 'todo', status: 'ready' })
+          : []
         if (todos.length === 0) return '대기 중인 TODO 항목이 없습니다.'
         return formatTodosAsLines(todos).join('\n')
       },

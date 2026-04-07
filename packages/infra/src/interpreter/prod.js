@@ -53,7 +53,7 @@ const createUiHelpers = (reactiveState) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const prodInterpreterR = Reader.asks(({ llm, toolRegistry, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
   const ui = createUiHelpers(reactiveState)
 
   let interpret
@@ -71,7 +71,7 @@ const prodInterpreterR = Reader.asks(({ llm, toolRegistry, reactiveState, agentR
   const composed = Interpreter.compose(ST,
     stateInterpreterR.run({ ST }),
     llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
-    toolInterpreterR.run({ ST, toolRegistry, toolResultUi: ui.toolResultUi }),
+    toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi }),
     delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn }),
     approvalInterpreterR.run({ ST, onApprove }),
     controlInterpreterR.run({ ST }),

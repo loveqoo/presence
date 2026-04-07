@@ -8,6 +8,7 @@ class Session {
   // --- 생성 알고리즘 ---
 
   constructor(userContext, opts = {}) {
+    this.userContext = userContext
     this.logger = userContext.logger
     this.initState()
     this.initTurnControl()

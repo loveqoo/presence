@@ -15,7 +15,7 @@ const { Reader } = fp
 const sessionInterpreterR =
   Reader.local(
     env => ({
-      llm: env.llm, toolRegistry: env.toolRegistry, reactiveState: env.state,
+      llm: env.llm, toolRegistry: env.toolRegistry, userDataStore: env.userDataStore, reactiveState: env.state,
       agentRegistry: env.agentRegistry,
       onApprove: (desc) => env.turnController.onApprove(desc),
       getAbortSignal: () => env.turnController.getAbortSignal(),

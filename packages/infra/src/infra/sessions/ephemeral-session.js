@@ -66,6 +66,7 @@ class EphemeralSession extends Session {
     this.interpreter = sessionInterpreterR.run({
       llm: userContext.llm,
       toolRegistry: this.toolView,
+      userDataStore: userContext.userDataStore,
       state: this.state,
       agentRegistry: userContext.agentRegistry,
       turnController: this.turnController,

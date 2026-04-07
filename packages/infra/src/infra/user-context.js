@@ -9,6 +9,7 @@ import { createAgentRegistry } from './agents/agent-registry.js'
 import { DelegationMode } from './agents/delegation.js'
 import { createEmbedder } from './embedding.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
+import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
 import { initI18n, t } from '../i18n/index.js'
 import { createSessionManager } from './sessions/session-manager.js'
@@ -107,8 +108,9 @@ class UserContext {
     userContext.agentRegistry = createAgentRegistry()
     registerSummarizer(userContext.agentRegistry, userContext.llm)
 
-    // --- Job Store ---
+    // --- Job Store + User Data Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.memoryPath))
+    userContext.userDataStore = new UserDataStore(defaultUserDataDbPath(userContext.memoryPath))
 
     // --- Sessions (userContext 자기 참조) ---
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
@@ -120,6 +122,7 @@ class UserContext {
   async shutdown() {
     await Promise.all(this.sessions.list().map(({ session }) => session.shutdown().catch(() => {})))
     this.jobStore.close()
+    this.userDataStore.close()
     for (const conn of this.mcpConnections) {
       try { await conn.close() } catch (_) {}
     }

@@ -14,6 +14,29 @@ import { assert, summary } from '../lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
+// In-memory mock UserDataStore
+const createMockUserDataStore = (initialTodos = []) => {
+  const rows = initialTodos.map((t, i) => ({
+    id: i + 1, category: 'todo', status: t.done ? 'done' : 'ready',
+    title: t.title, payload: { sourceEventId: t.sourceEventId, type: t.type, data: t.data || {} },
+    createdAt: t.createdAt || Date.now(), updatedAt: Date.now(),
+  }))
+  let nextId = rows.length + 1
+  return {
+    list: ({ category, status } = {}) => rows
+      .filter(r => (!category || r.category === category) && (!status || r.status === status)),
+    add: ({ category, status, title, payload }) => {
+      const row = { id: nextId++, category, status, title, payload, createdAt: Date.now(), updatedAt: Date.now() }
+      rows.push(row)
+      return row
+    },
+    get: (id) => rows.find(r => r.id === id) || null,
+    update: () => true,
+    remove: () => true,
+    close: () => {},
+  }
+}
+
 const makeTmpDir = () => {
   const dir = join(tmpdir(), `presence-scheduler-test-${Date.now()}`)
   mkdirSync(dir, { recursive: true })
@@ -692,16 +715,17 @@ async function run() {
   // TR0. scheduled_job 이벤트에서 jobName으로 todo_review 감지 (실제 프로덕션 경로)
   {
     const TODO_REVIEW_JOB_NAME = '__todo_review__'
+    const userDataStore = createMockUserDataStore([
+      { type: 'task', title: '작업1', done: false },
+    ])
     const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
-      todos: [
-        { id: 't1', type: 'task', title: '작업1', done: false, createdAt: Date.now() },
-      ],
+      todos: [],
     })
     let receivedPrompt = null
     const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME, userDataStore })
 
     // SchedulerActor가 생성하는 것과 동일한 형태 (type: 'scheduled_job', jobName: '__todo_review__')
     eventActor.send({
@@ -718,6 +742,7 @@ async function run() {
   // TR0b. scheduled_job + todoReviewJobName, todos 없으면 no-op
   {
     const TODO_REVIEW_JOB_NAME = '__todo_review__'
+    const userDataStore = createMockUserDataStore([])
     const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -725,7 +750,7 @@ async function run() {
     })
     let turnCalled = false
     const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME, userDataStore })
 
     eventActor.send({
       type: 'enqueue',
@@ -738,6 +763,7 @@ async function run() {
 
   // TR1. todo_review: todos 없으면 turn 시작 안 함 (no-op:no-todos)
   {
+    const userDataStore = createMockUserDataStore([])
     const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
@@ -745,7 +771,7 @@ async function run() {
     })
     let turnCalled = false
     const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr1', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(100)
@@ -756,17 +782,18 @@ async function run() {
 
   // TR2. todo_review: todos 있으면 동적 프롬프트로 turn 실행
   {
+    const userDataStore = createMockUserDataStore([
+      { type: 'task', title: '주간 리포트 작성', done: false },
+      { type: 'reminder', title: '미팅 준비', done: false },
+    ])
     const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
-      todos: [
-        { id: 't1', type: 'task', title: '주간 리포트 작성', done: false, createdAt: Date.now() },
-        { id: 't2', type: 'reminder', title: '미팅 준비', done: false, createdAt: Date.now() },
-      ],
+      todos: [],
     })
     let receivedPrompt = null
     const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr2', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(150)
@@ -779,17 +806,18 @@ async function run() {
 
   // TR3. todo_review: done=true인 항목은 제외
   {
+    const userDataStore = createMockUserDataStore([
+      { type: 'task', title: '완료됨', done: true },
+      { type: 'task', title: '미완료', done: false },
+    ])
     const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
-      todos: [
-        { id: 't1', type: 'task', title: '완료됨', done: true, createdAt: Date.now() },
-        { id: 't2', type: 'task', title: '미완료', done: false, createdAt: Date.now() },
-      ],
+      todos: [],
     })
     let receivedPrompt = null
     const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr3', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(150)
@@ -802,16 +830,17 @@ async function run() {
 
   // TR4. todo_review: 모두 done이면 no-op
   {
+    const userDataStore = createMockUserDataStore([
+      { type: 'task', title: '완료', done: true },
+    ])
     const state = createOriginState({
       turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
-      todos: [
-        { id: 't1', type: 'task', title: '완료', done: true, createdAt: Date.now() },
-      ],
+      todos: [],
     })
     let turnCalled = false
     const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
-    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
     eventActor.send({ type: 'enqueue', event: { id: 'tr4', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(100)
