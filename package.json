@@ -14,9 +14,13 @@
     "test:live": "node test/e2e/tui-live.test.js",
     "start": "npm run start --workspace=@presence/server",
     "start:cli": "npm run start --workspace=@presence/tui",
-    "user": "node packages/infra/src/infra/auth/cli.js"
+    "user": "node packages/infra/src/infra/auth/cli.js",
+    "complexity": "node scripts/complexity.js",
+    "complexity:check": "node scripts/complexity.js --check"
   },
   "devDependencies": {
+    "acorn": "^8.16.0",
+    "acorn-walk": "^8.3.5",
     "fast-check": "^4.6.0"
   }
 }
