@@ -156,15 +156,23 @@ const setup = async (serverInfo) => {
   const { sessionId, tools, agents, config } = serverInfo
   const apiBase = `/api/sessions/${sessionId}`
 
-  // 이전 턴 완료 대기 (서버 state가 idle이 될 때까지)
-  await waitFor(async () => {
+  // 이전 턴 완료 대기 (서버 state가 idle이 될 때까지, REST 폴링)
+  for (let attempt = 0; attempt < 60; attempt++) {
     const stateRes = await httpRequest('GET', `${apiBase}/state`).catch(() => ({ body: {} }))
-    return stateRes.body?.turnState?.tag === 'idle'
-  }, { timeout: 30000 }).catch(() => {})
+    if (stateRes.body?.turnState?.tag === 'idle') break
+    await delay(1000)
+  }
 
   // 이전 대화 초기화
   await httpRequest('POST', `${apiBase}/chat`, { input: '/clear' }).catch(() => {})
   await delay(500)
+
+  // /clear 후 idle 복귀 대기
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const stateRes = await httpRequest('GET', `${apiBase}/state`).catch(() => ({ body: {} }))
+    if (stateRes.body?.turnState?.tag === 'idle') break
+    await delay(500)
+  }
 
   // MirrorState 연결
   const wsHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
