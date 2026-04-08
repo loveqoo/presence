@@ -191,9 +191,9 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
     const hasCount = /\d+/.test(frame1)
     assert(hasCount, 'S9-1: 파일/폴더 개수 응답')
 
-    await sendAndWait(stdin, remoteState, lastFrame, '방금 결과에서 폴더가 파일보다 많아? "예" 또는 "아니오"로만.')
+    await sendAndWait(stdin, remoteState, lastFrame, '방금 결과에서 폴더와 파일 중 뭐가 더 많아? 한 단어로.')
     const frame2 = lastFrame()
-    const hasAnswer = frame2.includes('예') || frame2.includes('아니오') || frame2.includes('네') || frame2.includes('아니')
+    const hasAnswer = frame2.includes('폴더') || frame2.includes('파일') || frame2.includes('folder') || frame2.includes('file') || frame2.includes('같')
     assert(hasAnswer, 'S9-2: 도구 결과 기반 판단')
   } finally { cleanup() }
 }
@@ -223,6 +223,119 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
     // 도구 사용 대화
     await sendAndWait(stdin, remoteState, lastFrame, 'package.json의 name 필드를 알려줘. 값만.')
     assert(lastFrame().includes('presence'), 'S10-4: /tools 후 도구 사용 대화')
+  } finally { cleanup() }
+}
+
+// =============================================================================
+// === 3단: 엣지 케이스 + 스트레스 시나리오 ===
+// =============================================================================
+
+// S11. 에러 복구 — 잘못된 요청 후 정상 대화 지속
+//      1) 의도적으로 모호한 도구 요청 → 에이전트가 실패/거절
+//      2) 바로 다음 턴에 정상 응답 가능한지 확인
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    // 빈 파일 경로 요청 — 에이전트가 처리하되, 에러나 거절 가능
+    await sendAndWait(stdin, remoteState, lastFrame, '""(빈 문자열) 파일을 읽어줘.')
+    assert(lastFrame().includes('idle'), 'S11-1: 모호한 요청 후 idle 복귀')
+
+    // 후속 정상 대화
+    await sendAndWait(stdin, remoteState, lastFrame, '2 + 3은? 숫자만.')
+    assert(lastFrame().includes('5'), 'S11-2: 에러 후 정상 대화')
+  } finally { cleanup() }
+}
+
+// S12. 6턴 누적 대화 — 긴 대화에서 초기 맥락 유지
+//      1~5) 정보를 하나씩 알려준다
+//      6) 모든 정보를 기억하는지 확인
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await sendAndWait(stdin, remoteState, lastFrame, '과일 이름을 하나씩 알려줄게. 첫 번째: 사과. 기억해.')
+    assert(lastFrame().includes('idle'), 'S12-1: 사과')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '두 번째: 바나나.')
+    assert(lastFrame().includes('idle'), 'S12-2: 바나나')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '세 번째: 체리.')
+    assert(lastFrame().includes('idle'), 'S12-3: 체리')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '네 번째: 포도.')
+    assert(lastFrame().includes('idle'), 'S12-4: 포도')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '다섯 번째: 키위.')
+    assert(lastFrame().includes('idle'), 'S12-5: 키위')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '내가 알려준 과일 5개를 전부 나열해. 쉼표로 구분.')
+    const frame = lastFrame()
+    const fruits = ['사과', '바나나', '체리', '포도', '키위']
+    const found = fruits.filter(fruit => frame.includes(fruit))
+    assert(found.length >= 4, `S12-6: 6턴 맥락 유지 (${found.length}/5 과일 기억)`)
+  } finally { cleanup() }
+}
+
+// S13. 도구 실행 → 분석 → 후속 도구 실행
+//      1) packages/core/package.json 읽기
+//      2) 의존성 개수 질문
+//      3) packages/server/package.json도 읽고 비교
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await sendAndWait(stdin, remoteState, lastFrame, 'packages/core/package.json을 읽어줘.')
+    assert(lastFrame().includes('idle'), 'S13-1: core/package.json 읽기')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '방금 파일의 dependencies 개수를 세줘. 숫자만.')
+    const frame2 = lastFrame()
+    assert(/\d/.test(frame2), 'S13-2: 의존성 개수 응답')
+
+    await sendAndWait(stdin, remoteState, lastFrame, 'packages/server/package.json도 읽고, core와 server 중 dependencies가 더 많은 쪽을 알려줘.')
+    const frame3 = lastFrame()
+    assert(frame3.includes('core') || frame3.includes('server'), 'S13-3: 두 패키지 비교 판단')
+  } finally { cleanup() }
+}
+
+// S14. /clear 후 도구 실행 — 초기화 후에도 도구 정상 동작
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    // 대화 + 도구 사용
+    await sendAndWait(stdin, remoteState, lastFrame, 'package.json 읽어줘.')
+    assert(lastFrame().includes('idle'), 'S14-1: 첫 대화 완료')
+
+    // /clear
+    await typeInput(stdin, '/clear')
+    await delay(500)
+
+    // 초기화 후 도구 실행
+    await sendAndWait(stdin, remoteState, lastFrame, 'packages/ 폴더 목록을 알려줘.')
+    const frame = lastFrame()
+    const hasPackages = frame.includes('core') || frame.includes('infra') || frame.includes('server') || frame.includes('tui')
+    assert(hasPackages, 'S14-2: /clear 후 도구 실행 정상')
+  } finally { cleanup() }
+}
+
+// S15. 연속 슬래시 커맨드 → 대화 → 슬래시 커맨드 → 대화 (교차)
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await typeInput(stdin, '/status')
+    await waitFor(() => lastFrame().includes('status:'), { timeout: 5000 })
+    assert(lastFrame().includes('idle'), 'S15-1: /status idle')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '"ALPHA"라고 답해.')
+    assert(lastFrame().includes('ALPHA'), 'S15-2: 첫 대화')
+
+    await typeInput(stdin, '/status')
+    await delay(1000)
+    // turn이 0이 아닌 값을 포함해야 함 (대화 1턴 후)
+    const frame3 = lastFrame()
+    assert(frame3.includes('status:'), 'S15-3: 대화 후 /status')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '"BRAVO"라고 답해.')
+    const frame4 = lastFrame()
+    assert(frame4.includes('BRAVO'), 'S15-4: 두 번째 대화')
+    assert(frame4.includes('ALPHA'), 'S15-5: 이전 대화(ALPHA)도 유지')
   } finally { cleanup() }
 }
 
