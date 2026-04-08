@@ -119,4 +119,111 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
   } finally { cleanup() }
 }
 
+// =============================================================================
+// === 2단: 복합 시나리오 ===
+// =============================================================================
+
+// S6. 도구 다중 실행 — 여러 파일 조회 후 비교
+//     1) 두 파일의 내용을 함께 요청
+//     2) 비교 결과가 응답에 포함
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await sendAndWait(stdin, remoteState, lastFrame, 'package.json과 packages/core/package.json 두 파일을 읽고, 각 name 필드를 비교해줘. 짧게.')
+    const frame = lastFrame()
+    const hasPresence = frame.includes('presence')
+    const hasCore = frame.includes('core')
+    assert(hasPresence && hasCore, 'S6: 두 파일 비교 — presence와 core 모두 언급')
+  } finally { cleanup() }
+}
+
+// S7. 조건 분기 대화 — 정보에 따라 다른 행동
+//     1) 파일 존재 여부를 확인하게 한다
+//     2) 존재 여부에 따른 판단이 응답에 포함
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await sendAndWait(stdin, remoteState, lastFrame, 'README.md 파일이 있으면 첫 줄을 알려주고, 없으면 "없음"이라고만 답해.')
+    const frame = lastFrame()
+    // README.md가 있든 없든, "없음" 또는 실제 내용 중 하나를 답해야 함
+    const hasContent = frame.split('\n').some(line => {
+      const trimmed = line.trim()
+      return trimmed.length > 2 && !trimmed.startsWith('>') && !trimmed.startsWith('─') && !trimmed.includes('idle')
+    })
+    assert(hasContent, 'S7: 조건 분기 — 파일 유무에 따른 응답')
+  } finally { cleanup() }
+}
+
+// S8. 긴 대화 맥락 유지 — 4턴 연속
+//     1) 숫자를 하나 정한다
+//     2) 2를 곱한다
+//     3) 10을 더한다
+//     4) 최종 값을 묻는다
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await sendAndWait(stdin, remoteState, lastFrame, '숫자 7을 기억해. 이 숫자로 계산할 거야.')
+    assert(lastFrame().includes('idle'), 'S8-1: 숫자 설정')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '기억한 숫자에 2를 곱해. 결과만 숫자로.')
+    assert(lastFrame().includes('14'), 'S8-2: 7 * 2 = 14')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '그 결과에 10을 더해. 숫자만.')
+    assert(lastFrame().includes('24'), 'S8-3: 14 + 10 = 24')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '지금까지 계산 과정을 요약해줘. 7 → ? → ? 형태로.')
+    const frame = lastFrame()
+    const has7 = frame.includes('7')
+    const has14 = frame.includes('14')
+    const has24 = frame.includes('24')
+    assert(has7 && has14 && has24, 'S8-4: 4턴 맥락 유지 (7, 14, 24 모두 포함)')
+  } finally { cleanup() }
+}
+
+// S9. 도구 결과 기반 멀티턴 분석
+//     1) 프로젝트의 파일 수를 세게 한다
+//     2) 그 결과를 기반으로 후속 질문
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    await sendAndWait(stdin, remoteState, lastFrame, '루트 디렉토리의 파일과 폴더 개수를 세줘. "N개 파일, M개 폴더" 형태로.')
+    const frame1 = lastFrame()
+    const hasCount = /\d+/.test(frame1)
+    assert(hasCount, 'S9-1: 파일/폴더 개수 응답')
+
+    await sendAndWait(stdin, remoteState, lastFrame, '방금 결과에서 폴더가 파일보다 많아? "예" 또는 "아니오"로만.')
+    const frame2 = lastFrame()
+    const hasAnswer = frame2.includes('예') || frame2.includes('아니오') || frame2.includes('네') || frame2.includes('아니')
+    assert(hasAnswer, 'S9-2: 도구 결과 기반 판단')
+  } finally { cleanup() }
+}
+
+// S10. 슬래시 커맨드 + 대화 혼합
+//      1) /status로 상태 확인
+//      2) 질문 → 응답
+//      3) /tools로 도구 확인
+//      4) 도구 사용 요청
+{
+  const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
+  try {
+    // /status
+    await typeInput(stdin, '/status')
+    await waitFor(() => lastFrame().includes('status:'), { timeout: 5000 })
+    assert(lastFrame().includes('status:'), 'S10-1: /status 동작')
+
+    // 일반 대화
+    await sendAndWait(stdin, remoteState, lastFrame, '"HELLO-MIX"라고 답해줘.')
+    assert(lastFrame().includes('HELLO-MIX'), 'S10-2: 슬래시 커맨드 후 일반 대화')
+
+    // /tools
+    await typeInput(stdin, '/tools')
+    await waitFor(() => lastFrame().includes('file_'), { timeout: 5000 })
+    assert(lastFrame().includes('file_'), 'S10-3: /tools 동작')
+
+    // 도구 사용 대화
+    await sendAndWait(stdin, remoteState, lastFrame, 'package.json의 name 필드를 알려줘. 값만.')
+    assert(lastFrame().includes('presence'), 'S10-4: /tools 후 도구 사용 대화')
+  } finally { cleanup() }
+}
+
 summary()
