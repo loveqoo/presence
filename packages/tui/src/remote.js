@@ -8,11 +8,10 @@ const h = React.createElement
 
 // =============================================================================
 // Remote 모드: 서버 세션을 WS/REST로 조작.
-// 401 자동 refresh, 세션 전환, App 렌더링을 담당.
 // =============================================================================
 
 // 401 시 refresh token으로 access token 갱신. refreshPromise 단일화로 동시성 제어.
-const createTokenRefresher = (baseUrl, authState) => {
+function createTokenRefresher(baseUrl, authState) {
   let refreshPromise = null
   return async () => {
     if (!authState) return false
@@ -34,8 +33,8 @@ const createTokenRefresher = (baseUrl, authState) => {
   }
 }
 
-// 401 자동 재시도를 포함한 HTTP 클라이언트. body만 반환 (status 숨김).
-const createAuthClient = (baseUrl, authState, tryRefresh) => {
+// 401 자동 재시도를 포함한 HTTP 클라이언트.
+function createAuthClient(baseUrl, authState, tryRefresh) {
   const request = async (method, path, body) => {
     const res = await jsonRequest(baseUrl, { method, path, body, token: authState?.accessToken })
     if (res.status === 401 && authState) {
@@ -55,7 +54,7 @@ const createAuthClient = (baseUrl, authState, tryRefresh) => {
 }
 
 // git branch 조회 (실패하면 빈 문자열)
-const detectGitBranch = async (cwd) => {
+async function detectGitBranch(cwd) {
   try {
     const { execSync } = await import('child_process')
     return execSync('git rev-parse --abbrev-ref HEAD', { cwd, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
@@ -64,101 +63,150 @@ const detectGitBranch = async (cwd) => {
   }
 }
 
-const runRemote = async (baseUrl, opts = {}) => {
-  const { authState, username } = opts
-  const wsUrl = baseUrl.replace(/^http/, 'ws')
+// =============================================================================
+// RemoteSession: 세션 상태 + 전환 + App props 조립을 응집.
+// =============================================================================
 
-  const tryRefresh = createTokenRefresher(baseUrl, authState)
-  const { post, del, getJson } = createAuthClient(baseUrl, authState, tryRefresh)
+class RemoteSession {
+  #wsUrl
+  #authState
+  #username
+  #client
+  #config
+  #agents
+  #cwd
+  #gitBranch
+  #currentSessionId
+  #remoteState
+  #currentTools
+  #rerender
+
+  constructor({ wsUrl, authState, username, client, config, agents, cwd, gitBranch, initialTools }) {
+    this.#wsUrl = wsUrl
+    this.#authState = authState
+    this.#username = username
+    this.#client = client
+    this.#config = config
+    this.#agents = agents
+    this.#cwd = cwd
+    this.#gitBranch = gitBranch
+    this.#currentTools = initialTools
+    this.#currentSessionId = username ? `${username}-default` : 'user-default'
+    this.#remoteState = this.#createMirrorState(this.#currentSessionId)
+    this.#rerender = null
+  }
 
   // --- 세션 관리 API ---
-  const onListSessions = () => getJson('/api/sessions')
-  const onCreateSession = (id) => post('/api/sessions', { id, type: 'user' })
-  const onDeleteSession = (id) => del(`/api/sessions/${id}`)
 
-  // --- 세션 상태 (mutable) ---
-  let currentSessionId = username ? `${username}-default` : 'user-default'
-  const wsHeaders = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : undefined
-  let remoteState = createMirrorState({ wsUrl, sessionId: currentSessionId, headers: wsHeaders })
-  let currentTools = []
-  let rerender = null
+  listSessions() { return this.#client.getJson('/api/sessions') }
+  createSession(id) { return this.#client.post('/api/sessions', { id, type: 'user' }) }
+  deleteSession(id) { return this.#client.del(`/api/sessions/${id}`) }
 
-  const [initialTools, agents, config] = await Promise.all([
-    getJson('/api/tools').catch(() => []),
-    getJson('/api/agents').catch(() => []),
-    getJson('/api/config').catch(() => ({})),
-  ])
-  currentTools = initialTools
+  async switchSession(newId) {
+    this.#remoteState.disconnect()
+    this.#currentSessionId = newId
+    this.#remoteState = this.#createMirrorState(newId)
+    const defaultSessionId = this.#username ? `${this.#username}-default` : 'user-default'
+    const toolsPath = newId === defaultSessionId ? '/api/tools' : `/api/sessions/${newId}/tools`
+    this.#currentTools = await this.#client.getJson(toolsPath).catch(() => this.#currentTools)
+    if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
+  }
 
-  const cwd = process.cwd()
-  const gitBranch = await detectGitBranch(cwd)
+  disconnect() { this.#remoteState.disconnect() }
 
-  // --- 세션별 핸들러 빌더 ---
-  const buildHandlers = (sessionId) => {
-    const apiBase = `/api/sessions/${sessionId}`
+  // --- 렌더링 ---
+
+  render() {
+    const rendered = render(h(App, this.#buildAppProps()))
+    this.#rerender = rendered.rerender
+    return rendered.waitUntilExit
+  }
+
+  // --- private ---
+
+  #createMirrorState(sessionId) {
+    const headers = this.#authState?.accessToken
+      ? { 'Authorization': `Bearer ${this.#authState.accessToken}` }
+      : undefined
+    return createMirrorState({ wsUrl: this.#wsUrl, sessionId, headers })
+  }
+
+  #buildHandlers() {
+    const apiBase = `/api/sessions/${this.#currentSessionId}`
     return {
       handleInput: async (input) => {
-        const res = await post(`${apiBase}/chat`, { input })
+        const res = await this.#client.post(`${apiBase}/chat`, { input })
         if (res.type === 'error') throw new Error(res.content)
         return res.content
       },
-      handleApproveResponse: (approved) => { post(`${apiBase}/approve`, { approved }).catch(() => {}) },
-      handleCancel: () => { post(`${apiBase}/cancel`).catch(() => {}) },
+      handleApproveResponse: (approved) => { this.#client.post(`${apiBase}/approve`, { approved }).catch(() => {}) },
+      handleCancel: () => { this.#client.post(`${apiBase}/cancel`).catch(() => {}) },
     }
   }
 
-  // --- App props 빌더 ---
-  const buildAppProps = () => {
-    const { handleInput, handleApproveResponse, handleCancel } = buildHandlers(currentSessionId)
+  #buildAppProps() {
+    const { handleInput, handleApproveResponse, handleCancel } = this.#buildHandlers()
     return {
-      key: currentSessionId,   // 세션 전환 시 App 완전 재마운트 → 메시지 초기화
-      state: remoteState,
+      key: this.#currentSessionId,
+      state: this.#remoteState,
       onInput: handleInput,
       onApprove: handleApproveResponse,
       onCancel: handleCancel,
-      agentName: config.persona?.name || 'Presence',
-      tools: currentTools,
-      agents,
-      cwd,
-      gitBranch,
-      model: config.llm?.model || '',
-      config,
+      agentName: this.#config.persona?.name || 'Presence',
+      tools: this.#currentTools,
+      agents: this.#agents,
+      cwd: this.#cwd,
+      gitBranch: this.#gitBranch,
+      model: this.#config.llm?.model || '',
+      config: this.#config,
       memory: null,
       llm: null,
       toolRegistry: null,
       initialMessages: [],
-      sessionId: currentSessionId,
-      onListSessions,
-      onCreateSession,
-      onDeleteSession,
-      onSwitchSession,
+      sessionId: this.#currentSessionId,
+      onListSessions: () => this.listSessions(),
+      onCreateSession: (id) => this.createSession(id),
+      onDeleteSession: (id) => this.deleteSession(id),
+      onSwitchSession: (id) => this.switchSession(id),
     }
   }
+}
 
-  // --- 세션 전환 ---
-  const onSwitchSession = async (newId) => {
-    remoteState.disconnect()
-    currentSessionId = newId
-    const newWsHeaders = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : undefined
-    remoteState = createMirrorState({ wsUrl, sessionId: newId, headers: newWsHeaders })
-    const defaultSessionId = username ? `${username}-default` : 'user-default'
-    const toolsPath = newId === defaultSessionId ? '/api/tools' : `/api/sessions/${newId}/tools`
-    currentTools = await getJson(toolsPath).catch(() => currentTools)
-    if (rerender) rerender(h(App, buildAppProps()))
-  }
+// =============================================================================
+// runRemote: 진입점. 인프라 생성 → RemoteSession → App 렌더.
+// =============================================================================
 
-  const onSignal = () => { remoteState.disconnect(); process.exit(0) }
+async function runRemote(baseUrl, opts = {}) {
+  const { authState, username } = opts
+  const wsUrl = baseUrl.replace(/^http/, 'ws')
+
+  const tryRefresh = createTokenRefresher(baseUrl, authState)
+  const client = createAuthClient(baseUrl, authState, tryRefresh)
+
+  const [initialTools, agents, config] = await Promise.all([
+    client.getJson('/api/tools').catch(() => []),
+    client.getJson('/api/agents').catch(() => []),
+    client.getJson('/api/config').catch(() => ({})),
+  ])
+
+  const cwd = process.cwd()
+  const gitBranch = await detectGitBranch(cwd)
+
+  const session = new RemoteSession({
+    wsUrl, authState, username, client,
+    config, agents, cwd, gitBranch, initialTools,
+  })
+
+  const onSignal = () => { session.disconnect(); process.exit(0) }
   process.on('SIGTERM', onSignal)
   process.on('SIGINT', onSignal)
 
-  const rendered = render(h(App, buildAppProps()))
-  rerender = rendered.rerender
-  const { waitUntilExit } = rendered
-
+  const waitUntilExit = session.render()
   await waitUntilExit()
+
   process.off('SIGTERM', onSignal)
   process.off('SIGINT', onSignal)
-  remoteState.disconnect()
+  session.disconnect()
 }
 
 export { runRemote }

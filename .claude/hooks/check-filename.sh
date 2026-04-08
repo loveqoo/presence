@@ -48,6 +48,15 @@ for FILE in $STAGED; do
     continue
   fi
 
+  # 예외 3: ui/ 하위 React 파일 (App.js 등) → PascalCase 허용
+  if echo "$DIRNAME" | grep -qE '/ui(/|$)'; then
+    if [[ "$BASENAME" =~ $PASCAL ]] || [[ "$BASENAME" =~ $KEBAB ]]; then
+      continue
+    fi
+    VIOLATIONS="${VIOLATIONS}\n  ${FILE}: ui/ 하위는 PascalCase 또는 kebab-case 필요"
+    continue
+  fi
+
   # 기본: kebab-case 또는 단일 단어 소문자
   if [[ ! "$BASENAME" =~ $KEBAB ]]; then
     VIOLATIONS="${VIOLATIONS}\n  ${FILE}: 기본은 kebab-case 필요 (소문자 + 하이픈)"

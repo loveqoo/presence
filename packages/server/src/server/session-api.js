@@ -2,13 +2,70 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
-import { SESSION_TYPE } from '@presence/core/core/policies.js'
-import { handleSlashCommand } from './slash-commands.js'
+import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { clearDebugState } from '@presence/core/core/state-commit.js'
+import { STATE_PATH } from '@presence/core/core/policies.js'
 
 // =============================================================================
-// Session API: /api/sessions/:sessionId/* + /api/sessions CRUD 엔드포인트.
-// 유저 인증 시 session ownership 검증 + on-demand 세션 생성.
+// Session API: Router를 반환. PresenceServer.#mountRoutes()에서 마운트.
 // =============================================================================
+
+// --- Slash commands (테이블 디스패치) ---
+
+const SLASH_COMMANDS = {
+  mcp: (args, { toolRegistry }) => {
+    const groups = toolRegistry.groups()
+    if (groups.length === 0) return { type: 'system', content: 'No MCP servers configured.' }
+    const sub = args[0] || 'list'
+    if (sub === 'list') {
+      const lines = groups.map(group => `${group.enabled ? '●' : '○'} ${group.group}  ${group.serverName}  (${group.toolCount} tools)`)
+      return { type: 'system', content: `MCP servers:\n${lines.join('\n')}` }
+    }
+    if (sub === 'enable' || sub === 'disable') {
+      const group = args[1]
+      if (!group) return { type: 'system', content: `Usage: /mcp ${sub} <id>` }
+      const ok = sub === 'enable' ? toolRegistry.enableGroup(group) : toolRegistry.disableGroup(group)
+      return { type: 'system', content: ok ? `${group} ${sub}d.` : `Unknown MCP id: ${group}` }
+    }
+    return { type: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' }
+  },
+
+  clear: (_args, { state }) => {
+    clearDebugState(state)
+    return { type: 'system', content: 'Conversation cleared.' }
+  },
+
+  status: (_args, { state }) => {
+    const turnState = state.get(STATE_PATH.TURN_STATE)
+    const lastTurn = state.get(STATE_PATH.LAST_TURN)
+    return {
+      type: 'system',
+      content: `status: ${turnState?.tag || 'idle'} | turn: ${state.get(STATE_PATH.TURN) || 0} | last: ${lastTurn?.tag || 'none'}`,
+    }
+  },
+
+  tools: (_args, { tools }) => {
+    return { type: 'system', content: tools.map(tool => tool.name).join(', ') || '(none)' }
+  },
+
+  memory: (args, { memory }) => {
+    if (args[0] !== 'list') return null // 미지원 서브커맨드 → 에이전트에 위임
+    const nodes = memory.allNodes()
+    const summary = nodes.slice(0, 20).map(node => `[${node.type}/${node.tier}] ${node.label}`).join('\n')
+    return { type: 'system', content: `${nodes.length} nodes:\n${summary}` }
+  },
+}
+
+const handleSlashCommand = (input, ctx) => {
+  const [command, ...args] = input.slice(1).trim().split(/\s+/)
+  const handler = SLASH_COMMANDS[command]
+  if (!handler) return { handled: false }
+  const result = handler(args, ctx)
+  if (!result) return { handled: false } // 핸들러가 null 반환 시 미처리
+  return { handled: true, result }
+}
+
+// --- Session middleware ---
 
 // :sessionId 미들웨어 — 세션 확보 + 소유권 검증 + req.presenceSession 첨부.
 const attachSessionMiddleware = (deps) => {
@@ -45,11 +102,13 @@ const attachSessionMiddleware = (deps) => {
   }
 }
 
-// 세션별 endpoint 등록 (chat, state, tools, agents, config, approve, cancel).
-const mountSessionEndpoints = (expressApp, deps) => {
+// --- Session endpoints ---
+
+// 세션별 endpoint (chat, state, tools, agents, config, approve, cancel).
+const mountSessionEndpoints = (router, deps) => {
   const { userContext } = deps
 
-  expressApp.post('/api/sessions/:sessionId/chat', async (req, res) => {
+  router.post('/sessions/:sessionId/chat', async (req, res) => {
     const { session } = req.presenceSession
     const { input } = req.body
     if (!input || typeof input !== 'string') return res.status(400).json({ error: 'input (string) required' })
@@ -67,40 +126,40 @@ const mountSessionEndpoints = (expressApp, deps) => {
       res.status(500).json({ type: 'error', content: err.message })
     }
   })
-  expressApp.get('/api/sessions/:sessionId/state', (req, res) => res.json(req.presenceSession.session.state.snapshot()))
-  expressApp.get('/api/sessions/:sessionId/tools', (req, res) => {
+  router.get('/sessions/:sessionId/state', (req, res) => res.json(req.presenceSession.session.state.snapshot()))
+  router.get('/sessions/:sessionId/tools', (req, res) => {
     const { session } = req.presenceSession
-    res.json(session.tools.map(t => ({ name: t.name, description: t.description, source: t.source })))
+    res.json(session.tools.map(tool => ({ name: tool.name, description: tool.description, source: tool.source })))
   })
-  expressApp.get('/api/sessions/:sessionId/agents', (req, res) => res.json(req.presenceSession.session.agents))
-  expressApp.get('/api/sessions/:sessionId/config', (_req, res) => {
+  router.get('/sessions/:sessionId/agents', (req, res) => res.json(req.presenceSession.session.agents))
+  router.get('/sessions/:sessionId/config', (_req, res) => {
     const { llm, ...rest } = userContext.config
     const { apiKey, ...safeLlm } = llm
     res.json({ ...rest, llm: safeLlm })
   })
-  expressApp.post('/api/sessions/:sessionId/approve', (req, res) => {
+  router.post('/sessions/:sessionId/approve', (req, res) => {
     req.presenceSession.session.handleApproveResponse(!!req.body.approved)
     res.json({ ok: true })
   })
-  expressApp.post('/api/sessions/:sessionId/cancel', (req, res) => {
+  router.post('/sessions/:sessionId/cancel', (req, res) => {
     req.presenceSession.session.handleCancel()
     res.json({ ok: true })
   })
 }
 
-// 세션 CRUD: GET/POST/DELETE /api/sessions[:sessionId]
-const mountSessionsCrud = (expressApp, userContext) => {
-  expressApp.get('/api/sessions', (_req, res) => {
+// 세션 CRUD: GET/POST/DELETE /sessions[:sessionId]
+const mountSessionsCrud = (router, userContext) => {
+  router.get('/sessions', (_req, res) => {
     res.json(userContext.sessions.list().map(({ id, type }) => ({ id, type })))
   })
-  expressApp.post('/api/sessions', express.json(), (req, res) => {
+  router.post('/sessions', express.json(), (req, res) => {
     const { type = 'user', id } = req.body || {}
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
     const entry = userContext.sessions.create({ id: sessionId, type, owner })
     res.status(201).json({ id: entry.id, type: entry.type })
   })
-  expressApp.delete('/api/sessions/:sessionId', async (req, res) => {
+  router.delete('/sessions/:sessionId', async (req, res) => {
     const { sessionId } = req.params
     if (!userContext.sessions.get(sessionId)) return res.status(404).json({ error: `Session not found: ${sessionId}` })
     await userContext.sessions.destroy(sessionId)
@@ -108,10 +167,12 @@ const mountSessionsCrud = (expressApp, userContext) => {
   })
 }
 
-const mountSessionApi = (expressApp, deps) => {
-  expressApp.use('/api/sessions/:sessionId', express.json(), attachSessionMiddleware(deps))
-  mountSessionEndpoints(expressApp, deps)
-  mountSessionsCrud(expressApp, deps.userContext)
+const createSessionRouter = (deps) => {
+  const router = express.Router()
+  router.use('/sessions/:sessionId', express.json(), attachSessionMiddleware(deps))
+  mountSessionEndpoints(router, deps)
+  mountSessionsCrud(router, deps.userContext)
+  return router
 }
 
-export { mountSessionApi }
+export { createSessionRouter }

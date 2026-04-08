@@ -5,8 +5,8 @@ import { HttpAuthService } from '@presence/infra/infra/auth/http-service.js'
 import { WsAuthService } from '@presence/infra/infra/auth/ws-service.js'
 
 // =============================================================================
-// Auth setup: cookie parser + auth routes + middleware 마운트.
-// Returns: { authEnabled, userStore, tokenService, wsAuth }
+// Auth setup: 인증 미들웨어 + 라우터 생성. expressApp을 직접 변이하지 않는다.
+// PresenceServer.#mountRoutes()에서 순서대로 마운트.
 // =============================================================================
 
 const parseCookiesMiddleware = (req, _res, next) => {
@@ -19,9 +19,9 @@ const parseCookiesMiddleware = (req, _res, next) => {
   next()
 }
 
-const setupAuth = (expressApp) => {
+const createAuthSetup = () => {
   const userStore = createUserStore()
-  if (!userStore.hasUsers()) throw new Error(`No users configured. Run: npm run user -- init`)
+  if (!userStore.hasUsers()) throw new Error('No users configured. Run: npm run user -- init')
 
   const tokenService = createTokenService()
 
@@ -29,24 +29,27 @@ const setupAuth = (expressApp) => {
   const httpAuth = new HttpAuthService(tokenService, userStore, { publicPaths })
   const wsAuth = new WsAuthService(tokenService, userStore)
 
-  expressApp.use(parseCookiesMiddleware)
-
-  // Auth routes (public — 미들웨어 이전 마운트)
-  expressApp.post('/api/auth/login', express.json(), httpAuth.loginHandler())
-  expressApp.post('/api/auth/refresh', express.json(), httpAuth.refreshHandler())
-  expressApp.post('/api/auth/logout', express.json(), httpAuth.logoutHandler())
-  expressApp.get('/api/auth/status', (_req, res) => {
+  // 인증 불필요 라우트 (login, refresh, logout, status)
+  const publicRouter = express.Router()
+  publicRouter.post('/login', express.json(), httpAuth.loginHandler())
+  publicRouter.post('/refresh', express.json(), httpAuth.refreshHandler())
+  publicRouter.post('/logout', express.json(), httpAuth.logoutHandler())
+  publicRouter.get('/status', (_req, res) => {
     const users = userStore.listUsers() || []
     res.json({ username: users.length > 0 ? users[0].username : null })
   })
 
-  // Auth middleware
-  expressApp.use('/api', httpAuth.authMiddleware())
+  // 인증 필요 라우트 (change-password)
+  const protectedRouter = express.Router()
+  protectedRouter.post('/change-password', express.json(), httpAuth.changePasswordHandler())
 
-  // Authenticated routes (미들웨어 이후 마운트)
-  expressApp.post('/api/auth/change-password', express.json(), httpAuth.changePasswordHandler())
-
-  return { authEnabled: true, userStore, tokenService, wsAuth }
+  return {
+    cookieParser: parseCookiesMiddleware,
+    publicRouter,              // mount at /api/auth — before authMiddleware
+    authMiddleware: httpAuth.authMiddleware(), // mount at /api
+    protectedRouter,           // mount at /api/auth — after authMiddleware
+    wsAuth,
+  }
 }
 
-export { setupAuth }
+export { createAuthSetup }

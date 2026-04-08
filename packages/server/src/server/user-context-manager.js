@@ -1,5 +1,6 @@
 import { UserContext } from '@presence/infra/infra/user-context.js'
-import { SESSION_TYPE } from '@presence/core/core/policies.js'
+import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { INACTIVITY_TIMEOUT_MS } from './constants.js'
 
 // =============================================================================
 // UserContextManager: 유저별 UserContext 생명주기 관리.
@@ -8,27 +9,31 @@ import { SESSION_TYPE } from '@presence/core/core/policies.js'
 // (인증 활성화 시에만 사용)
 // =============================================================================
 
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000 // 30분
+class UserContextManager {
+  #contexts = new Map() // username → { userContext, wsConnections, lastActivity, shutdownTimer }
+  #bridge
+  #configOverride
 
-const buildUserContextManager = (env) => {
-  const { bridge, configOverride } = env
-  const userContexts = new Map()  // username → { userContext, wsConnections, lastActivity, shutdownTimer }
+  constructor({ bridge, configOverride }) {
+    this.#bridge = bridge
+    this.#configOverride = configOverride
+  }
 
-  const getOrCreate = async (username) => {
-    if (userContexts.has(username)) return userContexts.get(username)
-    const userContext = await UserContext.create(configOverride, {
+  async getOrCreate(username) {
+    if (this.#contexts.has(username)) return this.#contexts.get(username)
+    const userContext = await UserContext.create(this.#configOverride, {
       username,
       onSessionCreated: ({ id, type, session }) => {
-        if (type !== SESSION_TYPE.SCHEDULED) bridge.watchSession(id, session.state)
+        if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session.state)
       },
     })
     const entry = { userContext, wsConnections: new Set(), lastActivity: Date.now(), shutdownTimer: null }
-    userContexts.set(username, entry)
+    this.#contexts.set(username, entry)
     return entry
   }
 
-  const touch = (username) => {
-    const entry = userContexts.get(username)
+  touch(username) {
+    const entry = this.#contexts.get(username)
     if (!entry) return
     entry.lastActivity = Date.now()
     if (entry.shutdownTimer) {
@@ -37,24 +42,8 @@ const buildUserContextManager = (env) => {
     }
   }
 
-  const shutdownUser = async (username) => {
-    const entry = userContexts.get(username)
-    if (!entry) return
-    userContexts.delete(username)
-    if (entry.shutdownTimer) clearTimeout(entry.shutdownTimer)
-    await entry.userContext.shutdown().catch(() => {})
-  }
-
-  const scheduleShutdown = (username) => {
-    const entry = userContexts.get(username)
-    if (!entry) return
-    if (entry.wsConnections.size > 0) return
-    if (entry.shutdownTimer) return
-    entry.shutdownTimer = setTimeout(() => shutdownUser(username), INACTIVITY_TIMEOUT_MS)
-  }
-
-  const addWs = (username, ws) => {
-    const entry = userContexts.get(username)
+  addWs(username, ws) {
+    const entry = this.#contexts.get(username)
     if (!entry) return
     entry.wsConnections.add(ws)
     if (entry.shutdownTimer) {
@@ -63,21 +52,37 @@ const buildUserContextManager = (env) => {
     }
   }
 
-  const removeWs = (username, ws) => {
-    const entry = userContexts.get(username)
+  removeWs(username, ws) {
+    const entry = this.#contexts.get(username)
     if (!entry) return
     entry.wsConnections.delete(ws)
-    if (entry.wsConnections.size === 0) scheduleShutdown(username)
+    if (entry.wsConnections.size === 0) this.#scheduleShutdown(username)
   }
 
-  const shutdownAll = async () => {
-    const usernames = [...userContexts.keys()]
-    await Promise.all(usernames.map(u => shutdownUser(u)))
+  async shutdownAll() {
+    const usernames = [...this.#contexts.keys()]
+    await Promise.all(usernames.map(username => this.#shutdownUser(username)))
   }
 
-  const list = () => [...userContexts.entries()].map(([username, entry]) => ({ username, entry }))
+  list() {
+    return [...this.#contexts.entries()].map(([username, entry]) => ({ username, entry }))
+  }
 
-  return { getOrCreate, touch, addWs, removeWs, shutdownAll, shutdownUser, list }
+  async #shutdownUser(username) {
+    const entry = this.#contexts.get(username)
+    if (!entry) return
+    this.#contexts.delete(username)
+    if (entry.shutdownTimer) clearTimeout(entry.shutdownTimer)
+    await entry.userContext.shutdown().catch(() => {})
+  }
+
+  #scheduleShutdown(username) {
+    const entry = this.#contexts.get(username)
+    if (!entry) return
+    if (entry.wsConnections.size > 0) return
+    if (entry.shutdownTimer) return
+    entry.shutdownTimer = setTimeout(() => this.#shutdownUser(username), INACTIVITY_TIMEOUT_MS)
+  }
 }
 
-export { buildUserContextManager, INACTIVITY_TIMEOUT_MS }
+export { UserContextManager }
