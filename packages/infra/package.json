@@ -9,14 +9,14 @@
     "./i18n": "./src/i18n/index.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@presence/core": "*",
     "bcryptjs": "^2.4.3",
-    "@modelcontextprotocol/sdk": "^1.27.1",
     "conf": "^15.1.0",
     "croner": "^10.0.1",
     "i18next": "^25.9.0",
     "lowdb": "^7.0.1",
-    "mem0ai": "^2.4.2",
+    "mem0ai": "^2.4.6",
     "winston": "^3.19.0",
     "ws": "^8.20.0",
     "zod": "^4.3.6"

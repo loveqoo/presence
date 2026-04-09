@@ -13,7 +13,8 @@ const SNAPSHOT_PATHS = [
   'turnState', 'lastTurn', 'turn',
   'context.memories', 'context.conversationHistory',
   '_streaming', '_retry', '_approve',
-  '_debug.lastTurn', '_debug.opTrace', '_debug.recalledMemories', '_debug.iterationHistory',
+  '_debug.lastTurn', '_debug.lastPrompt', '_debug.lastResponse',
+  '_debug.opTrace', '_debug.recalledMemories', '_debug.iterationHistory',
   '_budgetWarning', '_toolResults',
   'todos', 'events', 'delegates',
 ]

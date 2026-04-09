@@ -1,5 +1,6 @@
 import { UserContext } from '@presence/infra/infra/user-context.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { INACTIVITY_TIMEOUT_MS } from './constants.js'
 
 // =============================================================================
@@ -21,12 +22,30 @@ class UserContextManager {
 
   async getOrCreate(username) {
     if (this.#contexts.has(username)) return this.#contexts.get(username)
-    const userContext = await UserContext.create(this.#configOverride, {
+    // 유저별 config를 로드 (서버 전역 config가 아닌, 유저 인스턴스 config merge)
+    const { Config } = await import('@presence/infra/infra/config.js')
+    const userConfig = Config.loadUserMerged(username)
+    const userContext = await UserContext.create(userConfig, {
       username,
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session.state)
       },
     })
+    // config.agents 기반 에이전트 세션 등록 (글로벌 PresenceServer와 동일)
+    for (const agentDef of (userContext.config.agents || [])) {
+      const agentEntry = userContext.sessions.create({
+        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT,
+      })
+      userContext.agentRegistry.register({
+        name: agentDef.name,
+        description: agentDef.description,
+        capabilities: agentDef.capabilities || [],
+        type: DelegationMode.LOCAL,
+        run: (task) => agentEntry.session.handleInput(task),
+      })
+      agentEntry.session.delegateActor.start().fork(() => {}, () => {})
+    }
+
     const entry = { userContext, wsConnections: new Set(), lastActivity: Date.now(), shutdownTimer: null }
     this.#contexts.set(username, entry)
     return entry

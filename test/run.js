@@ -16,12 +16,8 @@ const NETWORK_TESTS = new Set([
   'packages/infra/test/mirror-state.test.js',
   'packages/infra/test/session.test.js',
   'packages/infra/test/supervisor-session.test.js',
-  'test/e2e/bootstrap.test.js',
-  'test/e2e/server-e2e.test.js',
   'test/e2e/tui-e2e.test.js',
-  'test/e2e/client-sync.test.js',
   'packages/server/test/server.test.js',
-  'packages/server/test/supervisor.test.js',
   'packages/server/test/auth-e2e.test.js',
 ])
 
@@ -60,6 +56,7 @@ const tests = [
   'packages/infra/test/auth-token.test.js',
   'packages/infra/test/auth-provider.test.js',
   'packages/infra/test/persona.test.js',
+  'packages/infra/test/memory.test.js',
   'packages/tui/test/app.test.js',
   'packages/tui/test/interactive.test.js',
   'packages/tui/test/session-commands.test.js',
@@ -83,17 +80,13 @@ const tests = [
   // Turn concurrency
   'packages/core/test/core/turn-concurrency.test.js',
   // E2E bootstrap
-  'test/e2e/bootstrap.test.js',
-  'test/e2e/server-e2e.test.js',
   'test/e2e/tui-e2e.test.js',
-  'test/e2e/client-sync.test.js',
   // Interpreter
   'packages/core/test/interpreter/delegate.test.js',
   // Infra
   'packages/infra/test/supervisor-session.test.js',
   // Server
   'packages/server/test/server.test.js',
-  'packages/server/test/supervisor.test.js',
   'packages/server/test/auth-e2e.test.js',
 ]
 

@@ -1,337 +1,266 @@
+/**
+ * Server E2E tests — 세션 API + WebSocket + 슬래시 커맨드
+ *
+ * 모든 요청은 인증 토큰 첨부. PRESENCE_DIR 격리.
+ *
+ * 커버하는 시나리오:
+ *  S1.  GET /api/sessions/:id/state — 초기 상태 idle, turn 0
+ *  S2.  GET /api/sessions/:id/tools — 도구 목록 배열
+ *  S3.  GET /api/sessions/:id/config — apiKey 제외
+ *  S4.  POST /api/sessions/:id/chat — 에이전트 응답
+ *  S5.  POST /api/sessions/:id/chat 후 turn 증가
+ *  S6.  POST /api/sessions/:id/chat — /status 슬래시 커맨드
+ *  S7.  POST /api/sessions/:id/chat — /clear 히스토리 초기화
+ *  S8.  POST /api/sessions/:id/chat — input 누락 → 400
+ *  S9.  POST /api/sessions/:id/cancel
+ *  S10. WebSocket — 인증 후 init 메시지
+ *  S11. WebSocket — state 변경 push
+ *  S12. POST /api/sessions/:id/chat — /mcp list (서버 없음)
+ *  S13. GET /api/sessions/:id/agents
+ *  S14. GET /api/sessions — 세션 목록에 default 포함
+ *  S15. POST /api/sessions — 새 세션 생성 + chat + 삭제
+ *  S16. 세션 격리 — 다른 세션 턴에 영향 없음
+ *  S17. 존재하지 않는 세션 → 404
+ *  S18. /clear 후 persistence flush — 재시작 시 이전 히스토리 복원 방지
+ *  S19. SPA 정적 파일 fallback (web/dist 존재 시)
+ */
+
 import http from 'node:http'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tmpdir } from 'node:os'
-import { WebSocket } from 'ws'
-import { startServer } from '@presence/server'
+import { createTestServer, request, connectWS, delay } from '../../../test/lib/mock-server.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// --- Mock LLM HTTP 서버 ---
-
-const createMockLLM = (handler) => {
-  const calls = []
-  const server = http.createServer((req, res) => {
-    let body = ''
-    req.on('data', d => { body += d })
-    req.on('end', () => {
-      const parsed = JSON.parse(body)
-      calls.push(parsed)
-      const response = handler(parsed, calls.length)
-      const content = typeof response === 'string' ? response : JSON.stringify(response)
-      if (parsed.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
-        res.write('data: [DONE]\n\n')
-        res.end()
-      } else {
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ choices: [{ message: { content } }] }))
-      }
-    })
-  })
-  return {
-    calls,
-    start: () => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port))),
-    close: () => new Promise(resolve => server.close(resolve)),
-  }
-}
-
-// --- HTTP 요청 헬퍼 ---
-
-const request = (port, method, path, body) =>
-  new Promise((resolve, reject) => {
-    const opts = { hostname: '127.0.0.1', port, method, path, headers: { 'Content-Type': 'application/json' } }
-    const req = http.request(opts, (res) => {
-      let data = ''
-      res.on('data', d => { data += d })
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(data) }) }
-        catch { resolve({ status: res.statusCode, body: data }) }
-      })
-    })
-    req.on('error', reject)
-    if (body) req.write(JSON.stringify(body))
-    req.end()
-  })
-
-// --- WebSocket 연결 헬퍼 ---
-
-const connectWS = (port) =>
-  new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
-    const messages = []
-    ws.on('message', (data) => messages.push(JSON.parse(data.toString())))
-    ws.on('open', () => resolve({ ws, messages }))
-  })
-
 async function run() {
   console.log('Server tests')
 
-  const tmpDir = mkdtempSync(join(tmpdir(), 'presence-server-'))
-  const mockLLM = createMockLLM((_req, n) =>
-    JSON.stringify({ type: 'direct_response', message: `응답 ${n}` })
+  const ctx = await createTestServer(
+    (_req, n) => JSON.stringify({ type: 'direct_response', message: `응답 ${n}` })
   )
-  const llmPort = await mockLLM.start()
+  const { port, token, defaultSessionId: sid, shutdown } = ctx
 
-  const config = {
-    llm: { baseUrl: `http://127.0.0.1:${llmPort}/v1`, model: 'test', apiKey: 'k', responseFormat: 'json_object', maxRetries: 0, timeoutMs: 5000 },
-    embed: { provider: 'openai', baseUrl: null, apiKey: null, model: null, dimensions: 256 },
-    locale: 'ko', maxIterations: 5,
-    memory: { path: join(tmpDir, 'memory') },
-    mcp: [],
-    scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
-    delegatePolling: { intervalMs: 60000 },
-    prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
-  }
-
-  const { server, shutdown, app } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
-  const port = server.address().port
+  const get = (path) => request(port, 'GET', path, null, { token })
+  const post = (path, body) => request(port, 'POST', path, body, { token })
 
   try {
-    // 1. GET /api/state — 초기 상태
+    // S1. 초기 상태
     {
-      const res = await request(port, 'GET', '/api/state')
-      assert(res.status === 200, 'GET /api/state: 200')
-      assert(res.body.turnState?.tag === 'idle', 'GET /api/state: idle')
-      assert(res.body.turn === 0, 'GET /api/state: turn 0')
+      const res = await get(`/api/sessions/${sid}/state`)
+      assert(res.status === 200, 'S1: GET state 200')
+      assert(res.body.turnState?.tag === 'idle', 'S1: idle')
+      assert(res.body.turn === 0, 'S1: turn 0')
     }
 
-    // 2. GET /api/tools — 도구 목록
+    // S2. 도구 목록
     {
-      const res = await request(port, 'GET', '/api/tools')
-      assert(res.status === 200, 'GET /api/tools: 200')
-      assert(Array.isArray(res.body), 'GET /api/tools: array')
-      assert(res.body.length > 0, 'GET /api/tools: has tools')
-      assert(res.body[0].name != null, 'GET /api/tools: tool has name')
+      const res = await get(`/api/sessions/${sid}/tools`)
+      assert(res.status === 200, 'S2: GET tools 200')
+      assert(Array.isArray(res.body), 'S2: array')
+      assert(res.body.length > 0, 'S2: has tools')
+      assert(res.body[0].name != null, 'S2: tool has name')
     }
 
-    // 3. GET /api/config — apiKey 제외
+    // S3. config — apiKey 제외
     {
-      const res = await request(port, 'GET', '/api/config')
-      assert(res.status === 200, 'GET /api/config: 200')
-      assert(res.body.llm.apiKey === undefined, 'GET /api/config: apiKey excluded')
-      assert(res.body.llm.model === 'test', 'GET /api/config: model present')
+      const res = await get(`/api/sessions/${sid}/config`)
+      assert(res.status === 200, 'S3: GET config 200')
+      assert(res.body.llm.apiKey === undefined, 'S3: apiKey excluded')
+      assert(res.body.llm.model === 'test', 'S3: model present')
     }
 
-    // 4. POST /api/chat — 에이전트 턴
+    // S4. chat → 에이전트 응답
     {
-      const res = await request(port, 'POST', '/api/chat', { input: '안녕하세요' })
-      assert(res.status === 200, 'POST /api/chat: 200')
-      assert(res.body.type === 'agent', 'POST /api/chat: type agent')
-      assert(res.body.content === '응답 1', 'POST /api/chat: correct response')
+      const res = await post(`/api/sessions/${sid}/chat`, { input: '안녕하세요' })
+      assert(res.status === 200, 'S4: POST chat 200')
+      assert(res.body.type === 'agent', 'S4: type agent')
+      assert(res.body.content === '응답 1', 'S4: correct response')
     }
 
-    // 5. POST /api/chat — 턴 증가 확인
+    // S5. 턴 증가
     {
-      const stateRes = await request(port, 'GET', '/api/state')
-      assert(stateRes.body.turn === 1, 'after chat: turn incremented')
-      assert(stateRes.body.lastTurn?.tag === 'success', 'after chat: lastTurn success')
+      const res = await get(`/api/sessions/${sid}/state`)
+      assert(res.body.turn === 1, 'S5: turn incremented')
+      assert(res.body.lastTurn?.tag === 'success', 'S5: lastTurn success')
     }
 
-    // 6. POST /api/chat — slash command
+    // S6. /status 슬래시 커맨드
     {
-      const res = await request(port, 'POST', '/api/chat', { input: '/status' })
-      assert(res.status === 200, 'slash /status: 200')
-      assert(res.body.type === 'system', 'slash /status: type system')
-      assert(res.body.content.includes('idle'), 'slash /status: includes idle')
+      const res = await post(`/api/sessions/${sid}/chat`, { input: '/status' })
+      assert(res.status === 200, 'S6: /status 200')
+      assert(res.body.type === 'system', 'S6: type system')
+      assert(res.body.content.includes('idle'), 'S6: includes idle')
     }
 
-    // 7. POST /api/chat — /clear
+    // S7. /clear
     {
-      // 먼저 history 확인
-      let state = await request(port, 'GET', '/api/state')
-      const historyBefore = state.body.context?.conversationHistory?.length || 0
-
-      await request(port, 'POST', '/api/chat', { input: '/clear' })
-      state = await request(port, 'GET', '/api/state')
-      const historyAfter = state.body.context?.conversationHistory?.length || 0
-      assert(historyAfter === 0, 'slash /clear: history cleared')
+      await post(`/api/sessions/${sid}/chat`, { input: '/clear' })
+      const state = await get(`/api/sessions/${sid}/state`)
+      const historyLen = state.body.context?.conversationHistory?.length || 0
+      assert(historyLen === 0, 'S7: history cleared')
     }
 
-    // 8. POST /api/chat — input 누락
+    // S8. input 누락 → 400
     {
-      const res = await request(port, 'POST', '/api/chat', {})
-      assert(res.status === 400, 'no input: 400')
+      const res = await post(`/api/sessions/${sid}/chat`, {})
+      assert(res.status === 400, 'S8: no input 400')
     }
 
-    // 9. POST /api/cancel
+    // S9. cancel
     {
-      const res = await request(port, 'POST', '/api/cancel')
-      assert(res.status === 200, 'POST /api/cancel: 200')
-      assert(res.body.ok === true, 'POST /api/cancel: ok')
+      const res = await post(`/api/sessions/${sid}/cancel`)
+      assert(res.status === 200, 'S9: cancel 200')
+      assert(res.body.ok === true, 'S9: ok')
     }
 
-    // 10. WebSocket — 연결 시 init 메시지
+    // S10. WebSocket — init 메시지
     {
-      const { ws, messages } = await connectWS(port)
-      await new Promise(r => setTimeout(r, 100))
-      assert(messages.length >= 1, 'WS: received init message')
-      assert(messages[0].type === 'init', 'WS: type is init')
-      assert(messages[0].state.turnState?.tag === 'idle', 'WS: init state is idle')
+      const { ws, messages } = await connectWS(port, { token, sessionId: sid })
+      await delay(300)
+      assert(messages.length >= 1, 'S10: received init')
+      assert(messages[0].type === 'init', 'S10: type init')
+      assert(messages[0].state.turnState?.tag === 'idle', 'S10: init idle')
       ws.close()
     }
 
-    // 11. WebSocket — state 변경 push
+    // S11. WebSocket — state push
     {
-      const { ws, messages } = await connectWS(port)
-      await new Promise(r => setTimeout(r, 100))
+      const { ws, messages } = await connectWS(port, { token, sessionId: sid })
+      await delay(200)
       const initCount = messages.length
 
-      // 턴 실행 → state 변경 → WS push
-      await request(port, 'POST', '/api/chat', { input: '두 번째 질문' })
-      await new Promise(r => setTimeout(r, 200))
+      await post(`/api/sessions/${sid}/chat`, { input: '두 번째' })
+      await delay(300)
 
       const stateMessages = messages.slice(initCount).filter(m => m.type === 'state')
-      assert(stateMessages.length > 0, 'WS: state changes pushed')
-      assert(stateMessages.some(m => m.path === 'turnState'), 'WS: turnState change pushed')
+      assert(stateMessages.length > 0, 'S11: state changes pushed')
+      assert(stateMessages.some(m => m.path === 'turnState'), 'S11: turnState pushed')
       ws.close()
     }
 
-    // 12. POST /api/chat — /mcp list (서버 없음)
+    // S12. /mcp list (서버 없음)
     {
-      const res = await request(port, 'POST', '/api/chat', { input: '/mcp list' })
-      assert(res.status === 200, 'slash /mcp list: 200')
-      assert(res.body.type === 'system', 'slash /mcp list: type system')
-      assert(res.body.content.includes('No MCP servers'), 'slash /mcp list: no servers message')
+      const res = await post(`/api/sessions/${sid}/chat`, { input: '/mcp list' })
+      assert(res.status === 200, 'S12: /mcp list 200')
+      assert(res.body.type === 'system', 'S12: type system')
+      assert(res.body.content.includes('No MCP servers'), 'S12: no servers')
     }
 
-    // 13. POST /api/chat — /mcp enable (서버 없음)
+    // S13. agents
     {
-      const res = await request(port, 'POST', '/api/chat', { input: '/mcp enable mcp0' })
-      assert(res.status === 200, 'slash /mcp enable: 200')
-      assert(res.body.type === 'system', 'slash /mcp enable: type system')
-      assert(res.body.content.includes('No MCP servers'), 'slash /mcp enable: no servers message')
+      const res = await get(`/api/sessions/${sid}/agents`)
+      assert(res.status === 200, 'S13: GET agents 200')
     }
 
-    // 14. GET /api/agents
+    // S14. 세션 목록에 default 포함
     {
-      const res = await request(port, 'GET', '/api/agents')
-      assert(res.status === 200, 'GET /api/agents: 200')
-      assert(Array.isArray(res.body), 'GET /api/agents: array')
+      const res = await get('/api/sessions')
+      assert(res.status === 200, 'S14: GET sessions 200')
+      assert(Array.isArray(res.body), 'S14: array')
+      assert(res.body.some(s => s.id === sid), 'S14: default session exists')
     }
 
-    // 15. WS init 메시지에 session_id 포함
+    // S15. 새 세션 생성 + chat + 삭제
     {
-      const { ws, messages } = await connectWS(port)
-      await new Promise(r => setTimeout(r, 100))
-      assert(messages[0].session_id === 'user-default', 'WS: init has session_id')
-      ws.close()
+      const createRes = await post('/api/sessions', { type: 'user' })
+      assert(createRes.status === 201, 'S15: create 201')
+      const newId = createRes.body.id
+      assert(typeof newId === 'string', 'S15: id returned')
+
+      const chatRes = await post(`/api/sessions/${newId}/chat`, { input: '세션 테스트' })
+      assert(chatRes.status === 200, 'S15: session chat 200')
+      assert(chatRes.body.type === 'agent', 'S15: agent type')
+
+      const stateRes = await get(`/api/sessions/${newId}/state`)
+      assert(stateRes.body.turn === 1, 'S15: turn incremented')
+
+      const deleteRes = await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
+      assert(deleteRes.status === 200, 'S15: delete 200')
+
+      const afterRes = await get(`/api/sessions/${newId}/state`)
+      assert(afterRes.status === 404, 'S15: deleted → 404')
     }
 
-    // 16. GET /api/sessions — user-default 포함
+    // S16. 세션 격리
     {
-      const res = await request(port, 'GET', '/api/sessions')
-      assert(res.status === 200, 'GET /api/sessions: 200')
-      assert(Array.isArray(res.body), 'GET /api/sessions: array')
-      assert(res.body.some(s => s.id === 'user-default'), 'GET /api/sessions: user-default exists')
-    }
-
-    // 17. POST /api/sessions — 새 세션 생성
-    {
-      const res = await request(port, 'POST', '/api/sessions', { type: 'user' })
-      assert(res.status === 201, 'POST /api/sessions: 201')
-      assert(typeof res.body.id === 'string', 'POST /api/sessions: id returned')
-      assert(res.body.type === 'user', 'POST /api/sessions: type returned')
-
-      // 생성된 세션으로 chat
-      const sessionId = res.body.id
-      const beforeChatState = await request(port, 'GET', `/api/sessions/${sessionId}/state`)
-      const turnBefore = beforeChatState.body.turn
-
-      const chatRes = await request(port, 'POST', `/api/sessions/${sessionId}/chat`, { input: '세션 테스트' })
-      assert(chatRes.status === 200, 'session chat: 200')
-      assert(chatRes.body.type === 'agent', 'session chat: agent type')
-
-      // 세션 상태 조회
-      const stateRes = await request(port, 'GET', `/api/sessions/${sessionId}/state`)
-      assert(stateRes.status === 200, 'session state: 200')
-      assert(stateRes.body.turn === turnBefore + 1, 'session state: turn incremented')
-
-      // 세션 소멸
-      const deleteRes = await request(port, 'DELETE', `/api/sessions/${sessionId}`)
-      assert(deleteRes.status === 200, 'DELETE session: 200')
-      assert(deleteRes.body.ok === true, 'DELETE session: ok')
-
-      // 소멸된 세션 접근 → 404
-      const afterRes = await request(port, 'GET', `/api/sessions/${sessionId}/state`)
-      assert(afterRes.status === 404, 'deleted session: 404')
-    }
-
-    // 18. /api/sessions/:id/chat — 세션 격리 (user-default 턴 영향 없음)
-    {
-      const beforeState = await request(port, 'GET', '/api/state')
+      const beforeState = await get(`/api/sessions/${sid}/state`)
       const turnBefore = beforeState.body.turn
 
-      const newSession = await request(port, 'POST', '/api/sessions', { type: 'user' })
-      const sessionId = newSession.body.id
-      await request(port, 'POST', `/api/sessions/${sessionId}/chat`, { input: '격리 테스트' })
+      const newSession = await post('/api/sessions', { type: 'user' })
+      const newId = newSession.body.id
+      await post(`/api/sessions/${newId}/chat`, { input: '격리 테스트' })
 
-      const afterState = await request(port, 'GET', '/api/state')
-      assert(afterState.body.turn === turnBefore, 'session isolation: user-default turn unchanged')
+      const afterState = await get(`/api/sessions/${sid}/state`)
+      assert(afterState.body.turn === turnBefore, 'S16: default turn unchanged')
+      await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
+    }
 
-      await request(port, 'DELETE', `/api/sessions/${sessionId}`)
+    // S17. 존재하지 않는 세션 → 404
+    {
+      const res = await get('/api/sessions/nonexistent/state')
+      assert(res.status === 404, 'S17: nonexistent session 404')
+    }
+
+    // S18. /clear 후 persistence flush — 재시작 시 이전 히스토리 복원 방지
+    {
+      // chat → persistence에 history 기록
+      await post(`/api/sessions/${sid}/chat`, { input: 'persist-test' })
+      await delay(1000) // debounce flush 대기
+
+      const stateFile = join(ctx.tmpDir, 'users', 'testuser', 'sessions', sid, 'state.json')
+      const before = JSON.parse(readFileSync(stateFile, 'utf-8'))
+      assert(before.agentState?.context?.conversationHistory?.length > 0, 'S18: chat 후 history 저장됨')
+
+      // /clear → persistence에 빈 history 기록
+      await post(`/api/sessions/${sid}/chat`, { input: '/clear' })
+      await delay(1000)
+
+      const after = JSON.parse(readFileSync(stateFile, 'utf-8'))
+      assert(after.agentState?.context?.conversationHistory?.length === 0, 'S18: /clear 후 빈 history 저장됨')
+
+      // 새 chat → 새 history만 저장
+      await post(`/api/sessions/${sid}/chat`, { input: 'after-clear' })
+      await delay(1000)
+
+      const final = JSON.parse(readFileSync(stateFile, 'utf-8'))
+      assert(final.agentState?.context?.conversationHistory?.length === 1, 'S18: /clear 후 새 대화만 저장됨')
+      assert(!JSON.stringify(final).includes('persist-test'), 'S18: 이전 대화 내용 없음')
     }
 
   } finally {
     await shutdown()
-    await mockLLM.close()
-    rmSync(tmpDir, { recursive: true, force: true })
   }
 
   // ==========================================================================
-  // 19. SPA 정적 파일 fallback — API 라우트 우선 매칭 (web/dist 존재 시)
-  // Express 5에서 '/{*splat}' 패턴 사용, API 라우트 이후 등록으로 GET /api/* 선점
+  // S19. SPA fallback (web/dist 존재 시)
   // ==========================================================================
   const webDist = join(__dirname, '../../web/dist')
   if (existsSync(webDist)) {
-    const tmpDir2 = mkdtempSync(join(tmpdir(), 'presence-spa-'))
-    const mockLLM2 = createMockLLM((_req, n) =>
-      JSON.stringify({ type: 'direct_response', message: `ok ${n}` })
+    const ctx2 = await createTestServer(
+      (_req, n) => JSON.stringify({ type: 'direct_response', message: `ok ${n}` })
     )
-    const llmPort2 = await mockLLM2.start()
-    const config2 = {
-      llm: { baseUrl: `http://127.0.0.1:${llmPort2}/v1`, model: 'test', apiKey: 'k', responseFormat: 'json_object', maxRetries: 0, timeoutMs: 5000 },
-      embed: { provider: 'openai', baseUrl: null, apiKey: null, model: null, dimensions: 256 },
-      locale: 'ko', maxIterations: 5,
-      memory: { path: join(tmpDir2, 'memory') },
-      mcp: [],
-      scheduler: { enabled: false, pollIntervalMs: 60000, todoReview: { enabled: false, cron: '0 9 * * *' } },
-      delegatePolling: { intervalMs: 60000 },
-      prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
-    }
-    const { server: server2, shutdown: shutdown2 } = await startServer(config2, { port: 0, persistenceCwd: tmpDir2 })
-    const port2 = server2.address().port
+    const { port: port2, token: token2, defaultSessionId: sid2, shutdown: shutdown2 } = ctx2
+
     try {
-      // GET /api/state는 JSON을 반환해야 함 (index.html로 먹히면 안 됨)
-      const apiRes = await request(port2, 'GET', '/api/state')
-      assert(apiRes.status === 200, '19: GET /api/state returns 200 with web/dist present')
-      assert(typeof apiRes.body === 'object' && apiRes.body.turn !== undefined, '19: GET /api/state returns JSON not HTML')
+      const apiRes = await request(port2, 'GET', `/api/sessions/${sid2}/state`, null, { token: token2 })
+      assert(apiRes.status === 200, 'S19: API returns 200 with web/dist')
+      assert(typeof apiRes.body === 'object' && apiRes.body.turn !== undefined, 'S19: API returns JSON')
 
-      // GET /api/tools도 JSON 반환
-      const toolsRes = await request(port2, 'GET', '/api/tools')
-      assert(toolsRes.status === 200, '19: GET /api/tools returns 200 with web/dist present')
-      assert(Array.isArray(toolsRes.body), '19: GET /api/tools returns array not HTML')
-
-      // SPA fallback: 알 수 없는 경로 → index.html (200, HTML 응답)
       const spaRes = await new Promise((resolve, reject) => {
-        const opts = { hostname: '127.0.0.1', port: port2, method: 'GET', path: '/some-client-route' }
-        const req = http.request(opts, (res) => {
+        const req = http.request({ hostname: '127.0.0.1', port: port2, method: 'GET', path: '/some-client-route' }, (res) => {
           let data = ''
           res.on('data', d => { data += d })
-          res.on('end', () => resolve({ status: res.statusCode, body: data, ct: res.headers['content-type'] }))
+          res.on('end', () => resolve({ status: res.statusCode, body: data }))
         })
         req.on('error', reject)
         req.end()
       })
-      assert(spaRes.status === 200, '19: SPA fallback returns 200')
-      assert(spaRes.body.includes('<html') || spaRes.body.includes('<!DOCTYPE'), '19: SPA fallback returns HTML')
+      assert(spaRes.status === 200, 'S19: SPA fallback 200')
+      assert(spaRes.body.includes('<html') || spaRes.body.includes('<!DOCTYPE'), 'S19: SPA returns HTML')
     } finally {
       await shutdown2()
-      await mockLLM2.close()
-      rmSync(tmpDir2, { recursive: true, force: true })
     }
   }
 

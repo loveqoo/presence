@@ -13,8 +13,17 @@ import { handleStatusline } from './slash-commands/statusline.js'
 // =============================================================================
 
 const handleMcp = (input, ctx) => {
-  const { toolRegistry, addMessage } = ctx
-  const groups = toolRegistry ? toolRegistry.groups() : []
+  const { toolRegistry, addMessage, onInput } = ctx
+  // remote 모드: toolRegistry가 null이면 서버로 전달
+  if (!toolRegistry) {
+    if (onInput) {
+      onInput(input).then(content => { if (content) addMessage({ role: 'system', content, transient: true }) }).catch(() => {})
+    } else {
+      addMessage({ role: 'system', content: 'No MCP servers configured.' })
+    }
+    return
+  }
+  const groups = toolRegistry.groups()
   if (groups.length === 0) { addMessage({ role: 'system', content: 'No MCP servers configured.' }); return }
   const args = input.trim().split(/\s+/).slice(1)
   const sub = args[0] || 'list'
@@ -68,19 +77,19 @@ const handleReport = (_input, ctx) => {
 
 const handleStatus = (_input, ctx) => {
   const lt = ctx.agentState.lastTurn
-  ctx.addMessage({ role: 'system', content: `status: ${ctx.agentState.status} | turn: ${ctx.agentState.turn} | mem: ${ctx.agentState.memoryCount} | last: ${lt?.tag || 'none'}` })
+  ctx.addMessage({ role: 'system', content: `status: ${ctx.agentState.status} | turn: ${ctx.agentState.turn} | mem: ${ctx.agentState.memoryCount} | last: ${lt?.tag || 'none'}`, transient: true })
 }
 
 const handleToolsList = (_input, ctx) => {
   const list = ctx.tools.map(tool => tool.name).join(', ') || '(none)'
-  ctx.addMessage({ role: 'system', content: `tools: ${list}` })
+  ctx.addMessage({ role: 'system', content: `tools: ${list}`, transient: true })
 }
 
 const handleTodos = (_input, ctx) => {
   const list = ctx.agentState.todos.length > 0
     ? ctx.agentState.todos.map(x => `• ${x.title || x.type}`).join('\n')
     : '(none)'
-  ctx.addMessage({ role: 'system', content: `todos:\n${list}` })
+  ctx.addMessage({ role: 'system', content: `todos:\n${list}`, transient: true })
 }
 
 const handleModels = (input, ctx) => {
@@ -109,8 +118,12 @@ const commandMap = new Map([
   ['/quit',       (_, ctx) => ctx.exit()],
   ['/exit',       (_, ctx) => ctx.exit()],
   ['/panel',      (_, ctx) => ctx.setShowPanel(p => !p)],
-  ['/clear',      (_, ctx) => { ctx.setMessages([]); if (ctx.state) clearDebugState(ctx.state) }],
-  ['/help',       (_, ctx) => ctx.addMessage({ role: 'system', content: t('help.commands'), tag: 'help' })],
+  ['/clear',      (_, ctx) => {
+    ctx.setMessages([])
+    // 서버 state(conversationHistory)도 초기화 → persistence 반영
+    if (ctx.onInput) ctx.onInput('/clear').catch(() => {})
+  }],
+  ['/help',       (_, ctx) => ctx.addMessage({ role: 'system', content: t('help.commands'), transient: true })],
   ['/mcp',        handleMcp],
   ['/report',     handleReport],
   ['/status',     handleStatus],

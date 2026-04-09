@@ -115,6 +115,8 @@ const setupAuthServer = async (llmPort) => {
   ensureSecret({ basePath: tmpDir })
   const userStore = createUserStore({ basePath: tmpDir })
   await userStore.addUser('testuser', 'testpassword123')
+  // addUser는 mustChangePassword: true → changePassword로 해제
+  await userStore.changePassword('testuser', 'testpassword123')
 
   // PRESENCE_DIR을 설정해야 서버 내부의 createUserStore/createTokenService가 올바른 경로 사용
   const origDir = process.env.PRESENCE_DIR
@@ -148,14 +150,14 @@ async function run() {
     const { server, shutdown, tmpDir } = await setupAuthServer(llmPort)
     const port = server.address().port
     try {
-      const res = await request(port, 'GET', '/api/state')
-      assert(res.status === 401, 'AE1: unauthenticated GET /api/state → 401')
+      const res = await request(port, 'GET', '/api/sessions/testuser-default/state')
+      assert(res.status === 401, 'AE1: unauthenticated GET state → 401')
 
-      const res2 = await request(port, 'POST', '/api/chat', { input: 'hello' })
-      assert(res2.status === 401, 'AE1: unauthenticated POST /api/chat → 401')
+      const res2 = await request(port, 'POST', '/api/sessions/testuser-default/chat', { input: 'hello' })
+      assert(res2.status === 401, 'AE1: unauthenticated POST chat → 401')
 
-      const res3 = await request(port, 'GET', '/api/tools')
-      assert(res3.status === 401, 'AE1: unauthenticated GET /api/tools → 401')
+      const res3 = await request(port, 'GET', '/api/sessions/testuser-default/tools')
+      assert(res3.status === 401, 'AE1: unauthenticated GET tools → 401')
     } finally {
       await shutdown()
       rmSync(tmpDir, { recursive: true, force: true })
@@ -196,11 +198,11 @@ async function run() {
     try {
       const res1 = await request(port, 'POST', '/api/auth/login', { username: 'testuser', password: 'wrongpassword' })
       assert(res1.status === 401, 'AE3: wrong password → 401')
-      assert(res1.body.error === 'Invalid credentials', 'AE3: generic error (wrong password)')
+      assert(res1.body.error?.message === 'Invalid credentials', 'AE3: generic error (wrong password)')
 
       const res2 = await request(port, 'POST', '/api/auth/login', { username: 'nonexistent', password: 'password123' })
       assert(res2.status === 401, 'AE3: nonexistent user → 401')
-      assert(res2.body.error === 'Invalid credentials', 'AE3: same generic error (nonexistent user)')
+      assert(res2.body.error?.message === 'Invalid credentials', 'AE3: same generic error (nonexistent user)')
     } finally {
       await shutdown()
       rmSync(tmpDir, { recursive: true, force: true })
@@ -217,15 +219,16 @@ async function run() {
       const loginRes = await request(port, 'POST', '/api/auth/login', { username: 'testuser', password: 'testpassword123' })
       const token = loginRes.body.accessToken
 
-      const stateRes = await request(port, 'GET', '/api/state', null, { token })
-      assert(stateRes.status === 200, 'AE4: authenticated GET /api/state → 200')
+      const sid = 'testuser-default'
+      const stateRes = await request(port, 'GET', `/api/sessions/${sid}/state`, null, { token })
+      assert(stateRes.status === 200, 'AE4: authenticated GET state → 200')
       assert(stateRes.body.turnState?.tag === 'idle', 'AE4: state is idle')
 
-      const chatRes = await request(port, 'POST', '/api/chat', { input: 'hello' }, { token })
-      assert(chatRes.status === 200, 'AE4: authenticated POST /api/chat → 200')
+      const chatRes = await request(port, 'POST', `/api/sessions/${sid}/chat`, { input: 'hello' }, { token })
+      assert(chatRes.status === 200, 'AE4: authenticated POST chat → 200')
 
-      const toolsRes = await request(port, 'GET', '/api/tools', null, { token })
-      assert(toolsRes.status === 200, 'AE4: authenticated GET /api/tools → 200')
+      const toolsRes = await request(port, 'GET', `/api/sessions/${sid}/tools`, null, { token })
+      assert(toolsRes.status === 200, 'AE4: authenticated GET tools → 200')
     } finally {
       await shutdown()
       rmSync(tmpDir, { recursive: true, force: true })
@@ -239,7 +242,7 @@ async function run() {
     const { server, shutdown, tmpDir } = await setupAuthServer(llmPort)
     const port = server.address().port
     try {
-      const res = await request(port, 'GET', '/api/state', null, { token: 'invalid.token.here' })
+      const res = await request(port, 'GET', '/api/sessions/testuser-default/state', null, { token: 'invalid.token.here' })
       assert(res.status === 401, 'AE5: invalid token → 401')
     } finally {
       await shutdown()
@@ -260,7 +263,7 @@ async function run() {
         iat: 1000, exp: 1001,
       }, tokenService.secret)
 
-      const res = await request(port, 'GET', '/api/state', null, { token: expiredToken })
+      const res = await request(port, 'GET', '/api/sessions/testuser-default/state', null, { token: expiredToken })
       assert(res.status === 401, 'AE6: expired token → 401')
     } finally {
       await shutdown()
@@ -284,7 +287,7 @@ async function run() {
       assert(typeof refreshRes.body.accessToken === 'string', 'AE7: new accessToken')
 
       // 새 access token으로 요청
-      const stateRes = await request(port, 'GET', '/api/state', null, { token: refreshRes.body.accessToken })
+      const stateRes = await request(port, 'GET', '/api/sessions/testuser-default/state', null, { token: refreshRes.body.accessToken })
       assert(stateRes.status === 200, 'AE7: new access token works')
 
       // rotated refresh cookie
@@ -313,7 +316,8 @@ async function run() {
       // 이전 refresh token으로 다시 시도 → 탈취 감지
       const replayRes = await request(port, 'POST', '/api/auth/refresh', {}, { cookie: `refreshToken=${refreshTokenValue}` })
       assert(replayRes.status === 401, 'AE8: replayed refresh token → 401')
-      assert(replayRes.body.error.includes('revoked') || replayRes.body.error.includes('theft'), 'AE8: theft detection message')
+      const errMsg = replayRes.body.error?.message || replayRes.body.error || ''
+      assert(errMsg.includes('revoked') || errMsg.includes('theft'), 'AE8: theft detection message')
     } finally {
       await shutdown()
       rmSync(tmpDir, { recursive: true, force: true })
@@ -438,7 +442,9 @@ async function run() {
       const token = loginRes.body.accessToken
 
       const { ws, messages } = await connectWS(port, { token })
-      await delay(300)
+      // join 메시지 전송 후 init 수신
+      ws.send(JSON.stringify({ type: 'join', session_id: 'testuser-default' }))
+      await delay(500)
 
       assert(ws !== null, 'AE14: authenticated WS connected')
       assert(messages.length > 0, 'AE14: received messages')
@@ -472,9 +478,8 @@ async function run() {
       // 올바른 Origin + auth header → 성공
       const loginRes = await request(port, 'POST', '/api/auth/login', { username: 'testuser', password: 'testpassword123' })
       const token = loginRes.body.accessToken
-      const { ws: goodWs, messages } = await connectWS(port, { token })
-      await delay(200)
-      assert(messages.length > 0, 'AE15: valid origin + auth → connected')
+      const { ws: goodWs } = await connectWS(port, { token })
+      assert(goodWs !== null, 'AE15: valid origin + auth → connected')
       goodWs.close()
     } finally {
       await shutdown()

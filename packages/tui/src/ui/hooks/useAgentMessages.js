@@ -20,8 +20,8 @@ const useAgentMessages = (state, agentState, initialMessages = []) => {
     setMessages(prev => [...prev, msg])
   }, [])
 
-  const clearHelpMessages = useCallback(() => {
-    setMessages(prev => prev.filter(msg => msg.tag !== 'help'))
+  const clearTransientMessages = useCallback(() => {
+    setMessages(prev => prev.filter(msg => !msg.transient))
   }, [])
 
   // conversationHistory → messages 동기화
@@ -70,7 +70,7 @@ const useAgentMessages = (state, agentState, initialMessages = []) => {
     }
   }, [agentState.status, state])
 
-  return { messages, setMessages, addMessage, clearHelpMessages }
+  return { messages, setMessages, addMessage, clearTransientMessages }
 }
 
 export { useAgentMessages }

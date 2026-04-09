@@ -141,7 +141,7 @@ class PresenceServer {
     // WebSocket
     const wsHandler = new WsHandler({
       host: this.#host, authEnabled: this.#authEnabled, wsAuth: auth.wsAuth,
-      userContext: this.#userContext, defaultSession: this.#defaultSession, getUserContextManager,
+      userContext: this.#userContext, getUserContextManager,
     })
     wsHandler.attach(this.#wss)
 

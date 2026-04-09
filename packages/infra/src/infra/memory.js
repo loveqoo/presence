@@ -58,7 +58,11 @@ class Memory {
       },
       vectorStore: {
         provider: 'memory',
-        config: { collectionName: 'presence_memories', dimension: dims },
+        config: {
+          collectionName: 'presence_memories',
+          dimension: dims,
+          ...(memoryPath && { dbPath: join(memoryPath, 'vector_store.db') }),
+        },
       },
       historyStore: {
         provider: 'sqlite',

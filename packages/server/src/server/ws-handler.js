@@ -1,6 +1,7 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { AUTH_ERROR } from '@presence/infra/infra/auth/policy.js'
 import { WS_CLOSE, WATCHED_PATHS } from './constants.js'
+import { findOrCreateSession } from './session-api.js'
 
 const { Either, Reader } = fp
 
@@ -48,15 +49,13 @@ class WsHandler {
   #authEnabled
   #wsAuth
   #userContext
-  #defaultSession
   #getUserContextManager
 
-  constructor({ host, authEnabled, wsAuth, userContext, defaultSession, getUserContextManager }) {
+  constructor({ host, authEnabled, wsAuth, userContext, getUserContextManager }) {
     this.#host = host
     this.#authEnabled = authEnabled
     this.#wsAuth = wsAuth
     this.#userContext = userContext
-    this.#defaultSession = defaultSession
     this.#getUserContextManager = getUserContextManager
   }
 
@@ -82,13 +81,10 @@ class WsHandler {
       userContextManager.addWs(wsUsername, ws)
     }
 
-    // 기본 세션 init 전송 (user-default 하위 호환)
-    ws.send(JSON.stringify({ type: 'init', session_id: 'user-default', state: this.#defaultSession.state.snapshot() }))
-
+    // join 메시지 대기 — 클라이언트가 세션 ID를 지정해야 init 전송
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString())
-        // join 메시지 처리: 세션 소유권 검증 + init 응답
         if (msg.type === 'join') this.#handleJoin(ws, msg, wsUsername)
       } catch (_) {}
     })
@@ -121,15 +117,26 @@ class WsHandler {
     return authenticated
   }
 
-  // join 메시지 처리: 세션 소유권 검증 + init 응답.
-  #handleJoin(ws, msg, wsUsername) {
-    const entry = this.#userContext.sessions.get(msg.session_id)
+  // join 메시지 처리: 유저별/글로벌 컨텍스트에서 세션 검색 + init 응답.
+  async #handleJoin(ws, msg, wsUsername) {
+    const sessionId = msg.session_id
+
+    // 유저별 컨텍스트 해석 (REST의 resolveUserContext와 동일 로직)
+    let effectiveCtx = this.#userContext
+    const userContextManager = this.#getUserContextManager()
+    if (this.#authEnabled && wsUsername && userContextManager) {
+      const userCtx = await userContextManager.getOrCreate(wsUsername)
+      effectiveCtx = userCtx?.userContext || this.#userContext
+    }
+
+    const entry = findOrCreateSession(sessionId, wsUsername, effectiveCtx, this.#userContext)
     if (!entry) return
+
     if (this.#authEnabled && wsUsername && entry.owner !== null && entry.owner !== wsUsername) {
       ws.send(JSON.stringify({ type: 'error', code: 403, message: 'Access denied: session belongs to another user' }))
       return
     }
-    ws.send(JSON.stringify({ type: 'init', session_id: msg.session_id, state: entry.session.state.snapshot() }))
+    ws.send(JSON.stringify({ type: 'init', session_id: sessionId, state: entry.session.state.snapshot() }))
   }
 }
 

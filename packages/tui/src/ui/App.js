@@ -26,7 +26,7 @@ const App = (props) => {
   } = props
   const { exit } = useApp()
   const agentState = useAgentState(state)
-  const { messages, setMessages, addMessage, clearHelpMessages } = useAgentMessages(state, agentState, initialMessages)
+  const { messages, setMessages, addMessage, clearTransientMessages } = useAgentMessages(state, agentState, initialMessages)
   const [currentModel, setCurrentModel] = useState(initialModel)
   const [showPanel, setShowPanel] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
@@ -37,7 +37,7 @@ const App = (props) => {
   // Slash commands + 일반 입력 처리
   const handleInput = useSlashCommands({
     state, agentState, config, tools, memory, llm, toolRegistry,
-    addMessage, setMessages, exit,
+    addMessage, setMessages, clearTransientMessages, exit,
     currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems,
     sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
     onInput,
@@ -46,7 +46,7 @@ const App = (props) => {
   // App-level key handlers (overlay가 열려있지 않을 때만)
   useInput((input, key) => {
     if (key.escape && agentState.status === 'working' && onCancel) onCancel()
-    if (key.escape && agentState.status !== 'working') clearHelpMessages()
+    if (key.escape && agentState.status !== 'working') clearTransientMessages()
     if (key.ctrl && input === 't') setShowTranscript(true)
     if (key.ctrl && input === 'o') setToolExpanded(prev => !prev)
   }, { isActive: !showTranscript })

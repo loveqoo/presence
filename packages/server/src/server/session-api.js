@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
@@ -65,31 +66,46 @@ const handleSlashCommand = (input, ctx) => {
   return { handled: true, result }
 }
 
+// --- 세션 검색/생성 공용 로직 ---
+
+// 유저별 컨텍스트에서 세션 검색 + 글로벌 agent fallback + lazy 생성.
+// REST(attachSessionMiddleware)와 WS(handleJoin) 양쪽에서 사용.
+const findOrCreateSession = (sessionId, username, effectiveUserContext, globalUserContext) => {
+  let entry = effectiveUserContext.sessions.get(sessionId)
+
+  // 유저 컨텍스트에 없으면 글로벌 agent 세션에서 검색
+  if (!entry) {
+    const globalEntry = globalUserContext.sessions.get(sessionId)
+    if (globalEntry && globalEntry.type === SESSION_TYPE.AGENT) entry = globalEntry
+  }
+
+  // 세션 없으면 자동 생성 ({username}-default 패턴)
+  if (!entry && username && sessionId === `${username}-default`) {
+    const userDir = join(Config.resolveDir(), 'users', username)
+    const persistenceCwd = join(userDir, 'sessions', sessionId)
+    // 레거시 경로(users/{username}/state.json) → 새 경로 마이그레이션
+    const legacyState = join(userDir, 'state.json')
+    if (existsSync(legacyState) && !existsSync(join(persistenceCwd, 'state.json'))) {
+      mkdirSync(persistenceCwd, { recursive: true })
+      renameSync(legacyState, join(persistenceCwd, 'state.json'))
+    }
+    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username })
+  }
+
+  return entry
+}
+
 // --- Session middleware ---
 
 // :sessionId 미들웨어 — 세션 확보 + 소유권 검증 + req.presenceSession 첨부.
 const attachSessionMiddleware = (deps) => {
-  const { userContext, getUserContextManager, authEnabled } = deps
   return async (req, res, next) => {
     const sessionId = req.params.sessionId
     const username = req.user?.username
-    const userContextManager = getUserContextManager()
+    const { authEnabled } = deps
 
-    let userCtx = null
-    if (authEnabled && username && userContextManager) {
-      userCtx = await userContextManager.getOrCreate(username)
-      userContextManager.touch(username)
-    }
-
-    const effectiveUserContext = userCtx?.userContext || userContext
-    const sessions = effectiveUserContext.sessions
-    let entry = sessions.get(sessionId)
-
-    // 세션 없으면 자동 생성 ({username}-default 패턴)
-    if (!entry && username && sessionId === `${username}-default`) {
-      const persistenceCwd = join(Config.presenceDir(), 'users', username)
-      entry = sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username })
-    }
+    const effectiveUserContext = await resolveUserContext(req, deps)
+    const entry = findOrCreateSession(sessionId, username, effectiveUserContext, deps.userContext)
     if (!entry) return res.status(404).json({ error: `Session not found: ${sessionId}` })
 
     // 인증 활성화 시 소유자 검증
@@ -110,14 +126,19 @@ const mountSessionEndpoints = (router, deps) => {
 
   router.post('/sessions/:sessionId/chat', async (req, res) => {
     const { session } = req.presenceSession
+    const effectiveCtx = req.presenceUserContext || userContext
     const { input } = req.body
     if (!input || typeof input !== 'string') return res.status(400).json({ error: 'input (string) required' })
     if (input.startsWith('/')) {
       const cmd = handleSlashCommand(input, {
         state: session.state, tools: session.tools,
-        memory: userContext.memory, toolRegistry: userContext.toolRegistry,
+        memory: effectiveCtx.memory, toolRegistry: effectiveCtx.toolRegistry,
       })
-      if (cmd.handled) return res.json(cmd.result)
+      if (cmd.handled) {
+        // state 변경 커맨드(/clear 등) 후 persistence flush
+        session.flushPersistence().catch(() => {})
+        return res.json(cmd.result)
+      }
     }
     try {
       const result = await session.handleInput(input)
@@ -132,8 +153,9 @@ const mountSessionEndpoints = (router, deps) => {
     res.json(session.tools.map(tool => ({ name: tool.name, description: tool.description, source: tool.source })))
   })
   router.get('/sessions/:sessionId/agents', (req, res) => res.json(req.presenceSession.session.agents))
-  router.get('/sessions/:sessionId/config', (_req, res) => {
-    const { llm, ...rest } = userContext.config
+  router.get('/sessions/:sessionId/config', (req, res) => {
+    const ctx = req.presenceUserContext || userContext
+    const { llm, ...rest } = ctx.config
     const { apiKey, ...safeLlm } = llm
     res.json({ ...rest, llm: safeLlm })
   })
@@ -147,22 +169,45 @@ const mountSessionEndpoints = (router, deps) => {
   })
 }
 
+// 유저별 effectiveUserContext 해석 — attachSessionMiddleware와 동일 로직
+const resolveUserContext = async (req, deps) => {
+  const { userContext, getUserContextManager, authEnabled } = deps
+  const username = req.user?.username
+  const userContextManager = getUserContextManager()
+  if (authEnabled && username && userContextManager) {
+    const userCtx = await userContextManager.getOrCreate(username)
+    userContextManager.touch(username)
+    return userCtx?.userContext || userContext
+  }
+  return userContext
+}
+
 // 세션 CRUD: GET/POST/DELETE /sessions[:sessionId]
-const mountSessionsCrud = (router, userContext) => {
-  router.get('/sessions', (_req, res) => {
-    res.json(userContext.sessions.list().map(({ id, type }) => ({ id, type })))
+const mountSessionsCrud = (router, deps) => {
+  router.get('/sessions', async (req, res) => {
+    const ctx = await resolveUserContext(req, deps)
+    const userSessions = ctx.sessions.list()
+    // 글로벌 agent 세션도 포함 (유저별 컨텍스트와 글로벌이 다른 경우)
+    const globalSessions = deps.userContext.sessions.list()
+    const agentSessions = globalSessions.filter(s => s.type === SESSION_TYPE.AGENT)
+    const userIds = new Set(userSessions.map(s => s.id))
+    const merged = [...userSessions, ...agentSessions.filter(s => !userIds.has(s.id))]
+    res.json(merged.map(({ id, type }) => ({ id, type })))
   })
-  router.post('/sessions', express.json(), (req, res) => {
+  router.post('/sessions', express.json(), async (req, res) => {
+    const ctx = await resolveUserContext(req, deps)
     const { type = 'user', id } = req.body || {}
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
-    const entry = userContext.sessions.create({ id: sessionId, type, owner })
+    const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined
+    const entry = ctx.sessions.create({ id: sessionId, type, owner, persistenceCwd })
     res.status(201).json({ id: entry.id, type: entry.type })
   })
   router.delete('/sessions/:sessionId', async (req, res) => {
+    const ctx = await resolveUserContext(req, deps)
     const { sessionId } = req.params
-    if (!userContext.sessions.get(sessionId)) return res.status(404).json({ error: `Session not found: ${sessionId}` })
-    await userContext.sessions.destroy(sessionId)
+    if (!ctx.sessions.get(sessionId)) return res.status(404).json({ error: `Session not found: ${sessionId}` })
+    await ctx.sessions.destroy(sessionId)
     res.json({ ok: true })
   })
 }
@@ -171,8 +216,8 @@ const createSessionRouter = (deps) => {
   const router = express.Router()
   router.use('/sessions/:sessionId', express.json(), attachSessionMiddleware(deps))
   mountSessionEndpoints(router, deps)
-  mountSessionsCrud(router, deps.userContext)
+  mountSessionsCrud(router, deps)
   return router
 }
 
-export { createSessionRouter }
+export { createSessionRouter, findOrCreateSession }

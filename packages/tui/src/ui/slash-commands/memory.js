@@ -29,14 +29,14 @@ const cmdSummary = (memory, addMessage) => {
   const byTier = {}
   for (const n of nodes) byTier[n.tier] = (byTier[n.tier] || 0) + 1
   const parts = Object.entries(byTier).map(([k, v]) => `${k}: ${v}`).join(', ')
-  addMessage({ role: 'system', content: t('memory_cmd.summary', { count: nodes.length, detail: parts || t('memory_cmd.empty') }) })
+  addMessage({ role: 'system', content: t('memory_cmd.summary', { count: nodes.length, detail: parts || t('memory_cmd.empty') }), transient: true })
 }
 
 const cmdList = (args, memory, addMessage) => {
   const tierArg = args.slice(4).trim() || null
   let nodes = memory.allNodes()
   if (tierArg && TIER_SET.has(tierArg)) nodes = nodes.filter(n => n.tier === tierArg)
-  if (nodes.length === 0) { addMessage({ role: 'system', content: t('memory_cmd.not_found') }); return }
+  if (nodes.length === 0) { addMessage({ role: 'system', content: t('memory_cmd.not_found'), transient: true }); return }
   nodes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   const lines = nodes.slice(0, 30).map((n, i) => {
     const age = formatAge(n.createdAt)
@@ -44,7 +44,7 @@ const cmdList = (args, memory, addMessage) => {
     return `${String(i + 1).padStart(3)}. ${label}  [${n.tier} · ${n.type} · ${age}]`
   })
   if (nodes.length > 30) lines.push(`... +${nodes.length - 30} more`)
-  addMessage({ role: 'system', content: lines.join('\n') })
+  addMessage({ role: 'system', content: lines.join('\n'), transient: true })
 }
 
 const cmdClear = (args, memory, addMessage) => {
@@ -64,12 +64,20 @@ const cmdClear = (args, memory, addMessage) => {
   else if (maxAgeMs) removed = memory.removeOlderThan(maxAgeMs)
   else { addMessage({ role: 'system', content: t('memory_cmd.tier_requires_age') }); return }
   const desc = [tier, maxAgeMs ? `older than ${clearArgs.find(a => DURATION_RE.test(a))}` : null].filter(Boolean).join(', ')
-  addMessage({ role: 'system', content: t('memory_cmd.cleared', { count: removed, desc: desc ? ` (${desc})` : '' }) })
+  addMessage({ role: 'system', content: t('memory_cmd.cleared', { count: removed, desc: desc ? ` (${desc})` : '' }), transient: true })
 }
 
 const handleMemory = (input, ctx) => {
-  const { memory, addMessage } = ctx
-  if (!memory) { addMessage({ role: 'system', content: t('memory_cmd.not_available') }); return }
+  const { memory, addMessage, onInput } = ctx
+  // remote 모드: memory가 null이면 서버로 전달
+  if (!memory) {
+    if (onInput) {
+      onInput(input).then(content => { if (content) addMessage({ role: 'system', content, transient: true }) }).catch(() => {})
+    } else {
+      addMessage({ role: 'system', content: t('memory_cmd.not_available') })
+    }
+    return
+  }
   const args = input.slice('/memory'.length).trim()
   if (!args) return cmdSummary(memory, addMessage)
   if (args === 'help') { addMessage({ role: 'system', content: t('memory_cmd.help') }); return }

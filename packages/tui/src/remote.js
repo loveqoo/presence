@@ -1,6 +1,7 @@
 import React from 'react'
 import { render } from 'ink'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
+import { initI18n } from '@presence/infra/i18n'
 import { jsonRequest, refreshAccessToken } from './http.js'
 import { App } from './ui/App.js'
 
@@ -183,11 +184,15 @@ async function runRemote(baseUrl, opts = {}) {
   const tryRefresh = createTokenRefresher(baseUrl, authState)
   const client = createAuthClient(baseUrl, authState, tryRefresh)
 
+  const sessionId = username ? `${username}-default` : 'user-default'
+  const sessionBase = `/api/sessions/${sessionId}`
   const [initialTools, agents, config] = await Promise.all([
-    client.getJson('/api/tools').catch(() => []),
-    client.getJson('/api/agents').catch(() => []),
-    client.getJson('/api/config').catch(() => ({})),
+    client.getJson(`${sessionBase}/tools`).catch(() => []),
+    client.getJson(`${sessionBase}/agents`).catch(() => []),
+    client.getJson(`${sessionBase}/config`).catch(() => ({})),
   ])
+
+  initI18n(config.locale || 'ko')
 
   const cwd = process.cwd()
   const gitBranch = await detectGitBranch(cwd)

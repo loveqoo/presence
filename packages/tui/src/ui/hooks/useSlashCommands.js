@@ -10,19 +10,22 @@ import { t } from '@presence/infra/i18n'
 
 const useSlashCommands = ({
   state, agentState, config, tools, memory, llm, toolRegistry,
-  addMessage, setMessages, exit,
+  addMessage, setMessages, clearTransientMessages, exit,
   currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems,
   sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
   onInput,
 }) => {
 
   const handleInput = useCallback((input) => {
+    // 이전 정보 조회 결과(transient) 제거
+    clearTransientMessages()
     const slashCtx = {
       addMessage, exit, state, agentState, config,
       tools, memory, llm, toolRegistry,
       currentModel, setCurrentModel,
       setMessages, setShowPanel, statusItems, setStatusItems,
       sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
+      onInput,
     }
     if (dispatchSlashCommand(input, slashCtx)) return
 
@@ -38,7 +41,7 @@ const useSlashCommands = ({
       })
     }
   }, [
-    onInput, exit, agentState, tools, addMessage, statusItems, currentModel,
+    onInput, exit, agentState, tools, addMessage, clearTransientMessages, statusItems, currentModel,
     llm, memory, config, state, toolRegistry, sessionId,
     onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
     setMessages, setCurrentModel, setShowPanel, setStatusItems,
