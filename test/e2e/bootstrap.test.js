@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { bootstrap } from '@presence/tui'
-import { PHASE, RESULT } from '@presence/core/core/agent.js'
+import { PHASE, RESULT } from '@presence/core/core/policies.js'
 
 import { assert, summary } from '../lib/assert.js'
 
@@ -259,8 +259,8 @@ async function run() {
   // ===========================================
   {
     const { createTestInterpreter } = await import('@presence/core/interpreter/test.js')
-    const { createAgentTurn } = await import('@presence/core/core/agent.js')
-    const { runFreeWithStateT } = await import('@presence/core/core/op.js')
+    const { Agent } = await import('@presence/core/core/agent.js')
+    const { runFreeWithStateT } = await import('@presence/core/lib/runner.js')
 
     let llmCall = 0
     let capturedRollingContext = null
@@ -291,7 +291,8 @@ async function run() {
     })
 
     const initial = { turnState: { tag: 'idle' }, lastTurn: null, turn: 0, context: { memories: [] } }
-    const [result, finalState] = await runFreeWithStateT(interpret, ST)(createAgentTurn()('3가지 주제 검색해줘'))(initial)
+    const agent = new Agent({ interpret, ST })
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('3가지 주제 검색해줘'))(initial)
 
     // 3개 도구 모두 실행됨 (2번째는 에러 결과)
     assert(toolCall === 3, 'e2e-6: all 3 tools executed')
@@ -311,7 +312,7 @@ async function run() {
   }
 
   // ===========================================
-  // 7. mcpControl — MCP 없을 때 빈 목록
+  // 7. toolRegistry — MCP 없을 때 빈 목록
   // ===========================================
   {
     const tmpDir = mkdtempSync(join(tmpdir(), 'presence-e2e-'))
@@ -320,10 +321,10 @@ async function run() {
     try {
       const app = await bootstrap(createTestConfig(port, tmpDir), { persistenceCwd: tmpDir })
 
-      assert(Array.isArray(app.mcpControl.list()), 'e2e-7: mcpControl.list() is array')
-      assert(app.mcpControl.list().length === 0, 'e2e-7: no MCP servers')
-      assert(app.mcpControl.enable('mcp0') === false, 'e2e-7: enable unknown returns false')
-      assert(app.mcpControl.disable('mcp0') === false, 'e2e-7: disable unknown returns false')
+      assert(Array.isArray(app.toolRegistry.groups()), 'e2e-7: toolRegistry.list() is array')
+      assert(app.toolRegistry.groups().length === 0, 'e2e-7: no MCP servers')
+      assert(app.toolRegistry.enableGroup('mcp0') === false, 'e2e-7: enable unknown returns false')
+      assert(app.toolRegistry.disableGroup('mcp0') === false, 'e2e-7: disable unknown returns false')
 
       // mcp_search_tools / mcp_call_tool 미등록 확인 (allMcpTools.length === 0)
       assert(!app.tools.some(t => t.name === 'mcp_search_tools'), 'e2e-7: no mcp_search_tools')
@@ -336,7 +337,7 @@ async function run() {
   }
 
   // ===========================================
-  // 8. mcpControl — mock MCP 연결 + enable/disable
+  // 8. toolRegistry — mock MCP 연결 + enable/disable
   // ===========================================
   {
     const tmpDir = mkdtempSync(join(tmpdir(), 'presence-e2e-'))
@@ -365,23 +366,23 @@ async function run() {
     try {
       const app = await bootstrap(config, { persistenceCwd: tmpDir })
 
-      const list = app.mcpControl.list()
+      const list = app.toolRegistry.groups()
       assert(list.length === 1, 'e2e-8: 1 MCP server')
       assert(list[0].serverName === 'jira', 'e2e-8: jira server name')
       assert(list[0].toolCount === 2, 'e2e-8: 2 tools')
       assert(list[0].enabled === true, 'e2e-8: initially enabled')
-      assert(list[0].prefix === 'mcp0', 'e2e-8: prefix mcp0')
+      assert(list[0].group === 'mcp0', 'e2e-8: prefix mcp0')
 
       assert(app.tools.some(t => t.name === 'mcp_search_tools'), 'e2e-8: mcp_search_tools registered')
       assert(app.tools.some(t => t.name === 'mcp_call_tool'), 'e2e-8: mcp_call_tool registered')
 
-      assert(app.mcpControl.disable('mcp0') === true, 'e2e-8: disable returns true')
-      assert(app.mcpControl.list()[0].enabled === false, 'e2e-8: disabled')
-      assert(app.mcpControl.enable('mcp0') === true, 'e2e-8: enable returns true')
-      assert(app.mcpControl.list()[0].enabled === true, 'e2e-8: re-enabled')
+      assert(app.toolRegistry.disableGroup('mcp0') === true, 'e2e-8: disable returns true')
+      assert(app.toolRegistry.groups()[0].enabled === false, 'e2e-8: disabled')
+      assert(app.toolRegistry.enableGroup('mcp0') === true, 'e2e-8: enable returns true')
+      assert(app.toolRegistry.groups()[0].enabled === true, 'e2e-8: re-enabled')
 
       // 알 수 없는 prefix
-      assert(app.mcpControl.disable('mcp99') === false, 'e2e-8: disable unknown returns false')
+      assert(app.toolRegistry.disableGroup('mcp99') === false, 'e2e-8: disable unknown returns false')
 
       await app.shutdown()
     } finally {
@@ -427,7 +428,7 @@ async function run() {
       assert(enabledResult.includes('mcp0__calendar_find_event'), 'e2e-9: tool visible when enabled')
 
       // disable 후 검색 결과에서 제외
-      app.mcpControl.disable('mcp0')
+      app.toolRegistry.disableGroup('mcp0')
       const disabledResult = await searchTool.handler({ query: 'find' })
       assert(!disabledResult.includes('mcp0__calendar_find_event'), 'e2e-9: tool hidden when disabled')
       assert(disabledResult.includes('No MCP tools found'), 'e2e-9: no tools message when disabled')

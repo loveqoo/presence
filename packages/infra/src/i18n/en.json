@@ -84,7 +84,8 @@
     "cleared": "cleared {{count}} nodes{{desc}}",
     "unknown_arg": "unknown argument: {{arg}}\nuse: /memory help",
     "unknown_sub": "unknown subcommand. use: /memory help",
-    "help": "/memory              — summary (node count by tier)\n/memory list         — show all nodes\n/memory list <tier>  — show nodes in tier (episodic, semantic)\n/memory clear        — delete all nodes\n/memory clear <age>  — delete older than age (e.g. 7d, 24h, 30m)\n/memory clear <tier> — delete all nodes in tier\n/memory clear <tier> <age> — combine tier + age filter"
+    "help": "/memory              — summary (node count by tier)\n/memory list         — show all nodes\n/memory list <tier>  — show nodes in tier (episodic, semantic)\n/memory clear        — delete all nodes\n/memory clear <age>  — delete older than age (e.g. 7d, 24h, 30m)",
+    "tier_requires_age": "mem0 does not support tier-based deletion. Combine with an age filter or use /memory clear to delete all."
   },
   "models_cmd": {
     "not_available": "LLM client not available",

@@ -7,20 +7,20 @@
     "packages/core",
     "packages/infra",
     "packages/server",
-    "packages/orchestrator",
-    "packages/tui",
-    "packages/web"
+    "packages/tui"
   ],
   "scripts": {
     "test": "node test/run.js",
-    "start": "npm run start --workspace=@presence/orchestrator",
-    "start:server": "npm run start --workspace=@presence/server",
+    "test:live": "node test/e2e/tui-live.test.js",
+    "start": "npm run start --workspace=@presence/server",
     "start:cli": "npm run start --workspace=@presence/tui",
-    "dev:web": "npm run dev --workspace=@presence/web",
-    "build:web": "npm run build --workspace=@presence/web",
-    "user": "node packages/infra/src/infra/auth-cli.js"
+    "user": "node packages/infra/src/infra/auth/cli.js",
+    "complexity": "node scripts/complexity.js",
+    "complexity:check": "node scripts/complexity.js --check"
   },
   "devDependencies": {
+    "acorn": "^8.16.0",
+    "acorn-walk": "^8.3.5",
     "fast-check": "^4.6.0"
   }
 }

@@ -28,10 +28,6 @@ const summarizers = {
   GetState:    (f) => `path: ${f.path}`,
 }
 
-// plan 축적은 관찰 전용 부수효과.
-const appendPlan = (plan, entry) => { plan.push(entry); return entry }
-
-// stub 핸들러를 Interpreter 인스턴스로 변환
 const stubToInterpreter = (tag, stub) =>
   new Interpreter([tag], (f) => {
     try {
@@ -54,10 +50,8 @@ const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
   const interpret = (functor) => {
     const { tag } = functor
     const summarize = summarizers[tag]
-    const entry = appendPlan(plan, {
-      tag,
-      ...(summarize ? { summary: summarize(functor) } : {}),
-    })
+    const entry = { tag, ...(summarize ? { summary: summarize(functor) } : {}) }
+    plan.push(entry)
     if (onOp) onOp(entry)
     return composed(functor)
   }
@@ -65,4 +59,4 @@ const createDryRunInterpreter = ({ stubs = {}, onOp } = {}) => {
   return { interpret, ST, plan }
 }
 
-export { createDryRunInterpreter, DEFAULT_STUBS }
+export { createDryRunInterpreter }

@@ -24,16 +24,21 @@ if [[ "$FILE_PATH" =~ test/ ]] || [[ "$FILE_PATH" =~ node_modules/ ]]; then
 fi
 
 # --- 규칙 1: 신규 클로저 DI 패턴 감지 ---
-# const createXxx = ({ dep1, dep2 }) => { ... } 또는 (dep1, dep2) => { ... } 패턴
-# 레거시 브릿지(단일 라인 xR.run)는 허용
-if echo "$NEW_STRING" | grep -qE 'const create[A-Z]\w+\s*=\s*\(' ; then
-  # 레거시 브릿지 패턴인지 확인 (xR.run 위임)
-  if ! echo "$NEW_STRING" | grep -qE '\.run\(' ; then
-    echo "❌ 클로저 DI 신규 작성 금지. Reader.asks를 사용하세요." >&2
-    echo "   패턴: const createX = (deps) => { ... }" >&2
-    echo "   대안: const xR = Reader.asks(({ dep1, dep2 }) => ...)" >&2
-    echo "         const createX = (deps) => xR.run(deps)  // 레거시 브릿지만 허용" >&2
-    exit 2
+# 구조분해 파라미터를 받는 모듈 스코프 arrow function → DI 팩토리로 간주
+# 라인 단위로 .run( 이 있으면 레거시 브릿지(단일 라인 위임)로 허용
+# React hook (use* 접두사)과 TUI 패키지는 예외
+if [[ ! "$FILE_PATH" =~ packages/tui/ ]]; then
+  FACTORIES=$(echo "$NEW_STRING" | grep -E 'const \w+\s*=\s*\(\{' || true)
+  if [ -n "$FACTORIES" ]; then
+    VIOLATIONS=$(echo "$FACTORIES" | grep -vE '\.run\(' || true)
+    if [ -n "$VIOLATIONS" ]; then
+      echo "❌ 클로저 DI 신규 작성 금지. Reader.asks를 사용하세요." >&2
+      echo "   감지된 패턴:" >&2
+      echo "$VIOLATIONS" | while IFS= read -r line; do echo "     $line" >&2; done
+      echo "   대안: const xR = Reader.asks(({ dep1, dep2 }) => ...)" >&2
+      echo "         const createX = (deps) => xR.run(deps)  // 레거시 브릿지만 허용" >&2
+      exit 2
+    fi
   fi
 fi
 

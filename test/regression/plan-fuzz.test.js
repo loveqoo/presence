@@ -5,8 +5,9 @@
  */
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { validatePlan, safeJsonParse } from '@presence/core/core/agent.js'
-import { Free, Either } from '@presence/core/core/op.js'
+import { validatePlan, safeJsonParse } from '@presence/core/core/validate.js'
+import fp from '@presence/core/lib/fun-fp.js'
+const { Free, Either } = fp
 import { assert, summary } from '../lib/assert.js'
 
 function run() {

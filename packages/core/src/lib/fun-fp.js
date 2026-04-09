@@ -1,3 +1,8 @@
+/**
+ * Fun-FP-JS - Functional Programming Library
+ * Built: 2026-04-05T07:47:44.175Z
+ * Static Land specification compliant
+ */
 const polyfills = {
     array: {
         flatMap: Array.prototype.flatMap
@@ -653,6 +658,10 @@ const withTypeRegistry = (TypeClass, defaultResolver = null) => {
     TypeClass.of = key => TypeClass.resolver(key)
         || raise(new TypeError(`${TypeClass.name}.of: unsupported key ${key}`));
 };
+const addResolver = (TypeClass, resolver) => {
+    const prev = TypeClass.resolver;
+    TypeClass.resolver = key => prev(key) || resolver(key);
+};
 
 Setoid.op = (a, b) => a === b;
 withTypeRegistry(Setoid, key => key === 'default' ? { equals: Setoid.op } : null);
@@ -1284,6 +1293,100 @@ class EitherTraversable extends Traversable {
     }
 }
 modules.push(EitherTraversable);
+/* Container Semigroup / Monoid */
+const normalizeSemigroupKey = x => {
+    const instance = typeof x === 'string' ? Semigroup.of(x) : x;
+    if (typeof x !== 'string' && !(x && x[Symbols.Semigroup] === true)) {
+        raise(new TypeError('normalizeSemigroupKey: argument must be a string or Semigroup instance'));
+    }
+    const ctorName = instance.constructor?.name?.toLowerCase?.() || '';
+    let best = null;
+    for (const [k, v] of Object.entries(Semigroup.types)) {
+        if (v === instance && k === k.toLowerCase() && k !== ctorName) {
+            if (best === null || k.length < best.length || (k.length === best.length && k < best)) best = k;
+        }
+    }
+    return { key: best, instance };
+};
+const resolveInnerSemigroup = (label, innerSG) => {
+    if (typeof innerSG === 'string') return normalizeSemigroupKey(innerSG);
+    try { return normalizeSemigroupKey(innerSG); }
+    catch (e) {
+        if (e instanceof TypeError) raise(new TypeError(`${label}: innerSG must be a supported semigroup key or Semigroup instance`));
+        throw e;
+    }
+};
+Maybe.Semigroup = innerSG => {
+    const { key, instance: sg } = resolveInnerSemigroup('Maybe.Semigroup', innerSG);
+    if (key !== null && Maybe.Semigroup._keyCache.has(key)) return Maybe.Semigroup._keyCache.get(key);
+    if (key === null && Maybe.Semigroup._instanceCache.has(sg)) return Maybe.Semigroup._instanceCache.get(sg);
+    const result = new Semigroup(
+        (a, b) =>
+            a.isNothing() ? b :
+            b.isNothing() ? a :
+            Maybe.Just(sg.concat(a.value, b.value)),
+        'Maybe', null
+    );
+    if (key !== null) {
+        Semigroup.types[`maybe(${key})`] = result;
+        Maybe.Semigroup._keyCache.set(key, result);
+    } else {
+        Maybe.Semigroup._instanceCache.set(sg, result);
+    }
+    return result;
+};
+Maybe.Semigroup._keyCache = new Map();
+Maybe.Semigroup._instanceCache = new WeakMap();
+// Maybe는 inner가 Semigroup이기만 해도 Monoid를 구성할 수 있다.
+// Nothing이 항등원 역할을 하므로 inner의 empty()가 필요 없다.
+Maybe.Monoid = innerSG => {
+    const { key, instance: sg } = resolveInnerSemigroup('Maybe.Monoid', innerSG);
+    if (key !== null && Maybe.Monoid._keyCache.has(key)) return Maybe.Monoid._keyCache.get(key);
+    if (key === null && Maybe.Monoid._instanceCache.has(sg)) return Maybe.Monoid._instanceCache.get(sg);
+    const maybeSG = Maybe.Semigroup(sg);
+    const result = new Monoid(maybeSG, () => Maybe.Nothing(), 'Maybe', null);
+    if (key !== null) {
+        Monoid.types[`maybe(${key})`] = result;
+        Maybe.Monoid._keyCache.set(key, result);
+    } else {
+        Maybe.Monoid._instanceCache.set(sg, result);
+    }
+    return result;
+};
+Maybe.Monoid._keyCache = new Map();
+Maybe.Monoid._instanceCache = new WeakMap();
+Either.Semigroup = innerSG => {
+    const { key, instance: sg } = resolveInnerSemigroup('Either.Semigroup', innerSG);
+    if (key !== null && Either.Semigroup._keyCache.has(key)) return Either.Semigroup._keyCache.get(key);
+    if (key === null && Either.Semigroup._instanceCache.has(sg)) return Either.Semigroup._instanceCache.get(sg);
+    const result = new Semigroup(
+        (a, b) =>
+            a.isLeft() ? a :
+            b.isLeft() ? b :
+            Either.Right(sg.concat(a.value, b.value)),
+        'Either', null
+    );
+    if (key !== null) {
+        Semigroup.types[`either(${key})`] = result;
+        Either.Semigroup._keyCache.set(key, result);
+    } else {
+        Either.Semigroup._instanceCache.set(sg, result);
+    }
+    return result;
+};
+Either.Semigroup._keyCache = new Map();
+Either.Semigroup._instanceCache = new WeakMap();
+addResolver(Semigroup, key => {
+    const m = /^(maybe|either)\((.+)\)$/.exec(key);
+    if (!m) return null;
+    return m[1] === 'maybe' ? Maybe.Semigroup(m[2])
+         : m[1] === 'either' ? Either.Semigroup(m[2])
+         : null;
+});
+addResolver(Monoid, key => {
+    const m = /^maybe\((.+)\)$/.exec(key);
+    return m ? Maybe.Monoid(m[1]) : null;
+});
 /* Task */
 class Task {
     constructor(computation) {
@@ -1303,6 +1406,7 @@ class Task {
     }
     map(f) { return Functor.of('task').map(f, this); }
     chain(f) { return Chain.of('task').chain(f, this); }
+    catchError(handler) { return Task.catchError(handler, this); }
 }
 Task.prototype[Symbols.Task] = true;
 const settledFork = (task, onReject, onResolve) => {
@@ -1372,6 +1476,12 @@ Task.race = tasks => new Task((reject, resolve) => {
     let done = false;
     list.forEach(t => t.fork(e => { if (!done) { done = true; reject(e); } }, v => { if (!done) { done = true; resolve(v); } }));
 });
+Task.catchError = (handler, task) => new Task((reject, resolve) => {
+    task.fork(
+        e => handler(e).fork(reject, resolve),
+        resolve
+    );
+});
 class TaskSemigroupoid extends Semigroupoid {
     constructor() {
         super((f, g) => x => Chain.types.TaskChain.chain(f, g(x)), 'function', Semigroupoid.types, 'task');
@@ -1395,7 +1505,10 @@ modules.push(TaskFilterable);
 class TaskFunctor extends Functor {
     constructor() {
         super((f, task) => new Task((reject, resolve) => {
-            settledFork(task, reject, x => resolve(f(x)));
+            settledFork(task, reject, x => {
+                try { resolve(f(x)); }
+                catch (e) { reject(e); }
+            });
         }), 'Task', Functor.types, 'task');
     }
 }
@@ -2144,6 +2257,38 @@ class FreeMonad extends Monad {
 modules.push(FreeMonad);
 load(...modules);
 
+/* Optics */
+// 내부 전용 Identity/Const Functor (Static Land 형태, public registry 미노출)
+const _Identity = { of: v => ({ value: v }), map: (f, x) => ({ value: f(x.value) }) };
+const _Const = { of: v => ({ value: v }), map: (_, x) => x };
+// Van Laarhoven Lens (F-explicit): Lens s a = forall F. Functor F => F -> (a -> F a) -> s -> F s
+// F 파라미터가 첫 인자이므로 plain compose로는 합성 불가 → composeLens 제공
+const Lens = (getter, setter) => {
+    typeof getter !== 'function' && raise(new TypeError('Lens: getter must be a function'));
+    typeof setter !== 'function' && raise(new TypeError('Lens: setter must be a function'));
+    return F => f => s => F.map(b => setter(b, s), f(getter(s)));
+};
+const view = (lens, s) => {
+    typeof lens !== 'function' && raise(new TypeError('view: lens must be a function'));
+    return lens(_Const)(_Const.of)(s).value;
+};
+const over = (lens, f, s) => {
+    typeof lens !== 'function' && raise(new TypeError('over: lens must be a function'));
+    typeof f !== 'function' && raise(new TypeError('over: f must be a function'));
+    return lens(_Identity)(a => _Identity.of(f(a)))(s).value;
+};
+const set = (lens, b, s) => {
+    typeof lens !== 'function' && raise(new TypeError('set: lens must be a function'));
+    return over(lens, () => b, s);
+};
+// Lens 합성: F를 양쪽에 주입한 후 concrete-F 레벨에서 함수 합성
+const composeLens = (...lenses) => {
+    lenses.forEach((l, i) => {
+        typeof l !== 'function' && raise(new TypeError(`composeLens: argument ${i} must be a Lens`));
+    });
+    return F => compose(...lenses.map(l => l(F)));
+};
+
 /* ═══════════════════════════════════════════════════════════════
    Monad Transformer
    - load() 이후에 위치: Monad.of(), Functor.of() 등이 로드된 상태 필요
@@ -2584,6 +2729,7 @@ export default {
     Apply, Applicative, Alt, Plus, Alternative, Chain, ChainRec, Monad, Foldable,
     Extend, Comonad, Traversable, Maybe, Either, Task, Free, Validation, Reader, Writer, State,
     StateT, EitherT, ReaderT, WriterT, Actor,
+    Lens, composeLens, view, set, over,
     identity, compose, compose2, sequence, foldMap, lift, pipeK, composeK, runCatch,
     constant, tuple, apply, unapply, unapply2, curry, curry2, uncurry, uncurry2,
     predicate, predicateN, negate, negateN,

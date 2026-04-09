@@ -84,7 +84,8 @@
     "cleared": "{{count}}개 노드 삭제{{desc}}",
     "unknown_arg": "알 수 없는 인자: {{arg}}\n/memory help 참조",
     "unknown_sub": "알 수 없는 하위 명령어. /memory help 참조",
-    "help": "/memory              — 요약 (tier별 노드 수)\n/memory list         — 전체 목록\n/memory list <tier>  — tier별 필터 (episodic, semantic)\n/memory clear        — 전체 삭제\n/memory clear <age>  — 지정 기간 이상 삭제 (예: 7d, 24h, 30m)\n/memory clear <tier> — tier 전체 삭제\n/memory clear <tier> <age> — tier + 기간 조합"
+    "help": "/memory              — 요약 (tier별 노드 수)\n/memory list         — 전체 목록\n/memory list <tier>  — tier별 필터 (episodic, semantic)\n/memory clear        — 전체 삭제\n/memory clear <age>  — 지정 기간 이상 삭제 (예: 7d, 24h, 30m)",
+    "tier_requires_age": "mem0는 tier 단위 삭제를 지원하지 않습니다. 기간과 함께 지정하거나 /memory clear로 전체를 삭제하세요."
   },
   "models_cmd": {
     "not_available": "LLM 클라이언트를 사용할 수 없습니다.",

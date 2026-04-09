@@ -1,10 +1,22 @@
 ---
-description: FP 모나드 규칙 — 모든 소스 코드에 적용
-globs:
+paths:
   - "packages/*/src/**/*.js"
 ---
 
 # FP 모나드 필수 규칙
+
+## 모나드 역할 경계
+
+각 모나드는 하나의 관심사만 담당한다. 역할을 혼용하지 않는다.
+
+| 모나드 | 역할 | 사용처 | 금지 |
+|--------|------|--------|------|
+| **Reader** | 의존성 전파 | factory의 deps 합성·전달 | 상태 변경, 부수 출력 |
+| **Writer** | 관찰 정보 축적 | trace, audit log append | 의존성 주입, 상태 변경 |
+| **State** | 순수 설정/빌더 | config merge 파이프라인 | 비동기 효과, 리액티브 hooks |
+| **StateT(Task)** | 턴 실행 상태 + 비동기 | Free 인터프리터 상태 스레딩 | 의존성 주입, 관찰 축적 |
+| **Either** | 동기 에러 분기 | 검증, 파싱, 분기 | 비동기, 상태 |
+| **Task** | 비동기 실행 | 지연 실행, 합성 async | 상태 스레딩 |
 
 ## 의존성 주입
 
@@ -33,7 +45,7 @@ globs:
 ## import 패턴
 
 ```javascript
-import fp from '@presence/core/lib/fun-fp.js'  // infra, server, orchestrator
+import fp from '@presence/core/lib/fun-fp.js'  // infra, server, tui
 import fp from '../lib/fun-fp.js'               // core 내부
 const { Either, Task, Reader, Writer, State } = fp
 ```

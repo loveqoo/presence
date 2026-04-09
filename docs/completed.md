@@ -236,3 +236,88 @@ Actor 메시지 경계에서 pending 노드 스냅샷을 선행 캡처.
 - `src/main.js`: `createMemoryGraph` → `createMem0Memory`, MemoryActor 파라미터 변경.
 - `test/infra/actors.test.js`: M1~M8 MemoryActor 테스트 전면 재작성 (mem0 mock 기반).
 - Embedding 정책 유지: embed API 없으면 메모리 비활성 (`createMem0Memory` null 반환).
+
+### Reader / Writer / State 모나드 도입
+
+클로저 기반 DI 34개를 Reader 모나드로 전환하고, Writer/State 모나드를 도입하여 FP 아키텍처 강화.
+
+**Phase 1 — auth-middleware.js Reader:**
+- 8개 함수 Reader 전환: `loginHandlerR`, `refreshHandlerR`, `logoutHandlerR`, `authMiddlewareR`, `authenticateWsR`, `issueTokensR`, `validateRefreshChainR`, `rotateRefreshTokenR`
+- Reader 합성: `rotateRefreshTokenR`이 내부에서 `issueTokensR` 체이닝
+- 레거시 브릿지: `const createX = (deps) => xR.run(deps)` 단일 라인 위임
+
+**Phase 2 — config.js State:**
+- `buildConfig(layers)` — `State.modify` chain으로 config 머지 파이프라인 구성
+- `mergeConfig(mergeConfig(...))` 중첩 호출 → `buildConfig([...]).run(DEFAULTS)[0]`
+
+**Phase 3 — traced.js Writer:**
+- 가변 `trace[]` → `Writer.of(null)` + `Writer.tell([entry])` 축적
+- 외부 API: `getTrace()` (방어적 복사) / `resetTrace()`
+- 내부 mutable accumulator, 외부에는 함수 인터페이스만 노출
+
+**Phase 4 — actors.js Reader:**
+- 8개 factory Reader 전환: `memoryActorR`, `compactionActorR`, `persistenceActorR`, `turnActorR`, `eventActorR`, `emitR`, `budgetActorR`, `delegateActorR`
+
+**Phase 5 — session-factory.js Reader 합성:**
+- `create*` 직접 호출 → `xR.run(sessionEnv)` 전환
+
+**Phase 6 — server/index.js Reader:**
+- `sessionBridgeR`, `sessionRoutesR` Reader 전환
+- `authEnv` 패턴으로 인증 미들웨어 Reader 실행
+
+**FP 코딩 규칙 강제:**
+- CLAUDE.md: 모나드 역할 경계 테이블, Reader/State/Writer 사용 규칙
+- `.claude/rules/`: 4개 경로별 규칙 파일 (fp-monad, interpreter, test, auth-web)
+- `.claude/hooks/validate-fp.sh`: PreToolUse hook — 클로저 DI, trace.push, mergeConfig 중첩 차단
+
+**검증:** 브릿지 동치 테스트 (35 assertions) + 전체 mock 테스트 2556 passed + live E2E 121 passed
+
+### infra 패키지 리팩토링
+
+클래스 + Reader 전환, #private, 매직 넘버 상수화, 관심사별 폴더 분리.
+
+- `embedding.js` → `embedding/` (provider.js, openai-provider.js, cohere-provider.js, embedder.js, search.js)
+- `mcp.js` → `mcp/` (transport.js, connection.js, schema.js, content.js)
+- `llm.js` → `llm/` (llm-client.js, sse-parser.js)
+- `memory.js`, `persistence.js`, `persona.js`, `events.js` — 클래스 전환 + #private
+- `policies.js` — EMBEDDING, LLM, TODO 상수 통합
+- 테스트 파일 workspace별 분리 (`test/infra/` → `packages/infra/test/`)
+
+### server 패키지 리팩토링
+
+PresenceServer facade 클래스 도입, Express 파이프라인 가시화, 파일 통합.
+
+- `PresenceServer` — static create + #boot + shutdown facade
+- `#mountRoutes()` — Express 미들웨어/라우트 순서를 한 곳에서 관리
+- `UserContextManager`, `SessionBridge`, `WsHandler` — 클래스 전환 (#private)
+- `auth-setup.js` → Router 반환 패턴 (expressApp 변이 제거)
+- `session-api.js` → Router 반환 + 슬래시 커맨드 테이블 디스패치 흡수
+- `constants.js` — WS_CLOSE, INACTIVITY_TIMEOUT_MS, WATCHED_PATHS 통합
+- 삭제: `legacy-routes.js`, `slash-commands.js`, `ws-bridge.js`, `scheduler.js` (9개 → 6개)
+- `SESSION_TYPE` import 경로 수정 (pre-existing bug)
+
+### tui 패키지 리팩토링
+
+React custom hook 추출, RemoteSession 클래스 전환.
+
+- `useAgentMessages` — App.js의 4개 useEffect (history, budget, toolResults, 턴 초기화) 통합
+- `useSlashCommands` — handleInput + slashCtx 16필드 디스패치 캡슐화
+- `RemoteSession` — runRemote의 mutable state 6개 + 클로저 5개 → 클래스 응집
+- App.js Score 224 → 139 (렌더 트리 조립에만 집중)
+
+**규칙 추가:**
+- `refactor.md` — React/Ink 컴포넌트 리팩토링 규칙 (custom hook 추출 기준)
+- `validate-fp.sh` — TUI 패키지 클로저 DI 검사 제외
+- `check-filename.sh` — ui/ 하위 PascalCase 허용
+
+### TUI 시나리오 live e2e 테스트
+
+실제 서버 + 실제 LLM 기반 사용자 시나리오 검증. 4단계 40+ assertions.
+
+- `live-helpers.js` — 공용 인프라 (connect, setup, sendAndWait, waitIdle)
+- `tui-live.test.js` — 기능 단위 검증 15개 (인증 모드 호환)
+- `tui-scenario.test.js` — 시나리오 검증:
+  - 1단: 멀티턴 맥락, 도구 연쇄, /clear, 디렉토리 탐색, 계산 연쇄
+  - 2단: 다중 파일 비교, 조건 분기, 4턴 체인, 도구+판단, 커맨드 혼합
+  - 3단: 에러 복구, 6턴 맥락(5/5 기억), 도구 3턴 연쇄, /clear+도구, 커맨드↔대화 교차
+  - 4단: streaming, 멀티 이터레이션, approve, cancel, 세션 전환

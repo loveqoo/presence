@@ -1,25 +1,18 @@
-import React from 'react'
-import { render } from 'ink'
-import { createGlobalContext } from '@presence/infra/infra/global-context.js'
-import { createRemoteState } from '@presence/infra/infra/remote-state.js'
-import { createSession } from '@presence/infra/infra/session-factory.js'
-import { loadClientConfig } from '@presence/infra/infra/config.js'
-import fp from '@presence/core/lib/fun-fp.js'
-const { Either } = fp
-import { App } from './ui/App.js'
-
-const h = React.createElement
+import { UserContext } from '@presence/infra/infra/user-context.js'
+import { checkServer, loginToServer, changePasswordOnServer } from './http.js'
+import { runRemote } from './remote.js'
 
 // =============================================================================
-// Bootstrap: createGlobalContext + createSession 조합. 하위 호환 유지.
+// Bootstrap: UserContext 생성 + 단일 유저 세션 생성.
 // e2e 테스트에서 직접 사용 가능: const app = await bootstrap(config)
 // =============================================================================
 
-const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
-  const globalCtx = await createGlobalContext(configOverride)
-  const session = createSession(globalCtx, { persistenceCwd })
+const bootstrap = async (configOverride, opts = {}) => {
+  const { persistenceCwd } = opts
+  const userContext = await UserContext.create(configOverride)
+  const { session } = userContext.sessions.create({ id: 'user-default', persistenceCwd })
 
-  const { config, logger, personaConfig, memory, llm, mcpControl, jobStore, embedder, mcpConnections, mem0 } = globalCtx
+  const { config, logger, personaConfig, memory, llm, toolRegistry, jobStore, embedder, mcpConnections } = userContext
   const { agent, state, tools, agents, handleInput, handleApproveResponse, handleCancel, schedulerActor, delegateActor } = session
 
   // --- Startup summary ---
@@ -35,78 +28,49 @@ const bootstrap = async (configOverride, { persistenceCwd } = {}) => {
     embedder: embedder ? config.embed.provider : 'none',
     scheduler: config.scheduler.enabled ? `enabled (poll: ${config.scheduler.pollIntervalMs}ms)` : 'disabled',
     scheduledJobs: jobStore.listJobs().filter(j => j.enabled).length,
-    memory: mem0 ? `mem0 (${memory?.allNodes().length ?? 0} cached)` : 'disabled',
+    memory: memory ? `mem0 (${memory.allNodes().length} cached)` : 'disabled',
   })
 
-  const shutdown = async () => {
-    await session.shutdown()
-    await globalCtx.shutdown()
-  }
+  const shutdown = async () => { await userContext.shutdown() }
 
   return {
     agent, state, config, logger,
     tools, agents, personaConfig,
     handleInput, handleApproveResponse, handleCancel,
     schedulerActor, delegateActor, jobStore,
-    memory, llm, mcpControl,
+    memory, llm, toolRegistry,
     shutdown,
   }
 }
 
 // =============================================================================
-// View: Ink 렌더링. TTY 필요.
-//
-// ~/.presence/clients/{userId}.json 에서 서버 URL을 읽어 원격 접속.
-// 서버 미응답 시 오케스트레이터 자동 spawn 시도.
+// CLI 진입점 보조 함수들 (서버 URL 결정, 프롬프트, 인증 흐름)
 // =============================================================================
 
-// --- 클라이언트 설정 로드 ---
-
-const resolveUserId = () => {
-  // --instance anthony 또는 --instance=anthony
-  const eqIdx = process.argv.indexOf('--instance')
-  if (eqIdx !== -1 && process.argv[eqIdx + 1]) return process.argv[eqIdx + 1]
-  const eqArg = process.argv.find(a => a.startsWith('--instance='))
+// --server <url> → PRESENCE_SERVER env → default
+const resolveServerUrl = () => {
+  const argIdx = process.argv.indexOf('--server')
+  if (argIdx !== -1 && process.argv[argIdx + 1]) return process.argv[argIdx + 1]
+  const eqArg = process.argv.find(a => a.startsWith('--server='))
   if (eqArg) return eqArg.split('=')[1]
-  return null
+  if (process.env.PRESENCE_SERVER) return process.env.PRESENCE_SERVER
+  return 'http://127.0.0.1:3000'
 }
 
-// 서버 생존 여부 + authRequired 확인
-const checkServer = async (baseUrl) => {
-  try {
-    const { default: http } = await import('node:http')
-    const url = new URL('/api/instance', baseUrl)
-    return await new Promise((resolve) => {
-      const req = http.get({ hostname: url.hostname, port: url.port, path: url.pathname }, (res) => {
-        let buf = ''
-        res.on('data', d => { buf += d })
-        res.on('end', () => {
-          try {
-            const body = JSON.parse(buf)
-            resolve({ reachable: true, authRequired: !!body.authRequired })
-          } catch {
-            resolve({ reachable: res.statusCode === 200, authRequired: false })
-          }
-        })
-      })
-      req.on('error', () => resolve({ reachable: false, authRequired: false }))
-      req.setTimeout(1500, () => { req.destroy(); resolve({ reachable: false, authRequired: false }) })
-    })
-  } catch (_) {
-    return { reachable: false, authRequired: false }
-  }
+const promptInput = async (prompt) => {
+  const { createInterface } = await import('node:readline')
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout })
+    rl.question(prompt, (answer) => { rl.close(); resolve(answer.trim()) })
+  })
 }
 
-// 비밀번호 프롬프트 (마스킹)
 const promptPassword = async (prompt = 'Password: ') => {
   const { createInterface } = await import('node:readline')
   return new Promise((resolve) => {
     const rl = createInterface({ input: process.stdin, output: process.stdout })
     const origWrite = rl._writeToOutput
-    rl._writeToOutput = (s) => {
-      if (s.includes(prompt)) origWrite.call(rl, s)
-      else origWrite.call(rl, '*')
-    }
+    rl._writeToOutput = (s) => { origWrite.call(rl, s.includes(prompt) ? s : '*') }
     rl.question(prompt, (answer) => {
       rl._writeToOutput = origWrite
       rl.close()
@@ -116,311 +80,73 @@ const promptPassword = async (prompt = 'Password: ') => {
   })
 }
 
-// 로그인 API 호출
-const loginToServer = async (baseUrl, username, password) => {
-  const { default: http } = await import('node:http')
-  const url = new URL('/api/auth/login', baseUrl)
-  const data = JSON.stringify({ username, password })
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: url.hostname, port: url.port, path: url.pathname,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-    }, (res) => {
-      let buf = ''
-      res.on('data', d => { buf += d })
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(buf) }) }
-        catch { resolve({ status: res.statusCode, body: buf }) }
-      })
-    })
-    req.on('error', reject)
-    req.write(data)
-    req.end()
-  })
-}
-
-// Refresh token으로 새 access token 획득
-const refreshAccessToken = async (baseUrl, refreshToken) => {
-  const { default: http } = await import('node:http')
-  const url = new URL('/api/auth/refresh', baseUrl)
-  const data = JSON.stringify({ refreshToken })
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: url.hostname, port: url.port, path: url.pathname,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
-    }, (res) => {
-      let buf = ''
-      res.on('data', d => { buf += d })
-      res.on('end', () => {
-        try { resolve({ status: res.statusCode, body: JSON.parse(buf) }) }
-        catch { resolve({ status: res.statusCode, body: buf }) }
-      })
-    })
-    req.on('error', reject)
-    req.write(data)
-    req.end()
-  })
-}
-
-// 서버가 응답할 때까지 폴링 (최대 10초)
-const waitForServer = async (baseUrl, { maxMs = 10_000, intervalMs = 300 } = {}) => {
-  const deadline = Date.now() + maxMs
-  while (Date.now() < deadline) {
-    const { reachable } = await checkServer(baseUrl)
-    if (reachable) return true
-    await new Promise(r => setTimeout(r, intervalMs))
-  }
-  return false
-}
-
-// 오케스트레이터 프로세스 백그라운드 spawn (터미널 종료 후에도 유지)
-const spawnOrchestrator = async () => {
-  const { spawn } = await import('node:child_process')
-  const { createRequire } = await import('node:module')
-  const orchestratorPath = createRequire(import.meta.url).resolve('@presence/orchestrator')
-  const child = spawn(process.execPath, [orchestratorPath], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env },
-  })
-  child.unref()
-}
-
-// 원격 모드: WS 상태 미러링 + REST 커맨드
-const runRemote = async (baseUrl, { authState } = {}) => {
-  const wsUrl = baseUrl.replace(/^http/, 'ws')
-
-  // --- 401 자동 갱신 (단일 refreshPromise 동시성 제어) ---
-  let refreshPromise = null
-
-  const tryRefresh = async () => {
-    if (!authState) return false
-    if (refreshPromise) return refreshPromise
-
-    refreshPromise = (async () => {
-      try {
-        const res = await refreshAccessToken(baseUrl, authState.refreshToken)
-        if (res.status === 200) {
-          authState.accessToken = res.body.accessToken
-          if (res.body.refreshToken) authState.refreshToken = res.body.refreshToken
-          return true
-        }
-      } catch {}
-      return false
-    })()
-
-    const result = await refreshPromise
-    refreshPromise = null
-    return result
-  }
-
-  // --- HTTP 헬퍼 ---
-  const rawHttpRequest = async (method, path, body) => {
-    const { default: http } = await import('node:http')
-    const url = new URL(path, baseUrl)
-    return new Promise((resolve, reject) => {
-      const data = body ? JSON.stringify(body) : null
-      const authHeader = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : {}
-      const req = http.request({
-        hostname: url.hostname, port: url.port, path: url.pathname,
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeader,
-          ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}),
-        },
-      }, (res) => {
-        let buf = ''
-        res.on('data', d => { buf += d })
-        res.on('end', () => { try { resolve({ status: res.statusCode, body: JSON.parse(buf) }) } catch { resolve({ status: res.statusCode, body: buf }) } })
-      })
-      req.on('error', reject)
-      if (data) req.write(data)
-      req.end()
-    })
-  }
-
-  // 401 자동 갱신 래퍼
-  const httpRequest = async (method, path, body) => {
-    const res = await rawHttpRequest(method, path, body)
-    if (res.status === 401 && authState) {
-      const refreshed = await tryRefresh()
-      if (refreshed) {
-        const retry = await rawHttpRequest(method, path, body)
-        return retry.body
+// mustChangePassword 흐름: 새 비밀번호 입력 → API 호출 → 새 토큰 반환. 3회 실패 시 exit.
+const changePasswordFlow = async (baseUrl, username, currentPassword, authState) => {
+  console.log(`\n[${username}] 최초 로그인입니다. 새 비밀번호를 설정하세요.`)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const newPassword = await promptPassword('새 비밀번호: ')
+    const confirmPassword = await promptPassword('새 비밀번호 확인: ')
+    if (newPassword !== confirmPassword) { console.error('비밀번호가 일치하지 않습니다. 다시 시도하세요.'); continue }
+    if (!newPassword) { console.error('비밀번호를 입력하세요.'); continue }
+    const res = await changePasswordOnServer(baseUrl, authState.accessToken, currentPassword, newPassword)
+    if (res.status === 200) {
+      console.log('비밀번호가 변경되었습니다.')
+      return {
+        accessToken: res.body.accessToken ?? authState.accessToken,
+        refreshToken: res.body.refreshToken ?? authState.refreshToken,
       }
     }
-    return res.body
+    console.error(res.body?.error || '비밀번호 변경 실패')
   }
-
-  const post = (path, body) => httpRequest('POST', path, body)
-  const httpDelete = (path) => httpRequest('DELETE', path)
-  const getJson = async (path) => {
-    const result = await httpRequest('GET', path)
-    return result ?? []
-  }
-
-  // --- 세션 관리 API ---
-  const onListSessions = () => getJson('/api/sessions')
-  const onCreateSession = (id) => post('/api/sessions', { id, type: 'user' })
-  const onDeleteSession = (id) => httpDelete(`/api/sessions/${id}`)
-
-  // --- 세션 상태 (mutable) ---
-  let currentSessionId = 'user-default'
-  const wsHeaders = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : undefined
-  let remoteState = createRemoteState({ wsUrl, sessionId: currentSessionId, headers: wsHeaders })
-  let currentTools = []
-  let rerender = null
-
-  const [initialTools, agents, config] = await Promise.all([
-    getJson('/api/tools').catch(() => []),
-    getJson('/api/agents').catch(() => []),
-    getJson('/api/config').catch(() => ({})),
-  ])
-  currentTools = initialTools
-
-  const cwd = process.cwd()
-  let gitBranch = ''
-  try {
-    const { execSync } = await import('child_process')
-    gitBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
-  } catch (_) {}
-
-  // --- 세션별 핸들러 빌더 ---
-  const buildHandlers = (sessionId) => {
-    const apiBase = `/api/sessions/${sessionId}`
-    return {
-      handleInput: async (input) => {
-        const res = await post(`${apiBase}/chat`, { input })
-        if (res.type === 'error') throw new Error(res.content)
-        return res.content
-      },
-      handleApproveResponse: (approved) => { post(`${apiBase}/approve`, { approved }).catch(() => {}) },
-      handleCancel: () => { post(`${apiBase}/cancel`).catch(() => {}) },
-    }
-  }
-
-  // --- App props 빌더 ---
-  const buildAppProps = () => {
-    const { handleInput, handleApproveResponse, handleCancel } = buildHandlers(currentSessionId)
-    return {
-      key: currentSessionId,   // 세션 전환 시 App 완전 재마운트 → 메시지 초기화
-      state: remoteState,
-      onInput: handleInput,
-      onApprove: handleApproveResponse,
-      onCancel: handleCancel,
-      agentName: config.persona?.name || 'Presence',
-      tools: currentTools,
-      agents,
-      cwd,
-      gitBranch,
-      model: config.llm?.model || '',
-      config,
-      memory: null,
-      llm: null,
-      mcpControl: null,
-      initialMessages: [],
-      sessionId: currentSessionId,
-      onListSessions,
-      onCreateSession,
-      onDeleteSession,
-      onSwitchSession,
-    }
-  }
-
-  // --- 세션 전환 ---
-  const onSwitchSession = async (newId) => {
-    remoteState.disconnect()
-    currentSessionId = newId
-    const newWsHeaders = authState?.accessToken ? { 'Authorization': `Bearer ${authState.accessToken}` } : undefined
-    remoteState = createRemoteState({ wsUrl, sessionId: newId, headers: newWsHeaders })
-    const toolsPath = newId === 'user-default' ? '/api/tools' : `/api/sessions/${newId}/tools`
-    currentTools = await getJson(toolsPath).catch(() => currentTools)
-    if (rerender) rerender(h(App, buildAppProps()))
-  }
-
-  const onSignal = () => { remoteState.disconnect(); process.exit(0) }
-  process.on('SIGTERM', onSignal)
-  process.on('SIGINT', onSignal)
-
-  const rendered = render(h(App, buildAppProps()))
-  rerender = rendered.rerender
-  const { waitUntilExit } = rendered
-
-  await waitUntilExit()
-  process.off('SIGTERM', onSignal)
-  process.off('SIGINT', onSignal)
-  remoteState.disconnect()
+  console.error('비밀번호 변경에 실패했습니다.')
+  process.exit(1)
 }
 
-
-const main = async () => {
-  const userId = resolveUserId()
-
-  if (!userId) {
-    console.error('사용법: npm run start:cli -- --instance <user-id>')
-    console.error('예시:   npm run start:cli -- --instance anthony')
-    process.exit(1)
+// 로그인 루프 (최대 3회 시도) + mustChangePassword 후속 처리.
+const loginFlow = async (baseUrl) => {
+  const username = await promptInput('사용자명: ')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const password = await promptPassword('비밀번호: ')
+    const res = await loginToServer(baseUrl, username, password)
+    if (res.status === 200) {
+      let authState = {
+        accessToken: res.body.accessToken,
+        refreshToken: res.body.refreshToken || null,
+      }
+      if (res.body.mustChangePassword) {
+        authState = await changePasswordFlow(baseUrl, username, password, authState)
+      }
+      return { authState, username }
+    }
+    console.error(res.body?.error || '로그인 실패')
+    if (attempt < 2) console.log('다시 시도하세요.')
   }
+  console.error('로그인에 실패했습니다.')
+  process.exit(1)
+}
 
-  const clientConfig = Either.fold(
-    err => {
-      console.error(`클라이언트 설정을 찾을 수 없습니다: ${err}`)
-      console.error(`~/.presence/clients/${userId}.json 파일을 생성하세요.`)
-      console.error(`예시: { "instanceId": "${userId}", "server": { "url": "http://127.0.0.1:3001" } }`)
-      process.exit(1)
-    },
-    config => config,
-    loadClientConfig(userId),
-  )
-
-  const baseUrl = clientConfig.server.url
+/**
+ * TUI entry point: server URL 결정 → 서버 생존 확인 → 인증 → Ink UI 렌더.
+ * @returns {Promise<void>}
+ */
+const main = async () => {
+  const baseUrl = resolveServerUrl()
 
   const serverStatus = await checkServer(baseUrl)
   if (!serverStatus.reachable) {
-    console.log(`서버에 연결할 수 없습니다: ${baseUrl}`)
-    console.log('오케스트레이터를 시작합니다...')
-    await spawnOrchestrator()
-    const ready = await waitForServer(baseUrl)
-    if (!ready) {
-      console.error('서버 시작 실패. 오케스트레이터를 수동으로 시작하세요: npm start')
-      process.exit(1)
-    }
-    // 재확인
-    const recheckStatus = await checkServer(baseUrl)
-    serverStatus.authRequired = recheckStatus.authRequired
+    console.error(`서버에 연결할 수 없습니다: ${baseUrl}`)
+    console.error('서버가 실행 중인지 확인하세요: npm start')
+    process.exit(1)
   }
 
-  // --- 인증 ---
-  let authState = null
-  if (serverStatus.authRequired) {
-    console.log(`인스턴스 [${userId}]에 로그인합니다.`)
-    const maxAttempts = 3
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const password = await promptPassword('Password: ')
-      const res = await loginToServer(baseUrl, userId, password)
-      if (res.status === 200) {
-        authState = {
-          accessToken: res.body.accessToken,
-          refreshToken: res.body.refreshToken || null,
-        }
-        break
-      }
-      console.error(res.body?.error || '로그인 실패')
-      if (attempt < maxAttempts - 1) console.log('다시 시도하세요.')
-    }
-    if (!authState) {
-      console.error('로그인에 실패했습니다.')
-      process.exit(1)
-    }
-  }
+  const { authState, username } = serverStatus.authRequired
+    ? await loginFlow(baseUrl)
+    : { authState: null, username: null }
 
-  return runRemote(baseUrl, { authState })
+  return runRemote(baseUrl, { authState, username })
 }
 
-export { main, bootstrap, createGlobalContext, createSession }
+export { main, bootstrap, UserContext }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
   main().catch(err => { console.error('Fatal:', err); process.exit(1) })

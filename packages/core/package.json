@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "scripts": {
+    "test": "node test/run.js"
+  },
   "exports": {
     "./core/*.js": "./src/core/*.js",
     "./interpreter/*.js": "./src/interpreter/*.js",

@@ -1,10 +1,15 @@
-import { createAgentTurn, createAgent, safeRunTurn, applyFinalState, PHASE, RESULT, Phase, ErrorInfo, ERROR_KIND } from '@presence/core/core/agent.js'
+import { PHASE, RESULT, ERROR_KIND, TurnState } from '@presence/core/core/policies.js'
+import { Agent } from '@presence/core/core/agent.js'
+import { applyFinalState } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
-import { createReactiveState } from '@presence/infra/infra/state.js'
-import { createAgentRegistry, DelegateResult } from '@presence/infra/infra/agent-registry.js'
+import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
+import { Delegation } from '@presence/infra/infra/agents/delegation.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
-import { createEventActor, createEmit, createTurnActor, forkTask } from '@presence/infra/infra/actors.js'
-import { runFreeWithStateT } from '@presence/core/core/op.js'
+import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
+import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
+import { forkTask } from '@presence/core/lib/task.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 
 import { assert, summary } from '../lib/assert.js'
 
@@ -17,8 +22,8 @@ async function run() {
 
   // E2E: heartbeat emits → EventActor processes → turnActor called
   {
-    const state = createReactiveState({
-      turnState: Phase.idle(),
+    const state = createOriginState({
+      turnState: TurnState.idle(),
       lastTurn: null,
       turn: 0,
       context: { memories: [] },
@@ -28,23 +33,23 @@ async function run() {
 
     let agentRunCalled = false
     let agentRunPrompt = null
-    const turnActor = createTurnActor(async (input) => {
+    const turnActor = turnActorR.run({ runTurn: async (input) => {
       agentRunCalled = true
       agentRunPrompt = input
       return 'heartbeat result'
-    })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
+    } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
 
     // 브릿지 hook
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
     // scheduled_job 이벤트를 직접 enqueue (scheduler 역할)
     const event = withEventMeta({ type: 'scheduled_job', jobId: 'test-job', jobName: '정기 점검', prompt: '정기 점검', runId: 'run-1', attempt: 1 })
-    eventActor.send({ type: 'enqueue', event }).fork(() => {}, () => {})
+    eventActor.enqueue(event).fork(() => {}, () => {})
 
     await new Promise(r => setTimeout(r, 150))
 
@@ -55,22 +60,22 @@ async function run() {
 
   // heartbeat → event 큐 → agent busy → 큐에 대기 → idle 후 처리
   {
-    const state = createReactiveState({
-      turnState: Phase.working('user turn'),
+    const state = createOriginState({
+      turnState: TurnState.working('user turn'),
       lastTurn: null,
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
 
     let runCount = 0
-    const turnActor = createTurnActor(async () => { runCount++; return 'done' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => { runCount++; return 'done' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = (event) => eventActor.emit(event)
 
     // 브릿지 hook
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
@@ -81,7 +86,7 @@ async function run() {
     assert(state.get('events.queue').length === 1, 'Step 29 busy: 1 event in queue')
 
     // idle로 전환 → 브릿지 hook → drain
-    state.set('turnState', Phase.idle())
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 100))
 
     assert(runCount === 1, 'Step 29 busy→idle: event processed after idle')
@@ -94,8 +99,8 @@ async function run() {
 
   // E2E: planner generates DELEGATE step → interpreter dispatches → result in plan
   {
-    const state = createReactiveState({
-      turnState: Phase.idle(),
+    const state = createOriginState({
+      turnState: TurnState.idle(),
       lastTurn: null,
       context: { memories: [] },
     })
@@ -125,25 +130,25 @@ async function run() {
       // Delegate handler: local agent run (sync for test interpreter)
       Delegate: (op) => {
         const entry = agentReg.get(op.target)
-        if (entry.isNothing()) return DelegateResult.failed(op.target, 'Unknown')
-        return DelegateResult.completed(op.target, `요약: ${op.task}`)
+        if (entry.isNothing()) return Delegation.failed(op.target, 'Unknown')
+        return Delegation.completed(op.target, `요약: ${op.task}`)
       },
     })
 
-    const turn = createAgentTurn({ tools: [], agents: agentReg.list() })
+    const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
     const initialState = state.snapshot()
-    const [result, finalState] = await runFreeWithStateT(interpret, ST)(turn('보고서 요약해줘'))(initialState)
+    const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('보고서 요약해줘'))(initialState)
     applyFinalState(state, finalState)
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 E2E: turnState idle')
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'Step 30 E2E: success')
-    assert(result != null && result.status === 'completed', 'Step 30 E2E: result is DelegateResult')
+    assert(result != null && result.status === 'completed', 'Step 30 E2E: result is Delegation')
   }
 
   // Delegate 실패 → plan이 실패로 닫힘
   {
-    const state = createReactiveState({
-      turnState: Phase.idle(),
+    const state = createOriginState({
+      turnState: TurnState.idle(),
       lastTurn: null,
       context: { memories: [] },
     })
@@ -163,17 +168,17 @@ async function run() {
         }
         return 'should not reach'
       },
-      Delegate: (op) => DelegateResult.failed(op.target, 'Unknown agent'),
+      Delegate: (op) => Delegation.failed(op.target, 'Unknown agent'),
     })
 
-    const agent = createAgent({
-      buildTurn: createAgentTurn({ tools: [] }),
+    const agent = new Agent({
+      resolveTools: () => [],
       interpret, ST, state,
     })
     await agent.run('test')
 
-    // DELEGATE returns DelegateResult.failed → RESPOND ref=1 gets the failed result object
-    // Formatter still runs (DelegateResult is a valid result)
+    // DELEGATE returns Delegation.failed → RESPOND ref=1 gets the failed result object
+    // Formatter still runs (Delegation is a valid result)
     assert(state.get('turnState').tag === PHASE.IDLE, 'Step 30 delegate fail: idle')
   }
 
@@ -183,13 +188,13 @@ async function run() {
 
   // Parallel 내에서 여러 프로그램이 독립 실행
   {
-    const state = createReactiveState({
-      turnState: Phase.idle(),
+    const state = createOriginState({
+      turnState: TurnState.idle(),
       context: {},
     })
 
     const { interpret, ST } = createTestInterpreter({
-      Delegate: (op) => DelegateResult.completed(op.target, `done: ${op.task}`),
+      Delegate: (op) => Delegation.completed(op.target, `done: ${op.task}`),
     })
 
     // parallel([respond('a'), respond('b')]) → allSettled 결과
@@ -210,21 +215,21 @@ async function run() {
 
   // 큐에 3개 쌓인 후 idle 전이 → EventActor drain이 순차 처리
   {
-    const state = createReactiveState({
-      turnState: Phase.working('busy'),
+    const state = createOriginState({
+      turnState: TurnState.working('busy'),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
 
     const processed = []
-    const turnActor = createTurnActor(async (input) => { processed.push(input); return 'ok' })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async (input) => { processed.push(input); return 'ok' } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = (event) => eventActor.emit(event)
 
     // 브릿지 hook
-    state.hooks.on('turnState', (phase) => {
+    state.hooks.on("turnState", (change) => { const phase = change.nextValue;
       if (phase.tag === 'idle') {
-        eventActor.send({ type: 'drain' }).fork(() => {}, () => {})
+        eventActor.drain().fork(() => {}, () => {})
       }
     })
 
@@ -236,7 +241,7 @@ async function run() {
     assert(processed.length === 0, 'FIFO: queued while working')
 
     // idle 전이 → drain이 3개 순차 처리
-    state.set('turnState', Phase.idle())
+    state.set('turnState', TurnState.idle())
     await new Promise(r => setTimeout(r, 300))
 
     assert(processed.length === 3, 'FIFO: all 3 processed')
@@ -250,15 +255,15 @@ async function run() {
   // ===========================================
 
   {
-    const state = createReactiveState({
-      turnState: Phase.idle(),
+    const state = createOriginState({
+      turnState: TurnState.idle(),
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
 
-    const turnActor = createTurnActor(async () => { throw new Error('agent crashed') })
-    const eventActor = createEventActor({ turnActor, state, logger: null })
-    const emit = createEmit(eventActor)
+    const turnActor = turnActorR.run({ runTurn: async () => { throw new Error('agent crashed') } })
+    const eventActor = eventActorR.run({ turnActor, state, logger: null })
+    const emit = (event) => eventActor.emit(event)
 
     emit({ type: 'bad-event', prompt: 'crash' })
 

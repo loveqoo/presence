@@ -1,5 +1,5 @@
 import fp from '../lib/fun-fp.js'
-import { createStateInterpreter } from './state.js'
+import { stateInterpreterR } from './state.js'
 import { Interpreter } from './compose.js'
 
 const { Task, StateT } = fp
@@ -16,10 +16,6 @@ const defaultHandlers = {
   Spawn:        (op) => undefined,
 }
 
-// log 축적은 관찰 전용 부수효과.
-const appendLog = (log, entry) => { log.push(entry); return entry }
-
-// 핸들러 함수를 Interpreter 인스턴스로 변환.
 // ExecuteTool 예외는 에러 결과값으로 변환 (턴 계속 진행).
 const handlerToInterpreter = (tag, handler) =>
   new Interpreter([tag], (f) => {
@@ -39,7 +35,7 @@ const createTestInterpreter = (handlers = {}) => {
   const merged = { ...defaultHandlers, ...handlers }
 
   // State 인터프리터 공유 + mock 핸들러를 Interpreter로 변환
-  const stateI = createStateInterpreter(ST)
+  const stateI = stateInterpreterR.run({ ST })
   const mockInterpreters = Object.entries(merged)
     .filter(([tag]) => !stateI.handles.has(tag))
     .map(([tag, handler]) => handlerToInterpreter(tag, handler))
@@ -48,7 +44,7 @@ const createTestInterpreter = (handlers = {}) => {
 
   // 로깅은 합성된 interpret 위에 래핑 (모든 Op 대상)
   const interpret = (functor) => {
-    appendLog(log, { tag: functor.tag, data: { ...functor, next: undefined, map: undefined } })
+    log.push({ tag: functor.tag, data: { ...functor, next: undefined, map: undefined } })
     return composed(functor)
   }
 

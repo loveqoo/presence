@@ -1,9 +1,10 @@
+import fp from '../lib/fun-fp.js'
 import { Interpreter } from './compose.js'
 
-// --- ControlInterpreter ---
-// Respond, Observe, Spawn — 순수 제어 Op. 외부 I/O 없음.
+const { Reader } = fp
 
-const createControlInterpreter = (ST) =>
+// 순수 제어 Op. 외부 I/O 없음.
+const controlInterpreterR = Reader.asks(({ ST }) =>
   new Interpreter(['Respond', 'Observe', 'Spawn'], (f) => {
     switch (f.tag) {
       case 'Respond': return ST.of(f.next(f.message))
@@ -11,6 +12,6 @@ const createControlInterpreter = (ST) =>
       case 'Spawn':   return ST.of(f.next(undefined))
       default:        return ST.of(f.next(undefined))
     }
-  })
+  }))
 
-export { createControlInterpreter }
+export { controlInterpreterR }

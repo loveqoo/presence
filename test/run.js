@@ -11,70 +11,66 @@ const root = join(__dirname, '..')
 // `node test/run.js --no-network` 로 건너뜁니다.
 // (실제 LLM 유무와 무관 — 포트 바인딩 권한 부족일 때만 사용)
 const NETWORK_TESTS = new Set([
-  'test/infra/llm.test.js',
-  'test/infra/mcp-sse.test.js',
-  'test/infra/remote-state.test.js',
-  'test/infra/session.test.js',
-  'test/infra/supervisor-session.test.js',
+  'packages/infra/test/llm.test.js',
+  'packages/infra/test/mcp-sse.test.js',
+  'packages/infra/test/mirror-state.test.js',
+  'packages/infra/test/session.test.js',
+  'packages/infra/test/supervisor-session.test.js',
   'test/e2e/bootstrap.test.js',
   'test/e2e/server-e2e.test.js',
   'test/e2e/tui-e2e.test.js',
   'test/e2e/client-sync.test.js',
-  'test/server/server.test.js',
-  'test/server/supervisor.test.js',
-  'test/server/auth-e2e.test.js',
-  'test/orchestrator/orchestrator-e2e.test.js',
+  'packages/server/test/server.test.js',
+  'packages/server/test/supervisor.test.js',
+  'packages/server/test/auth-e2e.test.js',
 ])
 
 const tests = [
   // Workspace import map smoke test (must run first)
   'test/workspace/smoke.test.js',
-  'test/core/makeOp.test.js',
-  'test/core/op.test.js',
-  'test/infra/state.test.js',
-  'test/infra/hook.test.js',
-  'test/infra/reactiveState.test.js',
-  'test/interpreter/test.test.js',
-  'test/core/free-integration.test.js',
-  'test/core/fp-laws.test.js',
-  'test/core/plan.test.js',
-  'test/core/prompt.test.js',
-  'test/infra/tools.test.js',
-  'test/core/agent.test.js',
-  'test/core/assembly.test.js',
+  'packages/core/test/core/make-op.test.js',
+  'packages/core/test/core/op.test.js',
+  'packages/infra/test/state.test.js',
+  'packages/infra/test/hook.test.js',
+  'packages/infra/test/origin-state.test.js',
+  'packages/core/test/interpreter/test.test.js',
+  'packages/core/test/core/free-integration.test.js',
+  'packages/core/test/core/fp-laws.test.js',
+  'packages/core/test/core/plan.test.js',
+  'packages/core/test/core/prompt.test.js',
+  'packages/infra/test/tools.test.js',
+  'packages/core/test/core/agent.test.js',
+  'packages/core/test/core/assembly.test.js',
   // Phase 1 infra
-  'test/infra/logger.test.js',
-  'test/infra/persistence.test.js',
-  'test/infra/memory.test.js',
-  'test/infra/embedding.test.js',
-  'test/infra/mcp.test.js',
-  'test/infra/mcp-sse.test.js',
-  'test/infra/memory-hook.test.js',
-  'test/infra/actors.test.js',
-  'test/infra/agent-registry.test.js',
-  'test/infra/a2a-client.test.js',
-  'test/infra/events.test.js',
-  'test/infra/scheduler.test.js',
-  'test/infra/session.test.js',
-  'test/infra/remote-state.test.js',
-  'test/infra/local-tools.test.js',
-  'test/infra/config.test.js',
-  'test/infra/auth-user-store.test.js',
-  'test/infra/auth-token.test.js',
-  'test/infra/auth-provider.test.js',
-  'test/infra/persona.test.js',
-  'test/ui/app.test.js',
-  'test/ui/interactive.test.js',
-  'test/ui/session-commands.test.js',
+  'packages/infra/test/logger.test.js',
+  'packages/infra/test/persistence.test.js',
+  'packages/infra/test/embedding.test.js',
+  'packages/infra/test/mcp.test.js',
+  'packages/infra/test/mcp-sse.test.js',
+  'packages/infra/test/actors.test.js',
+  'packages/infra/test/agent-registry.test.js',
+  'packages/infra/test/a2a-client.test.js',
+  'packages/infra/test/events.test.js',
+  'packages/infra/test/scheduler.test.js',
+  'packages/infra/test/session.test.js',
+  'packages/infra/test/mirror-state.test.js',
+  'packages/infra/test/local-tools.test.js',
+  'packages/infra/test/config.test.js',
+  'packages/infra/test/auth-user-store.test.js',
+  'packages/infra/test/auth-token.test.js',
+  'packages/infra/test/auth-provider.test.js',
+  'packages/infra/test/persona.test.js',
+  'packages/tui/test/app.test.js',
+  'packages/tui/test/interactive.test.js',
+  'packages/tui/test/session-commands.test.js',
   // History compaction
-  'test/core/compaction.test.js',
+  'packages/core/test/core/compaction.test.js',
   // Phase 2
-  'test/infra/llm.test.js',
-  'test/interpreter/prod.test.js',
-  'test/interpreter/traced.test.js',
-  'test/interpreter/dryrun.test.js',
-  'test/infra/input.test.js',
-  'test/core/repl.test.js',
+  'packages/infra/test/llm.test.js',
+  'packages/core/test/interpreter/prod.test.js',
+  'packages/core/test/interpreter/traced.test.js',
+  'packages/core/test/interpreter/dryrun.test.js',
+  'packages/core/test/core/repl.test.js',
   // Phase 5 integration
   'test/integration/phase5.test.js',
   // Regression
@@ -83,25 +79,22 @@ const tests = [
   'test/regression/plan-fuzz.test.js',
   'test/regression/e2e-scenario.test.js',
   // applyFinalState ordering + turn chaining
-  'test/core/apply-final-state.test.js',
+  'packages/core/test/core/apply-final-state.test.js',
   // Turn concurrency
-  'test/core/turn-concurrency.test.js',
+  'packages/core/test/core/turn-concurrency.test.js',
   // E2E bootstrap
   'test/e2e/bootstrap.test.js',
   'test/e2e/server-e2e.test.js',
   'test/e2e/tui-e2e.test.js',
   'test/e2e/client-sync.test.js',
   // Interpreter
-  'test/interpreter/delegate.test.js',
+  'packages/core/test/interpreter/delegate.test.js',
   // Infra
-  'test/infra/supervisor-session.test.js',
+  'packages/infra/test/supervisor-session.test.js',
   // Server
-  'test/server/server.test.js',
-  'test/server/supervisor.test.js',
-  'test/server/auth-e2e.test.js',
-  // Orchestrator
-  'test/orchestrator/child-manager.test.js',
-  'test/orchestrator/orchestrator-e2e.test.js',
+  'packages/server/test/server.test.js',
+  'packages/server/test/supervisor.test.js',
+  'packages/server/test/auth-e2e.test.js',
 ]
 
 const noNetwork = process.argv.includes('--no-network')
@@ -160,31 +153,6 @@ console.log(`\n=== Total: ${totalPassed} passed, ${totalFailed} failed${filesFai
 
 if (noNetwork && skipped > 0) {
   console.log(`    To run all tests: node test/run.js`)
-}
-
-// --- Playwright (웹 브라우저 E2E) ---
-if (!noNetwork) {
-  console.log('\n--- Playwright (web browser E2E) ---')
-  try {
-    const pwOutput = execSync('npx playwright test e2e/chat.spec.js e2e/sessions.spec.js --reporter=list', {
-      cwd: join(root, 'packages/web'),
-      encoding: 'utf-8',
-      timeout: 120000,
-    })
-    const pwPassed = (pwOutput.match(/(\d+) passed/)?.[1]) || '0'
-    const pwFailed = (pwOutput.match(/(\d+) failed/)?.[1]) || '0'
-    totalPassed += Number(pwPassed)
-    totalFailed += Number(pwFailed)
-    if (Number(pwFailed) > 0) allPassed = false
-    console.log(`  ✓ web/e2e/ — ${pwPassed} passed, ${pwFailed} failed`)
-  } catch (e) {
-    allPassed = false
-    filesFailed++
-    console.error('  ✗ Playwright FAILED')
-    if (e.stdout) console.error(e.stdout.trim().split('\n').slice(-5).join('\n'))
-    if (e.stderr) console.error(e.stderr.trim().split('\n').slice(0, 3).join('\n'))
-  }
-  console.log(`\n=== Grand Total: ${totalPassed} passed, ${totalFailed} failed${filesFailed > 0 ? `, ${filesFailed} file(s) errored` : ''} ===`)
 }
 
 if (!allPassed || totalFailed > 0 || filesFailed > 0) {

@@ -1,15 +1,15 @@
 import fp from '@presence/core/lib/fun-fp.js'
-import { runFreeWithStateT } from '@presence/core/core/op.js'
+import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
-import { createStateInterpreter } from '@presence/core/interpreter/state.js'
-import { createLlmInterpreter, extractStreamingMessage } from '@presence/core/interpreter/llm.js'
-import { createToolInterpreter } from '@presence/core/interpreter/tool.js'
-import { createDelegateInterpreter } from './delegate.js'
-import { createApprovalInterpreter } from '@presence/core/interpreter/approval.js'
-import { createControlInterpreter } from '@presence/core/interpreter/control.js'
-import { createParallelInterpreter } from '@presence/core/interpreter/parallel.js'
+import { stateInterpreterR } from '@presence/core/interpreter/state.js'
+import { llmInterpreterR } from '@presence/core/interpreter/llm.js'
+import { toolInterpreterR } from '@presence/core/interpreter/tool.js'
+import { delegateInterpreterR } from './delegate.js'
+import { approvalInterpreterR } from '@presence/core/interpreter/approval.js'
+import { controlInterpreterR } from '@presence/core/interpreter/control.js'
+import { parallelInterpreterR } from '@presence/core/interpreter/parallel.js'
 
-const { StateT } = fp
+const { StateT, Reader } = fp
 const ST = StateT('task')
 
 // --- UI 헬퍼 ---
@@ -53,10 +53,9 @@ const createUiHelpers = (reactiveState) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
   const ui = createUiHelpers(reactiveState)
 
-  // interpret를 클로저로 참조 — runProgram에서 사용
   let interpret
 
   const runProgram = async (program, state) => {
@@ -70,18 +69,18 @@ const createProdInterpreter = ({ llm, toolRegistry, reactiveState, agentRegistry
   }
 
   const composed = Interpreter.compose(ST,
-    createStateInterpreter(ST),
-    createLlmInterpreter({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
-    createToolInterpreter({ ST, toolRegistry, toolResultUi: ui.toolResultUi }),
-    createDelegateInterpreter({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn }),
-    createApprovalInterpreter({ ST, onApprove }),
-    createControlInterpreter(ST),
-    createParallelInterpreter({ ST, runProgram }),
+    stateInterpreterR.run({ ST }),
+    llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
+    toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi }),
+    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn }),
+    approvalInterpreterR.run({ ST, onApprove }),
+    controlInterpreterR.run({ ST }),
+    parallelInterpreterR.run({ ST, runProgram }),
   )
 
   interpret = composed
 
   return { interpret, ST }
-}
+})
 
-export { createProdInterpreter, extractStreamingMessage }
+export { prodInterpreterR }

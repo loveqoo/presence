@@ -1,7 +1,7 @@
 /**
  * TUI E2E tests — ink-testing-library + 실제 서버 + Mock LLM
  *
- * App(RemoteState) → stdin 입력 → handleInput → POST /api/chat → server → mock LLM
+ * App(MirrorState) → stdin 입력 → handleInput → POST /api/chat → server → mock LLM
  * → WS state push → useAgentState 재렌더 → lastFrame() 검증
  *
  * 커버하는 시나리오:
@@ -28,7 +28,7 @@ import http from 'node:http'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createRemoteState } from '@presence/infra/infra/remote-state.js'
+import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { App } from '@presence/tui/ui/App.js'
 import { startServer } from '@presence/server'
 import { assert, summary } from '../lib/assert.js'
@@ -131,11 +131,11 @@ const request = (port, method, path, body) =>
   })
 
 /**
- * RemoteState 생성 후 WS init 수신을 기다림.
+ * MirrorState 생성 후 WS init 수신을 기다림.
  * turnState가 cache에 들어올 때까지 폴링.
  */
-const connectRemoteState = (wsUrl) => new Promise((resolve) => {
-  const rs = createRemoteState({ wsUrl, sessionId: 'user-default' })
+const connectMirrorState = (wsUrl) => new Promise((resolve) => {
+  const rs = createMirrorState({ wsUrl, sessionId: 'user-default' })
   const check = () => {
     if (rs.get('turnState') !== undefined) { resolve(rs); return }
     setTimeout(check, 20)
@@ -159,7 +159,7 @@ const typeInput = async (stdin, text) => {
 }
 
 /**
- * 테스트별 서버 + RemoteState + App 렌더링 조립.
+ * 테스트별 서버 + MirrorState + App 렌더링 조립.
  * Returns { port, remoteState, lastFrame, stdin, post, cleanup }
  */
 const setupTuiE2E = async (mockHandler) => {
@@ -171,7 +171,7 @@ const setupTuiE2E = async (mockHandler) => {
   const { server, shutdown } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
   const port = server.address().port
 
-  const remoteState = await connectRemoteState(`ws://127.0.0.1:${port}`)
+  const remoteState = await connectMirrorState(`ws://127.0.0.1:${port}`)
 
   const post = (path, body) => request(port, 'POST', path, body)
   const get = (path) => request(port, 'GET', path)
@@ -198,7 +198,7 @@ const setupTuiE2E = async (mockHandler) => {
     config: {},
     memory: null,
     llm: null,
-    mcpControl: null,
+    toolRegistry: null,
     initialMessages: [],
   }))
 
@@ -401,7 +401,7 @@ async function run() {
         { timeout: 5000 }
       )
 
-      // RemoteState에서 turn 값 확인
+      // MirrorState에서 turn 값 확인
       await waitFor(() => remoteState.get('turn') >= 2, { timeout: 3000 })
       assert(remoteState.get('turn') >= 2, 'TE6: turn 카운터 2 이상')
       assert(lastFrame().includes('응답 1') || lastFrame().includes('응답 2'), 'TE6: 응답 누적 표시')

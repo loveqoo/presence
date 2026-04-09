@@ -1,345 +1,120 @@
-import { JSONFilePreset } from 'lowdb/node'
-import { mkdirSync } from 'fs'
-import { dirname } from 'path'
-import fp from '@presence/core/lib/fun-fp.js'
-import { dotSimilarity, topK, mergeSearchResults, textHash } from './embedding.js'
+import { join } from 'node:path'
 
-const { Maybe } = fp
+// presence의 단일 사용자 에이전트 — 고정 userId
+const MEM0_USER_ID = 'default'
+const DEFAULT_EMBED_MODEL = 'text-embedding-3-small'
+const DEFAULT_EMBED_DIMS = 1536
 
-const TIERS = { WORKING: 'working', EPISODIC: 'episodic', SEMANTIC: 'semantic' }
+// =============================================================================
+// Memory: mem0 기반 메모리 + 동기 캐시 뷰.
+// Write path: search()/add()로 mem0에 접근, add()/clearAll() 등에서 내부 캐시 갱신.
+// Read path(UI/REPL): allNodes() 동기 호출로 캐시 조회.
+//
+// 주의: mem0는 tier 개념이 없는 flat memory. tier 필드는 UI 표시용 라벨.
+// =============================================================================
 
-// --- Storage strategies ---
+class Memory {
+  #mem0
+  #cache
 
-class InMemoryStore {
-  constructor() {
-    this.data = { nodes: [], edges: [] }
-  }
-  async save() {}
-}
-
-class LowdbStore {
-  constructor(db) {
-    this.data = db.data
-    this._db = db
-  }
-  async save() {
-    await this._db.write()
-  }
-  static async create(dbPath) {
-    mkdirSync(dirname(dbPath), { recursive: true })
-    const db = await JSONFilePreset(dbPath, { nodes: [], edges: [] })
-    return new LowdbStore(db)
-  }
-}
-
-// --- Keyword tokenizer ---
-
-const _tokenize = (text) =>
-  text == null ? [] : String(text).toLowerCase().split(/\s+/).filter(k => k.length >= 2)
-
-// --- MemoryGraph ---
-
-class MemoryGraph {
-  constructor(store) {
-    this.store = store
-    this._nextId = store.data.nodes.reduce(
-      (max, n) => Math.max(max, Number(n.id) || 0), 0
-    ) + 1
-    this._index = new Map()     // term → Set<nodeId>
-    this._nodeTerms = new Map() // nodeId → string[] (unindex용)
-    for (const node of this.nodes) this._indexNode(node)
+  constructor(mem0) {
+    this.#mem0 = mem0
+    this.#cache = []
   }
 
-  _indexNode(node) {
-    const terms = _tokenize(node.label)
-    if (terms.length === 0) return
-    this._nodeTerms.set(node.id, terms)
-    for (const term of terms) {
-      if (!this._index.has(term)) this._index.set(term, new Set())
-      this._index.get(term).add(node.id)
+  // mem0 인스턴스 생성 + 초기 캐시 로드. embed 자격증명 없으면 null.
+  static async create(config, opts = {}) {
+    const { memoryPath } = opts
+    const { llm, embed } = config
+    const embedApiKey = embed.apiKey || (embed.provider === 'openai' ? llm.apiKey : null)
+    if (!embedApiKey && !embed.baseUrl) return null
+
+    const { Memory: Mem0Memory } = await import('mem0ai/oss')
+    const mem0Config = Memory.#buildMem0Config({ llm, embed, embedApiKey, memoryPath })
+    const memory = new Memory(new Mem0Memory(mem0Config))
+    await memory.refreshCache()
+    return memory
+  }
+
+  static #buildMem0Config({ llm, embed, embedApiKey, memoryPath }) {
+    const dims = embed.dimensions || DEFAULT_EMBED_DIMS
+    return {
+      llm: {
+        provider: 'openai',
+        config: {
+          apiKey: llm.apiKey,
+          model: llm.model,
+          ...(llm.baseUrl && { baseURL: llm.baseUrl }),
+        },
+      },
+      embedder: {
+        provider: 'openai',
+        config: {
+          apiKey: embedApiKey,
+          model: embed.model || DEFAULT_EMBED_MODEL,
+          embeddingDims: dims,
+          ...(embed.baseUrl && { baseURL: embed.baseUrl }),
+        },
+      },
+      vectorStore: {
+        provider: 'memory',
+        config: { collectionName: 'presence_memories', dimension: dims },
+      },
+      historyStore: {
+        provider: 'sqlite',
+        config: { historyDbPath: memoryPath ? join(memoryPath, 'mem0_history.db') : ':memory:' },
+      },
     }
   }
 
-  _unindexNode(nodeId) {
-    const terms = this._nodeTerms.get(nodeId)
-    if (!terms) return
-    for (const term of terms) {
-      const set = this._index.get(term)
-      if (set) {
-        set.delete(nodeId)
-        if (set.size === 0) this._index.delete(term)
-      }
-    }
-    this._nodeTerms.delete(nodeId)
+  // --- Write path ---
+
+  // 유사 메모리 검색. 반환: [{ label }]
+  async search(input, limit = 10) {
+    const result = await this.#mem0.search(input, { userId: MEM0_USER_ID, limit })
+    return (result.results || []).map(record => ({ label: record.memory }))
   }
 
-  static create() {
-    return new MemoryGraph(new InMemoryStore())
+  // 대화 턴 저장 + 캐시 동기화
+  async add(userInput, assistantOutput) {
+    await this.#mem0.add([
+      { role: 'user', content: userInput },
+      { role: 'assistant', content: assistantOutput || '' },
+    ], { userId: MEM0_USER_ID })
+    await this.refreshCache()
   }
 
-  static async fromFile(dbPath) {
-    const store = await LowdbStore.create(dbPath)
-    return new MemoryGraph(store)
-  }
+  // --- Read path (동기 캐시) ---
 
-  get nodes() { return this.store.data.nodes }
-  get edges() { return this.store.data.edges }
-
-  addNode({ label, type = 'entity', data = {}, tier = TIERS.EPISODIC, expiresAt = null, source = null }) {
-    const sourceHash = source ? textHash(source.tool + JSON.stringify(source.toolArgs || {})) : null
-
-    // 출처 기반 dedup (source 있을 때): 같은 도구+인자 → 기존 노드 갱신
-    if (sourceHash && tier !== TIERS.WORKING) {
-      const existing = this.nodes.find(n => n.sourceHash === sourceHash && n.tier !== TIERS.WORKING)
-      if (existing) {
-        existing.label = label
-        existing.data = data
-        existing.expiresAt = expiresAt
-        existing.createdAt = Date.now()
-        existing.vector = null
-        existing.embeddingTextHash = null
-        return existing
-      }
-    }
-
-    // 중복 방지: working 이외 티어에서 기존 노드 매칭 (label/data 해시)
-    // source가 있으면 위 source dedup이 ID이므로 label dedup 건너뜀
-    if (tier !== TIERS.WORKING && !source) {
-      let existing
-      const candidateHash = type === 'conversation'
-        ? textHash(String(label))
-        : textHash(String(label) + JSON.stringify(data))
-
-      if (type === 'conversation') {
-        existing = this.nodes.find(n =>
-          n.type === type && n.tier !== TIERS.WORKING &&
-          textHash(String(n.label)) === candidateHash
-        )
-      } else {
-        existing = this.nodes.find(n =>
-          n.type === type &&
-          n.tier !== TIERS.WORKING &&
-          textHash(String(n.label) + JSON.stringify(n.data)) === candidateHash
-        )
-      }
-      if (existing) {
-        existing.createdAt = Date.now()
-        existing.expiresAt = expiresAt
-        if (type === 'conversation') {
-          existing.data = data
-          existing.vector = null
-          existing.embeddingTextHash = null
-        }
-        return existing
-      }
-    }
-    const id = String(this._nextId++)
-    const node = {
-      id, label, type, data, tier, createdAt: Date.now(),
-      expiresAt,
-      source,
-      sourceHash,
-      vector: null,
-      embeddingModel: null,
-      embeddingDimensions: null,
-      embeddedAt: null,
-      embeddingTextHash: null,
-    }
-    this.nodes.push(node)
-    this._indexNode(node)
-    return node
-  }
-
-  addEdge(fromId, toId, relation, data = {}) {
-    const edge = { from: fromId, to: toId, relation, data }
-    this.edges.push(edge)
-    return edge
-  }
-
-  findNode(id) {
-    return Maybe.fromNullable(this.nodes.find(n => n.id === id))
-  }
-
-  findNodesByLabel(label) {
-    return this.nodes.filter(n => n.label === label)
-  }
-
-  query({ from, relation, depth = 1 }) {
-    const results = new Set()
-    const visited = new Set()
-    const queue = [{ nodeId: from, currentDepth: 0 }]
-
-    while (queue.length > 0) {
-      const { nodeId, currentDepth } = queue.shift()
-      if (currentDepth >= depth) continue
-      if (visited.has(`${nodeId}-${currentDepth}`)) continue
-      visited.add(`${nodeId}-${currentDepth}`)
-
-      for (const edge of this.edges) {
-        if (edge.from !== nodeId) continue
-        if (relation && edge.relation !== relation) continue
-
-        Maybe.fold(
-          () => {},
-          target => {
-            results.add(target)
-            if (currentDepth + 1 < depth) {
-              queue.push({ nodeId: edge.to, currentDepth: currentDepth + 1 })
-            }
-          },
-          this.findNode(edge.to),
-        )
-      }
-    }
-
-    return [...results]
-  }
-
-  // --- 키워드 검색 (벡터 검색 보조용) — 역인덱스 O(1) ---
-  _keywordSearch(text) {
-    const keywords = _tokenize(text)
-    if (keywords.length === 0) return []
-    const matched = new Set()
-    for (const kw of keywords) {
-      const nodeIds = this._index.get(kw)
-      if (nodeIds) nodeIds.forEach(id => matched.add(id))
-    }
-    if (matched.size === 0) return []
-    return [...matched]
-      .map(id => this.nodes.find(n => n.id === id))
-      .filter(Boolean)
-      .map(node => ({ node, score: 1.0 }))
-  }
-
-  // --- 벡터 검색 (dot similarity) ---
-  // 차원 불일치 노드는 제외 (모델/차원 변경 시 NaN 방지)
-  _vectorSearch(queryVec, k) {
-    const dim = queryVec.length
-    const compatible = this.nodes.filter(n =>
-      Array.isArray(n.vector) && n.vector.length === dim
-    )
-    if (compatible.length === 0) return []
-    const scored = compatible.map(node => ({ node, score: dotSimilarity(queryVec, node.vector) }))
-    return topK(scored, k)
-  }
-
-  // --- recall ---
-  // embedder 없으면 recall 비활성 (키워드 단독 검색은 오히려 해로움)
-  async recall(text, { embedder, topK: k = 10, logger } = {}) {
-    if (!text) return []
-    if (!embedder) return []
-
-    let vectorResults = []
+  async refreshCache() {
     try {
-      const queryVec = await embedder.embed(text)
-      vectorResults = this._vectorSearch(queryVec, k)
-    } catch (e) {
-      if (logger) logger.warn('Embedding recall failed', { error: e.message })
-      return []
-    }
-
-    // 벡터 결과를 키워드로 보강 (벡터가 있을 때만)
-    const keywordResults = this._keywordSearch(text)
-    const now = Date.now()
-    const isValid = n => !n.expiresAt || n.expiresAt > now
-    const merged = mergeSearchResults(keywordResults, vectorResults)
-    const topNodes = merged.filter(({ node }) => isValid(node)).slice(0, k).map(({ node }) => node)
-
-    // 연결 노드 확장 (만료 노드 제외)
-    const expanded = new Set(
-      topNodes.flatMap(node => [node, ...this.query({ from: node.id, depth: 1 })])
-    )
-
-    return [...expanded].filter(isValid)
+      const result = await this.#mem0.getAll({ userId: MEM0_USER_ID })
+      this.#cache = (result.results || []).map(record => ({
+        id: record.id,
+        label: record.memory,
+        type: 'fact',
+        tier: 'episodic',
+        createdAt: record.createdAt ? new Date(record.createdAt).getTime() : Date.now(),
+      }))
+    } catch (_) {}
   }
 
-  setVector(nodeId, { vector, model, dimensions, embeddedAt, textHash: hash }) {
-    const node = this.nodes.find(n => n.id === nodeId)
-    if (!node) return false
-    node.vector = vector
-    node.embeddingModel = model
-    node.embeddingDimensions = dimensions
-    node.embeddedAt = embeddedAt
-    node.embeddingTextHash = hash
-    return true
-  }
+  allNodes() { return this.#cache }
 
-  async save() {
-    await this.store.save()
-  }
-
-  getNodesByTier(tier) {
-    return this.nodes.filter(n => n.tier === tier)
-  }
-
-  // unindex + filter + orphan edge cleanup 공통 처리
-  _removeMatchingNodes(predicate) {
-    const before = this.nodes.length
-    const keep = [], remove = []
-    for (const node of this.nodes) (predicate(node) ? remove : keep).push(node)
-    remove.forEach(n => this._unindexNode(n.id))
-    this.store.data.nodes = keep
-    const nodeIds = new Set(keep.map(n => n.id))
-    this.store.data.edges = this.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to))
-    return before - keep.length
-  }
-
-  removeNodesByTier(tier) {
-    this._removeMatchingNodes(n => n.tier === tier)
-  }
-
-  /** @param {(node) => boolean} predicate - true인 노드를 제거 */
-  removeNodes(predicate) {
-    return this._removeMatchingNodes(predicate)
-  }
-
-  promoteNode(nodeId, newTier) {
-    Maybe.fold(
-      () => {},
-      node => { node.tier = newTier },
-      this.findNode(nodeId),
-    )
-  }
-
-  // age 기반 삭제: maxAgeMs보다 오래된 노드 제거. tier 필터 선택적.
-  removeOlderThan(maxAgeMs, { tier } = {}) {
-    const cutoff = Date.now() - maxAgeMs
-    return this._removeMatchingNodes(n => {
-      if (tier && n.tier !== tier) return false
-      return (n.createdAt || 0) < cutoff
-    })
-  }
-
-  // tier별 노드 수 제한: maxCount 초과 시 오래된 것부터 제거
-  pruneByTier(tier, maxCount) {
-    const tierNodes = this.nodes
-      .filter(n => n.tier === tier)
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
-    if (tierNodes.length <= maxCount) return 0
-    const toRemoveIds = new Set(tierNodes.slice(0, tierNodes.length - maxCount).map(n => n.id))
-    return this._removeMatchingNodes(n => toRemoveIds.has(n.id))
-  }
-
-  // 전체 삭제 (working 제외) — edges도 전부 초기화
   clearAll() {
-    const before = this.nodes.length
-    this.nodes.filter(n => n.tier !== TIERS.WORKING).forEach(n => this._unindexNode(n.id))
-    this.store.data.nodes = this.nodes.filter(n => n.tier === TIERS.WORKING)
-    this.store.data.edges = []
-    return before - this.nodes.length
+    const count = this.#cache.length
+    this.#cache = []
+    this.#mem0.reset().catch(() => {})
+    return count
   }
 
-  allNodes() { return [...this.nodes] }
-  allEdges() { return [...this.edges] }
+  removeOlderThan(maxAgeMs) {
+    const cutoff = Date.now() - maxAgeMs
+    const toDelete = this.#cache.filter(node => node.createdAt < cutoff)
+    this.#cache = this.#cache.filter(node => node.createdAt >= cutoff)
+    Promise.all(toDelete.map(node => this.#mem0.delete(node.id).catch(() => {}))).catch(() => {})
+    return toDelete.length
+  }
 }
 
-const createMemoryGraph = async (dbPath = null) => {
-  return dbPath ? MemoryGraph.fromFile(dbPath) : MemoryGraph.create()
-}
-
-const defaultMemoryPath = () => {
-  const home = process.env.HOME || process.env.USERPROFILE || '.'
-  return `${home}/.presence/memory`
-}
-
-export { MemoryGraph, InMemoryStore, LowdbStore, createMemoryGraph, TIERS, defaultMemoryPath }
+export { Memory }

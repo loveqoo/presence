@@ -6,7 +6,7 @@
  *   2. 오케스트레이터 실행 중: npm start
  *
  * 사용법:
- *   node test/e2e/multi-instance-live.test.js [--orchestrator http://127.0.0.1:3000]
+ *   node test/e2e/multi-instance-live.test.js [--orchestrator http://127.0.0.1:3010]
  *
  * 커버하는 시나리오:
  *
@@ -64,7 +64,7 @@ import { assert, summary } from '../lib/assert.js'
 
 const orchestratorUrl = (() => {
   const idx = process.argv.indexOf('--orchestrator')
-  return idx !== -1 ? process.argv[idx + 1] : 'http://127.0.0.1:3000'
+  return idx !== -1 ? process.argv[idx + 1] : 'http://127.0.0.1:3010'
 })()
 
 // ---------------------------------------------------------------------------
@@ -269,11 +269,17 @@ async function run() {
   // ML8. 히스토리 격리 — 인스턴스별 turn 독립
   // =========================================================================
   {
-    const [state0, state1] = await Promise.all([
-      request(inst0.baseUrl, 'GET', '/api/state', null, { token: t(inst0) }),
-      request(inst1.baseUrl, 'GET', '/api/state', null, { token: t(inst1) }),
-    ])
-    // 둘 다 turn이 있지만 서로 다를 수 있음
+    // idle 상태 대기 (다른 테스트의 잔여 working 상태 방지)
+    const waitIdle = async (inst) => {
+      const deadline = Date.now() + 15000
+      while (Date.now() < deadline) {
+        const s = await request(inst.baseUrl, 'GET', '/api/state', null, { token: t(inst) })
+        if (s.body.turnState?.tag === 'idle') return s
+        await delay(500)
+      }
+      return request(inst.baseUrl, 'GET', '/api/state', null, { token: t(inst) })
+    }
+    const [state0, state1] = await Promise.all([waitIdle(inst0), waitIdle(inst1)])
     assert(typeof state0.body.turn === 'number', 'ML8: instance 0 has turn number')
     assert(typeof state1.body.turn === 'number', 'ML8: instance 1 has turn number')
     assert(state0.body.turnState?.tag === 'idle', 'ML8: instance 0 is idle')

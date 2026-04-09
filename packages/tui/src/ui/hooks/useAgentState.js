@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { STATE_PATH } from '@presence/core/core/policies.js'
 
 /**
  * State + Hook 시스템을 React 상태에 바인딩.
@@ -6,15 +7,15 @@ import { useState, useEffect } from 'react'
  */
 // 순수 셀렉터 — 테스트에서도 사용
 const deriveStatus = (state) => {
-  const ts = state.get('turnState')
+  const ts = state.get(STATE_PATH.TURN_STATE)
   if (ts?.tag === 'working') return 'working'
-  const lt = state.get('lastTurn')
+  const lt = state.get(STATE_PATH.LAST_TURN)
   if (lt?.tag === 'failure') return 'error'
   return 'idle'
 }
 
 const deriveMemoryCount = (state) => {
-  const mems = state.get('context.memories')
+  const mems = state.get(STATE_PATH.CONTEXT_MEMORIES)
   return Array.isArray(mems) ? mems.length : 0
 }
 
@@ -42,41 +43,45 @@ const useAgentState = (state) => {
     if (!state) return
 
     // events/delegates는 하위 경로(events.queue 등)로 변경되므로 wildcard 구독 필요
-    const refreshEvents = () => setEvents(state.get('events') || { queue: [], deadLetter: [] })
-    const refreshDelegates = () => setDelegates(state.get('delegates') || { pending: [] })
+    const refreshEvents = () => setEvents(state.get(STATE_PATH.EVENTS) || { queue: [], deadLetter: [] })
+    const refreshDelegates = () => setDelegates(state.get(STATE_PATH.DELEGATES) || { pending: [] })
 
     const handlers = {
-      turnState: (phase) => {
+      [STATE_PATH.TURN_STATE]: (change) => {
+        const phase = change.nextValue
         setStatus(deriveStatus(state))
         setActivity(phase.tag === 'working' ? 'thinking...' : null)
       },
-      lastTurn: (lt) => {
+      [STATE_PATH.LAST_TURN]: (change) => {
         setStatus(deriveStatus(state))
-        setLastTurn(lt)
+        setLastTurn(change.nextValue)
       },
-      turn: (val) => setTurn(val),
-      'context.memories': (val) => {
+      [STATE_PATH.TURN]: (change) => setTurn(change.nextValue),
+      [STATE_PATH.CONTEXT_MEMORIES]: (change) => {
+        const val = change.nextValue
         setMemoryCount(Array.isArray(val) ? val.length : 0)
       },
-      'context.conversationHistory': (val) => {
+      [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: (change) => {
+        const val = change.nextValue
         setConversationHistory(Array.isArray(val) ? val : [])
       },
-      _retry: (info) => {
+      _retry: (change) => {
+        const info = change.nextValue
         setRetryInfo(info)
         setActivity(`retry ${info.attempt}/${info.maxRetries}...`)
       },
-      _approve: (val) => setApprove(val || null),
-      _streaming: (val) => setStreaming(val || null),
-      '_debug.lastTurn': (val) => setDebug(val || null),
-      '_debug.opTrace': (val) => setOpTrace(Array.isArray(val) ? val : []),
-      '_debug.recalledMemories': (val) => setRecalledMemories(Array.isArray(val) ? val : []),
-      '_debug.iterationHistory': (val) => setIterationHistory(Array.isArray(val) ? val : []),
-      '_budgetWarning': (val) => setBudgetWarning(val || null),
-      '_toolResults': (val) => setToolResults(val || []),
-      todos: (val) => setTodos(Array.isArray(val) ? val : []),
+      [STATE_PATH.APPROVE]: (change) => setApprove(change.nextValue || null),
+      [STATE_PATH.STREAMING]: (change) => setStreaming(change.nextValue || null),
+      [STATE_PATH.DEBUG_LAST_TURN]: (change) => setDebug(change.nextValue || null),
+      [STATE_PATH.DEBUG_OP_TRACE]: (change) => { const v = change.nextValue; setOpTrace(Array.isArray(v) ? v : []) },
+      [STATE_PATH.DEBUG_RECALLED_MEMORIES]: (change) => { const v = change.nextValue; setRecalledMemories(Array.isArray(v) ? v : []) },
+      [STATE_PATH.DEBUG_ITERATION_HISTORY]: (change) => { const v = change.nextValue; setIterationHistory(Array.isArray(v) ? v : []) },
+      [STATE_PATH.BUDGET_WARNING]: (change) => setBudgetWarning(change.nextValue || null),
+      [STATE_PATH.TOOL_RESULTS]: (change) => setToolResults(change.nextValue || []),
+      [STATE_PATH.TODOS]: (change) => { const v = change.nextValue; setTodos(Array.isArray(v) ? v : []) },
       // exact match (전체 객체 교체 시)
-      events: (val) => setEvents(val || { queue: [], deadLetter: [] }),
-      delegates: (val) => setDelegates(val || { pending: [] }),
+      [STATE_PATH.EVENTS]: (change) => setEvents(change.nextValue || { queue: [], deadLetter: [] }),
+      [STATE_PATH.DELEGATES]: (change) => setDelegates(change.nextValue || { pending: [] }),
       // wildcard match (하위 경로 변경 시: events.queue, delegates.pending 등)
       'events.*': refreshEvents,
       'delegates.*': refreshDelegates,
@@ -88,18 +93,18 @@ const useAgentState = (state) => {
 
     // 초기 상태 동기화
     setStatus(deriveStatus(state))
-    setTurn(state.get('turn') || 0)
-    setMemoryCount(Array.isArray(state.get('context.memories')) ? state.get('context.memories').length : 0)
-    setConversationHistory(state.get('context.conversationHistory') || [])
-    setLastTurn(state.get('lastTurn'))
-    setTodos(state.get('todos') || [])
-    setApprove(state.get('_approve') || null)
-    setStreaming(state.get('_streaming') || null)
-    setDebug(state.get('_debug.lastTurn') || null)
-    setOpTrace(state.get('_debug.opTrace') || [])
-    setRecalledMemories(state.get('_debug.recalledMemories') || [])
-    setIterationHistory(state.get('_debug.iterationHistory') || [])
-    setToolResults(state.get('_toolResults') || [])
+    setTurn(state.get(STATE_PATH.TURN) || 0)
+    setMemoryCount(Array.isArray(state.get(STATE_PATH.CONTEXT_MEMORIES)) ? state.get(STATE_PATH.CONTEXT_MEMORIES).length : 0)
+    setConversationHistory(state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || [])
+    setLastTurn(state.get(STATE_PATH.LAST_TURN))
+    setTodos(state.get(STATE_PATH.TODOS) || [])
+    setApprove(state.get(STATE_PATH.APPROVE) || null)
+    setStreaming(state.get(STATE_PATH.STREAMING) || null)
+    setDebug(state.get(STATE_PATH.DEBUG_LAST_TURN) || null)
+    setOpTrace(state.get(STATE_PATH.DEBUG_OP_TRACE) || [])
+    setRecalledMemories(state.get(STATE_PATH.DEBUG_RECALLED_MEMORIES) || [])
+    setIterationHistory(state.get(STATE_PATH.DEBUG_ITERATION_HISTORY) || [])
+    setToolResults(state.get(STATE_PATH.TOOL_RESULTS) || [])
     refreshEvents()
     refreshDelegates()
 
