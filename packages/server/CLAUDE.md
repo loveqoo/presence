@@ -2,6 +2,40 @@
 
 Express + WebSocket 서버. 1 서버 = N 유저.
 
+## 구조
+
+```
+src/server/
+├── index.js                  ← PresenceServer facade (static create, shutdown)
+├── constants.js              ← 서버 도메인 상수 (WS_CLOSE, INACTIVITY_TIMEOUT_MS, WATCHED_PATHS)
+├── auth-setup.js             ← Auth 미들웨어/라우터 반환 (createAuthSetup)
+├── session-api.js            ← Session Router + 슬래시 커맨드 테이블 디스패치
+├── ws-handler.js             ← SessionBridge + WsHandler (WS 계층 통합)
+└── user-context-manager.js   ← UserContextManager (유저별 생명주기)
+```
+
+### PresenceServer
+
+서버의 조립 facade. `static async create(config, opts)` → `#boot()` → `shutdown()`.
+
+- `#mountRoutes(auth, ctx)` — Express 미들웨어/라우트 마운트 순서를 한 곳에서 가시화
+- `#createScheduler()` — cron 잡 스케줄러 생성
+- `#registerAgentSessions()` — config.agents 기반 서브 에이전트 등록
+- `startServer()` — 레거시 브릿지 (테스트 호환 `{ server, wss, app, userContext, shutdown }`)
+
+### Express 파이프라인 (#mountRoutes 순서)
+
+```
+1. Cookie parser
+2. Public auth routes    → /api/auth (login, refresh, logout, status)
+3. Auth middleware        → /api (JWT 검증)
+4. Protected auth routes → /api/auth (change-password)
+5. Activity tracking     → /api
+6. Health endpoint       → /api/instance
+7. Session API           → /api/sessions/*
+8. Static web UI         → catch-all
+```
+
 ## 정책
 
 ### 사용자 등록
