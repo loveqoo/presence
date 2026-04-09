@@ -22,7 +22,7 @@ class Config {
       baseUrl: z.string().nullable(),
       apiKey: z.string().nullable(),
       model: z.string().nullable(),
-      dimensions: z.number().int().positive(),
+      dimensions: z.number().int().positive().nullable(),
     }),
     locale: z.string(),
     maxIterations: z.number().int().positive(),
