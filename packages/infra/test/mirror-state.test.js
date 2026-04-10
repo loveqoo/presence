@@ -1,18 +1,29 @@
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
+import { WS_CLOSE } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
-// 최소 WS 서버: 연결 수 추적 + 메시지 응답
+// 최소 WS 서버: 연결 수 추적 + 메시지 응답 + Authorization 헤더 기록 + 지정 코드로 닫기
 const createMockWsServer = () => {
   const server = http.createServer()
   const wss = new WebSocketServer({ server })
   const connections = []
+  const authHeaders = []
+  // closeWith: 다음 연결을 지정 코드로 close하도록 예약 (null이면 정상 init)
+  let closeWith = null
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
     connections.push(ws)
+    authHeaders.push(req.headers.authorization || null)
+    if (closeWith != null) {
+      const code = closeWith
+      closeWith = null
+      setTimeout(() => ws.close(code), 10)
+      return
+    }
     ws.on('message', (data) => {
       const msg = JSON.parse(data.toString())
       if (msg.type === 'join') {
@@ -23,6 +34,8 @@ const createMockWsServer = () => {
 
   return {
     connections,
+    authHeaders,
+    scheduleCloseWith: (code) => { closeWith = code },
     start: () => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port))),
     close: () => new Promise(resolve => {
       for (const ws of wss.clients) ws.terminate()
@@ -139,6 +152,88 @@ async function run() {
     try { rs.set('turn', 99) } catch (_) { threw = true }
     assert(!threw, 'RS6: set() does not throw')
     assert(rs.get('turn') === 0, 'RS6: set() does not change cached value')
+
+    rs.disconnect()
+    await mock.close()
+  }
+
+  // RS7. 4001 AUTH_FAILED — onAuthFailed가 true 반환 시 새 헤더로 재연결
+  {
+    const mock = createMockWsServer()
+    const port = await mock.start()
+
+    let token = 'initial-token'
+    let refreshCalls = 0
+    const rs = createMirrorState({
+      wsUrl: `ws://127.0.0.1:${port}`,
+      getHeaders: () => ({ 'Authorization': `Bearer ${token}` }),
+      onAuthFailed: async () => {
+        refreshCalls += 1
+        token = 'refreshed-token'
+        return true
+      },
+    })
+
+    await delay(50)
+    assert(mock.connections.length === 1, 'RS7 setup: first connection')
+    assert(mock.authHeaders[0] === 'Bearer initial-token', 'RS7 setup: initial header')
+
+    // 서버가 4001로 닫음
+    mock.connections[0].close(WS_CLOSE.AUTH_FAILED)
+    await delay(200)
+
+    assert(refreshCalls === 1, 'RS7: onAuthFailed called once')
+    assert(mock.connections.length === 2, 'RS7: reconnected after refresh')
+    assert(mock.authHeaders[1] === 'Bearer refreshed-token', 'RS7: reconnect uses refreshed header')
+
+    rs.disconnect()
+    await mock.close()
+  }
+
+  // RS8. 4001 AUTH_FAILED — onAuthFailed가 false 반환 시 onUnrecoverable 호출 + 재연결 없음
+  {
+    const mock = createMockWsServer()
+    const port = await mock.start()
+
+    let unrecoverableCode = null
+    const rs = createMirrorState({
+      wsUrl: `ws://127.0.0.1:${port}`,
+      getHeaders: () => ({ 'Authorization': 'Bearer stale' }),
+      onAuthFailed: async () => false,
+      onUnrecoverable: (code) => { unrecoverableCode = code },
+    })
+
+    await delay(50)
+    mock.connections[0].close(WS_CLOSE.AUTH_FAILED)
+    await delay(700)  // backoff 초과 대기
+
+    assert(unrecoverableCode === WS_CLOSE.AUTH_FAILED, 'RS8: onUnrecoverable called with 4001')
+    assert(mock.connections.length === 1, 'RS8: no reconnect after failed refresh')
+
+    rs.disconnect()
+    await mock.close()
+  }
+
+  // RS9. 4002 PASSWORD_CHANGE_REQUIRED / 4003 ORIGIN_NOT_ALLOWED — 즉시 onUnrecoverable, refresh 시도 없음
+  {
+    const mock = createMockWsServer()
+    const port = await mock.start()
+
+    let unrecoverableCode = null
+    let refreshCalled = false
+    const rs = createMirrorState({
+      wsUrl: `ws://127.0.0.1:${port}`,
+      onAuthFailed: async () => { refreshCalled = true; return true },
+      onUnrecoverable: (code) => { unrecoverableCode = code },
+    })
+
+    await delay(50)
+    mock.connections[0].close(WS_CLOSE.PASSWORD_CHANGE_REQUIRED)
+    await delay(700)
+
+    assert(unrecoverableCode === WS_CLOSE.PASSWORD_CHANGE_REQUIRED, 'RS9: onUnrecoverable called with 4002')
+    assert(!refreshCalled, 'RS9: refresh NOT attempted on 4002 (recovery impossible)')
+    assert(mock.connections.length === 1, 'RS9: no reconnect after 4002')
 
     rs.disconnect()
     await mock.close()
