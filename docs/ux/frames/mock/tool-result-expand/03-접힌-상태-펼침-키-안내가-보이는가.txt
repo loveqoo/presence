@@ -1,0 +1,9 @@
+# step 3: 접힌 상태 — 펼침 키 안내가 보이는가?
+# status: assertion-failed
+# error: assertion failed at "접힌 상태 — 펼침 키 안내가 보이는가?"
+
+ tool   > file_read /tmp/long.log — 120 lines
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main

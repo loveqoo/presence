@@ -1,0 +1,10 @@
+# step 6: /status 출력 — 내부 필드명 노출 여부 — FP-08
+# status: assertion-failed
+# error: assertion failed at "/status 출력 — 내부 필드명 노출 여부 — FP-08"
+
+
+  status: error | turn: 0 | mem: 0 | last: failure
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ✗ error │ mock-model │ presence-scenario │ branch: main

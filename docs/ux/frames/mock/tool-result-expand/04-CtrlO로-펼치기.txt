@@ -1,0 +1,89 @@
+# step 4: Ctrl+O로 펼치기
+# status: ok
+
+ tool   > file_read /tmp/long.log
+    1 line 001: sample content
+    2 line 002: sample content
+    3 line 003: sample content
+    4 line 004: sample content
+    5 line 005: sample content
+    6 line 006: sample content
+    7 line 007: sample content
+    8 line 008: sample content
+    9 line 009: sample content
+   10 line 010: sample content
+   11 line 011: sample content
+   12 line 012: sample content
+   13 line 013: sample content
+   14 line 014: sample content
+   15 line 015: sample content
+   16 line 016: sample content
+   17 line 017: sample content
+   18 line 018: sample content
+   19 line 019: sample content
+   20 line 020: sample content
+   21 line 021: sample content
+   22 line 022: sample content
+   23 line 023: sample content
+   24 line 024: sample content
+   25 line 025: sample content
+   26 line 026: sample content
+   27 line 027: sample content
+   28 line 028: sample content
+   29 line 029: sample content
+   30 line 030: sample content
+   31 line 031: sample content
+   32 line 032: sample content
+   33 line 033: sample content
+   34 line 034: sample content
+   35 line 035: sample content
+   36 line 036: sample content
+   37 line 037: sample content
+   38 line 038: sample content
+   39 line 039: sample content
+   40 line 040: sample content
+   41 line 041: sample content
+   42 line 042: sample content
+   43 line 043: sample content
+   44 line 044: sample content
+   45 line 045: sample content
+   46 line 046: sample content
+   47 line 047: sample content
+   48 line 048: sample content
+   49 line 049: sample content
+   50 line 050: sample content
+   51 line 051: sample content
+   52 line 052: sample content
+   53 line 053: sample content
+   54 line 054: sample content
+   55 line 055: sample content
+   56 line 056: sample content
+   57 line 057: sample content
+   58 line 058: sample content
+   59 line 059: sample content
+   60 line 060: sample content
+   61 line 061: sample content
+   62 line 062: sample content
+   63 line 063: sample content
+   64 line 064: sample content
+   65 line 065: sample content
+   66 line 066: sample content
+   67 line 067: sample content
+   68 line 068: sample content
+   69 line 069: sample content
+   70 line 070: sample content
+   71 line 071: sample content
+   72 line 072: sample content
+   73 line 073: sample content
+   74 line 074: sample content
+   75 line 075: sample content
+   76 line 076: sample content
+   77 line 077: sample content
+   78 line 078: sample content
+   79 line 079: sample content
+   80 line 080: sample content
+      ... +40 lines
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main

@@ -1,0 +1,12 @@
+# step 5: 오타가 에이전트 onInput까지 도달했는지 확인 (기대: 도달 = FP-7 재현)
+# status: assertion-failed
+# error: assertion failed at "오타가 에이전트 onInput까지 도달했는지 확인 (기대: 도달 = FP-7 재현)"
+
+
+   /mem
+
+   /model
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main

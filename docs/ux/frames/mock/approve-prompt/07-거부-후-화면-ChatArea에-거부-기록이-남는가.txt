@@ -1,0 +1,8 @@
+# step 7: 거부 후 화면 — ChatArea에 거부 기록이 남는가?
+# status: assertion-failed
+# error: assertion failed at "거부 후 화면 — ChatArea에 거부 기록이 남는가?"
+
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main

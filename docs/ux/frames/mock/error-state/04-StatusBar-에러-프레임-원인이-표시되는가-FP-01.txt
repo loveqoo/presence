@@ -1,0 +1,8 @@
+# step 4: StatusBar 에러 프레임 — 원인이 표시되는가? — FP-01
+# status: assertion-failed
+# error: assertion failed at "StatusBar 에러 프레임 — 원인이 표시되는가? — FP-01"
+
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ✗ error │ mock-model │ presence-scenario │ branch: main

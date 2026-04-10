@@ -22,7 +22,7 @@ fi
 VIOLATIONS=""
 
 # 정규식
-KEBAB='^[a-z0-9]+(-[a-z0-9]+)*(\.test|\.spec|\.live)?\.js$'
+KEBAB='^[a-z0-9]+(-[a-z0-9]+)*(\.test|\.spec|\.live|\.scenario)?\.js$'
 PASCAL='^[A-Z][a-zA-Z0-9]*\.js$'
 HOOK='^use[A-Z][a-zA-Z0-9]*\.js$'
 

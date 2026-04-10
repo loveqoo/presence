@@ -1,0 +1,34 @@
+# step 6: deadLetter 노출 — FP-06
+# status: assertion-failed
+# error: assertion failed at "deadLetter 노출 — FP-06"
+
+                                                                          │ ── Agents ──
+                                                                          │   ● Writer
+                                                                          │   ● Coder
+                                                                          │
+                                                                          │ ── Tools ──
+                                                                          │   tool_01
+                                                                          │   tool_02
+                                                                          │   tool_03
+                                                                          │   tool_04
+                                                                          │   tool_05
+                                                                          │   tool_06
+                                                                          │   tool_07
+                                                                          │   tool_08
+                                                                          │   +4 more
+                                                                          │
+                                                                          │ ── Memory ──
+                                                                          │   7 nodes
+                                                                          │
+                                                                          │ ── TODOs ──
+                                                                          │   보고서 작성
+                                                                          │   이메일 확인
+                                                                          │   회의 준비
+                                                                          │
+                                                                          │ ── Events ──
+                                                                          │   2 queued
+                                                                          │
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main

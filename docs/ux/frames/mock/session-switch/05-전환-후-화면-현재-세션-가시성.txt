@@ -1,0 +1,15 @@
+# step 5: 전환 후 화면 — 현재 세션 가시성
+# status: assertion-failed
+# error: assertion failed at "전환 후 화면 — 현재 세션 가시성"
+
+
+  sessions:
+  ● testuser-default  [user] (현재)
+
+  세션 생성됨: work
+
+  세션 전환 중: work...
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main

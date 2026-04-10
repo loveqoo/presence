@@ -1,0 +1,344 @@
+감사 일자: 2026-04-10
+스코프: 상태/도구/승인
+감사자: ux-guardian
+
+---
+
+# TUI 상태·도구·승인 영역 UX 감사
+
+## 관찰 방법
+
+대상 파일: StatusBar.js, SidePanel.js, ApprovePrompt.js, ToolResultView.js, PlanView.js, CodeView.js,
+App.js, useAgentState.js, useSlashCommands.js, slash-commands.js, slash-commands/statusline.js,
+slash-commands/memory.js, transcript/turn.js
+참고 스펙: op-interpreter.md, mcp-tools.md, planner.md, todo-state.md
+
+시나리오 경로:
+  서버 상태 확인 → 도구 실행 요청 → 승인 프롬프트 → 결과 확인 → 플랜 리뷰 → 코드 diff 검토 → 사이드패널 토글/탐색
+
+---
+
+## 마찰 포인트 목록
+
+### [FP-01] 심각도: high | StatusBar.js:58 | 에러 상태에서 원인을 알 수 없음
+
+**현상**
+`status === 'error'`일 때 StatusBar는 `'✗ error'`만 표시한다. 에러 내용이나 원인은 없다.
+
+**시나리오**
+유저가 메시지를 보낸다 → 에이전트가 실패한다 → StatusBar에 `✗ error`가 표시된다 → 유저는 무슨 일이 생겼는지 알 수 없다.
+
+**제안**
+에러 발생 시 StatusBar에 짧은 원인 힌트가 함께 표시되어야 한다. 예: `✗ error: timeout`. 길면 말줄임 처리. 또는 에러 상태에서 Esc를 누르면 에러 상세가 ChatArea에 system 메시지로 나타나는 경로가 있어야 한다.
+
+**근거**
+유저는 "에러"라는 사실보다 "왜"가 궁금하다. 지금은 `/report` 슬래시 커맨드를 알고 있어야만 원인을 볼 수 있다. 이는 진입 경로 부담이다.
+
+---
+
+### [FP-02] 심각도: high | ApprovePrompt.js:7-9 | 승인 거부 후 결과 피드백 없음
+
+**현상**
+`[n]`을 눌러 거부하면 `onResolve(false)`가 호출된다. 이후 화면에 "거부됨"이라는 피드백이 보이지 않는다. `ApprovePrompt` 컴포넌트 자체는 사라지지만 ChatArea에 결과가 기록되지 않는다.
+
+**시나리오**
+LLM이 파일을 삭제하려 한다 → `APPROVE: 파일 삭제` 프롬프트가 뜬다 → 유저가 `n`을 누른다 → 화면에서 프롬프트가 사라진다 → 유저는 "실제로 거부된 건지, 아니면 그냥 닫힌 건지" 알 수 없다.
+
+**제안**
+승인 결과(승인/거부)를 ChatArea에 system 메시지로 기록해야 한다. 예: `[승인됨] 파일 삭제`, `[거부됨] 파일 삭제`.
+
+**근거**
+승인 판단은 되돌릴 수 없는 동작이다. 내가 무엇을 결정했는지 기록이 남아야 책임 인지가 생긴다.
+
+---
+
+### [FP-03] 심각도: high | ApprovePrompt.js:12-18 | 위험 수준이 모든 승인 요청에 동일하게 표시됨
+
+**현상**
+`⚠ APPROVE:` 앞에 노란색 bold 경고가 항상 동일하게 표시된다. 파일 읽기 승인이든 외부 쉘 실행 승인이든 같은 포맷이다. 위험도 차이가 시각적으로 없다.
+
+**시나리오**
+`file_read /tmp/safe.txt` 승인과 `shell_exec rm -rf ~/` 승인이 같은 시각적 형식으로 표시된다 → 유저는 두 요청의 위험 수준 차이를 화면에서 즉시 인지할 수 없다.
+
+**제안**
+도구 유형(shell 실행, 파일 쓰기/삭제 등)에 따라 위험 수준을 색상이나 아이콘으로 구분해야 한다. 예: 쉘 실행은 `⚠⚠ HIGH RISK`, 파일 읽기는 `ℹ APPROVE`. `description`에 실제 커맨드가 포함되어 있으므로 키워드 기반 분류가 가능하다.
+
+**근거**
+모든 승인이 동일한 강도로 표시되면 경고 피로(alert fatigue)가 생겨 유저가 내용을 읽지 않고 `y`를 누르게 된다.
+
+---
+
+### [FP-04] 심각도: medium | App.js:47-52 | Ctrl+O 토글 키가 화면에 표시되지 않음
+
+**현상**
+도구 결과 펼침/접힘은 `Ctrl+O`로 토글된다(`App.js:50`). 그러나 이 키 바인딩이 화면 어디에도 표시되지 않는다. StatusBar, InputBar, ChatArea 모두 이 키를 안내하지 않는다.
+
+**시나리오**
+유저가 도구 결과를 자세히 보고 싶다 → 어떤 키를 눌러야 하는지 모른다 → `/help`를 쳐봐야 알 수 있다.
+
+**제안**
+`/help` 출력에 Ctrl+O(도구 펼침), Ctrl+T(트랜스크립트 오버레이), Esc(취소) 등 키 바인딩을 포함해야 한다. 또는 InputBar 하단에 힌트 라인을 두어 자주 쓰는 키를 상황에 따라 표시한다.
+
+**근거**
+슬래시 커맨드 진입 경로는 텍스트 입력이라 발견 가능하지만, 키 바인딩은 화면에 표시되지 않으면 존재를 알기 어렵다.
+
+---
+
+### [FP-05] 심각도: medium | PlanView.js:31-44 | Op 코드가 화면에 직접 노출됨
+
+**현상**
+`formatStepLabel`이 `EXEC`, `ASK_LLM`, `RESPOND`, `APPROVE`, `DELEGATE`, `LOOKUP_MEMORY` 등 내부 Op 코드를 그대로 표시한다. 예: `EXEC file_read(path: "/tmp/test.txt")`, `ASK_LLM "분석해줘..."`.
+
+**시나리오**
+에이전트가 플랜을 실행하는 동안 유저는 `EXEC`, `ASK_LLM` 같은 내부 표현을 본다 → 기술적 의미를 모르는 유저는 이것이 무엇인지 알 수 없다.
+
+**제안**
+Op 코드를 유저 언어로 번역해야 한다:
+- `EXEC file_read` → `파일 읽기: /tmp/test.txt`
+- `ASK_LLM` → `AI 분석 중...`
+- `LOOKUP_MEMORY` → `기억 검색 중...`
+- `DELEGATE` → `하위 에이전트 위임: {target}`
+- `RESPOND` → `응답 생성 중`
+
+**근거**
+UX 원칙 1: 내부 구현 용어가 화면에 보이는 순간 UX 실패다.
+
+---
+
+### [FP-06] 심각도: medium | SidePanel.js:57-62 | 이벤트 큐 상태만 표시되고 deadLetter는 노출 안 됨
+
+**현상**
+SidePanel의 Events 섹션은 `events.queue.length`만 표시한다. `todo-state.md` E9에 따르면 `deadLetter`에 쌓인 이벤트는 자동 재처리가 없고 수동 개입이 필요하다. 그러나 SidePanel에 deadLetter 개수가 표시되지 않는다.
+
+**시나리오**
+외부 이벤트 처리가 실패한다 → deadLetter에 쌓인다 → 유저는 사이드패널을 열어도 이 사실을 알 수 없다 → 주의가 필요한 상태가 숨겨진다.
+
+**제안**
+deadLetter에 이벤트가 있을 때 Events 섹션에 경고 표시가 있어야 한다. 예: `큐: 0개 | 실패: 2개` (빨간색).
+
+**근거**
+`todo-state.md` E9: "deadLetter에 쌓인 이벤트는 수동 개입 또는 `/status` 확인 필요"라고 명시. 수동 개입이 필요한 상태는 화면에서 능동적으로 알려야 한다.
+
+---
+
+### [FP-07] 심각도: medium | SidePanel.js:46-55 | TODOs 항목에 상태 정보가 없음
+
+**현상**
+SidePanel의 TODOs 섹션은 `t.title || t.type`만 표시한다. `todo-state.md`의 TODO 구조에는 `category`, `status` 필드가 있다. 상태(ready/done/blocked 등)가 표시되지 않는다.
+
+**시나리오**
+유저가 사이드패널을 열어 TODO 목록을 본다 → 항목 제목만 보인다 → 어떤 것이 완료되었고 어떤 것이 대기 중인지 알 수 없다.
+
+**제안**
+TODO 항목에 상태 아이콘을 붙여야 한다. 예: `○ 보고서 작성` (대기), `✓ 이메일 확인` (완료). `policies.js`의 TODO.STATUS_READY 상수를 활용.
+
+**근거**
+할 일 목록에서 상태가 빠지면 목록의 가치가 반감된다. "뭘 해야 하는가"와 "뭘 했는가"가 구분되어야 한다.
+
+---
+
+### [FP-08] 심각도: medium | slash-commands.js:80 | /status 출력에 내부 필드명이 노출됨
+
+**현상**
+`/status` 커맨드 출력: `status: idle | turn: 3 | mem: 12 | last: none`.
+- `mem`은 메모리 노드 개수인데 레이블이 불명확하다.
+- `last: none`의 `none`이 무엇을 의미하는지 맥락 없이 표시된다.
+- `last: failure`가 표시될 때 유저는 `failure`가 무엇을 뜻하는지 알 수 없다.
+
+**시나리오**
+유저가 `/status`를 쳐서 상태를 확인한다 → `last: failure`를 본다 → 마지막 턴이 실패했다는 것인지, 에러 상태인지 판단하기 어렵다.
+
+**제안**
+- `mem: 12` → `메모리: 12개` 또는 `memories: 12`
+- `last: failure` → `마지막 결과: 실패` 또는 `last turn: failed`
+- `last: none` → `last turn: (없음)` 또는 생략
+
+**근거**
+내부 태그 값(`failure`, `success`, `none`)이 그대로 노출되면 유저가 의미를 추론해야 한다.
+
+---
+
+### [FP-09] 심각도: medium | App.js:47-49 | Esc 키의 동작이 상태에 따라 다른데 안내가 없음
+
+**현상**
+```
+if (key.escape && agentState.status === 'working' && onCancel) onCancel()     // 작업 취소
+if (key.escape && agentState.status !== 'working') clearTransientMessages()   // transient 메시지 제거
+```
+같은 Esc 키가 상황에 따라 완전히 다른 동작을 한다. 화면에는 어떤 안내도 없다.
+
+**시나리오**
+에이전트가 작업 중이다 → 유저가 실수로 Esc를 누른다 → 작업이 취소된다 → 유저는 왜 작업이 멈췄는지 알 수 없다. 또는 transient 메시지를 보는 중에 Esc를 누르면 메시지가 사라진다 → 유저는 "왜 내용이 사라졌지?"라고 혼란스러워한다.
+
+**제안**
+- 작업 중일 때: InputBar 또는 StatusBar에 `[Esc] 취소` 힌트 표시
+- transient 메시지 표시 중: 메시지 하단에 `[Esc] 닫기` 힌트 표시
+- 작업 취소 후: "작업이 취소되었습니다" system 메시지를 ChatArea에 표시
+
+**근거**
+같은 키가 맥락에 따라 다른 동작을 하면 예측 불가능성이 생긴다. 최소한 현재 Esc가 무엇을 할지를 힌트로 알려야 한다.
+
+---
+
+### [FP-10] 심각도: medium | ToolResultView.js:172-176 | collapsed 상태임을 유저가 알 수 없음
+
+**현상**
+도구 결과가 collapsed 상태일 때 `tool   > file_read /tmp/test.txt — 42 lines` 형식으로 표시된다. 이것이 요약(접힌 상태)인지 전체인지 화면에서 구분이 안 된다.
+
+**시나리오**
+유저가 도구 결과를 본다 → 한 줄 요약이 보인다 → 더 보고 싶은데 어떻게 펼치는지 모른다 → Ctrl+O를 모르면 접힌 상태임도 인지하기 어렵다.
+
+**제안**
+collapsed 상태에 접힘 표시(`▶`)를 붙이고, expanded 상태에 `▼`를 붙여 토글 가능함을 암시한다. 예: `▶ tool > file_read /tmp/test.txt — 42 lines`. 또는 첫 사용 시 한 번 `[Ctrl+O] 도구 결과 펼치기` 힌트를 표시한다.
+
+**근거**
+도구 결과 탐색의 진입점이 숨겨진 키 바인딩(Ctrl+O)이고, 접힌 상태임을 알리는 시각 신호도 없어 기능 발견성이 매우 낮다.
+
+---
+
+### [FP-11] 심각도: low | SidePanel.js:34-38 | 도구 8개 초과 시 나머지가 `+N more`로만 표시됨
+
+**현상**
+도구가 9개 이상이면 `+N more`로 잘린다. 숨겨진 도구를 보는 방법이 없다.
+
+**시나리오**
+유저가 어떤 도구를 사용할 수 있는지 확인하고 싶다 → SidePanel에 8개만 보인다 → `+3 more`라고 나온다 → 나머지를 보려면 `/tools`를 쳐야 한다.
+
+**제안**
+`+N more` 옆에 `(/tools로 전체 보기)` 힌트를 추가하거나, SidePanel에서 스크롤이 가능하면 더 자연스럽다. 현재 SidePanel은 정적 렌더링이므로, 적어도 경로 안내 텍스트가 있어야 한다.
+
+**근거**
+기능이 있어도 진입 경로를 모르면 없는 것과 같다.
+
+---
+
+### [FP-12] 심각도: low | statusline.js:5-11 | /statusline 피드백이 영어 필드명만 표시됨
+
+**현상**
+`/statusline` 출력:
+```
+statusline items: status, budget, model, dir, branch (status: always on)
+available: turn, mem, tools
+usage: /statusline +item  /statusline -item
+```
+`turn`, `mem`, `tools`, `budget`, `dir`, `branch`, `model` 등 내부 필드명이 그대로 노출된다.
+
+**시나리오**
+유저가 `/statusline`을 쳐서 현재 상태표시줄 항목을 확인한다 → `mem`이 무엇인지, `turn`이 무엇인지 맥락 없이 표시된다.
+
+**제안**
+각 항목에 설명을 붙인다. 예: `mem (메모리 노드 수)`, `turn (현재 턴 번호)`, `tools (등록 도구 수)`.
+
+**근거**
+내부 필드명이 곧 유저 인터페이스가 되어선 안 된다.
+
+---
+
+### [FP-13] 심각도: low | CodeView.js:185-208 | maxLines=80 초과 시 스크롤 불가
+
+**현상**
+`CodeView`는 최대 80줄까지만 표시하고 초과분은 `... +N lines`로 잘린다. 잘린 내용을 볼 방법이 없다.
+
+**시나리오**
+에이전트가 200줄짜리 파일을 읽는다 → ToolResultView가 expanded 상태에서 CodeView를 보여준다 → 80줄 이후는 `... +120 lines`로 잘린다 → 유저는 나머지 내용을 볼 수 없다.
+
+**제안**
+잘린 파일 내용을 볼 방법(TranscriptOverlay 또는 별도 오버레이)이 있어야 한다. 또는 `... +120 lines (원본: /path/to/file)` 형식으로 경로를 표시하여 유저가 직접 파일을 열 수 있게 안내한다.
+
+**근거**
+TUI 환경에서 스크롤이 어려운 것은 이해할 수 있으나, 잘린 내용에 접근하는 경로 자체가 없다는 점이 문제다.
+
+---
+
+### [FP-14] 심각도: high | StatusBar.js:9-34 | 현재 세션이 화면 어디에도 표시되지 않음
+
+**현상**
+`DEFAULT_ITEMS`와 `TOGGLEABLE_ITEMS` 모두 `'session'` 항목이 없다. `buildSegment`에도 session case가 없다. `sessionId` prop은 App.js에서 `useSlashCommands`로만 전달되고 렌더 트리의 어떤 컴포넌트에도 도달하지 않는다. 결과적으로 멀티세션 환경에서 유저가 지금 어느 세션에 있는지 화면으로 알 방법이 없다.
+
+**시나리오**
+유저가 `/sessions new work`로 작업용 세션을 만들고 `/sessions switch work`로 전환한다 → 전환 직후에도 StatusBar에는 `● idle │ mock-model │ presence-scenario │ branch: main` 뿐이다 → 현재 세션이 `work`인지 `testuser-default`인지 알 방법은 `/sessions list`를 매번 치는 것뿐이다.
+
+**재현 프레임**: `docs/ux/frames/mock/session-switch/05-전환-후-화면-현재-세션-가시성.txt`
+```
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ● idle │ mock-model │ presence-scenario │ branch: main
+```
+
+**제안**
+1. `StatusBar.js`의 `TOGGLEABLE_ITEMS`에 `'session'` 추가
+2. `DEFAULT_ITEMS`에도 `'session'` 포함 (멀티세션이 핵심 기능이므로 기본 노출)
+3. `buildSegment`에 `case 'session': return ctx.sessionName || ctx.sessionId` 추가
+4. App.js에서 `sessionId`/`sessionName`을 StatusBar props로 전달
+5. `/sessions switch` 성공 후 전환 완료 피드백과 함께 StatusBar가 자동 갱신되도록
+
+**근거**
+presence는 "서버 1개 = 유저 N명" + 유저별 멀티세션이 핵심이다. 멀티세션 아키텍처에서 현재 세션 가시성은 가장 기본적인 요건이며, 이것이 없으면 세션을 여러 개 만드는 의미가 없다. 이 갭은 파일 단위 감사에서 놓쳤고, 시나리오 기반 감사(session-switch.scenario.js)로 드러났다.
+
+---
+
+### [FP-15] 심각도: medium | StatusBar.js:56-60, App.js:74-82 | 스트리밍 수신 중에도 StatusBar가 "thinking..."을 유지
+
+**현상**
+`_streaming.content`가 이미 도착하여 ChatArea에 마크다운으로 렌더되고 있는 중에도, StatusBar의 indicator는 `⠦ thinking... 0s`를 유지한다. "생각 중"이라는 문구는 content가 전혀 없을 때(진짜 사고 단계)에만 적합하다.
+
+**시나리오**
+유저가 질문을 보낸다 → 잠시 후 응답 텍스트가 ChatArea에 실시간으로 찍히기 시작한다 → 그럼에도 StatusBar는 계속 `thinking...` → 유저 입장에서는 "텍스트가 나오고 있는데 왜 아직 생각 중이지?" 라는 모순된 신호를 받는다.
+
+**재현 프레임**: `docs/ux/frames/mock/streaming-response/05-스트리밍-content-도착-마크다운-렌더로-전환.txt`
+```
+  오늘 서울의 날씨는 맑습니다. 기온은 섭씨 22도이며 습도는 낮은 편입니다.▌
+ ──────────────────────────────────────────────────────────────────────────────
+ >
+ ──────────────────────────────────────────────────────────────────────────────
+ ⠦ thinking... 0s │ mock-model │ presence-scenario │ branch: main
+```
+
+**제안**
+`deriveStatus`/`buildIndicator`에 스트리밍 단계를 구분한다:
+- `turnState=working` + `_streaming.content`가 비어있음 → `thinking...`
+- `turnState=working` + `_streaming.content`가 있음 → `streaming...` 또는 `응답 중...`
+- `turnState=working` + `_streaming.status === 'receiving'` + `content` 없음 → `receiving...`
+
+**근거**
+StatusBar의 indicator는 유저에게 시스템이 무엇을 하고 있는지 알리는 1차 신호다. 실제 진행 단계와 indicator 문구가 일치하지 않으면 신호 자체를 신뢰하지 못하게 된다.
+
+---
+
+### 기존 FP의 시나리오 재현 증거
+
+다음 FP들은 시나리오 기반 감사로 실제 프레임이 확보되어 근거가 강화되었다.
+
+| FP | 재현 시나리오 | 증거 프레임 |
+|----|---------------|-----------|
+| **FP-02** 승인 거부 후 피드백 없음 | `approve-prompt` | `docs/ux/frames/mock/approve-prompt/07-*.txt` — 거부 후 화면이 사실상 백지 상태 |
+| **FP-03** 위험도 구분 없는 승인 UI | `approve-prompt` | `03-*.txt`(file_read)와 `05-*.txt`(shell_exec rm -rf)가 **문자 그대로 동일 포맷** |
+| **FP-04/10** 접힘 상태 가시성 / 키바인딩 미노출 | `tool-result-expand` | `03-*.txt` — `file_read — 120 lines` 요약만 있고 `Ctrl+O` 힌트 없음 |
+| **(기존 감사 누락 / FP-2 in tui-chat-transcript.md)** `receiving N chars...` 내부 용어 노출 | `streaming-response` | `03-*.txt` — `receiving 42 chars...` 문자 그대로 |
+
+시나리오는 `packages/tui/test/scenarios/`에 정의되어 있으며 `npm run scenarios:mock`으로 재실행할 수 있다. 프레임이 `docs/ux/frames/mock/` 아래 저장되므로 git diff로 UI 회귀 감지가 가능하다.
+
+---
+
+## 시나리오별 흐름 평가 요약
+
+| 시나리오 | 평가 | 주요 마찰 포인트 |
+|---------|------|----------------|
+| 서버 상태 확인 | 부족 | 에러 원인 미표시 (FP-01), /status 레이블 불명확 (FP-08) |
+| 도구 실행 요청 | 보통 | Op 코드 직접 노출 (FP-05), collapsed 상태 미인지 (FP-10) |
+| 승인 프롬프트 | 나쁨 | 거부 피드백 없음 (FP-02), 위험도 구분 없음 (FP-03) |
+| 결과 확인 | 보통 | 펼침 키 미안내 (FP-04, FP-10) |
+| 플랜 리뷰 | 나쁨 | Op 코드 노출 (FP-05) |
+| 코드 diff 검토 | 보통 | 80줄 제한 (FP-13) |
+| 사이드패널 토글/탐색 | 보통 | deadLetter 미표시 (FP-06), TODO 상태 없음 (FP-07), 도구 목록 잘림 (FP-11) |
+| **세션 전환** | **나쁨** | **현재 세션 미표시 (FP-14)** |
+| **응답 스트리밍** | **보통** | **indicator 라벨 부정확 (FP-15)** |
+
+## 심각도별 집계 (업데이트)
+
+| 심각도 | 건수 | 항목 |
+|--------|------|------|
+| **high** | 4 | FP-01, FP-02, FP-03, **FP-14 (신규)** |
+| **medium** | 8 | FP-04, FP-05, FP-06, FP-07, FP-08, FP-09, FP-10, **FP-15 (신규)** |
+| **low** | 3 | FP-11, FP-12, FP-13 |
