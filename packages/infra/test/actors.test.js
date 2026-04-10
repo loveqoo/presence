@@ -44,13 +44,13 @@ async function run() {
     const calls = { search: [], add: [] }
     return {
       calls,
-      search: async (input) => {
-        calls.search.push({ input })
+      search: async (userId, input) => {
+        calls.search.push({ userId, input })
         if (failSearch) throw new Error('search failed')
         return searchResult.map(r => ({ label: r.memory }))
       },
-      add: async (userInput, assistantOutput) => {
-        calls.add.push({ userInput, assistantOutput })
+      add: async (userId, userInput, assistantOutput) => {
+        calls.add.push({ userId, userInput, assistantOutput })
         if (failAdd) throw new Error('add failed')
       },
     }
@@ -62,7 +62,7 @@ async function run() {
       { id: '1', memory: '회의 안건 A', score: 0.9 },
       { id: '2', memory: '회의 안건 B', score: 0.8 },
     ]})
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     const result = await forkTask(actor.recall('회의'))
     assert(Array.isArray(result), 'MemoryActor recall: returns array')
@@ -74,7 +74,7 @@ async function run() {
   // M2. save → memory.add 호출, 'ok' 반환
   {
     const memory = makeMockMemory()
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     const result = await forkTask(actor.save(
       { label: 'test', type: 'conversation', data: { input: 'q', output: 'a' } },
@@ -87,7 +87,7 @@ async function run() {
 
   // M3. memory=null → recall 빈 배열, save skip
   {
-    const actor = memoryActorR.run({ memory: null, logger: null })
+    const actor = memoryActorR.run({ memory: null, userId: 'test-user', logger: null })
 
     const recalled = await forkTask(actor.recall('회의'))
     assert(Array.isArray(recalled) && recalled.length === 0, 'MemoryActor null: recall returns []')
@@ -101,7 +101,7 @@ async function run() {
   // M4. save data.input 없음 → skip
   {
     const memory = makeMockMemory()
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     const result = await forkTask(actor.save({ data: {} }))
     assert(result === MemoryActor.RESULT.SKIP, 'MemoryActor save: no input → skip')
@@ -111,7 +111,7 @@ async function run() {
   // M5. 미지원 메시지 → no-op (embed/prune/promote/removeWorking/saveDisk)
   {
     const memory = makeMockMemory()
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     for (const type of ['embed', 'prune', 'promote', 'removeWorking', 'saveDisk']) {
       const result = await forkTask(actor.send({ type }))
@@ -123,7 +123,7 @@ async function run() {
   // M6. recall 오류 → 빈 배열 반환 (격리)
   {
     const memory = makeMockMemory({ failSearch: true })
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     const result = await forkTask(actor.recall('x'))
     assert(Array.isArray(result) && result.length === 0, 'MemoryActor recall error: returns []')
@@ -136,7 +136,7 @@ async function run() {
   // M7. save 오류 → skip 반환 (격리)
   {
     const memory = makeMockMemory({ failAdd: true })
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     const result = await forkTask(actor.save(
       { data: { input: 'q', output: 'a' } },
@@ -151,7 +151,7 @@ async function run() {
       search: async () => { order.push('search'); return [] },
       add: async () => { order.push('add') },
     }
-    const actor = memoryActorR.run({ memory, logger: null })
+    const actor = memoryActorR.run({ memory, userId: 'test-user', logger: null })
 
     const p1 = forkTask(actor.recall('x'))
     const p2 = forkTask(actor.save({ data: { input: 'q', output: 'a' } }))
@@ -459,7 +459,7 @@ async function run() {
   {
 
     const mockMemory = makeMockMemory({ searchResult: [{ memory: 'recall target' }] })
-    const memActor = memoryActorR.run({ memory: mockMemory, logger: null })
+    const memActor = memoryActorR.run({ memory: mockMemory, userId: 'test-user', logger: null })
 
     const state = createOriginState({
       turnState: TurnState.idle(), lastTurn: null, turn: 0,

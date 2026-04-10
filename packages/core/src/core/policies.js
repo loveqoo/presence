@@ -55,6 +55,18 @@ export const SCHEDULER = Object.freeze({
   BACKOFF_EXPONENT: 2,
 })
 
+export const JOB = Object.freeze({
+  HISTORY_MAX_PER_JOB: 50,
+  HISTORY_TTL_DAYS: 90,
+})
+
+// WebSocket close 코드 (wire format)
+export const WS_CLOSE = Object.freeze({
+  AUTH_FAILED: 4001,
+  PASSWORD_CHANGE_REQUIRED: 4002,
+  ORIGIN_NOT_ALLOWED: 4003,
+})
+
 export const STATE_PATH = Object.freeze({
   TURN_STATE: 'turnState',
   TURN: 'turn',

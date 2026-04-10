@@ -16,7 +16,7 @@ const useSlashCommands = ({
   onInput,
 }) => {
 
-  const handleInput = useCallback((input) => {
+  const handleInput = useCallback(async (input) => {
     // 이전 정보 조회 결과(transient) 제거
     clearTransientMessages()
     const slashCtx = {
@@ -27,10 +27,11 @@ const useSlashCommands = ({
       sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
       onInput,
     }
-    if (dispatchSlashCommand(input, slashCtx)) return
+    if (await dispatchSlashCommand(input, slashCtx)) return
 
-    // 일반 입력 → 에이전트 실행
+    // 일반 입력 → 유저 메시지 즉시 표시 후 에이전트 실행
     if (onInput) {
+      addMessage({ role: 'user', content: input })
       onInput(input).then(() => {}).catch(err => {
         const isAbort = err.name === 'AbortError' || err.message?.includes('aborted')
         addMessage({

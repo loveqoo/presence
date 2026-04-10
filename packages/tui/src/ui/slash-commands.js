@@ -135,12 +135,12 @@ const commandMap = new Map([
   ['/statusline', handleStatusline],
 ])
 
-// Returns true if input was a slash command (handled).
-const dispatchSlashCommand = (input, ctx) => {
+// Returns Promise<boolean> — true if input was a slash command (handled).
+const dispatchSlashCommand = async (input, ctx) => {
   const name = input.trim().split(/\s+/)[0]
   const handler = commandMap.get(name)
   if (!handler) return false
-  handler(input, ctx)
+  await handler(input, ctx)
   return true
 }
 

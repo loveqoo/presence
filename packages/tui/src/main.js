@@ -1,47 +1,5 @@
-import { UserContext } from '@presence/infra/infra/user-context.js'
 import { checkServer, loginToServer, changePasswordOnServer } from './http.js'
 import { runRemote } from './remote.js'
-
-// =============================================================================
-// Bootstrap: UserContext 생성 + 단일 유저 세션 생성.
-// e2e 테스트에서 직접 사용 가능: const app = await bootstrap(config)
-// =============================================================================
-
-const bootstrap = async (configOverride, opts = {}) => {
-  const { persistenceCwd } = opts
-  const userContext = await UserContext.create(configOverride)
-  const { session } = userContext.sessions.create({ id: 'user-default', persistenceCwd })
-
-  const { config, logger, personaConfig, memory, llm, toolRegistry, jobStore, embedder, mcpConnections } = userContext
-  const { agent, state, tools, agents, handleInput, handleApproveResponse, handleCancel, schedulerActor, delegateActor } = session
-
-  // --- Startup summary ---
-  logger.info('Startup complete', {
-    model: config.llm.model,
-    responseFormat: config.llm.responseFormat,
-    maxRetries: config.llm.maxRetries,
-    maxIterations: config.maxIterations,
-    timeoutMs: config.llm.timeoutMs,
-    tools: tools.length,
-    agents: agents.length,
-    mcpServers: mcpConnections.length,
-    embedder: embedder ? config.embed.provider : 'none',
-    scheduler: config.scheduler.enabled ? `enabled (poll: ${config.scheduler.pollIntervalMs}ms)` : 'disabled',
-    scheduledJobs: jobStore.listJobs().filter(j => j.enabled).length,
-    memory: memory ? `mem0 (${memory.allNodes().length} cached)` : 'disabled',
-  })
-
-  const shutdown = async () => { await userContext.shutdown() }
-
-  return {
-    agent, state, config, logger,
-    tools, agents, personaConfig,
-    handleInput, handleApproveResponse, handleCancel,
-    schedulerActor, delegateActor, jobStore,
-    memory, llm, toolRegistry,
-    shutdown,
-  }
-}
 
 // =============================================================================
 // CLI 진입점 보조 함수들 (서버 URL 결정, 프롬프트, 인증 흐름)
@@ -146,7 +104,7 @@ const main = async () => {
   return runRemote(baseUrl, { authState, username })
 }
 
-export { main, bootstrap, UserContext }
+export { main }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
   main().catch(err => { console.error('Fatal:', err); process.exit(1) })

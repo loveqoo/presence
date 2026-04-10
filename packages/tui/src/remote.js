@@ -81,8 +81,9 @@ class RemoteSession {
   #remoteState
   #currentTools
   #rerender
+  #tryRefresh
 
-  constructor({ wsUrl, authState, username, client, config, agents, cwd, gitBranch, initialTools }) {
+  constructor({ wsUrl, authState, username, client, config, agents, cwd, gitBranch, initialTools, tryRefresh }) {
     this.#wsUrl = wsUrl
     this.#authState = authState
     this.#username = username
@@ -92,6 +93,7 @@ class RemoteSession {
     this.#cwd = cwd
     this.#gitBranch = gitBranch
     this.#currentTools = initialTools
+    this.#tryRefresh = tryRefresh
     this.#currentSessionId = username ? `${username}-default` : 'user-default'
     this.#remoteState = this.#createMirrorState(this.#currentSessionId)
     this.#rerender = null
@@ -107,9 +109,7 @@ class RemoteSession {
     this.#remoteState.disconnect()
     this.#currentSessionId = newId
     this.#remoteState = this.#createMirrorState(newId)
-    const defaultSessionId = this.#username ? `${this.#username}-default` : 'user-default'
-    const toolsPath = newId === defaultSessionId ? '/api/tools' : `/api/sessions/${newId}/tools`
-    this.#currentTools = await this.#client.getJson(toolsPath).catch(() => this.#currentTools)
+    this.#currentTools = await this.#client.getJson(`/api/sessions/${newId}/tools`).catch(() => this.#currentTools)
     if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
   }
 
@@ -126,10 +126,17 @@ class RemoteSession {
   // --- private ---
 
   #createMirrorState(sessionId) {
-    const headers = this.#authState?.accessToken
-      ? { 'Authorization': `Bearer ${this.#authState.accessToken}` }
-      : undefined
-    return createMirrorState({ wsUrl: this.#wsUrl, sessionId, headers })
+    return createMirrorState({
+      wsUrl: this.#wsUrl,
+      sessionId,
+      getHeaders: () => this.#authState?.accessToken
+        ? { 'Authorization': `Bearer ${this.#authState.accessToken}` }
+        : undefined,
+      onAuthFailed: this.#tryRefresh,
+      onUnrecoverable: (code) => {
+        console.error(`WS connection unrecoverable (close code ${code}). Re-login required.`)
+      },
+    })
   }
 
   #buildHandlers() {
@@ -199,7 +206,7 @@ async function runRemote(baseUrl, opts = {}) {
 
   const session = new RemoteSession({
     wsUrl, authState, username, client,
-    config, agents, cwd, gitBranch, initialTools,
+    config, agents, cwd, gitBranch, initialTools, tryRefresh,
   })
 
   const onSignal = () => { session.disconnect(); process.exit(0) }

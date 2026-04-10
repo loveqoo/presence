@@ -1,39 +1,33 @@
 import { join } from 'node:path'
+import { Config } from './config.js'
 
-// presence의 단일 사용자 에이전트 — 고정 userId
-const MEM0_USER_ID = 'default'
 const DEFAULT_EMBED_MODEL = 'text-embedding-3-small'
 const DEFAULT_EMBED_DIMS = 1536
 
+const defaultMemoryPath = () => join(Config.presenceDir(), 'memory')
+
 // =============================================================================
-// Memory: mem0 기반 메모리 + 동기 캐시 뷰.
-// Write path: search()/add()로 mem0에 접근, add()/clearAll() 등에서 내부 캐시 갱신.
-// Read path(UI/REPL): allNodes() 동기 호출로 캐시 조회.
-//
-// 주의: mem0는 tier 개념이 없는 flat memory. tier 필드는 UI 표시용 라벨.
+// Memory: mem0 기반 메모리. 서버 레벨 공유 인스턴스.
+// 모든 메서드는 userId를 파라미터로 받아 멀티유저 격리.
 // =============================================================================
 
 class Memory {
   #mem0
-  #cache
 
   constructor(mem0) {
     this.#mem0 = mem0
-    this.#cache = []
   }
 
-  // mem0 인스턴스 생성 + 초기 캐시 로드. embed 자격증명 없으면 null.
+  // embed 자격증명 없으면 null 반환.
   static async create(config, opts = {}) {
-    const { memoryPath } = opts
     const { llm, embed } = config
     const embedApiKey = embed.apiKey || (embed.provider === 'openai' ? llm.apiKey : null)
     if (!embedApiKey && !embed.baseUrl) return null
 
+    const memoryPath = config.memory.path || defaultMemoryPath()
     const { Memory: Mem0Memory } = await import('mem0ai/oss')
     const mem0Config = Memory.#buildMem0Config({ llm, embed, embedApiKey, memoryPath })
-    const memory = new Memory(new Mem0Memory(mem0Config))
-    await memory.refreshCache()
-    return memory
+    return new Memory(new Mem0Memory(mem0Config))
   }
 
   static #buildMem0Config({ llm, embed, embedApiKey, memoryPath }) {
@@ -71,52 +65,51 @@ class Memory {
     }
   }
 
-  // --- Write path ---
+  // --- 검색 ---
 
-  // 유사 메모리 검색. 반환: [{ label }]
-  async search(input, limit = 10) {
-    const result = await this.#mem0.search(input, { userId: MEM0_USER_ID, limit })
+  async search(userId, input, limit = 10) {
+    const result = await this.#mem0.search(input, { userId, limit })
     return (result.results || []).map(record => ({ label: record.memory }))
   }
 
-  // 대화 턴 저장 + 캐시 동기화
-  async add(userInput, assistantOutput) {
+  // --- 저장 ---
+
+  async add(userId, userInput, assistantOutput) {
     await this.#mem0.add([
       { role: 'user', content: userInput },
       { role: 'assistant', content: assistantOutput || '' },
-    ], { userId: MEM0_USER_ID })
-    await this.refreshCache()
+    ], { userId })
   }
 
-  // --- Read path (동기 캐시) ---
+  // --- 조회 ---
 
-  async refreshCache() {
+  async allNodes(userId) {
     try {
-      const result = await this.#mem0.getAll({ userId: MEM0_USER_ID })
-      this.#cache = (result.results || []).map(record => ({
+      const result = await this.#mem0.getAll({ userId })
+      return (result.results || []).map(record => ({
         id: record.id,
         label: record.memory,
-        type: 'fact',
-        tier: 'episodic',
         createdAt: record.createdAt ? new Date(record.createdAt).getTime() : Date.now(),
       }))
-    } catch (_) {}
+    } catch (_) {
+      return []
+    }
   }
 
-  allNodes() { return this.#cache }
+  // --- 삭제 ---
 
-  clearAll() {
-    const count = this.#cache.length
-    this.#cache = []
-    this.#mem0.reset().catch(() => {})
+  async clearAll(userId) {
+    const nodes = await this.allNodes(userId)
+    const count = nodes.length
+    if (count > 0) await this.#mem0.deleteAll({ userId }).catch(() => {})
     return count
   }
 
-  removeOlderThan(maxAgeMs) {
+  async removeOlderThan(userId, maxAgeMs) {
+    const nodes = await this.allNodes(userId)
     const cutoff = Date.now() - maxAgeMs
-    const toDelete = this.#cache.filter(node => node.createdAt < cutoff)
-    this.#cache = this.#cache.filter(node => node.createdAt >= cutoff)
-    Promise.all(toDelete.map(node => this.#mem0.delete(node.id).catch(() => {}))).catch(() => {})
+    const toDelete = nodes.filter(node => node.createdAt < cutoff)
+    await Promise.all(toDelete.map(node => this.#mem0.delete(node.id).catch(() => {})))
     return toDelete.length
   }
 }

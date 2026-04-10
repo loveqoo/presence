@@ -1,8 +1,8 @@
+import { join } from 'node:path'
 import { createToolRegistry } from './tools/tool-registry.js'
 import { createLocalTools } from './tools/local-tools.js'
 import { initMcpIntegration } from './tools/mcp-tools.js'
 import { createPersona } from './persona.js'
-import { Memory } from './memory.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm/llm-client.js'
 import { createAgentRegistry } from './agents/agent-registry.js'
@@ -20,10 +20,7 @@ import { createSessionManager } from './sessions/session-manager.js'
 // 포함: 유저 공용 인프라(llm, memory, mcp, tools, jobStore 등) + sessions(SessionManager).
 // =============================================================================
 
-const defaultMemoryPath = () => {
-  const home = process.env.HOME || process.env.USERPROFILE || '.'
-  return `${home}/.presence/memory`
-}
+const defaultUserDataPath = () => join(Config.presenceDir(), 'users', 'default')
 
 const buildEmbedder = (config) => {
   const embedApiKey = config.embed.apiKey
@@ -77,16 +74,12 @@ class UserContext {
     userContext.persona = createPersona()
     userContext.personaConfig = userContext.persona.get()
 
-    // --- Memory ---
-    userContext.memoryPath = userContext.config.memory.path
-      || (username ? Config.userDataPath(username) : defaultMemoryPath())
-    userContext.memory = await Memory.create(userContext.config, { memoryPath: userContext.memoryPath }).catch(e => {
-      userContext.logger.warn('mem0 init failed, memory disabled', { error: e.message })
-      return null
-    })
-    userContext.logger.info(t('startup.memory_loaded', {
-      path: userContext.memoryPath, count: userContext.memory?.allNodes().length ?? 0,
-    }))
+    // --- Memory (외부 주입) ---
+    userContext.memory = opts.memory ?? null
+    userContext.logger.info(userContext.memory ? 'Memory: mem0 enabled' : 'Memory: disabled')
+
+    // --- User data path (jobStore, userDataStore) ---
+    userContext.userDataPath = username ? Config.userDataPath(username) : defaultUserDataPath()
 
     // --- Embedder ---
     userContext.embedder = buildEmbedder(userContext.config)
@@ -109,8 +102,8 @@ class UserContext {
     registerSummarizer(userContext.agentRegistry, userContext.llm)
 
     // --- Job Store + User Data Store ---
-    userContext.jobStore = createJobStore(defaultJobDbPath(userContext.memoryPath))
-    userContext.userDataStore = new UserDataStore(defaultUserDataDbPath(userContext.memoryPath))
+    userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))
+    userContext.userDataStore = new UserDataStore(defaultUserDataDbPath(userContext.userDataPath))
 
     // --- Sessions (userContext 자기 참조) ---
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })

@@ -3,15 +3,13 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import fp from '@presence/core/lib/fun-fp.js'
+import { JOB } from '@presence/core/core/policies.js'
 
 const { Reader } = fp
 
 // --- JobStore ---
 // SQLite 기반 Job 정의 + 실행 이력 저장소.
 // better-sqlite3 (동기 API) — Actor 큐 내에서 호출하므로 동기 OK.
-
-const HISTORY_MAX_PER_JOB = 50
-const HISTORY_TTL_DAYS = 90
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS jobs (
@@ -103,7 +101,7 @@ class JobStore {
   startRun(jobId, attempt = 1) {
     const now = Date.now()
     const id = randomUUID()
-    const expireAt = now + HISTORY_TTL_DAYS * 86_400_000
+    const expireAt = now + JOB.HISTORY_TTL_DAYS * 86_400_000
     this.#db.prepare(`
       INSERT INTO job_runs (id, job_id, started_at, status, attempt, expire_at)
       VALUES (?, ?, ?, 'running', ?, ?)
@@ -116,7 +114,7 @@ class JobStore {
       UPDATE job_runs SET finished_at = ?, status = ?, result = ?, error = ?
       WHERE id = ?
     `).run(Date.now(), status, result, error, runId)
-    // 최근 HISTORY_MAX_PER_JOB개 초과분 삭제
+    // 최근 JOB.HISTORY_MAX_PER_JOB개 초과분 삭제
     const resolvedJobId = jobId ?? this.#db.prepare('SELECT job_id FROM job_runs WHERE id = ?').get(runId)?.job_id
     if (resolvedJobId) this.#trimHistory(resolvedJobId)
   }
@@ -142,7 +140,7 @@ class JobStore {
     const ids = this.#db.prepare(`
       SELECT id FROM job_runs WHERE job_id = ?
       ORDER BY started_at DESC LIMIT -1 OFFSET ?
-    `).all(jobId, HISTORY_MAX_PER_JOB).map(row => row.id)
+    `).all(jobId, JOB.HISTORY_MAX_PER_JOB).map(row => row.id)
     if (ids.length > 0) {
       this.#db.prepare(`DELETE FROM job_runs WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids)
     }

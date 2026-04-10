@@ -78,6 +78,7 @@ class EphemeralSession extends Session {
     this.actors = new SessionActors({
       userContext, state: this.state, logger: this.logger,
       persistenceActor: this.persistenceActor,
+      userId: this.userId,
       dispatchTurn: (input, turnOpts) => this.runAgent(input, turnOpts),
       onScheduledJobDone: this.resolveJobDoneHandler(opts),
     })

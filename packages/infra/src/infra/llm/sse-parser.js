@@ -46,13 +46,25 @@ class SseParser {
   }
 
   // 한 SSE chunk 파싱: JSON decode → delta 추출 → onDelta 호출. JSON 에러는 스킵.
+  // thinking 모델(qwen 등)은 delta.reasoning_content로 추론 토큰을 먼저 보낸 뒤 delta.content로 응답.
+  // reasoning 토큰은 축적하지 않고 onDelta만 호출하여 UI 진행 표시.
   #parseChunk(data, accumulated, onDelta) {
     try {
       const chunk = JSON.parse(data)
-      const delta = chunk.choices?.[0]?.delta?.content
-      const next = delta ? accumulated + delta : accumulated
-      if (delta && onDelta) onDelta({ delta, accumulated: next })
-      return { accumulated: next, streamDone: !!chunk.choices?.[0]?.finish_reason }
+      const choiceDelta = chunk.choices?.[0]?.delta
+      const contentDelta = choiceDelta?.content
+      const reasoningDelta = choiceDelta?.reasoning_content
+      // content가 있으면 실제 응답 — 축적
+      if (contentDelta) {
+        const next = accumulated + contentDelta
+        if (onDelta) onDelta({ delta: contentDelta, accumulated: next })
+        return { accumulated: next, streamDone: !!chunk.choices?.[0]?.finish_reason }
+      }
+      // reasoning만 있으면 thinking 중 — 축적 없이 진행 알림만
+      if (reasoningDelta && onDelta) {
+        onDelta({ delta: '', accumulated, reasoning: reasoningDelta })
+      }
+      return { accumulated, streamDone: !!chunk.choices?.[0]?.finish_reason }
     } catch (_) {
       return null
     }

@@ -109,7 +109,6 @@ class HttpAuthService extends AuthService {
       if (!this.#rateLimiter.isAllowed(ip)) {
         return res.status(429).json({ error: 'Too many login attempts. Try again later.' })
       }
-      this.#rateLimiter.record(ip)
 
       const credentials = this.extractCredentials(req)
       if (!credentials) return res.status(400).json({ error: 'username and password are required' })
@@ -123,7 +122,10 @@ class HttpAuthService extends AuthService {
         .fork(
           () => res.status(500).json({ error: 'Internal error' }),
           result => {
-            if (result.left) return res.status(401).json({ error: result.left })
+            if (result.left) {
+              this.#rateLimiter.record(ip)
+              return res.status(401).json({ error: result.left })
+            }
             const { accessToken, refreshToken, user } = result.right
             this.#setRefreshCookie(res, refreshToken)
             res.json({

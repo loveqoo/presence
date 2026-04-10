@@ -49,35 +49,30 @@ const SLASH_COMMANDS = {
     return { type: 'system', content: tools.map(tool => tool.name).join(', ') || '(none)' }
   },
 
-  memory: (args, { memory }) => {
+  memory: async (args, { memory, userId }) => {
     if (args[0] !== 'list') return null // 미지원 서브커맨드 → 에이전트에 위임
-    const nodes = memory.allNodes()
-    const summary = nodes.slice(0, 20).map(node => `[${node.type}/${node.tier}] ${node.label}`).join('\n')
+    if (!memory) return { type: 'system', content: 'Memory disabled.' }
+    const nodes = await memory.allNodes(userId)
+    const summary = nodes.slice(0, 20).map(node => node.label).join('\n')
     return { type: 'system', content: `${nodes.length} nodes:\n${summary}` }
   },
 }
 
-const handleSlashCommand = (input, ctx) => {
+const handleSlashCommand = async (input, ctx) => {
   const [command, ...args] = input.slice(1).trim().split(/\s+/)
   const handler = SLASH_COMMANDS[command]
   if (!handler) return { handled: false }
-  const result = handler(args, ctx)
+  const result = await handler(args, ctx)
   if (!result) return { handled: false } // 핸들러가 null 반환 시 미처리
   return { handled: true, result }
 }
 
 // --- 세션 검색/생성 공용 로직 ---
 
-// 유저별 컨텍스트에서 세션 검색 + 글로벌 agent fallback + lazy 생성.
+// 유저별 컨텍스트에서 세션 검색 + lazy 생성.
 // REST(attachSessionMiddleware)와 WS(handleJoin) 양쪽에서 사용.
-const findOrCreateSession = (sessionId, username, effectiveUserContext, globalUserContext) => {
+const findOrCreateSession = (sessionId, username, effectiveUserContext) => {
   let entry = effectiveUserContext.sessions.get(sessionId)
-
-  // 유저 컨텍스트에 없으면 글로벌 agent 세션에서 검색
-  if (!entry) {
-    const globalEntry = globalUserContext.sessions.get(sessionId)
-    if (globalEntry && globalEntry.type === SESSION_TYPE.AGENT) entry = globalEntry
-  }
 
   // 세션 없으면 자동 생성 ({username}-default 패턴)
   if (!entry && username && sessionId === `${username}-default`) {
@@ -89,7 +84,7 @@ const findOrCreateSession = (sessionId, username, effectiveUserContext, globalUs
       mkdirSync(persistenceCwd, { recursive: true })
       renameSync(legacyState, join(persistenceCwd, 'state.json'))
     }
-    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username })
+    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username })
   }
 
   return entry
@@ -105,7 +100,7 @@ const attachSessionMiddleware = (deps) => {
     const { authEnabled } = deps
 
     const effectiveUserContext = await resolveUserContext(req, deps)
-    const entry = findOrCreateSession(sessionId, username, effectiveUserContext, deps.userContext)
+    const entry = findOrCreateSession(sessionId, username, effectiveUserContext)
     if (!entry) return res.status(404).json({ error: `Session not found: ${sessionId}` })
 
     // 인증 활성화 시 소유자 검증
@@ -130,9 +125,10 @@ const mountSessionEndpoints = (router, deps) => {
     const { input } = req.body
     if (!input || typeof input !== 'string') return res.status(400).json({ error: 'input (string) required' })
     if (input.startsWith('/')) {
-      const cmd = handleSlashCommand(input, {
+      const cmd = await handleSlashCommand(input, {
         state: session.state, tools: session.tools,
         memory: effectiveCtx.memory, toolRegistry: effectiveCtx.toolRegistry,
+        userId: req.presenceSession.session.userId,
       })
       if (cmd.handled) {
         // state 변경 커맨드(/clear 등) 후 persistence flush
@@ -187,12 +183,7 @@ const mountSessionsCrud = (router, deps) => {
   router.get('/sessions', async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
     const userSessions = ctx.sessions.list()
-    // 글로벌 agent 세션도 포함 (유저별 컨텍스트와 글로벌이 다른 경우)
-    const globalSessions = deps.userContext.sessions.list()
-    const agentSessions = globalSessions.filter(s => s.type === SESSION_TYPE.AGENT)
-    const userIds = new Set(userSessions.map(s => s.id))
-    const merged = [...userSessions, ...agentSessions.filter(s => !userIds.has(s.id))]
-    res.json(merged.map(({ id, type }) => ({ id, type })))
+    res.json(userSessions.map(({ id, type }) => ({ id, type })))
   })
   router.post('/sessions', express.json(), async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
@@ -200,13 +191,19 @@ const mountSessionsCrud = (router, deps) => {
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
     const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined
-    const entry = ctx.sessions.create({ id: sessionId, type, owner, persistenceCwd })
+    const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: owner || 'default', persistenceCwd })
     res.status(201).json({ id: entry.id, type: entry.type })
   })
   router.delete('/sessions/:sessionId', async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
     const { sessionId } = req.params
-    if (!ctx.sessions.get(sessionId)) return res.status(404).json({ error: `Session not found: ${sessionId}` })
+    const { authEnabled } = deps
+    const username = req.user?.username
+    const entry = ctx.sessions.get(sessionId)
+    if (!entry) return res.status(404).json({ error: `Session not found: ${sessionId}` })
+    if (authEnabled && username && entry.owner !== null && entry.owner !== username) {
+      return res.status(403).json({ error: 'Access denied: session belongs to another user' })
+    }
     await ctx.sessions.destroy(sessionId)
     res.json({ ok: true })
   })

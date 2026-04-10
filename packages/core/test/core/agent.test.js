@@ -566,6 +566,39 @@ async function run() {
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'Agent.run: lastTurn failure')
   }
 
+  // Executor.recover() 단위 테스트 — runFreeWithStateT throw 경로
+  {
+    const { Executor } = await import('@presence/core/core/executor.js')
+    const state = initState({ _streaming: { active: true }, lastTurn: null })
+    state.set('turnState', TurnState.working('orig input'))
+
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => { throw new Error('interpreter boom') }
+    })
+    const failingProgram = (await import('@presence/core/core/op.js')).askLLM({ messages: [] })
+
+    const executor = new Executor({ interpret, ST, state })
+
+    let thrown = null
+    try {
+      await executor.run(failingProgram, 'orig input')
+    } catch (e) {
+      thrown = e
+    }
+
+    // Executor 는 예외를 재전파한다
+    assert(thrown !== null, 'Executor.run: re-throws on interpreter error')
+    assert(thrown.message === 'interpreter boom', 'Executor.run: preserves error message')
+    // recover() 가 세 경로를 원자적으로 초기화한다
+    assert(state.get('_streaming') === null, 'Executor.recover: _streaming cleared')
+    assert(state.get('turnState').tag === PHASE.IDLE, 'Executor.recover: turnState → idle')
+    const last = state.get('lastTurn')
+    assert(last.tag === RESULT.FAILURE, 'Executor.recover: lastTurn failure')
+    assert(last.input === 'orig input', 'Executor.recover: failure retains original input')
+    assert(last.error.kind === ERROR_KIND.INTERPRETER, 'Executor.recover: error kind INTERPRETER')
+    assert(last.error.message === 'interpreter boom', 'Executor.recover: error message preserved')
+  }
+
   // Agent.run() success
   {
     const state = initState()

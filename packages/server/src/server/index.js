@@ -5,6 +5,7 @@ import express from 'express'
 import { WebSocketServer } from 'ws'
 import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Config } from '@presence/infra/infra/config.js'
+import { Memory } from '@presence/infra/infra/memory.js'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
@@ -41,6 +42,7 @@ class PresenceServer {
   #expressApp
   #wss
   #bridge
+  #memory
   #userContext
   #userContextManager
   #scheduler
@@ -109,11 +111,19 @@ class PresenceServer {
 
   async #boot(configOverride, opts) {
     const { persistenceCwd } = opts
+    const config = configOverride || Config.loadServer()
 
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
-    this.#userContext = await UserContext.create(configOverride, {
+    // 서버 레벨 Memory — 모든 유저 공유
+    this.#memory = await Memory.create(config).catch(err => {
+      console.warn('mem0 init failed, memory disabled', { error: err.message })
+      return null
+    })
+
+    this.#userContext = await UserContext.create(config, {
       username: this.#username,
+      memory: this.#memory,
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session.state)
       },
@@ -122,8 +132,10 @@ class PresenceServer {
     this.#scheduler = this.#createScheduler()
 
     // 기본 세션 + 에이전트 세션
+    const defaultUserId = this.#username || 'default'
     const defaultEntry = this.#userContext.sessions.create({
       id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd,
+      userId: defaultUserId,
       onScheduledJobDone: () => {},
     })
     this.#defaultSession = defaultEntry.session
@@ -132,7 +144,7 @@ class PresenceServer {
     // Auth + UserContextManager
     const auth = createAuthSetup()
     this.#authEnabled = true
-    this.#userContextManager = new UserContextManager({ bridge: this.#bridge, configOverride })
+    this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory })
     const getUserContextManager = () => this.#userContextManager
 
     // Express 라우트 마운트 (순서 중요)
@@ -221,9 +233,10 @@ class PresenceServer {
   }
 
   #registerAgentSessions() {
+    const userId = this.#username || 'default'
     for (const agentDef of (this.#userContext.config.agents || [])) {
       const agentEntry = this.#userContext.sessions.create({
-        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT,
+        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId,
       })
       this.#userContext.agentRegistry.register({
         name: agentDef.name,
@@ -260,7 +273,7 @@ class PresenceServer {
     console.log(`  URL        : http://${this.#host}:${this.#port}`)
     console.log(`  WebSocket  : ws://${this.#host}:${this.#port}`)
     console.log(`  Model      : ${cfg.llm.model}`)
-    console.log(`  Memory     : ${this.#userContext.memoryPath}`)
+    console.log(`  Memory     : ${this.#memory ? 'mem0 enabled' : 'disabled'}`)
     console.log(`  Tools      : ${toolCount}`)
     console.log(`  Agents     : ${agentCount}`)
     if (mcpConnections.length > 0) console.log(`  MCP        : ${mcpConnections.length} server(s)`)

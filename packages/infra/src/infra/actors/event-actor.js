@@ -43,7 +43,7 @@ class EventActor extends ActorWrapper {
             if (actorState.queue.length === 0) return [R.NO_OP_EMPTY, actorState]
             if (actorState.inFlight !== null) return [R.NO_OP_IN_FLIGHT, actorState]
             const ts = state.get(STATE_PATH.TURN_STATE)
-            if (!ts || ts.tag !== 'idle') return [R.NO_OP_BUSY, actorState]
+            if (!ts || ts.tag !== PHASE.IDLE) return [R.NO_OP_BUSY, actorState]
 
             const [head, ...rest] = actorState.queue
             const todoResult = this.#resolveTodoReview(head, state, todoReviewJobName)

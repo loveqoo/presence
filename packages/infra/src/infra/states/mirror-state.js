@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws'
+import { WS_CLOSE } from '@presence/core/core/policies.js'
 import { State } from './state.js'
 
 // =============================================================================
@@ -25,14 +26,18 @@ const getNestedValue = (obj, path) =>
 class MirrorState extends State {
   constructor(opts = {}) {
     super()
-    const { wsUrl, sessionId = 'user-default', headers } = opts
+    const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable } = opts
     this.cache = {}
+    this.wsUrl = wsUrl
     this.sessionId = sessionId
+    this.getHeaders = getHeaders || (() => headers)
+    this.onAuthFailed = onAuthFailed
+    this.onUnrecoverable = onUnrecoverable
     this.ws = null
     this.reconnectTimer = null
     this.connectAttempt = 0
     this.stopped = false
-    this.connect(wsUrl, headers)
+    this.connect()
   }
 
   get(path) { return this.cache[path] }
@@ -60,9 +65,10 @@ class MirrorState extends State {
     this.bus.publish({ path, prevValue, nextValue }, this)
   }
 
-  connect(wsUrl, headers) {
+  connect() {
     if (this.stopped) return
-    this.ws = new WebSocket(wsUrl, headers ? { headers } : undefined)
+    const headers = this.getHeaders()
+    this.ws = new WebSocket(this.wsUrl, headers ? { headers } : undefined)
 
     this.ws.on('open', () => {
       this.connectAttempt = 0
@@ -71,13 +77,34 @@ class MirrorState extends State {
 
     this.ws.on('message', (data) => this.handleMessage(data))
 
-    this.ws.on('close', () => {
-      if (this.stopped) return
-      const delay = Math.min(500 * Math.pow(2, this.connectAttempt++), 15_000)
-      this.reconnectTimer = setTimeout(() => this.connect(wsUrl, headers), delay)
-    })
+    this.ws.on('close', (code) => this.handleClose(code))
 
     this.ws.on('error', () => {})  // close 이벤트에서 재연결 처리
+  }
+
+  async handleClose(code) {
+    if (this.stopped) return
+    // 복구 불가: 비밀번호 변경 필요 / Origin 거부
+    if (code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED || code === WS_CLOSE.ORIGIN_NOT_ALLOWED) {
+      this.stopped = true
+      if (this.onUnrecoverable) this.onUnrecoverable(code)
+      return
+    }
+    // 인증 실패: 토큰 갱신 1회 시도 후 재연결
+    if (code === WS_CLOSE.AUTH_FAILED && this.onAuthFailed) {
+      const refreshed = await this.onAuthFailed().catch(() => false)
+      if (refreshed) {
+        this.connectAttempt = 0
+        this.connect()
+        return
+      }
+      this.stopped = true
+      if (this.onUnrecoverable) this.onUnrecoverable(code)
+      return
+    }
+    // 그 외: 지수 백오프 재연결
+    const delay = Math.min(500 * Math.pow(2, this.connectAttempt++), 15_000)
+    this.reconnectTimer = setTimeout(() => this.connect(), delay)
   }
 
   handleMessage(data) {

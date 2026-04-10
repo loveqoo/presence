@@ -71,11 +71,11 @@ class Repl {
     this.emit(`Agents (${agents.length}):\n${lines.join('\n')}`)
   }
 
-  cmdMemory() {
+  async cmdMemory() {
     if (!this.memory) { this.emit(this.t('repl.memory_unavailable')); return }
-    const nodes = this.memory.allNodes().slice(-10)
+    const nodes = (await this.memory.allNodes()).slice(-10)
     if (nodes.length === 0) { this.emit(this.t('repl.no_memories')); return }
-    const lines = nodes.map(n => `  [${n.tier}] ${n.label}${n.vector ? ' 🔢' : ''}`)
+    const lines = nodes.map(n => `  ${n.label}`)
     this.emit(`Recent memories (${nodes.length}):\n${lines.join('\n')}`)
   }
 
@@ -128,7 +128,7 @@ class Repl {
     const key = input.split(/\s/)[0]
     const method = Repl._dispatch[key]
     if (method) {
-      this[method](input)
+      await this[method](input)
       return null
     }
 

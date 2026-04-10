@@ -1,4 +1,5 @@
 import { UserContext } from '@presence/infra/infra/user-context.js'
+import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { INACTIVITY_TIMEOUT_MS } from './constants.js'
@@ -13,28 +14,30 @@ import { INACTIVITY_TIMEOUT_MS } from './constants.js'
 class UserContextManager {
   #contexts = new Map() // username → { userContext, wsConnections, lastActivity, shutdownTimer }
   #bridge
-  #configOverride
+  #serverConfig
+  #memory
 
-  constructor({ bridge, configOverride }) {
+  constructor({ bridge, serverConfig, memory }) {
     this.#bridge = bridge
-    this.#configOverride = configOverride
+    this.#serverConfig = serverConfig
+    this.#memory = memory
   }
 
   async getOrCreate(username) {
     if (this.#contexts.has(username)) return this.#contexts.get(username)
-    // 유저별 config를 로드 (서버 전역 config가 아닌, 유저 인스턴스 config merge)
-    const { Config } = await import('@presence/infra/infra/config.js')
-    const userConfig = Config.loadUserMerged(username)
+    // 런타임 서버 config를 base로 유저 config merge (disk server.json 재독 없음)
+    const userConfig = Config.mergeUserOver(this.#serverConfig, username)
     const userContext = await UserContext.create(userConfig, {
       username,
+      memory: this.#memory,
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session.state)
       },
     })
-    // config.agents 기반 에이전트 세션 등록 (글로벌 PresenceServer와 동일)
+    // config.agents 기반 에이전트 세션 등록
     for (const agentDef of (userContext.config.agents || [])) {
       const agentEntry = userContext.sessions.create({
-        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT,
+        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId: username,
       })
       userContext.agentRegistry.register({
         name: agentDef.name,

@@ -1,6 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
-import { DELEGATE, STATE_PATH } from '@presence/core/core/policies.js'
+import { DELEGATE, PHASE, STATE_PATH } from '@presence/core/core/policies.js'
 import { withEventMeta } from '../events.js'
 import { A2AClient } from '../agents/a2a-client.js'
 import { ActorWrapper } from './actor-wrapper.js'
@@ -65,7 +65,7 @@ class DelegateActor extends ActorWrapper {
         case DelegateActor.MSG.POLL: {
           if (actorState.polling) return [R.NO_OP_POLLING, actorState]
           const ts = this.#state.get(STATE_PATH.TURN_STATE)
-          if (!ts || ts.tag !== 'idle') return [R.NO_OP_BUSY, actorState]
+          if (!ts || ts.tag !== PHASE.IDLE) return [R.NO_OP_BUSY, actorState]
           const pending = this.#state.get(STATE_PATH.DELEGATES_PENDING) || []
           if (pending.length === 0) return [R.NO_OP_EMPTY, actorState]
 

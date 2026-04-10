@@ -43,8 +43,7 @@ class Executor {
       const memories = await forkTask(memoryActor.recall(input))
       state.set(STATE_PATH.CONTEXT_MEMORIES, memories.map(n => n.label))
       state.set(STATE_PATH.DEBUG_RECALLED_MEMORIES, memories.map(n => ({
-        label: n.label, type: n.type, tier: n.tier,
-        createdAt: n.createdAt, embeddedAt: n.embeddedAt,
+        label: n.label, createdAt: n.createdAt,
       })))
     } catch (e) {
       state.set(STATE_PATH.CONTEXT_MEMORIES, [])
@@ -69,7 +68,6 @@ class Executor {
     if (lastTurn?.tag === RESULT.SUCCESS) {
       fireAndForget(memoryActor.save({
         label: lastTurn.input || 'unknown',
-        type: 'conversation', tier: 'episodic',
         data: { input: lastTurn.input, output: lastTurn.result },
       }))
     }

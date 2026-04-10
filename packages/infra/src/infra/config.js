@@ -146,6 +146,7 @@ class Config {
   // --- 경로 ---
 
   static presenceDir() {
+    if (process.env.PRESENCE_DIR) return process.env.PRESENCE_DIR
     const home = process.env.HOME || process.env.USERPROFILE || '.'
     return join(home, '.presence')
   }
@@ -201,11 +202,22 @@ class Config {
     ])
   })
 
+  // resolved server config 위에 유저 config를 병합.
+  // disk server.json이 아닌, 런타임 서버 config를 base로 사용하여 일관성 보장.
+  static mergeUserOverR = Reader.asks(({ serverConfig, username, basePath }) => {
+    if (!username) throw new Error('username is required for mergeUserOver')
+    const dir = Config.resolveDir(basePath)
+    const base = serverConfig instanceof Config ? serverConfig : new Config(serverConfig)
+    const userLayer = Config.fromFile(join(dir, 'users', username, 'config.json'))
+    return Config.loadAndMerge([Maybe.Just(base), userLayer])
+  })
+
   // --- 브릿지 ---
 
   static loadServer(opts = {}) { return Config.loadServerR.run({ basePath: opts.basePath }) }
   static loadUser(username, opts = {}) { return Config.loadUserR.run({ basePath: opts.basePath, username }) }
   static loadUserMerged(username, opts = {}) { return Config.loadUserMergedR.run({ basePath: opts.basePath, username }) }
+  static mergeUserOver(serverConfig, username, opts = {}) { return Config.mergeUserOverR.run({ serverConfig, username, basePath: opts.basePath }) }
 }
 
 export { Config }

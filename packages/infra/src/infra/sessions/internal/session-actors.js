@@ -14,9 +14,9 @@ import { delegateActorR } from '../../actors/delegate-actor.js'
 // =============================================================================
 
 class SessionActors {
-  constructor({ userContext, state, logger, persistenceActor, dispatchTurn, onScheduledJobDone }) {
+  constructor({ userContext, state, logger, persistenceActor, userId, dispatchTurn, onScheduledJobDone }) {
     // --- 메모리/압축 Actor ---
-    const sessionEnv = { memory: userContext.memory, logger, llm: userContext.llm, state }
+    const sessionEnv = { memory: userContext.memory, userId, logger, llm: userContext.llm, state }
     this.memoryActor = memoryActorR.run(sessionEnv)
     this.compactionActor = compactionActorR.run(sessionEnv)
     this.persistenceActor = persistenceActor

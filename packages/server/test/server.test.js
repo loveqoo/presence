@@ -183,6 +183,36 @@ async function run() {
       assert(afterRes.status === 404, 'S15: deleted → 404')
     }
 
+    // S15b. default 세션 삭제 → 재접속 시 자동 재생성
+    {
+      // default 세션 삭제
+      const deleteRes = await request(port, 'DELETE', `/api/sessions/${sid}`, null, { token })
+      assert(deleteRes.status === 200, 'S15b: default session delete 200')
+
+      // 삭제 직후 목록에서 사라짐
+      const listRes = await get('/api/sessions')
+      const hasDefault = listRes.body.some(s => s.id === sid)
+      assert(!hasDefault, 'S15b: default session removed from list')
+
+      // 다시 접근 → findOrCreateSession이 자동 재생성
+      const stateRes = await get(`/api/sessions/${sid}/state`)
+      assert(stateRes.status === 200, 'S15b: auto-recreated on access')
+      assert(stateRes.body.turn === 0, 'S15b: fresh state (turn 0)')
+
+      // chat도 정상 동작
+      const chatRes = await post(`/api/sessions/${sid}/chat`, { input: '재생성 테스트' })
+      assert(chatRes.status === 200, 'S15b: chat after recreate 200')
+    }
+
+    // S15c. 비-default 커스텀 세션 삭제 → 재접근 시 404 (자동 재생성 안 됨)
+    {
+      const createRes = await post('/api/sessions', { type: 'user' })
+      const customId = createRes.body.id
+      await request(port, 'DELETE', `/api/sessions/${customId}`, null, { token })
+      const afterRes = await get(`/api/sessions/${customId}/state`)
+      assert(afterRes.status === 404, 'S15c: custom session not auto-recreated')
+    }
+
     // S16. 세션 격리
     {
       const beforeState = await get(`/api/sessions/${sid}/state`)

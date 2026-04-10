@@ -60,14 +60,14 @@ const llmInterpreterR = Reader.asks(({ ST, llm, streamingUi, getAbortSignal }) =
           messages,
           responseFormat: f.responseFormat,
           signal,
-          onDelta: ({ accumulated }) => {
+          onDelta: ({ accumulated, reasoning }) => {
             const now = Date.now()
             if (now - lastUpdate < 50) return
             lastUpdate = now
             const extracted = extractStreamingMessage(accumulated)
             streamingUi.set({
               content: extracted || '',
-              status: extracted ? 'streaming' : 'receiving',
+              status: reasoning ? 'thinking' : (extracted ? 'streaming' : 'receiving'),
               length: accumulated.length,
             })
           },

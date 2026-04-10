@@ -9,6 +9,7 @@ class Session {
 
   constructor(userContext, opts = {}) {
     this.userContext = userContext
+    this.userId = opts.userId || 'default'
     this.logger = userContext.logger
     this.initState()
     this.initTurnControl()
@@ -53,12 +54,20 @@ class Session {
     await this.flushPersistence()
   }
 
+  // --- 데이터 삭제 (세션 destroy 시) ---
+
+  async cleanup() {
+    await this.shutdown()
+    this.clearPersistence()
+  }
+
   // --- 종료 단계 (서브클래스에서 구현) ---
 
   shutdownScheduler() {}
   shutdownActors() {}
   clearTimers() {}
   async flushPersistence() {}
+  clearPersistence() {}
 }
 
 export { Session }

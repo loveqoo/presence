@@ -129,7 +129,7 @@ class WsHandler {
       effectiveCtx = userCtx?.userContext || this.#userContext
     }
 
-    const entry = findOrCreateSession(sessionId, wsUsername, effectiveCtx, this.#userContext)
+    const entry = findOrCreateSession(sessionId, wsUsername, effectiveCtx)
     if (!entry) return
 
     if (this.#authEnabled && wsUsername && entry.owner !== null && entry.owner !== wsUsername) {

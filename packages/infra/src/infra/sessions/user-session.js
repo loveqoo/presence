@@ -119,6 +119,10 @@ class UserSession extends EphemeralSession {
       await forkTask(this.actors.persistenceActor.flush(this.state.snapshot()))
     } catch (_unused) {}
   }
+
+  clearPersistence() {
+    if (this.persistence) this.persistence.clear()
+  }
 }
 
 export { UserSession }

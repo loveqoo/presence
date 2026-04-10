@@ -7,8 +7,6 @@ import { t } from '@presence/infra/i18n'
 const add = (lines, text, color) => { lines.push({ text, color: color || null }); return lines }
 const blank = (lines) => add(lines, '')
 
-const TIER_LABELS = { working: 'W', episodic: 'E', semantic: 'S' }
-
 const formatAge = (ts) => {
   if (!ts) return ''
   const sec = Math.floor((Date.now() - ts) / 1000)
@@ -55,11 +53,8 @@ const appendAssemblyBlock = (lines, assembly) => {
 }
 
 const formatMemoryMeta = (m) => {
-  const tags = []
-  if (m.tier) tags.push(TIER_LABELS[m.tier] || m.tier)
-  if (m.type) tags.push(m.type)
-  if (m.createdAt) tags.push(formatAge(m.createdAt))
-  return tags.length > 0 ? `  [${tags.join(' · ')}]` : ''
+  if (m.createdAt) return `  [${formatAge(m.createdAt)}]`
+  return ''
 }
 
 const appendMemoriesBlock = (lines, mems) => {
