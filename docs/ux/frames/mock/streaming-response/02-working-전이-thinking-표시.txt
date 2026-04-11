@@ -4,4 +4,4 @@
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────
- ⠙ thinking... 0s │ mock-model │ presence-scenario │ branch: main
+ ⠙ thinking... 0s │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

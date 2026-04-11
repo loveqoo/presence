@@ -2,7 +2,7 @@ export default {
   name: 'slash-typo',
   description:
     '등록되지 않은 슬래시 커맨드 입력을 검증한다. ' +
-    'FP-7(알 수 없는 /command가 에이전트 턴으로 그대로 전달됨)을 재현한다. ' +
+    'FP-42(알 수 없는 /command가 에이전트 턴으로 그대로 전달됨)을 재현한다. ' +
     'session.md E12에 Known Gap으로 명시된 사안.',
   timeout: 3000,
   setup: {
@@ -36,7 +36,7 @@ export default {
       },
     },
     {
-      label: '입력 후 화면 — "알 수 없는 커맨드" 안내가 표시되는가 (기대: 실패 = FP-7 재현)',
+      label: '입력 후 화면 — "알 수 없는 커맨드" 안내가 표시되는가 (기대: 실패 = FP-42 재현)',
       action: async (ctx) => { await ctx.wait(100) },
       assert: (frame) => /알 수 없는 커맨드|unknown command/i.test(frame),
     },
@@ -49,7 +49,7 @@ export default {
       },
     },
     {
-      label: '오타가 에이전트 onInput까지 도달했는지 확인 (기대: 도달 = FP-7 재현)',
+      label: '오타가 에이전트 onInput까지 도달했는지 확인 (기대: 도달 = FP-42 재현)',
       action: async (ctx) => { await ctx.wait(50) },
       assert: () => {
         // 도달했으면 __slashTypoRouted에 '/mem' 또는 '/model'이 있음.

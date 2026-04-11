@@ -31,4 +31,4 @@
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────
- ● idle │ mock-model │ presence-scenario │ branch: main
+ ● idle │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

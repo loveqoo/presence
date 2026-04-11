@@ -7,4 +7,4 @@
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────
- ✗ error │ mock-model │ presence-scenario │ branch: main
+ ✗ error │ session: testuser-default │ mock-model │ presence-scenario │ branch: main
