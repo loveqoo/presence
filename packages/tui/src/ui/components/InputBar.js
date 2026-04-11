@@ -1,11 +1,12 @@
 import React, { useState, useRef } from 'react'
 import { Box, Text, useInput } from 'ink'
+import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
 const MAX_HISTORY = 50
 
-const InputBar = ({ onSubmit = () => {}, disabled = false, isActive = true, historyRef: externalHistoryRef }) => {
+const InputBar = ({ onSubmit = () => {}, disabled = false, isActive = true, hint = null, historyRef: externalHistoryRef }) => {
   // value + cursor를 단일 state로 관리하여 원자적 업데이트 보장.
   // 별도 state 시 빠른 입력(한글 IME)에서 cursor 클로저가 stale → 글자 순서 뒤바뀜.
   const [{ value, cursor }, setInput] = useState({ value: '', cursor: 0 })
@@ -104,12 +105,19 @@ const InputBar = ({ onSubmit = () => {}, disabled = false, isActive = true, hist
   const before = value.slice(0, cursor)
   const cursorChar = value[cursor] || ' '
   const after = value.slice(cursor + 1)
+  const showSlashHint = !disabled && value.startsWith('/')
 
-  return h(Box, { paddingX: 1 },
-    h(Text, { color: promptColor }, '> '),
-    h(Text, null, before),
-    disabled ? null : h(Text, { inverse: true }, cursorChar),
-    h(Text, null, after),
+  return h(Box, { flexDirection: 'column' },
+    showSlashHint
+      ? h(Box, { paddingX: 1 }, h(Text, { color: 'gray' }, `Tip: ${t('slash_hint.tip')}`))
+      : null,
+    h(Box, { paddingX: 1 },
+      h(Text, { color: promptColor }, '> '),
+      h(Text, null, before),
+      disabled ? null : h(Text, { inverse: true }, cursorChar),
+      h(Text, null, after),
+      disabled && hint ? h(Text, { color: 'gray' }, ` [${hint}]`) : null,
+    ),
   )
 }
 

@@ -7,4 +7,4 @@
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────
- ✗ error │ session: testuser-default │ mock-model │ presence-scenario │ branch: main
+ ✗ error: planner_parse │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

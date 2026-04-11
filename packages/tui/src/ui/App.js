@@ -80,9 +80,7 @@ const App = (props) => {
     ? h(Box, { paddingX: 1, paddingLeft: 2, marginTop: 1, flexDirection: 'column' },
         agentState.streaming.content
           ? h(MarkdownText, { content: agentState.streaming.content + '▌' })
-          : h(Text, { color: 'gray' }, agentState.streaming.status === 'thinking'
-            ? 'thinking...'
-            : `receiving ${agentState.streaming.length || 0} chars...`),
+          : h(Text, { color: 'gray' }, 'thinking...'),
       )
     : null
 
@@ -93,6 +91,14 @@ const App = (props) => {
   const errorHint = agentState.lastTurn?.tag === 'failure'
     ? (agentState.lastTurn.error?.kind || null)
     : null
+
+  const inputHint = disconnected
+    ? t('input_hint.disconnected')
+    : agentState.approve
+      ? t('input_hint.approve')
+      : isWorking
+        ? t('input_hint.working')
+        : null
 
   const disconnectedBanner = disconnected
     ? h(Box, { paddingX: 1, borderStyle: 'double', borderColor: 'red', flexDirection: 'column' },
@@ -123,7 +129,7 @@ const App = (props) => {
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
-    h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve || !!disconnected, isActive: !showTranscript && !disconnected, historyRef: inputHistoryRef }),
+    h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve || !!disconnected, isActive: !showTranscript && !disconnected, hint: inputHint, historyRef: inputHistoryRef }),
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),

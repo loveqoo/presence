@@ -1,9 +1,9 @@
-# step 3: 스트리밍 시작 — content 도착 전 receiving 단계
+# step 4: 입력 비활성 힌트 표시 — FP-29
 # status: ok
 
 
-  receiving 42 chars...
+  thinking...
  ──────────────────────────────────────────────────────────────────────────────
- >
+ >  [응답 대기 중 · ESC로 취소]
  ──────────────────────────────────────────────────────────────────────────────
- ⠸ thinking... 0s │ session: testuser-default │ mock-model │ presence-scenario │ branch: main
+ ⠼ thinking... 0s │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

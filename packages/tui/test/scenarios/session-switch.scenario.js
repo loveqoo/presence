@@ -44,13 +44,13 @@ export default {
       },
     },
     {
-      label: '전환 후 화면 — 현재 세션 가시성',
+      label: '전환 후 화면 — 현재 세션 가시성 + 성공 피드백',
       action: async (ctx) => { await ctx.wait(100) },
       assert: (frame) => {
-        // StatusBar는 렌더 트리 마지막 줄. 'session: work' 표기가 보여야 한다.
         const lines = frame.split('\n').filter(l => l.trim().length > 0)
         const statusLine = lines[lines.length - 1] ?? ''
-        return statusLine.includes('session: work')
+        // FP-14: StatusBar 에 'session: work' 표기. FP-37: "세션 전환됨: work" 피드백.
+        return statusLine.includes('session: work') && frame.includes('세션 전환됨: work')
       },
     },
   ],

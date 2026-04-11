@@ -4,7 +4,7 @@ export default {
   name: 'streaming-response',
   description:
     '에이전트 응답 스트리밍 경험을 검증한다. ' +
-    'FP-29(입력 비활성 상태 이유 미표시), FP-30("receiving N chars..." 내부 용어 노출)을 재현한다.',
+    'FP-29(입력 비활성 상태 힌트), FP-30(스트리밍 두 단계 — thinking / content) 회귀.',
   timeout: 3000,
   setup: {
     app: { agentName: 'TestBot', model: 'mock-model' },
@@ -25,16 +25,17 @@ export default {
       assert: (frame) => frame.includes('thinking'),
     },
     {
-      label: '스트리밍 시작 — content 도착 전 receiving 단계',
+      label: '스트리밍 시작 — content 도착 전에는 thinking 유지 (FP-30)',
       action: async (ctx) => {
         await ctx.setState('_streaming', { status: 'receiving', length: 42, content: '' })
         await ctx.wait(100)
       },
-      assert: (frame) => /receiving/.test(frame),
+      assert: (frame) => frame.includes('thinking') && !frame.includes('receiving') && !frame.includes('chars...'),
     },
     {
-      label: '스트리밍 중 — "receiving N chars..." 내부 용어 노출 재현',
+      label: '입력 비활성 힌트 표시 — FP-29',
       action: async (ctx) => { await ctx.wait(50) },
+      assert: (frame) => frame.includes('응답 대기 중'),
     },
     {
       label: '스트리밍 content 도착 — 마크다운 렌더로 전환',

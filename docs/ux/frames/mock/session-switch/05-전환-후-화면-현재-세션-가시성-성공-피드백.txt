@@ -1,9 +1,9 @@
-# step 4: 스트리밍 중 — "receiving N chars..." 내부 용어 노출 재현
+# step 5: 전환 후 화면 — 현재 세션 가시성 + 성공 피드백
 # status: ok
 
 
-  receiving 42 chars...
+  세션 전환됨: work
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────
- ⠼ thinking... 0s │ session: testuser-default │ mock-model │ presence-scenario │ branch: main
+ ● idle │ session: work │ mock-model │ presence-scenario │ branch: main

@@ -43,16 +43,17 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
   - `4001`(`AUTH_FAILED`): `onAuthFailed()` 콜백으로 토큰 갱신 1회 시도. 성공 시 즉시 재연결, 실패 시 `onUnrecoverable(code)` 호출 후 중단.
   - 그 외: 기존 지수 백오프(최소 500ms, 최대 15,000ms) 재연결.
   콜백은 `RemoteSession` 생성자가 `tryRefresh`를 받아 `MirrorState`에 주입한다.
-- I13. **onUnrecoverable 발동 시 UI 상태**: `RemoteSession.#createMirrorState`의 `onUnrecoverable(code)` 콜백이 호출되면 `#disconnected = { code, at: Date.now() }`를 설정하고 App을 rerender한다. App은 `disconnected` prop이 non-null이면 빨간 double-border 배너("⚠ 서버 연결이 끊겼습니다 (close {code}). TUI를 재시작하세요")를 렌더링하고 `InputBar.disabled`를 true로 설정한다. 배너 표시는 백오프 재연결 경로(그 외 코드)에서는 발동하지 않는다 — "복구 불가"(4001 refresh 실패, 4002, 4003)에 한정된다.
+- I13. **onUnrecoverable 발동 시 UI 상태**: `RemoteSession.#createMirrorState`의 `onUnrecoverable(code)` 콜백이 호출되면 `#disconnected = { code, at: Date.now() }`를 설정하고 App을 rerender한다. App은 `disconnected` prop이 non-null이면 빨간 double-border 배너("⚠ 서버 연결이 끊겼습니다 (close {code}). TUI를 재시작하세요")를 렌더링하고 `InputBar.disabled`를 true로 설정한다. 이 때 `InputBar`에는 `hint` prop으로 i18n 키 `input_hint.disconnected`("연결 끊김 · Ctrl+C로 재시작") 값이 전달되어 프롬프트 옆에 `[<hint>]` 형태로 표시된다. 배너 표시는 백오프 재연결 경로(그 외 코드)에서는 발동하지 않는다 — "복구 불가"(4001 refresh 실패, 4002, 4003)에 한정된다.
 - I11. **WS 재연결 시 최신 토큰 사용**: `MirrorState.connect()`는 매번 `getHeaders()` 콜백을 호출하여 최신 Authorization 헤더를 사용한다. `onAuthFailed` 성공 후 갱신된 access token이 다음 재연결에 자동 반영된다.
 
 **세션 전환**
 
-- I9. **switchSession 순서**: `MirrorState.disconnect()` → `currentSessionId` 갱신 → `createMirrorState(newId)` (새 WS 연결) → `GET /api/sessions/:newId/tools` → App 재렌더. tools 조회 실패 시 이전 tools를 유지한다.
+- I9. **switchSession 순서**: `MirrorState.disconnect()` → `currentSessionId` 갱신 → `createMirrorState(newId)` (새 WS 연결) → `GET /api/sessions/:newId/tools` → `#pendingInitialMessages`에 `{ role: 'system', content: t('sessions_cmd.switched', { id }) }` 주입 → App 재렌더. App 재렌더 시 `#buildAppProps()`가 `#consumePendingInitialMessages()`를 한 번 소비하여 `initialMessages` prop으로 전달한다. 소비 후 `#pendingInitialMessages`는 초기화된다. tools 조회 실패 시 이전 tools를 유지한다.
 - I12. **세션 전환 후 StatusBar 갱신**: `switchSession` 완료 후 App 재렌더 시 `sessionId` prop이 새 세션 ID로 업데이트된다. StatusBar는 이를 받아 `session: {id}` 세그먼트를 갱신한다. `session` 항목은 `DEFAULT_ITEMS`에 포함되므로 기본 표시된다. 서버 세션 모델에 `name` 필드가 없으므로 표시 식별자는 `sessionId` 단일 경로다.
 
 ## 경계 조건 (Edge Cases)
 
+- E5. **`_streaming.length` — wire 전송되나 UI 노출 없음**: 서버→TUI로 전송되는 `_streaming` 객체는 `{ status, content, length }` 세 필드를 포함한다. `length`는 스트리밍 누적 바이트 수(내부 지표)이며 TUI UI에 직접 노출하지 않는다. App은 `content` 유무만으로 `thinking...` vs 마크다운 렌더를 결정한다. `length`를 UI 분기 조건으로 사용하거나 화면에 출력하는 것은 계약 위반이다.
 - E1. **WS close 코드 분기 처리 (해소됨)**: I10으로 불변식 승격. `MirrorState.handleClose(code)`가 4001/4002/4003을 구분하여 처리한다.
 - E2. **WS 재연결 시 토큰 갱신 없음 (해소됨)**: I11으로 불변식 승격. `getHeaders()` 콜백으로 매 재연결 시 최신 토큰 사용, `onAuthFailed` 성공 후 갱신 토큰 자동 반영.
 - E3. **`/api/auth/status` 멀티유저 한계**: `checkServer`가 호출하는 `/api/instance`는 `authRequired` 여부만 반환한다. `auth.md E10` 참조 — `/api/auth/status`는 첫 번째 등록 유저만 노출하므로, 멀티유저 환경에서 TUI가 현재 로그인한 유저를 서버에서 역조회하는 경로는 없다.
@@ -64,6 +65,8 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - I5 → (직접 테스트 없음) ⚠️ createAuthClient의 refresh 재시도 로직 단위 테스트 없음
 - I7 → `packages/server/test/server.test.js` (join/init/state 시퀀스)
 - I9, I12 → `packages/tui/test/scenarios/session-switch.scenario.js` (FP-14, 전환 후 StatusBar session 세그먼트 표시 검증)
+- I9 (switchSession 시스템 메시지 주입) → (직접 테스트 없음) ⚠️ pendingInitialMessages 소비 및 ChatArea 노출 시나리오 테스트 없음 (FP-37)
+- E5 → `packages/tui/test/app.test.js` 63b (content 없을 때 "receiving" 미노출, "thinking" 표시 검증)
 - I10, I11 → (직접 테스트 없음) ⚠️ MirrorState close 코드 분기 및 getHeaders 콜백 단위 테스트 없음
 - I13 → (직접 테스트 없음) ⚠️ onUnrecoverable 발동 시 배너 렌더 + InputBar disabled 시나리오 테스트 없음 (FP-22)
 
@@ -81,3 +84,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-10: E1/E2 Known Gap 해소 — I10(WS close 코드 분기), I11(재연결 시 최신 토큰) 으로 불변식 승격. MirrorState getHeaders/onAuthFailed/onUnrecoverable 콜백 구조 명시. 관련 코드에 remote.js 주석 갱신.
 - 2026-04-11: FP-14 반영 — I12 추가(세션 전환 후 StatusBar 갱신, sessionId 단일 경로). 서버 세션 모델에 name 필드가 없으므로 sessionName 개념 제외.
 - 2026-04-11: FP-16/FP-22 해소 반영 — I1에 checkServer reason.code별 힌트 출력 명시. I13 추가(onUnrecoverable → disconnected 배너 + InputBar disabled). 배너는 복구 불가 경로 전용(백오프 재연결 경로 제외) 명시. 테스트 커버리지에 I13 미커버 추가.
+- 2026-04-11: FP-29/FP-30/FP-37 해소 반영 — I13에 InputBar hint prop 전달 명시(input_hint.disconnected). I9에 pendingInitialMessages 주입·소비 계약 추가(세션 전환 시스템 메시지). E5 추가(_streaming.length는 wire 필드이나 UI 노출 금지, content 유무만으로 렌더 결정). 테스트 커버리지에 E5(63b), I9 미커버(FP-37) 추가.

@@ -1,7 +1,7 @@
 import React from 'react'
 import { render } from 'ink'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
-import { initI18n } from '@presence/infra/i18n'
+import { initI18n, t } from '@presence/infra/i18n'
 import { jsonRequest, refreshAccessToken } from './http.js'
 import { App } from './ui/App.js'
 
@@ -83,6 +83,7 @@ class RemoteSession {
   #rerender
   #tryRefresh
   #disconnected
+  #pendingInitialMessages
 
   constructor({ wsUrl, authState, username, client, config, agents, cwd, gitBranch, initialTools, tryRefresh }) {
     this.#wsUrl = wsUrl
@@ -97,6 +98,7 @@ class RemoteSession {
     this.#tryRefresh = tryRefresh
     this.#currentSessionId = username ? `${username}-default` : 'user-default'
     this.#disconnected = null
+    this.#pendingInitialMessages = []
     this.#remoteState = this.#createMirrorState(this.#currentSessionId)
     this.#rerender = null
   }
@@ -112,6 +114,7 @@ class RemoteSession {
     this.#currentSessionId = newId
     this.#remoteState = this.#createMirrorState(newId)
     this.#currentTools = await this.#client.getJson(`/api/sessions/${newId}/tools`).catch(() => this.#currentTools)
+    this.#pendingInitialMessages = [{ role: 'system', content: t('sessions_cmd.switched', { id: newId }) }]
     if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
   }
 
@@ -140,6 +143,12 @@ class RemoteSession {
         if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
       },
     })
+  }
+
+  #consumePendingInitialMessages() {
+    const msgs = this.#pendingInitialMessages
+    this.#pendingInitialMessages = []
+    return msgs
   }
 
   #buildHandlers() {
@@ -173,7 +182,7 @@ class RemoteSession {
       memory: null,
       llm: null,
       toolRegistry: null,
-      initialMessages: [],
+      initialMessages: this.#consumePendingInitialMessages(),
       sessionId: this.#currentSessionId,
       onListSessions: () => this.listSessions(),
       onCreateSession: (id) => this.createSession(id),

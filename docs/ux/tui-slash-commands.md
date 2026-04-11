@@ -13,19 +13,40 @@
 
 ## 마찰 포인트 목록
 
-### [FP-36] 심각도: high | InputBar.js | `/` 입력 시 커맨드 힌트 없음
+### [FP-36] 심각도: high | InputBar.js | `/` 입력 시 커맨드 힌트 없음 — **resolved (2026-04-11)**
 
-**현상** — InputBar는 순수 텍스트 입력기로, `/`를 타이핑해도 아무 힌트도 나타나지 않는다. 유저는 `/help`의 존재를 먼저 알아야만 다른 커맨드를 발견할 수 있다. `commandMap`에 13개 커맨드가 등록되어 있는데 모두 숨겨져 있는 상태다.
+**해소 확인**
+InputBar가 입력 value가 `/`로 시작할 때 프롬프트 위에 회색 힌트 한 줄을 렌더한다.
 
-**제안** — `/`를 입력하는 순간 입력창 위에 커맨드 목록 힌트를 표시한다. 최소한 고정 힌트 한 줄(`/help 로 전체 커맨드 목록 보기`)만 추가해도 진입 장벽이 크게 낮아진다.
+렌더 예시:
+```
+Tip: /help 로 전체 커맨드 목록 보기
+> /
+```
+
+i18n 키 `slash_hint.tip`이 `ko.json`에 추가되었다. 테스트: `packages/tui/test/app.test.js` 62c(초기 미표시), 62d(`/` 입력 후 표시).
+
+**원래 현상** — InputBar는 순수 텍스트 입력기로, `/`를 타이핑해도 아무 힌트도 나타나지 않는다. 유저는 `/help`의 존재를 먼저 알아야만 다른 커맨드를 발견할 수 있다. `commandMap`에 13개 커맨드가 등록되어 있는데 모두 숨겨져 있는 상태다.
+
+**원래 제안** — `/`를 입력하는 순간 입력창 위에 커맨드 목록 힌트를 표시한다. 최소한 고정 힌트 한 줄(`/help 로 전체 커맨드 목록 보기`)만 추가해도 진입 장벽이 크게 낮아진다.
 
 ---
 
-### [FP-37] 심각도: high | slash-commands/sessions.js:24-28 | `/sessions switch` 성공 피드백 없음
+### [FP-37] 심각도: high | slash-commands/sessions.js:24-28 | `/sessions switch` 성공 피드백 없음 — **resolved (2026-04-11)**
 
-**현상** — "세션 전환 중..." 메시지는 표시되지만 `onSwitchSession` Promise의 `.then()` 핸들러가 없어 전환 완료 메시지가 없다. 실패 시만 영어 오류가 뜬다. WS 재연결을 포함하는 비동기 작업인데 완료 신호가 없다.
+**해소 확인**
+`RemoteSession.switchSession`이 완료 후 새 mount의 `initialMessages`에 i18n 키 `sessions_cmd.switched` system 메시지를 한 번 주입한다. `#consumePendingInitialMessages()`가 주입/소비를 처리한다.
 
-**제안** — `.then(() => addMessage({ role: 'system', content: t('sessions_cmd.switched', { id }) }))` 추가.
+전환 후 ChatArea에 남는 메시지 예시:
+```
+[시스템] 세션 전환됨: work
+```
+
+시나리오 테스트: `packages/tui/test/scenarios/session-switch.scenario.js` 마지막 step에서 `세션 전환됨: work` 검증.
+
+**원래 현상** — "세션 전환 중..." 메시지는 표시되지만 `onSwitchSession` Promise의 `.then()` 핸들러가 없어 전환 완료 메시지가 없다. 실패 시만 영어 오류가 뜬다. WS 재연결을 포함하는 비동기 작업인데 완료 신호가 없다.
+
+**원래 제안** — `.then(() => addMessage({ role: 'system', content: t('sessions_cmd.switched', { id }) }))` 추가.
 
 ---
 
@@ -88,6 +109,16 @@
 ### [FP-45] 심각도: low | hooks/useAgentState.js:118-121 | `debug`, `opTrace` 등 내부 용어 잠재적 노출
 
 **현상** — 현재는 화면 레이블이 아닌 코드 수준이라 즉각 위험 없음. 향후 에러 메시지에 노출되지 않도록 주의 필요.
+
+---
+
+## 심각도별 집계 (2026-04-11 업데이트)
+
+| 심각도 | open | resolved | 항목 |
+|--------|------|----------|------|
+| **high** | 0 | 2 | resolved: FP-36, FP-37 |
+| **medium** | 5 | 0 | FP-38, FP-39, FP-40, FP-41, FP-42 |
+| **low** | 3 | 0 | FP-43, FP-44, FP-45 |
 
 ---
 

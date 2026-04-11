@@ -4,6 +4,7 @@ import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { initI18n } from '@presence/infra/i18n'
 import { App } from '@presence/tui/ui/App.js'
 import { TurnState } from '@presence/core/core/policies.js'
+import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
@@ -61,13 +62,14 @@ class FakeRemoteSession {
   }
 }
 
-const buildAppElement = ({ state, fakeSession, appProps }) =>
+const buildAppElement = ({ state, fakeSession, appProps, initialMessages }) =>
   h(App, {
+    key: fakeSession.currentSessionId,
     state,
     agentName: appProps.agentName ?? 'TestAgent',
     tools: appProps.tools ?? [],
     agents: appProps.agents ?? [],
-    initialMessages: appProps.initialMessages ?? [],
+    initialMessages: initialMessages ?? appProps.initialMessages ?? [],
     cwd: appProps.cwd ?? '/tmp/presence-scenario',
     gitBranch: appProps.gitBranch ?? 'main',
     model: appProps.model ?? 'test-model',
@@ -101,12 +103,16 @@ const createHarness = async (options = {}) => {
     return rendered
   }
 
-  // 실제 앱(remote.js)에서는 switchSession 성공 시 App을 새 sessionId로 remount한다.
-  // 테스트 환경에서도 같은 동작을 흉내내기 위해 원본 switchSession을 감싸 rerender를 발동한다.
+  // 실제 앱(remote.js)에서는 switchSession 성공 시 App을 새 sessionId로 remount 하고
+  // `sessions_cmd.switched` 시스템 메시지를 새 mount 의 initialMessages 로 한 번 주입한다.
+  // 테스트 환경에서도 같은 동작을 흉내내기 위해 원본 switchSession을 감싸 rerender + 메시지 주입.
   const originalSwitch = fakeSession.switchSession
   fakeSession.switchSession = async (id) => {
     const result = await originalSwitch(id)
-    if (rendered) rendered.rerender(buildAppElement({ state, fakeSession, appProps }))
+    if (rendered) {
+      const pending = [{ role: 'system', content: t('sessions_cmd.switched', { id }) }]
+      rendered.rerender(buildAppElement({ state, fakeSession, appProps, initialMessages: pending }))
+    }
     return result
   }
 

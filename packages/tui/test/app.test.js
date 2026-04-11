@@ -12,6 +12,7 @@ import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgent
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { ApprovePrompt, classifyRisk } from '@presence/tui/ui/components/ApprovePrompt.js'
+import { InputBar } from '@presence/tui/ui/components/InputBar.js'
 import { App } from '@presence/tui/ui/App.js'
 import { checkServer } from '@presence/tui/http.js'
 import { initI18n } from '@presence/infra/i18n'
@@ -720,9 +721,56 @@ await initI18n('ko')
   assert(output.includes('rm -rf'), 'ApprovePrompt high: description 표시')
 }
 
-// --- FP-22 / FP-01: App disconnected banner + errorHint wiring ---
-
 await initI18n('ko')
+
+// --- FP-29: InputBar disabled hint ---
+
+// 62a. InputBar disabled with hint renders hint label
+{
+  const frame = (await (async () => {
+    const r = inkRender(React.createElement(InputBar, { disabled: true, hint: '응답 대기 중 · ESC로 취소' }))
+    await new Promise(res => setTimeout(res, 20))
+    const f = r.lastFrame()
+    r.unmount()
+    return f
+  })())
+  assert(frame.includes('응답 대기 중'), 'InputBar disabled: shows hint text')
+  assert(frame.includes('ESC'), 'InputBar disabled: shows action hint')
+}
+
+// 62b. InputBar disabled without hint renders nothing extra
+{
+  const r = inkRender(React.createElement(InputBar, { disabled: true }))
+  await new Promise(res => setTimeout(res, 20))
+  const frame = r.lastFrame()
+  r.unmount()
+  assert(!frame.includes('['), 'InputBar disabled no hint: no bracketed hint')
+}
+
+// --- FP-36: InputBar slash hint ---
+
+// 62c. InputBar slash hint NOT shown initially
+{
+  const r = inkRender(React.createElement(InputBar, {}))
+  await new Promise(res => setTimeout(res, 20))
+  const frame = r.lastFrame()
+  r.unmount()
+  assert(!frame.includes('Tip:'), 'InputBar initial: no slash tip')
+}
+
+// 62d. InputBar slash hint shown after typing /
+{
+  const r = inkRender(React.createElement(InputBar, {}))
+  await new Promise(res => setTimeout(res, 20))
+  r.stdin.write('/')
+  await new Promise(res => setTimeout(res, 30))
+  const frame = r.lastFrame()
+  r.unmount()
+  assert(frame.includes('Tip:'), 'InputBar after /: slash tip shown')
+  assert(frame.includes('/help'), 'InputBar after /: /help referenced')
+}
+
+// --- FP-22 / FP-01: App disconnected banner + errorHint wiring ---
 
 const baseState = () => createOriginState({
   turnState: TurnState.idle(),
@@ -758,6 +806,26 @@ const mountApp = async (props) => {
 {
   const frame = await mountApp({ state: baseState() })
   assert(!frame.includes('서버 연결이 끊겼습니다'), 'App normal: no disconnected banner')
+}
+
+// 63b. App streaming without content shows thinking but NOT "receiving N chars" (FP-30)
+{
+  const state = createOriginState({
+    turnState: TurnState.working('query'),
+    lastTurn: null,
+    turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+    _streaming: { status: 'receiving', content: '', length: 42 },
+  })
+  state.set('_streaming', { status: 'receiving', content: '', length: 42 })
+  const frame = await mountApp({ state })
+  assert(!frame.includes('receiving'), 'App streaming: no internal "receiving" wording')
+  assert(!frame.includes('chars...'), 'App streaming: no "chars..." wording')
+  assert(frame.includes('thinking'), 'App streaming: shows thinking when no content')
 }
 
 // 64. App with failure lastTurn shows errorHint in StatusBar (FP-01)
