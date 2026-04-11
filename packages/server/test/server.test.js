@@ -29,7 +29,7 @@ import http from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createTestServer, request, connectWS, delay } from '../../../test/lib/mock-server.js'
+import { createTestServer, request, connectWS, delay, waitFor } from '../../../test/lib/mock-server.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -291,6 +291,71 @@ async function run() {
       assert(spaRes.body.includes('<html') || spaRes.body.includes('<!DOCTYPE'), 'S19: SPA returns HTML')
     } finally {
       await shutdown2()
+    }
+  }
+
+  // ==========================================================================
+  // S20. KG-07 — 재연결 중 pending approve 상태 복원
+  //   전제: client A 가 chat 시작 → APPROVE op 대기 → WS 끊김 → client B 재연결.
+  //   검증: 재연결 시 init snapshot 에 `_approve` 가 포함되어 ApprovePrompt 가 복원된다.
+  //        POST /approve 가 여전히 동작하여 pending turn 이 해소된다.
+  //   (spec approve.md E4 / KG-07 의 실제 동작 확인)
+  // ==========================================================================
+  {
+    const approvePlan = {
+      type: 'plan',
+      steps: [
+        { op: 'APPROVE', args: { description: 'dangerous: rm -rf /tmp/test' } },
+        { op: 'RESPOND', args: { message: 'approved and done' } },
+      ],
+    }
+    const ctx3 = await createTestServer(
+      (_req, n) => n === 1 ? JSON.stringify(approvePlan) : JSON.stringify({ type: 'direct_response', message: 'ok' })
+    )
+    const { port: port3, token: token3, defaultSessionId: sid3, shutdown: shutdown3 } = ctx3
+    const get3 = (path) => request(port3, 'GET', path, null, { token: token3 })
+    const post3 = (path, body) => request(port3, 'POST', path, body, { token: token3 })
+
+    try {
+      // 1. WS A 연결 → init 수신
+      const connA = await connectWS(port3, { token: token3, sessionId: sid3 })
+      await delay(150)
+      assert(connA.messages.some(m => m.type === 'init'), 'S20: WS A received init')
+
+      // 2. chat POST — APPROVE 에서 블로킹 (fire-and-forget)
+      const chatPromise = post3(`/api/sessions/${sid3}/chat`, { input: 'start risky op' })
+
+      // 3. WS A 에 _approve state 메시지가 push 될 때까지 대기
+      await waitFor(() => connA.messages.some(m => m.type === 'state' && m.path === '_approve' && m.value?.description), { timeout: 2000 })
+      const approveMsgA = connA.messages.find(m => m.type === 'state' && m.path === '_approve' && m.value?.description)
+      assert(approveMsgA.value.description.includes('dangerous'), 'S20: WS A received _approve push')
+
+      // 4. WS A 끊기 (클라이언트 측 close)
+      connA.ws.close()
+      await delay(100)
+
+      // 5. WS B 재연결 — init snapshot 에 _approve 복원 확인
+      const connB = await connectWS(port3, { token: token3, sessionId: sid3 })
+      await delay(150)
+      const initB = connB.messages.find(m => m.type === 'init')
+      assert(initB != null, 'S20: WS B received init')
+      assert(initB.state._approve != null, 'S20 (KG-07): init snapshot 에 _approve 복원됨')
+      assert(initB.state._approve.description.includes('dangerous'),
+        `S20 (KG-07): _approve description 복원 (got: ${JSON.stringify(initB.state._approve)})`)
+
+      // 6. POST /approve → approved=true → pending turn 해소
+      const approveRes = await post3(`/api/sessions/${sid3}/approve`, { approved: true })
+      assert(approveRes.status === 200, 'S20: POST /approve 200')
+
+      // 7. 원래 chat POST 가 완료 응답 반환
+      const chatResult = await chatPromise
+      assert(chatResult.status === 200, `S20: chat POST 200 (got ${chatResult.status})`)
+      assert(chatResult.body.content === 'approved and done',
+        `S20: turn 완료 응답 복원 (got: ${JSON.stringify(chatResult.body)})`)
+
+      connB.ws.close()
+    } finally {
+      await shutdown3()
     }
   }
 

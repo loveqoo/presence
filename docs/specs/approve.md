@@ -9,7 +9,8 @@
 
 - I1. **Approve Op는 UI 없이 자동 승인**: `onApprove` 콜백이 없는 환경(백그라운드 세션, 테스트 등)에서 `Approve` Op는 자동으로 `true`를 반환한다 (`approval.js: onApprove 없으면 ST.of(f.next(true))`).
 - I2. **승인 대기 상태는 `_approve` transient 경로에 기록**: `TurnController.onApprove(description)`는 `STATE_PATH.APPROVE`(`_approve`)에 `{ description }` 객체를 set하고 Promise resolve를 대기한다. `handleApproveResponse(approved)` 호출 시 resolve 후 `_approve`를 null로 clear한다.
-- I3. **`_approve`는 디스크에 저장하지 않는다**: `_` 접두사 필드이므로 `stripTransient()`에 의해 persistence snapshot에서 제거된다. 재접속/재시작 시 승인 대기 상태는 복원되지 않는다.
+- I3. **`_approve`는 디스크에 저장하지 않는다**: `_` 접두사 필드이므로 `stripTransient()`에 의해 persistence(disk) snapshot에서 제거된다. 이 제약은 디스크 저장 경로에만 적용된다. WS 브로드캐스트와 init snapshot은 별개 경로이며 `_approve`가 포함된다.
+- I8. **재연결 시 `_approve` 복원 보장**: WS 재연결 후 서버의 `#handleJoin`이 `entry.session.state.snapshot()`을 init 메시지에 담아 전송한다. 이 snapshot은 `stripTransient()`를 거치지 않으므로 `_approve` 필드가 포함된다. 클라이언트 `MirrorState.applySnapshot()`이 `SNAPSHOT_PATHS`에 등록된 `_approve`를 cache에 반영하고 HookBus를 통해 publish하면, `useAgentState`의 `STATE_PATH.APPROVE` 핸들러가 `setApprove`를 호출하여 `ApprovePrompt`가 복원된다. 서버 측 `TurnController.approveResolve`는 메모리에 유지되므로 `POST /api/sessions/:id/approve`로 정상 resolve 가능하다. — 통합 테스트 S20으로 검증됨.
 - I4. **승인 결정 기록은 TUI local message에만 존재**: `App.handleApprove`가 `addMessage({ role: 'system', content: '[승인됨/거부됨] ...' })`를 호출하여 ChatArea에 기록한다. 이 기록은 `conversationHistory`(서버 세션 상태)에 저장되지 않는다. 새로고침 또는 세션 재접속 시 소멸한다. — 의도된 동작 (ephemeral audit, 현재 구현 범위)
 - I5. **위험도 분류(`classifyRisk`)는 TUI 표시 전용**: `HIGH_RISK_PATTERNS` 패턴 매칭 결과는 TUI 렌더링(border 색상, 레이블)에만 영향을 준다. 서버 측 승인 승인/거부 로직에는 영향을 주지 않는다. 위험도가 높다고 해서 자동 거부되지 않는다.
 - I6. **승인 키 입력은 `y`/`Y`(승인)과 `n`/`N`(거부) 두 가지만**: `ApprovePrompt`의 `useInput`이 이 두 경우만 처리한다. 그 외 키는 무시된다.
@@ -44,7 +45,8 @@
 - E1. **`description`이 `null`/`undefined`**: `classifyRisk`는 `description ?? ''`로 방어한다. 빈 문자열은 어떤 패턴에도 매칭되지 않으므로 `'normal'`로 분류된다. `ApprovePrompt` 렌더링 시 `description` prop에 `undefined`가 전달되면 Ink의 `Text` 컴포넌트가 빈 문자열로 렌더링한다.
 - E2. **false positive — 맥락 없는 delete 매칭**: `description`이 "delete 방법 안내" 같은 무해한 문자열이어도 `/\bdelete\b/i`에 매칭되어 HIGH로 분류된다. 현재 classifyRisk는 키워드 위치/맥락을 고려하지 않는다. — Known Gap (표시 전용이므로 기능적 부작용 없음)
 - E3. **false negative — 정규식 한계**: `eval(`, `exec(`, `Function(`, base64 우회 패턴 등은 현재 HIGH 패턴에 포함되지 않아 normal로 분류된다. 정규식 키워드 매칭의 구조적 한계로 우회 가능한 잔여 영역이 존재한다. — Known Gap
-- E4. **승인 대기 중 세션 종료/재연결**: `_approve`가 transient이므로 재연결 후 승인 프롬프트는 사라진다. 서버 측 `TurnController.approveResolve`는 여전히 대기 중이지만 클라이언트로부터 응답을 받을 수 없다. 결국 turn abort 또는 타임아웃까지 서버 측에 Approve Promise가 pending 상태로 남는다. 이 경로는 백오프 재연결(close 코드 4001/4002/4003 외의 경우) 및 `onUnrecoverable` 발동(복구 불가 연결 끊김) 모두에 해당한다. 후자의 경우 배너("TUI를 재시작하세요")가 렌더링되어 유저가 연결 불가 상태임을 알 수 있지만 pending approve 해소 수단이 없다는 점에서 동일하게 Known Gap이다 (`tui-server-contract.md I13` 참조). — **KG-07** (Known Gap)
+- E4. **승인 대기 중 WS 재연결 (정상 경로)**: 백오프 재연결(close 코드 4001/4002/4003 외의 경우) 시 `_approve`는 init snapshot에 포함되어 복원된다 (I8 참조). `TurnController.approveResolve`는 서버 메모리에 유지되며, 클라이언트가 `POST /api/sessions/:id/approve`를 전송하면 정상적으로 resolve된다. — 통합 테스트 S20으로 검증됨.
+- E4b. **승인 대기 중 복구 불가 연결 끊김 (`onUnrecoverable` 발동)**: close 코드 4002/4003 또는 4001 refresh 실패 시 재연결이 중단되며 TUI가 배너("TUI를 재시작하세요")를 렌더링한다. 이 경우 클라이언트가 WS 자체를 다시 연결하지 않으므로 pending approve 해소 수단이 없다. TUI를 재시작하면 새 WS 연결로 init snapshot이 수신되어 E4(정상 재연결 경로)로 처리된다. — `tui-server-contract.md I13` 참조.
 - E5. **`handleApproveResponse` 중복 호출 방어**: `approveResolve`가 null이면 early return한다. 연속 클릭이나 중복 POST 요청은 무시된다.
 - E6. **승인 결정 기록과 conversationHistory 동기화 없음**: `useAgentMessages`의 `conversationHistory` sync effect는 `role: 'user'|'agent'|'error'` 외의 메시지를 `localOnly`로 보존한다. 승인 기록(`role: 'system'`)은 conversationHistory 재동기화 시에도 유지된다. 단, 페이지 새로고침/재마운트 시 소멸한다.
 - E7. **백그라운드 세션(EphemeralSession)의 Approve 자동 승인**: I1에 의해 `onApprove` 없이 자동 true 반환. 위험도 분류 없음. i18n 키 `errors.approve_rejected_bg`는 별도 경로(REPL auto-reject 등)에서 사용된다.
@@ -57,7 +59,8 @@
 - HIGH 패턴 단위 (14개 HIGH + 음성 3개) → `packages/tui/test/app.test.js` 단위 56-57
 - E2 → (단위 테스트 없음) ⚠️ false positive 맥락 구분 미커버
 - E3 → (단위 테스트 없음) ⚠️ eval/exec/base64 우회 false negative 미커버
-- E4 (KG-07) → (테스트 없음) ⚠️ 재연결 중 pending approve 동작
+- I8, E4 → `packages/server/test/server.test.js` S20 (재연결 시 _approve 복원 + POST /approve 정상 resolve 전체 흐름)
+- E4b → (테스트 없음) ⚠️ onUnrecoverable 발동 시 pending approve 해소 불가 경로
 
 ## 관련 코드
 
@@ -73,3 +76,4 @@
 - 2026-04-11: 초기 작성 — FP-02(결정 기록), FP-03(위험도 분류) 반영
 - 2026-04-11: FP-46 resolved — HIGH_RISK_PATTERNS 6개 → 21개 확장, E3 잔여 false negative만 남김, E4를 KG-07로 격상
 - 2026-04-11: FP-22 해소와 KG-07 경계 명시 — E4에 onUnrecoverable 발동 시(복구 불가 경로)에도 pending approve 해소 불가임을 명시. tui-server-contract.md I13 참조 링크 추가.
+- 2026-04-11: KG-07 재검증으로 정정 — `_approve`의 transient 범위를 persistence 한정으로 명확화. I3 범위 정정, I8(재연결 시 _approve 복원 보장) 신규 추가, E4를 정상 경로로 전환, E4b(복구 불가 경로)로 분리, 테스트 커버리지 S20 매핑 추가.
