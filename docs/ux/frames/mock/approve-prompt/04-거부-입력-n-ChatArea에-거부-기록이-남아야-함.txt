@@ -1,8 +1,8 @@
-# step 2: 낮은 위험 승인 프롬프트 — file_read
+# step 4: 거부 입력 n — ChatArea에 거부 기록이 남아야 함
 # status: ok
 
- ⚠ APPROVE: file_read /tmp/safe.txt
-   [y] approve  [n] reject
+
+  [거부됨] shell_exec rm -rf /Users/testuser
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────

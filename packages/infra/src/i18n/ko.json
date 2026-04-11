@@ -19,7 +19,13 @@
     "max_iterations": "최대 반복 횟수({{max}})를 초과했습니다."
   },
   "approve": {
-    "prompt": "\n⚠ 승인 필요: {{description}}\n  계속하시겠습니까? (y/n) > "
+    "prompt": "\n⚠ 승인 필요: {{description}}\n  계속하시겠습니까? (y/n) > ",
+    "label_normal": "⚠ 승인 요청: ",
+    "label_high": "⚠⚠ 위험 — 승인 요청: ",
+    "approve": "승인",
+    "reject": "거부",
+    "approved_log": "[승인됨]",
+    "rejected_log": "[거부됨]"
   },
   "status": {
     "thinking": "thinking...",

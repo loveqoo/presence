@@ -1,9 +1,0 @@
-# step 5: 높은 위험 승인 — 프레임 스냅샷 (낮은 위험과 시각적으로 구분되는가?)
-# status: ok
-
- ⚠ APPROVE: shell_exec rm -rf /Users/testuser
-   [y] approve  [n] reject
- ──────────────────────────────────────────────────────────────────────────────
- >
- ──────────────────────────────────────────────────────────────────────────────
- ● idle │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

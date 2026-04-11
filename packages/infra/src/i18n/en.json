@@ -19,7 +19,13 @@
     "max_iterations": "Max iterations ({{max}}) exceeded."
   },
   "approve": {
-    "prompt": "\n⚠ Approval required: {{description}}\n  Continue? (y/n) > "
+    "prompt": "\n⚠ Approval required: {{description}}\n  Continue? (y/n) > ",
+    "label_normal": "⚠ APPROVE: ",
+    "label_high": "⚠⚠ HIGH RISK — APPROVE: ",
+    "approve": "approve",
+    "reject": "reject",
+    "approved_log": "[approved]",
+    "rejected_log": "[rejected]"
   },
   "status": {
     "thinking": "thinking...",

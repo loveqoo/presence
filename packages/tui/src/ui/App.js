@@ -11,6 +11,7 @@ import { useAgentMessages } from './hooks/useAgentMessages.js'
 import { useSlashCommands } from './hooks/useSlashCommands.js'
 import { MarkdownText } from './components/MarkdownText.js'
 import { STATE_PATH } from '@presence/core/core/policies.js'
+import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
@@ -53,7 +54,10 @@ const App = (props) => {
 
   const handleApprove = useCallback((approved) => {
     if (onApprove) onApprove(approved)
-  }, [onApprove])
+    const desc = agentState.approve?.description ?? ''
+    const tag = approved ? t('approve.approved_log') : t('approve.rejected_log')
+    addMessage({ role: 'system', content: `${tag} ${desc}` })
+  }, [onApprove, agentState.approve, addMessage])
 
   const isWorking = agentState.status === 'working'
 

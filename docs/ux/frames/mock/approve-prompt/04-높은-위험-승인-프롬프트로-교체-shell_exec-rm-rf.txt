@@ -1,9 +1,0 @@
-# step 4: 높은 위험 승인 프롬프트로 교체 — shell_exec rm -rf
-# status: ok
-
- ⚠ APPROVE: shell_exec rm -rf /Users/testuser
-   [y] approve  [n] reject
- ──────────────────────────────────────────────────────────────────────────────
- >
- ──────────────────────────────────────────────────────────────────────────────
- ● idle │ session: testuser-default │ mock-model │ presence-scenario │ branch: main
