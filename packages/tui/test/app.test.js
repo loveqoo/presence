@@ -15,6 +15,7 @@ import { ApprovePrompt, classifyRisk } from '@presence/tui/ui/components/Approve
 import { InputBar } from '@presence/tui/ui/components/InputBar.js'
 import { App } from '@presence/tui/ui/App.js'
 import { checkServer } from '@presence/tui/http.js'
+import { resolveServerUrl, remainingLabel, SERVER_URL_SOURCE_LABEL } from '@presence/tui/main'
 import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -794,12 +795,18 @@ const mountApp = async (props) => {
   return frame
 }
 
-// 62. App with disconnected prop shows banner
+// 62. App with disconnected prop shows banner (4001 → 세션 만료, FP-24)
 {
   const frame = await mountApp({ state: baseState(), disconnected: { code: 4001, at: Date.now() } })
-  assert(frame.includes('서버 연결이 끊겼습니다'), 'App disconnected: banner text shown')
+  assert(frame.includes('세션이 만료되었습니다'), 'App disconnected 4001: 세션 만료 표기 (FP-24)')
   assert(frame.includes('4001'), 'App disconnected: close code shown')
   assert(frame.includes('재시작'), 'App disconnected: restart hint shown')
+}
+
+// 62-2. 일반 끊김 (그 외 코드) 은 기존 문구
+{
+  const frame = await mountApp({ state: baseState(), disconnected: { code: 1006, at: Date.now() } })
+  assert(frame.includes('서버 연결이 끊겼습니다'), 'App disconnected generic: 서버 연결 끊김')
 }
 
 // 63. App without disconnected prop does NOT show banner
@@ -862,6 +869,66 @@ const mountApp = async (props) => {
   assert(result.reason != null, 'checkServer: reason present')
   assert(['ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'UNKNOWN'].includes(result.reason.code),
     `checkServer: timeout-related code (got ${result.reason.code})`)
+}
+
+// --- FP-17: resolveServerUrl with source detection ---
+
+// 70. --server <url> → source 'arg'
+{
+  const r = resolveServerUrl(['node', 'main.js', '--server', 'http://example.com:9999'], {})
+  assert(r.url === 'http://example.com:9999', 'resolveServerUrl: --server url')
+  assert(r.source === 'arg', 'resolveServerUrl: source=arg')
+}
+
+// 71. --server=url → source 'arg'
+{
+  const r = resolveServerUrl(['node', 'main.js', '--server=http://example.com:9999'], {})
+  assert(r.url === 'http://example.com:9999', 'resolveServerUrl: --server=url')
+  assert(r.source === 'arg', 'resolveServerUrl: source=arg (equal form)')
+}
+
+// 72. PRESENCE_SERVER env → source 'env'
+{
+  const r = resolveServerUrl(['node', 'main.js'], { PRESENCE_SERVER: 'http://env.local:1234' })
+  assert(r.url === 'http://env.local:1234', 'resolveServerUrl: env url')
+  assert(r.source === 'env', 'resolveServerUrl: source=env')
+}
+
+// 73. default → source 'default'
+{
+  const r = resolveServerUrl(['node', 'main.js'], {})
+  assert(r.url === 'http://127.0.0.1:3000', 'resolveServerUrl: default url')
+  assert(r.source === 'default', 'resolveServerUrl: source=default')
+}
+
+// 74. arg 우선순위 > env
+{
+  const r = resolveServerUrl(['node', 'main.js', '--server', 'http://arg.local'], { PRESENCE_SERVER: 'http://env.local' })
+  assert(r.url === 'http://arg.local', 'resolveServerUrl: arg beats env')
+}
+
+// 75. source label 매핑
+{
+  assert(SERVER_URL_SOURCE_LABEL.arg === '--server', 'source label arg')
+  assert(SERVER_URL_SOURCE_LABEL.env === 'PRESENCE_SERVER', 'source label env')
+  assert(SERVER_URL_SOURCE_LABEL.default === '기본값', 'source label default')
+}
+
+// --- FP-19/20: remainingLabel ---
+
+// 76. 첫 시도 (attempt 0/3) → '2번 남음'
+{
+  assert(remainingLabel(0, 3) === '2번 남음', 'remainingLabel: attempt 0 → 2 left')
+}
+
+// 77. 두 번째 시도 (attempt 1/3) → '마지막 시도'
+{
+  assert(remainingLabel(1, 3) === '마지막 시도', 'remainingLabel: attempt 1 → 마지막')
+}
+
+// 78. 마지막 시도 (attempt 2/3) → null (표기 없음)
+{
+  assert(remainingLabel(2, 3) === null, 'remainingLabel: attempt 2 → null')
 }
 
 summary()

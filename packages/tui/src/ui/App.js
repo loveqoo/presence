@@ -100,9 +100,15 @@ const App = (props) => {
         ? t('input_hint.working')
         : null
 
+  const disconnectedReason = disconnected
+    ? disconnected.code === 4001 ? '세션이 만료되었습니다'
+    : disconnected.code === 4002 ? '비밀번호 변경이 필요합니다'
+    : disconnected.code === 4003 ? '접근이 거부되었습니다'
+    : '서버 연결이 끊겼습니다'
+    : null
   const disconnectedBanner = disconnected
     ? h(Box, { paddingX: 1, borderStyle: 'double', borderColor: 'red', flexDirection: 'column' },
-        h(Text, { color: 'red', bold: true }, `⚠ 서버 연결이 끊겼습니다 (close ${disconnected.code}).`),
+        h(Text, { color: 'red', bold: true }, `⚠ ${disconnectedReason} (close ${disconnected.code}).`),
         h(Text, { color: 'red' }, 'TUI 를 재시작하세요 (Ctrl+C).'),
       )
     : null
