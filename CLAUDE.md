@@ -42,9 +42,33 @@
 ## 품질 관리
 
 - `.claude/hooks/` — PreToolUse hook으로 코드 편집과 커밋 시점에 규칙을 자동 검증
-- `.claude/rules/` — 경로별 코딩 규칙 (FP, 인터프리터, 테스트, 리팩토링)
+- `.claude/rules/` — 경로별 코딩 규칙 (FP, 인터프리터, 테스트, 리팩토링, 티켓)
 
 새로운 규칙이나 검증이 필요하면 hook과 rules에 추가한다.
+
+## 작업 체계 — 에이전트 + 티켓
+
+presence 의 변경은 **에이전트 리뷰** 와 **티켓 레지스트리** 두 축으로 관리한다.
+
+**에이전트 (`.claude/agents/`)**
+- `spec-guardian` — 도메인 스펙(`docs/specs/`) 정합성 검증
+- `ux-guardian` — UX 마찰점(`docs/ux/`) 감사
+- `user-guide-writer` — 사용자 가이드(`docs/guide/ko/`) 갱신
+
+기능 변경 후 세 에이전트를 병렬 호출해 스펙/UX/가이드를 동기화한다. 각 에이전트는 자기 영역 문서만 수정하며 코드는 읽기만 한다.
+
+**티켓 레지스트리 (`docs/tickets/REGISTRY.md`)**
+- 모든 작업 항목(FP = UX 마찰점, KG = 스펙 Known Gap)을 전역 유일 ID 로 통합 관리
+- 단일 진실의 원천. 외부 인프라 의존 없이 git merge conflict 가 직렬화 포인트 역할
+- 스펙 불변식(I 항목)은 라이프사이클이 없으므로 레지스트리에 포함하지 않음
+
+```bash
+scripts/tickets.sh next-id fp     # 다음 ID 확인 (반드시 사용, 자체 부여 금지)
+scripts/tickets.sh list --status open --type fp
+scripts/tickets.sh check          # pre-commit hook 이 자동 실행
+```
+
+상세 절차는 `.claude/rules/tickets.md` 참고.
 
 ## 실행
 
