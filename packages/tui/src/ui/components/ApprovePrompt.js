@@ -11,7 +11,21 @@ const HIGH_RISK_PATTERNS = [
   /\bfile[_ ](write|delete)\b/i,
   /\bsudo\b/i,
   /\bdelete\b/i,
-  /\bDROP\s+TABLE\b/i,
+  /\bDROP\s+(TABLE|DATABASE|SCHEMA)\b/i,
+  /\bTRUNCATE\b/i,
+  /\bcurl\b[^\n]*\|\s*(ba|z|k|d)?sh\b/i,
+  /\bwget\b[^\n]*\|\s*(ba|z|k|d)?sh\b/i,
+  /\bchmod\s+(0?777|0?666|[1-7]?7[0-7]7)\b/i,
+  /\bchmod\s+-R\b/i,
+  /\bkill\s+-9\b/i,
+  /\bpkill\b/i,
+  /\bgit\s+push\b[^\n]*--force\b/i,
+  /\bgit\s+push\b[^\n]*\s-f(\s|$)/i,
+  /\bgit\s+reset\s+--hard\b/i,
+  /\btruncate\b/i,
+  /\bmkfs\b/i,
+  /\bdd\s+if=/i,
+  />\s*\/dev\/sd[a-z]/i,
 ]
 
 const classifyRisk = (description) =>
