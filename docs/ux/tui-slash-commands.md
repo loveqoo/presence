@@ -89,41 +89,64 @@ i18n 키 `slash_hint.tip`이 `ko.json`에 추가되었다. 테스트: `packages/
 
 ---
 
-### [FP-41] 심각도: medium | slash-commands/sessions.js:14, 21, 28, 37 | 세션 커맨드 오류 시 언어 전환
+### [FP-41] 심각도: medium | slash-commands/sessions.js:14, 21, 28, 37 | 세션 커맨드 오류 시 언어 전환 — **resolved (2026-04-12)**
 
-**현상** — `.catch()` 핸들러 4곳 모두 `` `Error: ${e.message}` `` 영어 하드코딩. 정상 경로는 한국어, 오류 경로는 영어로 일관성이 없다. i18n에 이미 `error.agent_error` 키가 있다.
+**해소 확인**
+`sessions.js` `.catch()` 핸들러 4곳과 `useSlashCommands.js`의 `` `Error: ${e.message}` `` 영어 템플릿이 i18n 키 `slash_cmd.error`("오류: {{message}}")로 이관되었다. `tag: 'error'`도 함께 적용. 정상 경로·오류 경로 모두 한국어로 일관된다.
 
-**제안** — 기존 i18n 키로 통일.
+i18n 키: `slash_cmd.error`. 테스트: `packages/tui/test/app.test.js` 83.
 
----
+**원래 현상** — `.catch()` 핸들러 4곳 모두 `` `Error: ${e.message}` `` 영어 하드코딩. 정상 경로는 한국어, 오류 경로는 영어로 일관성이 없다. i18n에 이미 `error.agent_error` 키가 있다.
 
-### [FP-42] 심각도: medium | hooks/useSlashCommands.js:30-43 | 알 수 없는 슬래시 커맨드가 에이전트로 전달됨
-
-**현상** — `/mem`, `/model` 등 오타 커맨드가 경고 없이 에이전트 채팅 턴을 시작한다. 스펙(`session.md:E12`)도 Known Gap으로 명시.
-
-**제안** — `/`로 시작하되 커맨드 테이블에 없는 입력은 "알 수 없는 커맨드: /xxx — /help 참조" 메시지로 차단.
+**원래 제안** — 기존 i18n 키로 통일.
 
 ---
 
-### [FP-43] 심각도: low | i18n/ko.json:47 | `/help`에 `/mcp` 커맨드 누락
+### [FP-42] 심각도: medium | hooks/useSlashCommands.js:30-43 | 알 수 없는 슬래시 커맨드가 에이전트로 전달됨 — **resolved (2026-04-12)**
 
-**현상** — `commandMap`에 `/mcp`가 등록되어 있으나 `/help` 출력에 없다.
+**해소 확인**
+`dispatchSlashCommand`가 `/`로 시작하되 커맨드 테이블에 없는 입력을 흡수하여 i18n 키 `slash_cmd.unknown`("알 수 없는 커맨드: /xxx — /help 로 전체 목록 확인") 메시지를 `tag: 'error'`로 표시한다. 에이전트 턴은 발생하지 않는다. 기존 `session.md:E12` Known Gap 해소.
 
-**제안** — `/help`의 i18n 문자열에 `/mcp` 한 줄 추가.
+i18n 키: `slash_cmd.unknown`. 테스트: `packages/tui/test/app.test.js` 80a/b/c + `slash-typo` 시나리오 5/5 통과.
 
----
+**원래 현상** — `/mem`, `/model` 등 오타 커맨드가 경고 없이 에이전트 채팅 턴을 시작한다. 스펙(`session.md:E12`)도 Known Gap으로 명시.
 
-### [FP-44] 심각도: low | slash-commands/sessions.js:7-14 | `/sessions list`에 세션 이름 미표시
-
-**현상** — `onCreateSession(name)`으로 이름을 받아 생성하지만 목록은 id만 표시. 여러 세션 구별이 id 기억에만 의존한다.
-
-**제안** — 목록 출력에 name/title 필드 포함.
+**원래 제안** — `/`로 시작하되 커맨드 테이블에 없는 입력은 "알 수 없는 커맨드: /xxx — /help 참조" 메시지로 차단.
 
 ---
 
-### [FP-45] 심각도: low | hooks/useAgentState.js:118-121 | `debug`, `opTrace` 등 내부 용어 잠재적 노출
+### [FP-43] 심각도: low | i18n/ko.json:47 | `/help`에 `/mcp` 커맨드 누락 — **resolved (2026-04-12)**
 
-**현상** — 현재는 화면 레이블이 아닌 코드 수준이라 즉각 위험 없음. 향후 에러 메시지에 노출되지 않도록 주의 필요.
+**해소 확인**
+`help.commands` i18n 문자열에 `/mcp          MCP 서버 관리 (예: /mcp list, /mcp enable mcp0)` 한 줄이 추가되었다. `/help` 출력에 `/mcp`가 포함된다.
+
+테스트: `packages/tui/test/app.test.js` 81.
+
+**원래 현상** — `commandMap`에 `/mcp`가 등록되어 있으나 `/help` 출력에 없다.
+
+**원래 제안** — `/help`의 i18n 문자열에 `/mcp` 한 줄 추가.
+
+---
+
+### [FP-44] 심각도: low | slash-commands/sessions.js:7-14 | `/sessions list`에 세션 이름 미표시 — **resolved (2026-04-12)**
+
+**해소 확인**
+`cmdList`에서 `s.name`이 `s.id`와 다르면 `id  "name"  [type]` 형태로 함께 표시하고, 같으면 중복을 억제한다. 헤더 문구도 `sessions:` → `세션 목록:`으로 한글화되었다. i18n 키: `sessions_cmd.list_header`.
+
+테스트: `packages/tui/test/app.test.js` 82a/b.
+
+**원래 현상** — `onCreateSession(name)`으로 이름을 받아 생성하지만 목록은 id만 표시. 여러 세션 구별이 id 기억에만 의존한다.
+
+**원래 제안** — 목록 출력에 name/title 필드 포함.
+
+---
+
+### [FP-45] 심각도: low | hooks/useAgentState.js:118-121 | `debug`, `opTrace` 등 내부 용어 잠재적 노출 — **resolved (2026-04-12)**
+
+**해소 확인**
+grep 검증으로 `debug`, `opTrace`, `iterationHistory` 등 내부 상태 변수명이 사용자 메시지 템플릿에 직접 포함된 경우가 없음을 확인했다. `/report` 및 `Ctrl+T` 전사는 의도적 개발자 뷰. 예방 체크 완료.
+
+**원래 현상** — 현재는 화면 레이블이 아닌 코드 수준이라 즉각 위험 없음. 향후 에러 메시지에 노출되지 않도록 주의 필요.
 
 ---
 
@@ -132,8 +155,8 @@ i18n 키 `slash_hint.tip`이 `ko.json`에 추가되었다. 테스트: `packages/
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 2 | resolved: FP-36, FP-37 |
-| **medium** | 2 | 3 | open: FP-41, FP-42 / resolved: FP-38, FP-39, FP-40 |
-| **low** | 3 | 0 | FP-43, FP-44, FP-45 |
+| **medium** | 0 | 5 | resolved: FP-38, FP-39, FP-40, FP-41, FP-42 |
+| **low** | 0 | 3 | resolved: FP-43, FP-44, FP-45 |
 
 ---
 

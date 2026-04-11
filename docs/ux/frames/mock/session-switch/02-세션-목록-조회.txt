@@ -2,10 +2,10 @@
 # status: ok
 
 
-  sessions:
+  세션 목록:
   ● testuser-default  [user] (현재)
  ──────────────────────────────────────────────────────────────────────────────
  >
- /help 커맨드 · Ctrl+T 전사 · Ctrl+O 도구 상세
+ /help 커맨드 · Ctrl+T 전사 · Ctrl+O 도구 상세 · Esc 임시메시지 닫기
  ──────────────────────────────────────────────────────────────────────────────
  ● idle │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

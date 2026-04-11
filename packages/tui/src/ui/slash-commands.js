@@ -135,13 +135,26 @@ const commandMap = new Map([
   ['/statusline', handleStatusline],
 ])
 
-// Returns Promise<boolean> — true if input was a slash command (handled).
+// Returns Promise<boolean> — true if input was (or looked like) a slash command.
+// `/` 로 시작하는 모든 입력은 이 디스패처가 흡수한다. 알 수 없는 커맨드는
+// 에이전트로 넘기지 않고 시스템 메시지로 차단 (FP-42).
 const dispatchSlashCommand = async (input, ctx) => {
   const name = input.trim().split(/\s+/)[0]
   const handler = commandMap.get(name)
-  if (!handler) return false
-  await handler(input, ctx)
-  return true
+  if (handler) {
+    await handler(input, ctx)
+    return true
+  }
+  if (name.startsWith('/')) {
+    ctx.addMessage({
+      role: 'system',
+      content: t('slash_cmd.unknown', { name }),
+      transient: true,
+      tag: 'error',
+    })
+    return true
+  }
+  return false
 }
 
 export { dispatchSlashCommand }

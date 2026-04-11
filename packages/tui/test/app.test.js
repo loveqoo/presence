@@ -18,6 +18,8 @@ import { checkServer } from '@presence/tui/http.js'
 import { resolveServerUrl, remainingLabel, SERVER_URL_SOURCE_LABEL } from '@presence/tui/main'
 import { handleStatusline } from '@presence/tui/ui/slash-commands/statusline.js'
 import { handleMemory } from '@presence/tui/ui/slash-commands/memory.js'
+import { handleSessions } from '@presence/tui/ui/slash-commands/sessions.js'
+import { dispatchSlashCommand } from '@presence/tui/ui/slash-commands.js'
 import { formatStepLabel } from '@presence/tui/ui/components/PlanView.js'
 import { todoStatusIcon } from '@presence/tui/ui/components/SidePanel.js'
 import { initI18n } from '@presence/infra/i18n'
@@ -1099,6 +1101,106 @@ await (async () => {
   const out = msgs[msgs.length - 1].content
   assert(out.includes('3개 노드 삭제'), 'memory clear all: count 표시')
   assert(!out.includes('이상 경과'), 'memory clear all: age 설명 없음')
+})()
+
+// --- FP-42: 알 수 없는 슬래시 커맨드 차단 ---
+
+// 80a. 알 수 없는 /xxx 는 시스템 메시지 + handled=true
+await (async () => {
+  const msgs = []
+  const ctx = { addMessage: (m) => msgs.push(m) }
+  const handled = await dispatchSlashCommand('/mem', ctx)
+  assert(handled === true, 'dispatch: /mem 은 흡수됨 (agent 로 전달 금지)')
+  assert(msgs.length === 1, 'dispatch: 시스템 메시지 1개')
+  assert(msgs[0].content.includes('알 수 없는 커맨드'), 'dispatch: 한글 안내')
+  assert(msgs[0].content.includes('/mem'), 'dispatch: 커맨드 이름 포함')
+  assert(msgs[0].content.includes('/help'), 'dispatch: /help 안내')
+  assert(msgs[0].tag === 'error', 'dispatch: error 태그')
+})()
+
+// 80b. 정상 슬래시 커맨드는 평소대로 dispatch
+await (async () => {
+  const msgs = []
+  const ctx = {
+    addMessage: (m) => msgs.push(m),
+    statusItems: ['status', 'session'],
+    setStatusItems: () => {},
+  }
+  const handled = await dispatchSlashCommand('/statusline', ctx)
+  assert(handled === true, 'dispatch: /statusline 은 정상 처리')
+  assert(msgs.length > 0, 'dispatch: /statusline 메시지 출력')
+  assert(!msgs[0].content.includes('알 수 없는'), 'dispatch: 정상 경로에서 "알 수 없는" 없음')
+})()
+
+// 80c. 슬래시로 시작하지 않는 입력은 handled=false (에이전트로 전달)
+await (async () => {
+  const msgs = []
+  const ctx = { addMessage: (m) => msgs.push(m) }
+  const handled = await dispatchSlashCommand('안녕하세요', ctx)
+  assert(handled === false, 'dispatch: 일반 입력은 false 반환')
+  assert(msgs.length === 0, 'dispatch: 일반 입력은 메시지 생성 안 함')
+})()
+
+// --- FP-43: /help 에 /mcp 포함 ---
+
+// 81. /help 출력에 /mcp 행 포함
+{
+  // t() 는 initI18n 상단 초기화로 이미 로드
+  const { t } = await import('@presence/infra/i18n')
+  const help = t('help.commands')
+  assert(help.includes('/mcp'), 'help: /mcp 커맨드 포함 (FP-43)')
+  assert(help.includes('/mcp list'), 'help: /mcp list 예시')
+}
+
+// --- FP-44: /sessions list 에 name 표시 ---
+
+// 82a. name 이 id 와 다르면 함께 표시
+await (async () => {
+  const msgs = []
+  handleSessions('/sessions list', {
+    sessionId: 'anthony-default',
+    onListSessions: async () => [
+      { id: 'anthony-default', name: 'anthony-default', type: 'user' },
+      { id: 'work-session', name: '업무 세션', type: 'user' },
+    ],
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  const out = msgs[0].content
+  assert(out.includes('work-session'), 'sessions list: id 표시')
+  assert(out.includes('업무 세션'), 'sessions list: name 표시 (FP-44)')
+  // 같은 값이면 중복 억제
+  assert((out.match(/anthony-default/g) || []).length === 1, 'sessions list: name==id 일 때 중복 억제')
+})()
+
+// 82b. 목록 헤더 한글화
+await (async () => {
+  const msgs = []
+  handleSessions('/sessions', {
+    sessionId: 'x',
+    onListSessions: async () => [],
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs[0].content.includes('세션 목록'), 'sessions list: 한글 헤더')
+}
+)()
+
+// --- FP-41: /sessions 오류 한글화 ---
+
+// 83. /sessions list 실패 시 "오류:" 한글
+await (async () => {
+  const msgs = []
+  handleSessions('/sessions list', {
+    sessionId: 'x',
+    onListSessions: async () => { throw new Error('network down') },
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 30))
+  const out = msgs[0].content
+  assert(out.includes('오류'), 'sessions 에러: "오류" 한글 (FP-41)')
+  assert(out.includes('network down'), 'sessions 에러: 원본 message 포함')
+  assert(!out.startsWith('Error:'), 'sessions 에러: 영어 Error: 제거')
 })()
 
 // --- FP-17: resolveServerUrl with source detection ---

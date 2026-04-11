@@ -36,7 +36,7 @@ const useSlashCommands = ({
         const isAbort = err.name === 'AbortError' || err.message?.includes('aborted')
         addMessage({
           role: 'system',
-          content: isAbort ? t('cancel.cancelled') : `Error: ${err.message}`,
+          content: isAbort ? t('cancel.cancelled') : t('slash_cmd.error', { message: err.message }),
           tag: isAbort ? undefined : 'error',
         })
       })

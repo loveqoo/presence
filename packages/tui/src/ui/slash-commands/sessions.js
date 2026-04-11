@@ -8,24 +8,26 @@ const cmdList = (sessionId, onListSessions, addMessage) => {
     const lines = sessions.map(s => {
       const marker = s.id === sessionId ? '●' : ' '
       const current = s.id === sessionId ? ` ${t('sessions_cmd.current_marker')}` : ''
-      return `${marker} ${s.id}  [${s.type}]${current}`
+      // name 이 id 와 다르면 함께 표시, 같으면 중복 억제
+      const nameSuffix = s.name && s.name !== s.id ? `  "${s.name}"` : ''
+      return `${marker} ${s.id}${nameSuffix}  [${s.type}]${current}`
     })
-    addMessage({ role: 'system', content: `${t('sessions_cmd.list_header')}\n${lines.join('\n')}` })
-  }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+    addMessage({ role: 'system', content: `${t('sessions_cmd.list_header')}\n${lines.join('\n')}`, transient: true })
+  }).catch(e => addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }), tag: 'error' }))
 }
 
 const cmdNew = (name, onCreateSession, addMessage) => {
   if (!onCreateSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
   onCreateSession(name || null).then(s => {
     addMessage({ role: 'system', content: t('sessions_cmd.created', { id: s.id }) })
-  }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+  }).catch(e => addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }), tag: 'error' }))
 }
 
 const cmdSwitch = (id, onSwitchSession, addMessage) => {
   if (!id) { addMessage({ role: 'system', content: t('sessions_cmd.usage_switch') }); return }
   if (!onSwitchSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
   addMessage({ role: 'system', content: t('sessions_cmd.switching', { id }) })
-  onSwitchSession(id).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+  onSwitchSession(id).catch(e => addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }), tag: 'error' }))
 }
 
 const cmdDelete = (id, currentId, onDeleteSession, addMessage) => {
@@ -34,7 +36,7 @@ const cmdDelete = (id, currentId, onDeleteSession, addMessage) => {
   if (!onDeleteSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
   onDeleteSession(id).then(() => {
     addMessage({ role: 'system', content: t('sessions_cmd.deleted', { id }) })
-  }).catch(e => addMessage({ role: 'system', content: `Error: ${e.message}` }))
+  }).catch(e => addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }), tag: 'error' }))
 }
 
 const handleSessions = (input, ctx) => {
