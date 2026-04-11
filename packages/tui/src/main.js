@@ -92,8 +92,14 @@ const main = async () => {
 
   const serverStatus = await checkServer(baseUrl)
   if (!serverStatus.reachable) {
+    const { code, message } = serverStatus.reason || {}
+    const hint = code === 'ECONNREFUSED' ? '서버가 실행 중이 아닙니다. npm start 로 서버를 시작하세요.'
+      : code === 'ETIMEDOUT' ? '응답 시간 초과. 네트워크 또는 방화벽을 확인하세요.'
+      : code === 'ENOTFOUND' ? '호스트를 찾을 수 없습니다. --server URL 을 확인하세요.'
+      : '서버 상태를 확인하세요: npm start'
     console.error(`서버에 연결할 수 없습니다: ${baseUrl}`)
-    console.error('서버가 실행 중인지 확인하세요: npm start')
+    console.error(`원인: ${code || 'UNKNOWN'}${message ? ` (${message})` : ''}`)
+    console.error(hint)
     process.exit(1)
   }
 

@@ -10,7 +10,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 
 **부팅/인증**
 
-- I1. **부팅 순서**: `resolveServerUrl` → `GET /api/instance`(authRequired 확인) → authRequired=true이면 `loginFlow` → `runRemote`. 서버에 도달하지 못하면 즉시 exit(1).
+- I1. **부팅 순서**: `resolveServerUrl` → `GET /api/instance`(authRequired 확인) → authRequired=true이면 `loginFlow` → `runRemote`. 서버에 도달하지 못하면 `checkServer`가 반환한 `reason.code`에 따라 힌트(ECONNREFUSED/ETIMEDOUT/ENOTFOUND별 메시지)를 stderr에 출력한 뒤 exit(1).
 - I2. **토큰 보관 위치**: 로그인 성공 응답의 `accessToken`은 `authState` 객체에 in-memory 보관. `refreshToken`은 서버가 HttpOnly 쿠키로 발급하며, 응답 body의 `refreshToken` 필드는 있을 수도 없을 수도 있다(`|| null`). 두 값 모두 외부 스토리지(파일/localStorage)에 저장하지 않는다.
 - I3. **mustChangePassword 강제**: 로그인 응답에 `mustChangePassword: true`가 포함되면 `POST /api/auth/change-password` 성공 전까지 TUI는 다른 API를 호출하지 않는다. 서버 측에서도 동일 조건으로 403을 반환하는 이중 방어. 최대 3회 입력 실패 시 exit(1).
 
@@ -43,6 +43,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
   - `4001`(`AUTH_FAILED`): `onAuthFailed()` 콜백으로 토큰 갱신 1회 시도. 성공 시 즉시 재연결, 실패 시 `onUnrecoverable(code)` 호출 후 중단.
   - 그 외: 기존 지수 백오프(최소 500ms, 최대 15,000ms) 재연결.
   콜백은 `RemoteSession` 생성자가 `tryRefresh`를 받아 `MirrorState`에 주입한다.
+- I13. **onUnrecoverable 발동 시 UI 상태**: `RemoteSession.#createMirrorState`의 `onUnrecoverable(code)` 콜백이 호출되면 `#disconnected = { code, at: Date.now() }`를 설정하고 App을 rerender한다. App은 `disconnected` prop이 non-null이면 빨간 double-border 배너("⚠ 서버 연결이 끊겼습니다 (close {code}). TUI를 재시작하세요")를 렌더링하고 `InputBar.disabled`를 true로 설정한다. 배너 표시는 백오프 재연결 경로(그 외 코드)에서는 발동하지 않는다 — "복구 불가"(4001 refresh 실패, 4002, 4003)에 한정된다.
 - I11. **WS 재연결 시 최신 토큰 사용**: `MirrorState.connect()`는 매번 `getHeaders()` 콜백을 호출하여 최신 Authorization 헤더를 사용한다. `onAuthFailed` 성공 후 갱신된 access token이 다음 재연결에 자동 반영된다.
 
 **세션 전환**
@@ -64,6 +65,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - I7 → `packages/server/test/server.test.js` (join/init/state 시퀀스)
 - I9, I12 → `packages/tui/test/scenarios/session-switch.scenario.js` (FP-14, 전환 후 StatusBar session 세그먼트 표시 검증)
 - I10, I11 → (직접 테스트 없음) ⚠️ MirrorState close 코드 분기 및 getHeaders 콜백 단위 테스트 없음
+- I13 → (직접 테스트 없음) ⚠️ onUnrecoverable 발동 시 배너 렌더 + InputBar disabled 시나리오 테스트 없음 (FP-22)
 
 ## 관련 코드
 
@@ -78,3 +80,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-10: I5 정정 — "재로그인 유도" 미구현 사실 반영, authState 부재 시 즉시 401 body 반환 동작 명시 (Known Gap).
 - 2026-04-10: E1/E2 Known Gap 해소 — I10(WS close 코드 분기), I11(재연결 시 최신 토큰) 으로 불변식 승격. MirrorState getHeaders/onAuthFailed/onUnrecoverable 콜백 구조 명시. 관련 코드에 remote.js 주석 갱신.
 - 2026-04-11: FP-14 반영 — I12 추가(세션 전환 후 StatusBar 갱신, sessionId 단일 경로). 서버 세션 모델에 name 필드가 없으므로 sessionName 개념 제외.
+- 2026-04-11: FP-16/FP-22 해소 반영 — I1에 checkServer reason.code별 힌트 출력 명시. I13 추가(onUnrecoverable → disconnected 배너 + InputBar disabled). 배너는 복구 불가 경로 전용(백오프 재연결 경로 제외) 명시. 테스트 커버리지에 I13 미커버 추가.

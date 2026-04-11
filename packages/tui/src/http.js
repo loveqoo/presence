@@ -44,8 +44,9 @@ const checkServer = async (baseUrl) => {
     const res = await jsonRequest(baseUrl, { method: 'GET', path: '/api/instance', timeoutMs: 1500 })
     const authRequired = !!(res.body && typeof res.body === 'object' && res.body.authRequired)
     return { reachable: true, authRequired }
-  } catch (_) {
-    return { reachable: false, authRequired: false }
+  } catch (err) {
+    const code = err?.code || (err?.message === 'timeout' ? 'ETIMEDOUT' : 'UNKNOWN')
+    return { reachable: false, authRequired: false, reason: { code, message: err?.message || String(err) } }
   }
 }
 

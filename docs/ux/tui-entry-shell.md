@@ -25,10 +25,27 @@ npm run start:cli
 
 ## 마찰 포인트 목록
 
-### FP-16 서버 연결 실패 시 원인 불명확 [심각도: high]
-- **위치**: `main.js:94-98`, `http.js:47`
-- **현상**: `checkServer`의 catch가 오류를 삼킨다(`catch (_) {}`). 유저에게는 `"서버에 연결할 수 없습니다"` 고정 메시지만 출력된다. ECONNREFUSED(서버 미실행)인지 ETIMEDOUT(방화벽/원격 서버)인지 알 수 없어 유저가 조치를 취하기 어렵다.
-- **제안**: `catch`에서 오류 코드(`err.code`)를 보존하고, `checkServer`의 반환값에 `reason`을 포함. `main.js`가 이를 출력. 예: `"연결 실패: 서버가 응답하지 않습니다 (ECONNREFUSED)"` vs `"연결 실패: 응답 시간 초과 (1500ms)"`
+### FP-16 서버 연결 실패 시 원인 불명확 [심각도: high] — **resolved (2026-04-11)**
+
+**해소 확인**
+`http.js:checkServer`의 `catch (_) {}` 를 `err.code`를 보존하도록 변경하고, 반환값에 `reachable: false, reason: { code, message }`를 포함시켰다.
+
+`main.js`가 `reason.code`를 분기하여 코드별 조치 힌트를 출력한다:
+- `ECONNREFUSED` → `"서버가 실행 중이 아닙니다"`
+- `ETIMEDOUT` → `"응답 시간 초과"`
+- `ENOTFOUND` → `"호스트 못 찾음"`
+- 그 외 → 기본 힌트
+
+출력 형태:
+```
+서버에 연결할 수 없습니다: <url>
+원인: <code> (<message>)
+조치: <hint>
+```
+
+테스트: `packages/tui/test/app.test.js` 60번(ECONNREFUSED 경로), 61번(ETIMEDOUT 경로).
+
+**원래 현상**: `checkServer`의 catch가 오류를 삼킨다(`catch (_) {}`). 유저에게는 `"서버에 연결할 수 없습니다"` 고정 메시지만 출력된다. ECONNREFUSED(서버 미실행)인지 ETIMEDOUT(방화벽/원격 서버)인지 알 수 없어 유저가 조치를 취하기 어렵다.
 
 ### FP-17 결정된 서버 URL이 화면에 보이지 않음 [심각도: medium]
 - **위치**: `main.js:9-16`
@@ -55,10 +72,21 @@ npm run start:cli
 - **현상**: 로그인 성공 후 `Promise.all([tools, agents, config])` + `detectGitBranch()` 처리 동안 터미널에 아무 출력이 없다. 네트워크 지연 또는 git 명령 지연 시 TUI가 멈춘 것으로 오인된다.
 - **제안**: 로그인 성공 즉시 `"세션을 초기화하는 중..."` 출력.
 
-### FP-22 WS 복구 불가 시 침묵 — 입력 무응답 상태 지속 [심각도: high]
-- **위치**: `remote.js:137-140`
-- **현상**: close 코드 4002/4003/4001(refresh 실패) 수신 시 `console.error("WS connection unrecoverable...")` 출력 후 아무 조치 없음. Ink UI는 계속 표시. 유저가 입력해도 서버 응답이 없는 무응답 상태. `console.error`는 Ink 렌더 위에 섞여 보기 어렵다.
-- **제안**: `onUnrecoverable` 콜백이 App 컴포넌트에 상태로 전달되어, 화면에 `"서버 연결이 끊겼습니다. 재시작하세요 (Ctrl+C)."` 배너를 표시하고 InputBar를 비활성화.
+### FP-22 WS 복구 불가 시 침묵 — 입력 무응답 상태 지속 [심각도: high] — **resolved (2026-04-11)**
+
+**해소 확인**
+`remote.js:createMirrorState`의 `onUnrecoverable` 콜백이 `RemoteSession.#disconnected = { code, at }`를 설정하고 rerender를 트리거한다.
+
+`App.js`가 `disconnected` prop을 받아 화면 최상단에 빨간 double border 배너를 렌더한다:
+```
+⚠ 서버 연결이 끊겼습니다 (close {code}). TUI 를 재시작하세요 (Ctrl+C).
+```
+
+InputBar는 `disabled: true, isActive: false`로 설정되어 입력이 차단된다. `console.error` 단독 출력은 제거되었다.
+
+테스트: `packages/tui/test/app.test.js` 62번(disconnected 배너 렌더), 63번(InputBar 비활성화).
+
+**원래 현상**: close 코드 4002/4003/4001(refresh 실패) 수신 시 `console.error("WS connection unrecoverable...")` 출력 후 아무 조치 없음. Ink UI는 계속 표시. 유저가 입력해도 서버 응답이 없는 무응답 상태. `console.error`는 Ink 렌더 위에 섞여 보기 어렵다.
 
 ### FP-23 WS 재연결 중 상태 미표시 [심각도: medium]
 - **위치**: `mirror-state.js:106-107`
@@ -94,8 +122,8 @@ npm run start:cli
 
 ## 심각도별 요약
 
-| 심각도 | 건수 | 항목 |
-|--------|------|------|
-| **high** | 2 | #1(서버 연결 실패 원인 불명), #7(WS 복구 불가 침묵) |
-| **medium** | 6 | #2(서버 URL 미표시), #3(마스킹 불완전), #4(로그인 횟수), #6(무피드백 대기), #8(재연결 상태 미표시), #9(인증 만료 안내) |
-| **low** | 5 | #5(변경 횟수), #10(Esc 힌트), #11(단축키 미노출), #12(깜박임), #13(Dead code) |
+| 심각도 | open | resolved | 항목 |
+|--------|------|----------|------|
+| **high** | 0 | 2 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵) |
+| **medium** | 6 | 0 | FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내) |
+| **low** | 5 | 0 | FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |

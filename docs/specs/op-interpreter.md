@@ -46,6 +46,7 @@ presence의 Free Monad 기반 에이전트 실행 모델에서 Op ADT의 설계 
 - E9. `dryrun`: state 효과 없음 (`UpdateState`/`GetState` 모두 stub — 플랜/계획 흐름 관찰 전용). `test`: `stateInterpreterR` 포함 → state 실제 작동 (핸들러 출력 assert 가능).
 - E10. AskLLM tool_calls 요청 시 스트리밍 비활성화 (비스트리밍 폴백). abort signal은 `getAbortSignal` dep으로 주입되어 턴 abort 시 LLM 호출 중단. 스트리밍 조건: `streamingUi.isEnabled() && !f.tools && llm.chatStream` 세 조건 모두 참.
 - E8. LLM 타임아웃 초과 → `llmInterpreter`가 Task.rejected → `Executor.recover()`가 state에 `TurnOutcome.failure` 플래그를 기록하고 throw. **재시도 없음** (`executor.js:83-93`). 별도로, Planner의 JSON parse 실패 시에는 `executeCycle(turn, n, retriesLeft)` 파라미터로 재시도하는 독립된 메커니즘이 존재한다 — LLM 타임아웃과 다른 경로.
+- E11. **TurnOutcome.failure의 error.kind UI 노출**: `TurnOutcome.failure(input, TurnError(message, kind), response)`에서 `kind`는 `ERROR_KIND` 상수 중 하나(`planner_parse`, `planner_shape`, `interpreter`, `max_iterations`). 턴 실패 후 `lastTurn.error.kind`가 `MirrorState`를 통해 TUI에 전달되며, `App.js`가 `errorHint = lastTurn.error.kind`를 `StatusBar`에 전달한다. `StatusBar`는 `status === 'error'`일 때 `✗ error: {errorHint}` 형식으로 표시한다. `kind`가 null/undefined이면 `✗ error`만 표시된다 (방어 처리).
 
 ## 테스트 커버리지
 
@@ -59,6 +60,7 @@ presence의 Free Monad 기반 에이전트 실행 모델에서 Op ADT의 설계 
 - I11 → `packages/core/test/interpreter/traced.test.js` (Writer trace 축적)
 - E1 → `packages/core/test/core/op.test.js` (askLLM messages 타입 검증)
 - E3 → `packages/core/test/interpreter/parallel.test.js` (브랜치 실패 격리)
+- E11 → `packages/tui/test/scenarios/error-state.scenario.js` step 4 (planner_parse 에러 시 StatusBar에 kind 표시 검증)
 
 ## 관련 코드
 
@@ -88,3 +90,4 @@ presence의 Free Monad 기반 에이전트 실행 모델에서 Op ADT의 설계 
 - 2026-04-10: E8 정정 — "Executor 재시도" 오기 제거. Executor.recover()는 실패 state 기록 후 throw만 수행(재시도 없음). Planner parse 실패 재시도는 별도 메커니즘임을 분리 명시.
 - 2026-04-10: I8에 traced 소비 패턴 명시 — compose() 결과를 interpret dep으로 주입받아 감싸는 상위 래퍼 패턴. E9 추가 — dryrun vs test 인터프리터 state 작동 차이. E10 추가 — AskLLM 스트리밍 3조건 및 abort 전파.
 - 2026-04-11: E4 보강 — Approve 세부 정책은 approve.md로 위임 명시.
+- 2026-04-11: FP-01 해소 반영 — E11 추가(TurnOutcome.failure의 error.kind가 StatusBar에 ✗ error: {kind} 형식으로 노출되는 UI 관찰 가능 계약).

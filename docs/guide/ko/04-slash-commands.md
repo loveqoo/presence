@@ -348,6 +348,21 @@ usage: /statusline +item  /statusline -item
 
 > **`status`는 항상 표시됩니다.** 에이전트가 대기 중인지(`● idle`), 처리 중인지(`⠙ thinking...`) 나타내는 항목으로, 제거할 수 없습니다.
 
+**에러가 발생하면** 상태바의 `status` 항목이 에러 분류와 함께 표시됩니다.
+
+```
+✗ error: interpreter
+```
+
+| 에러 분류 | 뜻 |
+|-----------|---|
+| `planner_parse` | AI 응답 형식을 읽지 못했습니다 |
+| `planner_shape` | AI 응답 구조가 예상과 다릅니다 |
+| `interpreter` | 도구 실행 중 문제가 발생했습니다 |
+| `max_iterations` | 처리 횟수 상한에 도달했습니다 |
+
+분류만으로는 원인을 파악하기 어려울 때는 `/report` 로 상세 내용을 파일로 저장하여 확인하세요.
+
 ### 사용 예시
 
 ```

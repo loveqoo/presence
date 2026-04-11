@@ -24,6 +24,7 @@ const App = (props) => {
     llm = null, toolRegistry = null, sessionId = 'user-default',
     onListSessions = null, onCreateSession = null,
     onDeleteSession = null, onSwitchSession = null,
+    disconnected = null,
   } = props
   const { exit } = useApp()
   const agentState = useAgentState(state)
@@ -89,7 +90,19 @@ const App = (props) => {
     ? Math.round(agentState.debug.assembly.used / agentState.debug.assembly.budget * 100)
     : null
 
+  const errorHint = agentState.lastTurn?.tag === 'failure'
+    ? (agentState.lastTurn.error?.kind || null)
+    : null
+
+  const disconnectedBanner = disconnected
+    ? h(Box, { paddingX: 1, borderStyle: 'double', borderColor: 'red', flexDirection: 'column' },
+        h(Text, { color: 'red', bold: true }, `⚠ 서버 연결이 끊겼습니다 (close ${disconnected.code}).`),
+        h(Text, { color: 'red' }, 'TUI 를 재시작하세요 (Ctrl+C).'),
+      )
+    : null
+
   return h(Box, { flexDirection: 'column', height: '100%' },
+    disconnectedBanner,
     h(Box, { flexGrow: 1 },
       h(Box, { flexDirection: 'column', flexGrow: 1 },
         h(ChatArea, { messages, toolExpanded }),
@@ -110,7 +123,7 @@ const App = (props) => {
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
-    h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve, isActive: !showTranscript, historyRef: inputHistoryRef }),
+    h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve || !!disconnected, isActive: !showTranscript && !disconnected, historyRef: inputHistoryRef }),
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
@@ -120,7 +133,7 @@ const App = (props) => {
       activity: agentState.activity, toolCount: tools.length,
       cwd, gitBranch, model: currentModel,
       budgetPct, visibleItems: statusItems,
-      sessionId,
+      sessionId, errorHint,
     }),
   )
 }

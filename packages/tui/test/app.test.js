@@ -1,5 +1,6 @@
 import React from 'react'
 import { renderToString, Box, Text } from 'ink'
+import { render as inkRender } from 'ink-testing-library'
 import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { SidePanel } from '@presence/tui/ui/components/SidePanel.js'
@@ -11,6 +12,8 @@ import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgent
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { ApprovePrompt, classifyRisk } from '@presence/tui/ui/components/ApprovePrompt.js'
+import { App } from '@presence/tui/ui/App.js'
+import { checkServer } from '@presence/tui/http.js'
 import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -137,6 +140,23 @@ console.log('UI component tests (renderToString)')
     React.createElement(StatusBar, { status: 'error', turn: 3, memoryCount: 0 })
   )
   assert(output.includes('error'), 'StatusBar: shows error status')
+}
+
+// 14b. StatusBar error with errorHint (FP-01)
+{
+  const output = renderToString(
+    React.createElement(StatusBar, { status: 'error', errorHint: 'interpreter' })
+  )
+  assert(output.includes('error: interpreter'), 'StatusBar: shows error hint')
+}
+
+// 14c. StatusBar error without errorHint falls back to plain label (FP-01)
+{
+  const output = renderToString(
+    React.createElement(StatusBar, { status: 'error', errorHint: null })
+  )
+  assert(output.includes('✗ error'), 'StatusBar: plain error label when no hint')
+  assert(!output.includes('error:'), 'StatusBar: no colon suffix when no hint')
 }
 
 // --- SidePanel ---
@@ -698,6 +718,82 @@ await initI18n('ko')
   )
   assert(output.includes('위험'), 'ApprovePrompt high: "위험" 강조')
   assert(output.includes('rm -rf'), 'ApprovePrompt high: description 표시')
+}
+
+// --- FP-22 / FP-01: App disconnected banner + errorHint wiring ---
+
+await initI18n('ko')
+
+const baseState = () => createOriginState({
+  turnState: TurnState.idle(),
+  lastTurn: null,
+  turn: 0,
+  context: { memories: [], conversationHistory: [] },
+  todos: [],
+  events: { queue: [], deadLetter: [] },
+  delegates: { pending: [] },
+  _toolResults: [],
+})
+
+const mountApp = async (props) => {
+  const rendered = inkRender(React.createElement(App, {
+    onInput: () => {}, onApprove: () => {}, onCancel: () => {},
+    ...props,
+  }))
+  await new Promise(r => setTimeout(r, 30))
+  const frame = rendered.lastFrame()
+  rendered.unmount()
+  return frame
+}
+
+// 62. App with disconnected prop shows banner
+{
+  const frame = await mountApp({ state: baseState(), disconnected: { code: 4001, at: Date.now() } })
+  assert(frame.includes('서버 연결이 끊겼습니다'), 'App disconnected: banner text shown')
+  assert(frame.includes('4001'), 'App disconnected: close code shown')
+  assert(frame.includes('재시작'), 'App disconnected: restart hint shown')
+}
+
+// 63. App without disconnected prop does NOT show banner
+{
+  const frame = await mountApp({ state: baseState() })
+  assert(!frame.includes('서버 연결이 끊겼습니다'), 'App normal: no disconnected banner')
+}
+
+// 64. App with failure lastTurn shows errorHint in StatusBar (FP-01)
+{
+  const state = createOriginState({
+    turnState: TurnState.idle(),
+    lastTurn: TurnOutcome.failure('q', TurnError('boom', ERROR_KIND.INTERPRETER), null),
+    turn: 1,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  const frame = await mountApp({ state })
+  assert(frame.includes('error: interpreter'), 'App error: errorHint wired from lastTurn to StatusBar')
+}
+
+// --- FP-16: checkServer preserves connection error reason ---
+
+// 60. checkServer returns ECONNREFUSED for closed port
+{
+  const result = await checkServer('http://127.0.0.1:1')
+  assert(result.reachable === false, 'checkServer: reachable=false on closed port')
+  assert(result.reason != null, 'checkServer: reason present on failure')
+  assert(result.reason.code === 'ECONNREFUSED', `checkServer: code=ECONNREFUSED (got ${result.reason.code})`)
+  assert(typeof result.reason.message === 'string' && result.reason.message.length > 0, 'checkServer: reason.message non-empty')
+}
+
+// 61. checkServer returns ETIMEDOUT or UNKNOWN for unreachable host
+{
+  const result = await checkServer('http://192.0.2.1:3000')
+  assert(result.reachable === false, 'checkServer: reachable=false on unreachable host')
+  assert(result.reason != null, 'checkServer: reason present')
+  assert(['ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'UNKNOWN'].includes(result.reason.code),
+    `checkServer: timeout-related code (got ${result.reason.code})`)
 }
 
 summary()

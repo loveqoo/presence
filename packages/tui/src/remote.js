@@ -82,6 +82,7 @@ class RemoteSession {
   #currentTools
   #rerender
   #tryRefresh
+  #disconnected
 
   constructor({ wsUrl, authState, username, client, config, agents, cwd, gitBranch, initialTools, tryRefresh }) {
     this.#wsUrl = wsUrl
@@ -95,6 +96,7 @@ class RemoteSession {
     this.#currentTools = initialTools
     this.#tryRefresh = tryRefresh
     this.#currentSessionId = username ? `${username}-default` : 'user-default'
+    this.#disconnected = null
     this.#remoteState = this.#createMirrorState(this.#currentSessionId)
     this.#rerender = null
   }
@@ -134,7 +136,8 @@ class RemoteSession {
         : undefined,
       onAuthFailed: this.#tryRefresh,
       onUnrecoverable: (code) => {
-        console.error(`WS connection unrecoverable (close code ${code}). Re-login required.`)
+        this.#disconnected = { code, at: Date.now() }
+        if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
       },
     })
   }
@@ -176,6 +179,7 @@ class RemoteSession {
       onCreateSession: (id) => this.createSession(id),
       onDeleteSession: (id) => this.deleteSession(id),
       onSwitchSession: (id) => this.switchSession(id),
+      disconnected: this.#disconnected,
     }
   }
 }

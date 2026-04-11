@@ -54,9 +54,12 @@ const renderSegments = (segments) => {
   return elements
 }
 
-const buildIndicator = (status, frame, activity, elapsedStr) => {
+const buildIndicator = (status, frame, activity, elapsedStr, errorHint) => {
   if (status === 'working') return h(Text, { color: 'yellow' }, `${SPINNER_FRAMES[frame]} ${activity || 'thinking...'}${elapsedStr}`)
-  if (status === 'error') return h(Text, { color: 'red' }, '✗ error')
+  if (status === 'error') {
+    const label = errorHint ? `✗ error: ${errorHint}` : '✗ error'
+    return h(Text, { color: 'red' }, label)
+  }
   return h(Text, { color: 'green' }, '● idle')
 }
 
@@ -65,7 +68,7 @@ const StatusBar = (props) => {
     status = 'idle', turn = 0, memoryCount = 0, activity = null,
     toolCount = 0, cwd = '', gitBranch = '', model = '',
     budgetPct = null, visibleItems = null,
-    sessionId = '',
+    sessionId = '', errorHint = null,
   } = props
   const [frame, setFrame] = useState(0)
   const [elapsed, setElapsed] = useState(0)
@@ -88,7 +91,7 @@ const StatusBar = (props) => {
 
   const items = visibleItems || DEFAULT_ITEMS
   const elapsedStr = status === 'working' && elapsed > 0 ? ` ${formatElapsed(elapsed)}` : ''
-  const indicator = buildIndicator(status, frame, activity, elapsedStr)
+  const indicator = buildIndicator(status, frame, activity, elapsedStr, errorHint)
 
   const segments = buildSegments(items, {
     turn, memoryCount, toolCount, budgetPct,

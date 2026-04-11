@@ -9,6 +9,7 @@
   "exports": {
     ".": "./src/main.js",
     "./main": "./src/main.js",
+    "./http.js": "./src/http.js",
     "./ui/*.js": "./src/ui/*.js",
     "./ui/components/*.js": "./src/ui/components/*.js",
     "./ui/hooks/*.js": "./src/ui/hooks/*.js",
