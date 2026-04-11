@@ -19,6 +19,7 @@
 | [todo-state.md](todo-state.md) | Todo/State 관리 | userDataStore 분리, state projection, 이벤트 흐름 |
 | [planner.md](planner.md) | Planner/Executor | Plan-Free 계층 분리, Executor 생명주기 계약, epoch 경합 방어 |
 | [tui-server-contract.md](tui-server-contract.md) | TUI-서버 계약 | 부팅 순서, REST 엔드포인트, WS 프로토콜, 세션 전환 |
+| [approve.md](approve.md) | 승인 플로우 | Approve Op 계약, 위험도 분류, 결정 기록, 경계 조건 |
 
 ## 스펙 문서 구조
 
@@ -39,3 +40,4 @@
 ## 변경 이력
 
 - 2026-04-10: 초기 작성 — 실제 코드 기반 전 도메인 스펙화
+- 2026-04-11: approve.md 추가 — FP-02/FP-03 반영

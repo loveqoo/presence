@@ -10,6 +10,8 @@ import { detectWholeCodeLang } from '@presence/tui/ui/components/MarkdownText.js
 import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgentState.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
+import { ApprovePrompt, classifyRisk } from '@presence/tui/ui/components/ApprovePrompt.js'
+import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 console.log('UI component tests (renderToString)')
@@ -627,6 +629,52 @@ import { buildReport, formatDuration, truncate } from '@presence/tui/ui/report.j
   })
   assert(report.includes('parse failed'), 'buildReport error: shows turn error')
   assert(report.includes('ERROR: state error'), 'buildReport error: shows op error')
+}
+
+// =============================================================================
+// ApprovePrompt — classifyRisk + 렌더링 (FP-02, FP-03)
+// 주의: 이 시점부터 i18n 이 초기화되므로 t(key) 가 번역값을 반환한다.
+// 위쪽 buildLines 테스트는 key 자체를 검사하므로 이 init 이후에 실행되면 안 된다.
+// =============================================================================
+await initI18n('ko')
+
+// 56. classifyRisk: HIGH 패턴 매칭
+{
+  assert(classifyRisk('shell_exec rm -rf /') === 'high', 'classifyRisk: shell_exec → high')
+  assert(classifyRisk('rm -rf foo') === 'high', 'classifyRisk: rm - → high')
+  assert(classifyRisk('sudo apt install') === 'high', 'classifyRisk: sudo → high')
+  assert(classifyRisk('file_write /etc/passwd') === 'high', 'classifyRisk: file_write → high')
+  assert(classifyRisk('file_delete /tmp/x') === 'high', 'classifyRisk: file_delete → high')
+  assert(classifyRisk('DROP TABLE users') === 'high', 'classifyRisk: DROP TABLE → high')
+  assert(classifyRisk('delete this row') === 'high', 'classifyRisk: delete → high (FP-46 false positive 가능성 알려짐)')
+}
+
+// 57. classifyRisk: NORMAL 패턴
+{
+  assert(classifyRisk('file_read /tmp/safe.txt') === 'normal', 'classifyRisk: file_read → normal')
+  assert(classifyRisk('list_dir /home') === 'normal', 'classifyRisk: list_dir → normal')
+  assert(classifyRisk('') === 'normal', 'classifyRisk: 빈 문자열 → normal')
+  assert(classifyRisk(null) === 'normal', 'classifyRisk: null → normal')
+  assert(classifyRisk(undefined) === 'normal', 'classifyRisk: undefined → normal')
+}
+
+// 58. ApprovePrompt 렌더링: 일반 위험
+{
+  const output = renderToString(
+    React.createElement(ApprovePrompt, { description: 'file_read /tmp/safe.txt', onResolve: () => {} })
+  )
+  assert(output.includes('승인 요청'), 'ApprovePrompt normal: 승인 요청 레이블')
+  assert(output.includes('file_read'), 'ApprovePrompt normal: description 표시')
+  assert(!output.includes('위험'), 'ApprovePrompt normal: "위험" 단어 없음')
+}
+
+// 59. ApprovePrompt 렌더링: HIGH 위험
+{
+  const output = renderToString(
+    React.createElement(ApprovePrompt, { description: 'shell_exec rm -rf /Users/x', onResolve: () => {} })
+  )
+  assert(output.includes('위험'), 'ApprovePrompt high: "위험" 강조')
+  assert(output.includes('rm -rf'), 'ApprovePrompt high: description 표시')
 }
 
 summary()

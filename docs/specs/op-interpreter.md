@@ -39,7 +39,7 @@ presence의 Free Monad 기반 에이전트 실행 모델에서 Op ADT의 설계 
 - E1. `askLLM({ messages: "string" })` — messages가 배열 아닌 경우 → `TypeError: messages must be an array` 즉시 throw.
 - E2. 알려지지 않은 Op 태그 → `Interpreter.compose` dispatch 실패 → `Task.rejected(new Error('Unknown op: ...'))`.
 - E3. `Parallel` 내 브랜치 중 하나 실패 → `Promise.allSettled` 사용으로 나머지 브랜치 계속 실행. 실패 브랜치 결과는 에러로 수집.
-- E4. `Approve` Op에서 사용자가 취소 → `handleCancel()` 호출 → TurnController가 abort 신호 전송.
+- E4. `Approve` Op에서 사용자가 취소 → `handleCancel()` 호출 → TurnController가 abort 신호 전송. Approve 대기 동작·위험도 분류·결정 기록 정책은 `approve.md` 참조.
 - E5. `Delegate` 대상 에이전트가 없는 경우 → `agentRegistry.get(name)` null → 즉시 에러.
 - E6. 인터프리터 합성 후 `interpret(op)`에 null/undefined op → dispatch 시 `op.tag` 접근 에러.
 - E7. StateT.get()으로 존재하지 않는 경로 접근 → `undefined` 반환. null/undefined 방어 필요.
@@ -87,3 +87,4 @@ presence의 Free Monad 기반 에이전트 실행 모델에서 Op ADT의 설계 
 - 2026-04-10: I11 사용 전제조건 추가 — traceWriter가 클로저 레벨 let으로 재할당 누적되며 호출자 간 공유됨. 새 측정 전 resetTrace() 호출 필수.
 - 2026-04-10: E8 정정 — "Executor 재시도" 오기 제거. Executor.recover()는 실패 state 기록 후 throw만 수행(재시도 없음). Planner parse 실패 재시도는 별도 메커니즘임을 분리 명시.
 - 2026-04-10: I8에 traced 소비 패턴 명시 — compose() 결과를 interpret dep으로 주입받아 감싸는 상위 래퍼 패턴. E9 추가 — dryrun vs test 인터프리터 state 작동 차이. E10 추가 — AskLLM 스트리밍 3조건 및 abort 전파.
+- 2026-04-11: E4 보강 — Approve 세부 정책은 approve.md로 위임 명시.

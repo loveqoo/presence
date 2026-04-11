@@ -10,18 +10,26 @@ presence 는 `docs/tickets/REGISTRY.md` 하나에 모든 FP (UX 마찰점) 와 K
 - **양방향 링크**: 레지스트리 → 소스 (Source 컬럼), 소스 → 레지스트리 (ID 가 제목 또는 본문 어디든 언급되어 있으면 됨).
 - **스펙 불변식(I 항목) 은 레지스트리에 포함하지 않음**. I 는 라이프사이클 없는 선언이므로 스펙 문서에만 산다.
 
-## 새 티켓 추가
+## 새 티켓 추가 (필수 절차)
+
+**❌ 자체 번호 부여 금지.** 반드시 `scripts/tickets.sh next-id` 로 다음 ID 를 받아라. 머릿속으로 "다음은 FP-16일 것 같다" 고 추측하는 것은 즉각적인 충돌의 원인이다 (실제 사고: 2026-04-11 ux-guardian 이 next-id 를 건너뛰고 FP-16 을 자체 부여 → 이미 등록된 다른 항목과 충돌 → 회수 작업 필요).
 
 ```bash
-# 1. 다음 ID 확인
-scripts/tickets.sh next-id fp   # → FP-46
+# 1. 반드시 먼저 — 다음 ID 확인
+scripts/tickets.sh next-id fp   # → FP-47
 
-# 2. 소스 문서에 새 항목 추가 + (REGISTRY: FP-46) 표기
+# 2. 소스 문서에 새 항목 추가 (제목 또는 본문에 ID 가 등장하면 OK)
 # 3. REGISTRY.md 테이블에 한 줄 추가
 # 4. 같은 커밋으로 묶음
 ```
 
-커밋 메시지: `docs(tickets): FP-46 추가 — 제목 요약`
+커밋 메시지: `docs(tickets): FP-47 추가 — 제목 요약`
+
+`scripts/tickets.sh check` 가 pre-commit 에서 자동으로 검증한다:
+- 소스 문서의 `### [FP-XX]` / `## FP-XX.` 헤딩이 레지스트리에 등록되어 있는가
+- 등록된 source 경로가 헤딩이 있는 파일과 일치하는가
+
+→ 둘 중 하나라도 어긋나면 커밋 차단.
 
 ## 기존 티켓 상태 변경
 

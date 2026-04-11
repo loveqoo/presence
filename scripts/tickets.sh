@@ -122,6 +122,42 @@ cmd_check() {
     fi
   done
 
+  # 4. 소스 doc 의 FP/KG 헤딩이 레지스트리에 등록되어 있고 source 가 일치하는지
+  #    (예: tui-status-tools.md 가 ### [FP-16] 을 선언하면 → 레지스트리의 FP-16 source 가 status-tools.md 여야 함)
+  #    이는 ux-guardian 같은 에이전트가 next-id 를 건너뛰고 자체 번호를 매기는 사고를 잡기 위함.
+  # set -e + 빈 grep 결과로 인한 조용한 실패를 막기 위해 임시로 errexit 해제
+  set +e
+  local heading_files
+  heading_files=$(find "$REPO_ROOT/docs/ux" "$REPO_ROOT/docs/specs" -name '*.md' -type f 2>/dev/null)
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    rel="${f#$REPO_ROOT/}"
+    # 헤딩 라인에서 FP-XX / KG-XX 추출 — `## FP-29.`, `### [FP-01]`, `### FP-16 ...` 모두 매칭
+    headings=$(grep -nE '^#{1,6}[[:space:]]+(\[)?(FP|KG)-[0-9]+' "$f" 2>/dev/null)
+    [[ -z "$headings" ]] && continue
+    while IFS= read -r line; do
+      heading_id=$(echo "$line" | grep -oE '(FP|KG)-[0-9]+' | head -1)
+      [[ -z "$heading_id" ]] && continue
+      registered_src=$(extract_rows | awk -F'|' -v id="$heading_id" '
+        { gsub(/^ +| +$/, "", $2) }
+        $2 == id {
+          gsub(/^ +| +$/, "", $7)
+          sub(/#.*/, "", $7)
+          print $7
+          exit
+        }
+      ')
+      if [[ -z "$registered_src" ]]; then
+        echo "✗ $rel: $heading_id 헤딩이 있는데 레지스트리에 없음 (next-id 를 사용하지 않은 듯)" >&2
+        echo x >> "$tmp_errors"
+      elif [[ "$registered_src" != "$rel" ]]; then
+        echo "✗ $rel: $heading_id 헤딩이 있는데 레지스트리는 $registered_src 에 등록 (ID 충돌 또는 잘못된 위치)" >&2
+        echo x >> "$tmp_errors"
+      fi
+    done <<< "$headings"
+  done <<< "$heading_files"
+  set -e
+
   local err_count=0
   if [[ -s "$tmp_errors" ]]; then
     err_count=$(wc -l < "$tmp_errors" | tr -d ' ')
