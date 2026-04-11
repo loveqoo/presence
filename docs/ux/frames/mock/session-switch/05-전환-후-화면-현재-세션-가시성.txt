@@ -1,6 +1,5 @@
 # step 5: 전환 후 화면 — 현재 세션 가시성
-# status: assertion-failed
-# error: assertion failed at "전환 후 화면 — 현재 세션 가시성"
+# status: ok
 
 
   sessions:
@@ -12,4 +11,4 @@
  ──────────────────────────────────────────────────────────────────────────────
  >
  ──────────────────────────────────────────────────────────────────────────────
- ● idle │ mock-model │ presence-scenario │ branch: main
+ ● idle │ session: work │ mock-model │ presence-scenario │ branch: main

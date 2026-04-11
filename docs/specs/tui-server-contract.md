@@ -48,6 +48,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 **세션 전환**
 
 - I9. **switchSession 순서**: `MirrorState.disconnect()` → `currentSessionId` 갱신 → `createMirrorState(newId)` (새 WS 연결) → `GET /api/sessions/:newId/tools` → App 재렌더. tools 조회 실패 시 이전 tools를 유지한다.
+- I12. **세션 전환 후 StatusBar 갱신**: `switchSession` 완료 후 App 재렌더 시 `sessionId` prop이 새 세션 ID로 업데이트된다. StatusBar는 이를 받아 `session: {id}` 세그먼트를 갱신한다. `session` 항목은 `DEFAULT_ITEMS`에 포함되므로 기본 표시된다. 서버 세션 모델에 `name` 필드가 없으므로 표시 식별자는 `sessionId` 단일 경로다.
 
 ## 경계 조건 (Edge Cases)
 
@@ -61,7 +62,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - I1, I3 → `packages/server/test/server.test.js` (부팅 플로우, mustChangePassword WS 4002)
 - I5 → (직접 테스트 없음) ⚠️ createAuthClient의 refresh 재시도 로직 단위 테스트 없음
 - I7 → `packages/server/test/server.test.js` (join/init/state 시퀀스)
-- I9 → (직접 테스트 없음) ⚠️ switchSession 순서 검증 테스트 없음
+- I9, I12 → `packages/tui/test/scenarios/session-switch.scenario.js` (FP-14, 전환 후 StatusBar session 세그먼트 표시 검증)
 - I10, I11 → (직접 테스트 없음) ⚠️ MirrorState close 코드 분기 및 getHeaders 콜백 단위 테스트 없음
 
 ## 관련 코드
@@ -76,3 +77,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-10: 초기 작성
 - 2026-04-10: I5 정정 — "재로그인 유도" 미구현 사실 반영, authState 부재 시 즉시 401 body 반환 동작 명시 (Known Gap).
 - 2026-04-10: E1/E2 Known Gap 해소 — I10(WS close 코드 분기), I11(재연결 시 최신 토큰) 으로 불변식 승격. MirrorState getHeaders/onAuthFailed/onUnrecoverable 콜백 구조 명시. 관련 코드에 remote.js 주석 갱신.
+- 2026-04-11: FP-14 반영 — I12 추가(세션 전환 후 StatusBar 갱신, sessionId 단일 경로). 서버 세션 모델에 name 필드가 없으므로 sessionName 개념 제외.

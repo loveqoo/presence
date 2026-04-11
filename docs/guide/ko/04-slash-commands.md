@@ -280,10 +280,12 @@ sessions:
 
 ```
 /sessions new
-/sessions new 업무용
+/sessions new work
 ```
 
 새 세션을 만들고 생성된 세션 ID를 화면에 표시합니다.
+
+`/sessions new work` 처럼 이름을 붙이면, 그 이름이 그대로 **세션 ID**가 됩니다. presence에는 별도의 "표시 이름" 개념이 없으며, `/sessions new` 에서 입력한 값이 ID이자 이름입니다. 이후 `/sessions switch work`, `/sessions delete work` 처럼 그대로 사용합니다.
 
 > **새 세션으로 자동 이동하지 않습니다.** 새 세션을 만든 뒤 그 세션을 사용하려면 `/sessions switch <id>` 로 직접 이동해야 합니다.
 
@@ -335,6 +337,7 @@ usage: /statusline +item  /statusline -item
 
 | 항목 이름 | 표시 내용 |
 |-----------|----------|
+| `session` | 현재 세션 ID (예: `session: work`) |
 | `turn` | 대화 횟수 (예: `turn: 5`) |
 | `mem` | 저장된 기억 개수 (예: `mem: 12`) |
 | `tools` | 사용 가능한 도구 개수 (예: `tools: 8`) |
@@ -353,7 +356,7 @@ usage: /statusline +item  /statusline -item
 /statusline                ← 변경 후 전체 구성 확인
 ```
 
-> **기본 표시 항목** — 앱을 시작하면 `budget`, `model`, `dir`, `branch` 네 항목이 기본으로 표시됩니다. 앱을 재시작하면 이 기본 구성으로 돌아갑니다.
+> **기본 표시 항목** — 앱을 시작하면 `session`, `budget`, `model`, `dir`, `branch` 다섯 항목이 기본으로 표시됩니다. 앱을 재시작하면 이 기본 구성으로 돌아갑니다.
 
 ---
 

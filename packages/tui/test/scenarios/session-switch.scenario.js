@@ -1,9 +1,8 @@
 export default {
   name: 'session-switch',
   description:
-    '멀티세션을 생성하고 전환할 때, 현재 세션이 StatusBar 또는 화면 어딘가에 표시되는지 확인한다. ' +
-    '현재는 StatusBar에 session 항목이 없으므로 전환 후에도 화면에 세션명이 나타나지 않을 것으로 예상된다. ' +
-    '이 시나리오는 해당 UX 공백을 재현하기 위한 것이다.',
+    '멀티세션을 생성하고 전환할 때, 현재 세션이 StatusBar에 표시되는지 확인한다. ' +
+    'FP-14 수정 이후 StatusBar 기본 항목에 session이 포함되어 전환 후 세션명이 즉시 보여야 한다.',
   timeout: 3000,
   setup: {
     app: {
@@ -48,10 +47,10 @@ export default {
       label: '전환 후 화면 — 현재 세션 가시성',
       action: async (ctx) => { await ctx.wait(100) },
       assert: (frame) => {
-        // 가설: StatusBar에 'work' 세션명이 나타나지 않음. 이 assert가 실패하면 UX 공백 재현 성공.
-        // StatusBar 영역(첫 줄)에만 한정해서 확인한다.
-        const firstLine = frame.split('\n')[0] ?? ''
-        return firstLine.includes('work')
+        // StatusBar는 렌더 트리 마지막 줄. 'session: work' 표기가 보여야 한다.
+        const lines = frame.split('\n').filter(l => l.trim().length > 0)
+        const statusLine = lines[lines.length - 1] ?? ''
+        return statusLine.includes('session: work')
       },
     },
   ],

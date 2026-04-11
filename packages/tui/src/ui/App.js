@@ -116,6 +116,7 @@ const App = (props) => {
       activity: agentState.activity, toolCount: tools.length,
       cwd, gitBranch, model: currentModel,
       budgetPct, visibleItems: statusItems,
+      sessionId,
     }),
   )
 }

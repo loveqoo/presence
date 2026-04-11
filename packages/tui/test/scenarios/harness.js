@@ -101,6 +101,15 @@ const createHarness = async (options = {}) => {
     return rendered
   }
 
+  // 실제 앱(remote.js)에서는 switchSession 성공 시 App을 새 sessionId로 remount한다.
+  // 테스트 환경에서도 같은 동작을 흉내내기 위해 원본 switchSession을 감싸 rerender를 발동한다.
+  const originalSwitch = fakeSession.switchSession
+  fakeSession.switchSession = async (id) => {
+    const result = await originalSwitch(id)
+    if (rendered) rendered.rerender(buildAppElement({ state, fakeSession, appProps }))
+    return result
+  }
+
   const api = {
     state,
     fakeSession,

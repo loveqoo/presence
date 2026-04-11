@@ -6,10 +6,10 @@ const h = React.createElement
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
-const DEFAULT_ITEMS = ['status', 'budget', 'model', 'dir', 'branch']
+const DEFAULT_ITEMS = ['status', 'session', 'budget', 'model', 'dir', 'branch']
 
 // status는 항상 표시 (토글 불가), 나머지만 토글 가능
-const TOGGLEABLE_ITEMS = ['turn', 'mem', 'tools', 'budget', 'dir', 'branch', 'model']
+const TOGGLEABLE_ITEMS = ['session', 'turn', 'mem', 'tools', 'budget', 'dir', 'branch', 'model']
 const ALL_ITEM_KEYS = ['status', ...TOGGLEABLE_ITEMS]
 
 const formatElapsed = (ms) => {
@@ -22,6 +22,7 @@ const budgetColor = (pct) => pct >= 95 ? 'red' : pct >= 80 ? 'yellow' : 'green'
 // 단일 item을 segment value로 변환. null이면 표시 안 함.
 const buildSegment = (item, ctx) => {
   switch (item) {
+    case 'session': return ctx.sessionId ? `session: ${ctx.sessionId}` : null
     case 'turn':   return `turn: ${ctx.turn}`
     case 'mem':    return `mem: ${ctx.memoryCount}`
     case 'tools':  return `tools: ${ctx.toolCount}`
@@ -64,6 +65,7 @@ const StatusBar = (props) => {
     status = 'idle', turn = 0, memoryCount = 0, activity = null,
     toolCount = 0, cwd = '', gitBranch = '', model = '',
     budgetPct = null, visibleItems = null,
+    sessionId = '',
   } = props
   const [frame, setFrame] = useState(0)
   const [elapsed, setElapsed] = useState(0)
@@ -91,7 +93,7 @@ const StatusBar = (props) => {
   const segments = buildSegments(items, {
     turn, memoryCount, toolCount, budgetPct,
     dirName: cwd ? basename(cwd) : '',
-    gitBranch, model,
+    gitBranch, model, sessionId,
   })
   const segmentElements = renderSegments(segments)
 
