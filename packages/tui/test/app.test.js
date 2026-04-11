@@ -835,6 +835,38 @@ const mountApp = async (props) => {
   assert(frame.includes('thinking'), 'App streaming: shows thinking when no content')
 }
 
+// --- FP-04 / FP-09 / FP-25 / FP-26: 키바인딩 힌트 라인 ---
+
+// 63c. idle 상태에서 키 힌트 라인 노출
+{
+  const frame = await mountApp({ state: baseState() })
+  assert(frame.includes('/help'), 'App idle: /help 힌트 표시')
+  assert(frame.includes('Ctrl+T'), 'App idle: Ctrl+T 힌트 표시')
+  assert(frame.includes('Ctrl+O'), 'App idle: Ctrl+O 힌트 표시')
+}
+
+// 63d. working 상태에서는 키 힌트 라인 숨김 (InputBar 가 대신 표시)
+{
+  const state = createOriginState({
+    turnState: TurnState.working('q'),
+    lastTurn: null,
+    turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  const frame = await mountApp({ state })
+  assert(!frame.includes('Ctrl+T 전사'), 'App working: 키 힌트 라인 숨김 (중복 방지)')
+}
+
+// 63e. disconnected 상태에서도 키 힌트 라인 숨김
+{
+  const frame = await mountApp({ state: baseState(), disconnected: { code: 4001, at: Date.now() } })
+  assert(!frame.includes('Ctrl+T 전사'), 'App disconnected: 키 힌트 라인 숨김')
+}
+
 // 64. App with failure lastTurn shows errorHint in StatusBar (FP-01)
 {
   const state = createOriginState({

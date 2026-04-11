@@ -134,5 +134,10 @@
   },
   "slash_hint": {
     "tip": "/help 로 전체 커맨드 목록 보기"
+  },
+  "key_hint": {
+    "idle": "/help 커맨드 · Ctrl+T 전사 · Ctrl+O 도구 상세",
+    "transient": "Esc 임시메시지 닫기",
+    "cancelled": "작업이 취소되었습니다"
   }
 }

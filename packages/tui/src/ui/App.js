@@ -47,7 +47,11 @@ const App = (props) => {
 
   // App-level key handlers (overlay가 열려있지 않을 때만)
   useInput((input, key) => {
-    if (key.escape && agentState.status === 'working' && onCancel) onCancel()
+    if (key.escape && agentState.status === 'working' && onCancel) {
+      onCancel()
+      addMessage({ role: 'system', content: t('key_hint.cancelled') })
+      return
+    }
     if (key.escape && agentState.status !== 'working') clearTransientMessages()
     if (key.ctrl && input === 't') setShowTranscript(true)
     if (key.ctrl && input === 'o') setToolExpanded(prev => !prev)
@@ -100,6 +104,15 @@ const App = (props) => {
         ? t('input_hint.working')
         : null
 
+  // 키바인딩 힌트 (FP-04/09/25/26): idle 상태에서만 노출. 작업 중/승인/끊김에는
+  // InputBar 가 이미 상황별 힌트를 보여주므로 중복 표시를 피한다.
+  const hasTransient = messages.some(msg => msg.transient)
+  const keyHintLine = disconnected || isWorking || agentState.approve
+    ? null
+    : hasTransient
+      ? `${t('key_hint.idle')} · ${t('key_hint.transient')}`
+      : t('key_hint.idle')
+
   const disconnectedReason = disconnected
     ? disconnected.code === 4001 ? '세션이 만료되었습니다'
     : disconnected.code === 4002 ? '비밀번호 변경이 필요합니다'
@@ -136,6 +149,9 @@ const App = (props) => {
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
     h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve || !!disconnected, isActive: !showTranscript && !disconnected, hint: inputHint, historyRef: inputHistoryRef }),
+    keyHintLine
+      ? h(Box, { paddingX: 1 }, h(Text, { color: 'gray' }, keyHintLine))
+      : null,
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),

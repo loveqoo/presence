@@ -5,5 +5,6 @@
   status: error | turn: 0 | mem: 0 | last: failure
  ──────────────────────────────────────────────────────────────────────────────
  >
+ /help 커맨드 · Ctrl+T 전사 · Ctrl+O 도구 상세 · Esc 임시메시지 닫기
  ──────────────────────────────────────────────────────────────────────────────
  ✗ error: planner_parse │ session: testuser-default │ mock-model │ presence-scenario │ branch: main

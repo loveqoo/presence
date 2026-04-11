@@ -62,6 +62,10 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 **세션 전환**
 
 - I9. **switchSession 순서**: `MirrorState.disconnect()` → `currentSessionId` 갱신 → `createMirrorState(newId)` (새 WS 연결) → `GET /api/sessions/:newId/tools` → `#pendingInitialMessages`에 `{ role: 'system', content: t('sessions_cmd.switched', { id }) }` 주입 → App 재렌더. App 재렌더 시 `#buildAppProps()`가 `#consumePendingInitialMessages()`를 한 번 소비하여 `initialMessages` prop으로 전달한다. 소비 후 `#pendingInitialMessages`는 초기화된다. tools 조회 실패 시 이전 tools를 유지한다.
+
+**취소 피드백**
+
+- I16. **cancel 피드백 메시지는 TUI local-only**: Esc 키가 working 상태에서 `POST /api/sessions/:id/cancel`을 유발하면, `App.handleInput`의 `onCancel()` 직후 `addMessage({ role: 'system', content: t('key_hint.cancelled') })`로 피드백 메시지를 ChatArea에 추가한다. 이 메시지는 `conversationHistory`(서버 세션 상태)에 저장되지 않으며, 세션 재접속 시 소멸한다. 승인 결정 기록(`approve.md I4`)과 동일한 ephemeral 특성을 가진다.
 - I12. **세션 전환 후 StatusBar 갱신**: `switchSession` 완료 후 App 재렌더 시 `sessionId` prop이 새 세션 ID로 업데이트된다. StatusBar는 이를 받아 `session: {id}` 세그먼트를 갱신한다. `session` 항목은 `DEFAULT_ITEMS`에 포함되므로 기본 표시된다. 서버 세션 모델에 `name` 필드가 없으므로 표시 식별자는 `sessionId` 단일 경로다.
 
 ## 경계 조건 (Edge Cases)
@@ -84,6 +88,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - I13 → (직접 테스트 없음) ⚠️ onUnrecoverable 발동 시 code별 배너 문구 + InputBar disabled 시나리오 테스트 없음 (FP-22, FP-24)
 - I14 → (직접 테스트 없음) ⚠️ 진입 시 stdout 출력 순서(resolveServerUrl 출력, 세션 초기화 출력) 단위 테스트 없음 (FP-17, FP-21)
 - I15 → (직접 테스트 없음) ⚠️ promptPassword 에코 억제 단위 테스트 없음 (FP-18)
+- I16 → (직접 테스트 없음) ⚠️ Esc 취소 후 system 메시지가 ChatArea에 추가되고 서버 상태에 기록되지 않음을 검증하는 테스트 없음
 
 ## 관련 코드
 
@@ -101,3 +106,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-11: FP-16/FP-22 해소 반영 — I1에 checkServer reason.code별 힌트 출력 명시. I13 추가(onUnrecoverable → disconnected 배너 + InputBar disabled). 배너는 복구 불가 경로 전용(백오프 재연결 경로 제외) 명시. 테스트 커버리지에 I13 미커버 추가.
 - 2026-04-11: FP-29/FP-30/FP-37 해소 반영 — I13에 InputBar hint prop 전달 명시(input_hint.disconnected). I9에 pendingInitialMessages 주입·소비 계약 추가(세션 전환 시스템 메시지). E5 추가(_streaming.length는 wire 필드이나 UI 노출 금지, content 유무만으로 렌더 결정). 테스트 커버리지에 E5(63b), I9 미커버(FP-37) 추가.
 - 2026-04-11: FP-17/FP-18/FP-19/FP-20/FP-21/FP-24 해소 반영 — I13 보강(disconnected.code별 배너 문구 4종 계약화). I14 신규(진입 시 stdout 출력 순서: 연결 중 메시지 + 세션 초기화 메시지). I15 신규(비밀번호 에코 금지). 테스트 커버리지에 I13/I14/I15 미커버 추가.
+- 2026-04-12: FP-04/FP-09/FP-25/FP-26 해소 반영 — I16 신규(cancel 피드백 메시지는 TUI local-only ephemeral). 키 힌트 라인 노출 조건(idle 상태 전용)은 TUI 내부 렌더링 정책이므로 이 스펙에 포함하지 않음. 테스트 커버리지에 I16 미커버 추가.
