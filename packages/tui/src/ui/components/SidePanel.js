@@ -1,5 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
@@ -9,7 +10,20 @@ const Section = ({ title, children }) =>
     children,
   )
 
-const SidePanel = ({ agents = [], tools = [], todos = [], memoryCount = 0, events = { queue: [] } }) => {
+// TODO status 값 → 아이콘. status 는 아직 도메인에서 확정되지 않았으므로
+// 알려진 값만 매핑하고 그 외는 'unknown' 으로 낙하 (FP-07).
+const todoStatusIcon = (status) => {
+  const key = status && ['ready', 'done', 'blocked'].includes(status) ? status : 'unknown'
+  return t(`side_panel.todo_status.${key}`)
+}
+
+const todoDisplay = (todo) => todo.title || todo.type || String(todo).slice(0, 20)
+
+const SidePanel = ({ agents = [], tools = [], todos = [], memoryCount = 0, events = { queue: [], deadLetter: [] } }) => {
+  const deadLetterCount = events.deadLetter?.length || 0
+  const queueCount = events.queue?.length || 0
+  const hasDead = deadLetterCount > 0
+
   return h(Box, {
     flexDirection: 'column',
     borderStyle: 'single',
@@ -18,48 +32,52 @@ const SidePanel = ({ agents = [], tools = [], todos = [], memoryCount = 0, event
     borderTop: false,
     borderBottom: false,
     paddingX: 1,
-    width: 26,
+    width: 30,
   },
-    h(Section, { title: 'Agents' },
+    h(Section, { title: t('side_panel.agents') },
       agents.length === 0
-        ? h(Text, { color: 'gray' }, '  (none)')
+        ? h(Text, { color: 'gray' }, `  ${t('side_panel.none')}`)
         : agents.map((a, i) =>
             h(Text, { key: i }, `  ● ${a.name || a.id}`)
           ),
     ),
 
-    h(Section, { title: 'Tools' },
+    h(Section, { title: t('side_panel.tools') },
       tools.length === 0
-        ? h(Text, { color: 'gray' }, '  (none)')
-        : tools.slice(0, 8).map((t, i) =>
-            h(Text, { key: i, color: 'gray' }, `  ${t.name}`)
+        ? h(Text, { color: 'gray' }, `  ${t('side_panel.none')}`)
+        : tools.slice(0, 8).map((tool, i) =>
+            h(Text, { key: i, color: 'gray' }, `  ${tool.name}`)
           ),
       tools.length > 8
-        ? h(Text, { color: 'gray' }, `  +${tools.length - 8} more`)
+        ? h(Text, { color: 'gray' }, `  ${t('side_panel.tools_more', { count: tools.length - 8 })}`)
         : null,
     ),
 
-    h(Section, { title: 'Memory' },
-      h(Text, { color: 'gray' }, `  ${memoryCount} nodes`),
+    h(Section, { title: t('side_panel.memory') },
+      h(Text, { color: 'gray' }, `  ${t('side_panel.nodes', { count: memoryCount })}`),
     ),
 
-    h(Section, { title: 'TODOs' },
+    h(Section, { title: t('side_panel.todos') },
       todos.length === 0
-        ? h(Text, { color: 'gray' }, '  (none)')
-        : todos.slice(0, 5).map((t, i) =>
-            h(Text, { key: i }, `  ${t.title || t.type || String(t).slice(0, 20)}`)
+        ? h(Text, { color: 'gray' }, `  ${t('side_panel.none')}`)
+        : todos.slice(0, 5).map((todo, i) =>
+            h(Text, { key: i }, `  ${todoStatusIcon(todo.status)} ${todoDisplay(todo)}`)
           ),
       todos.length > 5
-        ? h(Text, { color: 'gray' }, `  +${todos.length - 5} more`)
+        ? h(Text, { color: 'gray' }, `  ${t('side_panel.more', { count: todos.length - 5 })}`)
         : null,
     ),
 
-    h(Section, { title: 'Events' },
-      (events.queue?.length || 0) === 0
-        ? h(Text, { color: 'gray' }, '  (queue empty)')
-        : h(Text, { color: 'gray' }, `  ${events.queue.length} queued`),
+    h(Section, { title: t('side_panel.events') },
+      queueCount === 0 && !hasDead
+        ? h(Text, { color: 'gray' }, `  ${t('side_panel.queue_empty')}`)
+        : h(Text, { color: hasDead ? 'red' : 'gray' },
+            `  ${hasDead
+              ? t('side_panel.queue_with_dead', { queue: queueCount, dead: deadLetterCount })
+              : t('side_panel.queue_count', { queue: queueCount })}`,
+          ),
     ),
   )
 }
 
-export { SidePanel }
+export { SidePanel, todoStatusIcon }

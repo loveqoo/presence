@@ -1,5 +1,6 @@
 import React from 'react'
 import { Box, Text } from 'ink'
+import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
@@ -29,18 +30,21 @@ const STEP_COLORS = {
 const formatStepLabel = (step) => {
   const { op, args } = step
   if (op === 'EXEC') {
+    const tool = args?.tool || '?'
     const toolArgs = args?.tool_args || {}
     const argSummary = Object.entries(toolArgs)
       .slice(0, 2)
       .map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 20)}`)
       .join(', ')
-    return `EXEC ${args?.tool || '?'}(${argSummary})`
+    return argSummary
+      ? t('plan_op.exec', { tool, args: argSummary })
+      : t('plan_op.exec_no_args', { tool })
   }
-  if (op === 'ASK_LLM') return `ASK_LLM "${(args?.prompt || '').slice(0, 30)}..."`
-  if (op === 'RESPOND') return args?.ref ? `RESPOND ref=${args.ref}` : `RESPOND message`
-  if (op === 'APPROVE') return `APPROVE: ${args?.description || '?'}`
-  if (op === 'DELEGATE') return `DELEGATE → ${args?.target || '?'}`
-  if (op === 'LOOKUP_MEMORY') return `LOOKUP_MEMORY "${args?.query || ''}"`
+  if (op === 'ASK_LLM') return t('plan_op.ask_llm', { prompt: (args?.prompt || '').slice(0, 30) })
+  if (op === 'RESPOND') return args?.ref ? t('plan_op.respond_ref', { ref: args.ref }) : t('plan_op.respond')
+  if (op === 'APPROVE') return t('plan_op.approve', { description: args?.description || '?' })
+  if (op === 'DELEGATE') return t('plan_op.delegate', { target: args?.target || '?' })
+  if (op === 'LOOKUP_MEMORY') return t('plan_op.lookup_memory', { query: args?.query || '' })
   return op
 }
 

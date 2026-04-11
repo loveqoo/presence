@@ -1,33 +1,33 @@
 # step 5: TODO 상태 표시 — FP-07
-# status: assertion-failed
-# error: assertion failed at "TODO 상태 표시 — FP-07"
+# status: ok
 
-                                                                          │ ── Agents ──
-                                                                          │   ● Writer
-                                                                          │   ● Coder
-                                                                          │
-                                                                          │ ── Tools ──
-                                                                          │   tool_01
-                                                                          │   tool_02
-                                                                          │   tool_03
-                                                                          │   tool_04
-                                                                          │   tool_05
-                                                                          │   tool_06
-                                                                          │   tool_07
-                                                                          │   tool_08
-                                                                          │   +4 more
-                                                                          │
-                                                                          │ ── Memory ──
-                                                                          │   7 nodes
-                                                                          │
-                                                                          │ ── TODOs ──
-                                                                          │   보고서 작성
-                                                                          │   이메일 확인
-                                                                          │   회의 준비
-                                                                          │
-                                                                          │ ── Events ──
-                                                                          │   2 queued
-                                                                          │
+                                                                      │ ── 에이전트 ──
+                                                                      │   ● Writer
+                                                                      │   ● Coder
+                                                                      │
+                                                                      │ ── 도구 ──
+                                                                      │   tool_01
+                                                                      │   tool_02
+                                                                      │   tool_03
+                                                                      │   tool_04
+                                                                      │   tool_05
+                                                                      │   tool_06
+                                                                      │   tool_07
+                                                                      │   tool_08
+                                                                      │   +4개 더보기 · /tools 로
+                                                                      │ 전체 보기
+                                                                      │
+                                                                      │ ── 메모리 ──
+                                                                      │   7개 노드
+                                                                      │
+                                                                      │ ── 할 일 ──
+                                                                      │   ○ 보고서 작성
+                                                                      │   ✓ 이메일 확인
+                                                                      │   ⊘ 회의 준비
+                                                                      │
+                                                                      │ ── 이벤트 ──
+                                                                      │   대기: 2 · 실패: 2
+                                                                      │
  ──────────────────────────────────────────────────────────────────────────────
  >
  /help 커맨드 · Ctrl+T 전사 · Ctrl+O 도구 상세

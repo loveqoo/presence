@@ -46,22 +46,22 @@ export default {
         await ctx.press('enter')
         await ctx.wait(150)
       },
-      assert: (frame) => frame.includes('Agents') && frame.includes('Tools'),
+      assert: (frame) => frame.includes('에이전트') && frame.includes('도구'),
     },
     {
       label: '패널 펼침 — 모든 섹션이 보이는가',
       action: async (ctx) => { await ctx.wait(50) },
       assert: (frame) =>
-        frame.includes('Agents') &&
-        frame.includes('Tools') &&
-        frame.includes('Memory') &&
-        frame.includes('TODOs') &&
-        frame.includes('Events'),
+        frame.includes('에이전트') &&
+        frame.includes('도구') &&
+        frame.includes('메모리') &&
+        frame.includes('할 일') &&
+        frame.includes('이벤트'),
     },
     {
       label: '도구 12개 중 잘림 표시 — FP-11',
       action: async (ctx) => { await ctx.wait(30) },
-      assert: (frame) => /\+4 more|\+\d+ more/.test(frame),
+      assert: (frame) => /\+\d+개 더보기/.test(frame),
     },
     {
       label: 'TODO 상태 표시 — FP-07',

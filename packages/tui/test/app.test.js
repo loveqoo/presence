@@ -18,8 +18,14 @@ import { checkServer } from '@presence/tui/http.js'
 import { resolveServerUrl, remainingLabel, SERVER_URL_SOURCE_LABEL } from '@presence/tui/main'
 import { handleStatusline } from '@presence/tui/ui/slash-commands/statusline.js'
 import { handleMemory } from '@presence/tui/ui/slash-commands/memory.js'
+import { formatStepLabel } from '@presence/tui/ui/components/PlanView.js'
+import { todoStatusIcon } from '@presence/tui/ui/components/SidePanel.js'
 import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../../../test/lib/assert.js'
+
+// i18n 을 파일 최상단에서 초기화하여 SidePanel / op-chain 등 i18n 키를
+// 사용하는 컴포넌트 테스트가 올바른 한글 라벨을 받도록 한다.
+await initI18n('ko')
 
 console.log('UI component tests (renderToString)')
 
@@ -176,8 +182,8 @@ console.log('UI component tests (renderToString)')
   )
   assert(output.includes('backend'), 'SidePanel: shows agent name')
   assert(output.includes('heartbeat'), 'SidePanel: shows second agent')
-  assert(output.includes('Agents'), 'SidePanel: shows Agents header')
-  assert(output.includes('5'), 'SidePanel: shows memory count')
+  assert(output.includes('에이전트'), 'SidePanel: 에이전트 섹션 헤더')
+  assert(output.includes('5개 노드'), 'SidePanel: 메모리 노드 수 (한글화)')
 }
 
 // 16. SidePanel empty agents
@@ -185,7 +191,7 @@ console.log('UI component tests (renderToString)')
   const output = renderToString(
     React.createElement(SidePanel, { agents: [], tools: [], todos: [] })
   )
-  assert(output.includes('none'), 'SidePanel: shows (none) when empty')
+  assert(output.includes('없음'), 'SidePanel: (없음) when empty')
 }
 
 // --- StatusBar visibleItems ---
@@ -260,13 +266,12 @@ console.log('UI component tests (renderToString)')
   ]
   const lines = buildLines(null, null, null, trace)
   const texts = lines.map(l => l.text).join('\n')
-  assert(texts.includes('ops_total') || texts.includes('5 ops'), 'buildLines opTrace: shows op count')
-  assert(texts.includes('Ask LLM'), 'buildLines opTrace: shows AskLLM tag')
-  assert(texts.includes('slow'), 'buildLines opTrace: marks slowest op')
+  assert(texts.includes('5개 op'), 'buildLines opTrace: shows op count (한글화)')
+  assert(texts.includes('LLM 호출'), 'buildLines opTrace: shows AskLLM 한글 라벨')
+  assert(texts.includes('← 느림'), 'buildLines opTrace: marks slowest op (한글화)')
   assert(texts.includes('file not found'), 'buildLines opTrace: shows error')
-  assert(texts.includes('Load Context'), 'buildLines opTrace: shows context phase')
-  assert(texts.includes('Ask LLM'), 'buildLines opTrace: shows llm phase')
-  assert(texts.includes('Send Response'), 'buildLines opTrace: shows respond phase')
+  assert(texts.includes('컨텍스트 로드'), 'buildLines opTrace: 컨텍스트 phase 한글화')
+  assert(texts.includes('응답 전송'), 'buildLines opTrace: respond phase 한글화')
   const redLines = lines.filter(l => l.color === 'red')
   assert(redLines.length > 0, 'buildLines opTrace: error line is red')
 }
@@ -903,6 +908,116 @@ const mountApp = async (props) => {
   assert(result.reason != null, 'checkServer: reason present')
   assert(['ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'UNKNOWN'].includes(result.reason.code),
     `checkServer: timeout-related code (got ${result.reason.code})`)
+}
+
+// --- FP-05: PlanView formatStepLabel 한글 번역 ---
+
+// 67a. EXEC op 한글 라벨
+{
+  const label = formatStepLabel({ op: 'EXEC', args: { tool: 'file_read', tool_args: { path: '/tmp/x.txt' } } })
+  assert(label.includes('도구 실행'), 'formatStepLabel EXEC: 한글 동사')
+  assert(label.includes('file_read'), 'formatStepLabel EXEC: tool 이름')
+  assert(label.includes('/tmp/x.txt'), 'formatStepLabel EXEC: args preview')
+}
+
+// 67b. ASK_LLM
+{
+  const label = formatStepLabel({ op: 'ASK_LLM', args: { prompt: '오늘 일정 알려줘' } })
+  assert(label.includes('AI 분석'), 'formatStepLabel ASK_LLM: 한글 라벨')
+  assert(label.includes('오늘 일정'), 'formatStepLabel ASK_LLM: prompt preview')
+}
+
+// 67c. RESPOND
+{
+  assert(formatStepLabel({ op: 'RESPOND', args: { message: 'ok' } }) === '응답 생성', 'formatStepLabel RESPOND: 한글')
+  assert(formatStepLabel({ op: 'RESPOND', args: { ref: 2 } }).includes('단계 2'), 'formatStepLabel RESPOND ref: 한글')
+}
+
+// 67d. APPROVE / DELEGATE / LOOKUP_MEMORY
+{
+  assert(formatStepLabel({ op: 'APPROVE', args: { description: 'rm -rf' } }).includes('승인 요청'), 'formatStepLabel APPROVE: 한글')
+  assert(formatStepLabel({ op: 'DELEGATE', args: { target: 'backend' } }).includes('하위 에이전트 위임'), 'formatStepLabel DELEGATE: 한글')
+  assert(formatStepLabel({ op: 'LOOKUP_MEMORY', args: { query: '지난 주' } }).includes('기억 검색'), 'formatStepLabel LOOKUP_MEMORY: 한글')
+}
+
+// 67e. 영어 op 코드 흔적 없음
+{
+  const labels = [
+    formatStepLabel({ op: 'EXEC', args: { tool: 'x', tool_args: {} } }),
+    formatStepLabel({ op: 'ASK_LLM', args: { prompt: 'y' } }),
+    formatStepLabel({ op: 'RESPOND', args: {} }),
+    formatStepLabel({ op: 'APPROVE', args: { description: 'z' } }),
+    formatStepLabel({ op: 'DELEGATE', args: { target: 'a' } }),
+    formatStepLabel({ op: 'LOOKUP_MEMORY', args: { query: 'b' } }),
+  ]
+  for (const label of labels) {
+    assert(!/\b(EXEC|ASK_LLM|RESPOND|APPROVE|DELEGATE|LOOKUP_MEMORY)\b/.test(label),
+      `formatStepLabel: 영어 op 코드 제거 (got: ${label})`)
+  }
+}
+
+// --- FP-06: SidePanel Events deadLetter 노출 ---
+
+// 68a. deadLetter 있으면 빨간색 + 실패 카운트 표시
+{
+  const output = renderToString(
+    React.createElement(SidePanel, {
+      agents: [], tools: [], todos: [], memoryCount: 0,
+      events: { queue: [1, 2], deadLetter: [{}, {}, {}] },
+    })
+  )
+  assert(output.includes('대기: 2'), 'SidePanel events: 대기 카운트')
+  assert(output.includes('실패: 3'), 'SidePanel events: deadLetter 카운트 (FP-06)')
+}
+
+// 68b. deadLetter 비면 기존 동작 유지
+{
+  const output = renderToString(
+    React.createElement(SidePanel, {
+      agents: [], tools: [], todos: [], memoryCount: 0,
+      events: { queue: [1], deadLetter: [] },
+    })
+  )
+  assert(output.includes('대기: 1'), 'SidePanel events: 대기 카운트')
+  assert(!output.includes('실패'), 'SidePanel events: deadLetter 0 일 때 실패 표시 없음')
+}
+
+// 68c. queue + deadLetter 둘 다 비면 empty 메시지
+{
+  const output = renderToString(
+    React.createElement(SidePanel, {
+      agents: [], tools: [], todos: [], memoryCount: 0,
+      events: { queue: [], deadLetter: [] },
+    })
+  )
+  assert(output.includes('비어있음'), 'SidePanel events: 비어있음 메시지')
+}
+
+// --- FP-07: TODO status 아이콘 ---
+
+// 69a. todoStatusIcon 매핑
+{
+  assert(todoStatusIcon('ready') === '○', 'todoStatusIcon: ready → ○')
+  assert(todoStatusIcon('done') === '✓', 'todoStatusIcon: done → ✓')
+  assert(todoStatusIcon('blocked') === '⊘', 'todoStatusIcon: blocked → ⊘')
+  assert(todoStatusIcon(undefined) === '·', 'todoStatusIcon: undefined → ·')
+  assert(todoStatusIcon('weird') === '·', 'todoStatusIcon: 알 수 없는 값 → ·')
+}
+
+// 69b. SidePanel todos 가 상태 아이콘 렌더
+{
+  const output = renderToString(
+    React.createElement(SidePanel, {
+      agents: [], tools: [],
+      todos: [
+        { title: '보고서 작성', status: 'ready' },
+        { title: '이메일 확인', status: 'done' },
+      ],
+      memoryCount: 0,
+    })
+  )
+  assert(output.includes('○ 보고서 작성'), 'SidePanel todos: ready 아이콘 + 제목')
+  assert(output.includes('✓ 이메일 확인'), 'SidePanel todos: done 아이콘 + 제목')
 }
 
 // --- FP-12 / FP-40: /statusline 한글화 + 현재 구성 표시 ---

@@ -47,7 +47,7 @@ presence의 Todo 항목 관리, State 구조, 이벤트 흐름을 정의한다. 
 
 - I1. **Todo 단일 저장소**: Todo 항목의 진원은 `UserDataStore`이다. `state.todos`는 캐시/projection이며 직접 쓰지 않는다. *(state.todos 구조 유지 기간 한정)*
 - I2. **state.todos는 읽기 전용 projection**: `state.set('todos', ...)` 호출은 `syncTodosProjection()`과 초기화(`restoreState`)에서만 허용. 에이전트 프로그램(Op)에서 `updateState('todos', ...)`로 직접 쓰기 금지. *(state.todos 구조 유지 기간 한정)*
-- I3. **Todo category/status 상수화**: Todo는 category=`TODO.CATEGORY` ('todo'), status=`TODO.STATUS_READY` ('ready')로만 생성. `policies.js`의 `TODO` 상수 사용.
+- I3. **Todo category/status 상수화**: Todo는 category=`TODO.CATEGORY` ('todo'), status=`TODO.STATUS_READY` ('ready')로만 생성. `policies.js`의 `TODO` 상수 사용. `done`/`blocked` 등 추가 status 값은 아직 도메인에서 확정되지 않았다. TUI는 현재 `ready`/`done`/`blocked` 를 알려진 값으로 처리하되, 그 외 값은 i18n `unknown` 키로 낙하(fallback)한다. 새 status 값이 도메인에서 확정되면 `TODO` 상수와 함께 이 스펙을 갱신해야 한다.
 - I4. **이벤트 → Todo 변환**: 외부 이벤트의 `.todo` 필드가 있으면 `todoFromEvent()`로 변환 후 `userDataStore.add()`. 변환 후 `syncTodosProjection()`으로 state 동기화. **단, 이 처리는 `enqueue()` 시점이 아니라 TurnActor drain 성공 후 `#handleDrainSuccess()` 내부에서 `#applyTodo()`를 통해 수행된다. drain 실패 시(`#handleDrainFailure()`)에는 Todo가 반영되지 않는다. drain 실패 후에도 큐에 잔여 이벤트가 있으면 다음 drain을 계속 시작한다 — 실패는 개별 이벤트 단위로 격리되며 큐 전체가 멈추지 않는다.**
 - I5. **중복 Todo 방지**: `isDuplicate(existing, event.id)` — `withEventMeta()`가 부여한 이벤트 최상위 `id`로 중복 체크. `payload.sourceEventId` 아님. 같은 이벤트로 Todo 중복 생성 없음. (`event-actor.js:101`)
 - I6. **State 변경은 `OriginState.set(path, value)`로**: 인터프리터 내 state 변경은 `StateT.modify` 또는 `UpdateState` Op으로만. 직접 변이 없음.
@@ -85,7 +85,7 @@ presence의 Todo 항목 관리, State 구조, 이벤트 흐름을 정의한다. 
 - E6. epoch 불일치로 compaction 결과 버려진 경우 → 대화 이력 압축 없음. 다음 턴에서 다시 compaction 시도.
 - E7. `_debug.iterationHistory`가 10개 초과 → `slice(-10)`으로 최신 10개만 보존. 나머지 버림.
 - E8. `updateState('todos', newTodos)` Op을 에이전트 프로그램이 실행하는 경우 → state는 변경되지만 UserDataStore에 반영 안 됨. 다음 `syncTodosProjection()` 호출 시 원상 복구됨. I2 위반.
-- E9. EventActor의 deadLetter에 쌓인 이벤트 → 자동 재처리 없음. 수동 개입 또는 `/status` 확인 필요.
+- E9. EventActor의 deadLetter에 쌓인 이벤트 → 자동 재처리 없음. TUI SidePanel 이벤트 섹션에 `실패: N` (빨간색)으로 표시되어 관찰 가능. 수동 개입 필요. (FP-06 해소로 가시화 확보)
 
 ## 테스트 커버리지
 
@@ -97,7 +97,7 @@ presence의 Todo 항목 관리, State 구조, 이벤트 흐름을 정의한다. 
 - I11 → `packages/infra/test/session.test.js` (todo_review 잡 자동 등록)
 - E3 → `packages/infra/test/events.test.js` (isDuplicate)
 - E8 → (미커버) ⚠️ 에이전트가 updateState('todos') Op 실행 시 불일치 시나리오 없음
-- E9 → (미커버) ⚠️ deadLetter 처리 정책 미정의
+- E9 → (미커버) ⚠️ deadLetter 이벤트 존재 시 TUI 빨간색 표시 검증 없음 (렌더 시나리오 테스트 부재)
 
 ## 관련 코드
 
@@ -127,3 +127,5 @@ presence의 Todo 항목 관리, State 구조, 이벤트 흐름을 정의한다. 
 - 2026-04-10: I5 정정 — isDuplicate 인자가 payload.sourceEventId가 아닌 withEventMeta()가 부여한 event.id임을 정정 (event-actor.js:101 기준).
 - 2026-04-10: I4 및 이벤트 흐름 다이어그램 보강 — drain 실패 후에도 큐 잔여 이벤트가 있으면 다음 drain 계속. 실패는 개별 이벤트 단위 격리, 큐 전체 정지 없음 명시.
 - 2026-04-10: I8에 TURN_SOURCE.EVENT 대화이력 제외 정책 추가 — TurnLifecycle.finish()가 USER 소스만 conversationHistory에 기록함을 명시.
+- 2026-04-12: I3에 done/blocked status 미확정 상태 명시. TUI fallback 정책(unknown 키) 기록. 새 status 확정 시 갱신 의무 명시.
+- 2026-04-12: E9 갱신 — FP-06 해소로 deadLetter TUI 가시화(빨간색 실패: N) 확보. 테스트 미커버 주석 갱신.
