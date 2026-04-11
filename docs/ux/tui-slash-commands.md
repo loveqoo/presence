@@ -50,27 +50,42 @@ i18n 키 `slash_hint.tip`이 `ko.json`에 추가되었다. 테스트: `packages/
 
 ---
 
-### [FP-38] 심각도: medium | i18n/ko.json:87 + slash-commands/memory.js:43-55 | `/memory help`가 구현되지 않은 기능 안내
+### [FP-38] 심각도: medium | i18n/ko.json:87 + slash-commands/memory.js:43-55 | `/memory help`가 구현되지 않은 기능 안내 — **resolved (2026-04-12)**
 
-**현상** — 도움말에 `/memory list <tier>` (episodic, semantic 필터)가 설명되어 있으나, 실제 `cmdList` 구현은 tier 인자를 무시하고 항상 전체 목록을 반환한다. `/memory list episodic` 입력 시 전체 목록이 나온다.
+**해소 확인**
+`/memory help` 텍스트에서 `/memory list <tier>` (episodic, semantic 필터) 설명이 제거되었다. `cmdList`는 tier 인자를 지원하지 않으므로 구현 대신 도움말을 사실에 맞게 수정하는 방향으로 해소. 현재 도움말은 tier 필터 언급 없이 전체 목록 조회만 안내한다.
 
-**제안** — tier 필터 구현 또는 도움말에서 해당 설명 제거.
+테스트: `packages/tui/test/app.test.js` 66a (memory help 출력에 tier 관련 문구 없음 검증).
 
----
+**원래 현상** — 도움말에 `/memory list <tier>` (episodic, semantic 필터)가 설명되어 있으나, 실제 `cmdList` 구현은 tier 인자를 무시하고 항상 전체 목록을 반환한다. `/memory list episodic` 입력 시 전체 목록이 나온다.
 
-### [FP-39] 심각도: medium | slash-commands/memory.js:54 | `/memory clear` 기간 표현 영어 하드코딩
-
-**현상** — `` `older than ${clearArgs.find(...)}` `` 가 영어로 하드코딩. 나머지 메시지는 `t()`로 한국어인데 기간 지정 경로만 영어로 섞인다.
-
-**제안** — i18n 키로 이관.
+**원래 제안** — tier 필터 구현 또는 도움말에서 해당 설명 제거.
 
 ---
 
-### [FP-40] 심각도: medium | slash-commands/statusline.js:18, 24 | `/statusline` 변경 후 현재 구성 미표시
+### [FP-39] 심각도: medium | slash-commands/memory.js:54 | `/memory clear` 기간 표현 영어 하드코딩 — **resolved (2026-04-12)**
 
-**현상** — `+turn`, `-branch` 같은 단순 확인 메시지만 표시. 변경 후 전체 상태바 구성을 함께 보여주지 않아 결과 확인을 위해 `/statusline`을 다시 입력해야 한다.
+**해소 확인**
+피드백 문구가 i18n 키 `memory_cmd.cleared_with_age`로 이관되었다. `ko.json`에 해당 키가 추가되어 "5개 노드 삭제 (7d 이상 경과)" 형태로 출력된다. 영어 하드코딩이 완전히 제거되어 정상 경로와 오류 경로 모두 한국어로 일관된다.
 
-**제안** — 변경 후 현재 활성 항목 목록을 함께 출력.
+테스트: `packages/tui/test/app.test.js` 66b (`/memory clear 7d` 결과 메시지에 "이상 경과" 포함 검증).
+
+**원래 현상** — `` `older than ${clearArgs.find(...)}` `` 가 영어로 하드코딩. 나머지 메시지는 `t()`로 한국어인데 기간 지정 경로만 영어로 섞인다.
+
+**원래 제안** — i18n 키로 이관.
+
+---
+
+### [FP-40] 심각도: medium | slash-commands/statusline.js:18, 24 | `/statusline` 변경 후 현재 구성 미표시 — **resolved (2026-04-12)**
+
+**해소 확인**
+`/statusline +항목` / `/statusline -항목` 실행 후 변경 확인 메시지와 함께 전체 현재 구성이 즉시 출력된다. 추가·제거 후 `/statusline`을 다시 입력하지 않아도 결과를 한 번에 확인할 수 있다. FP-12(한글 헤더 + 키 설명)와 같은 커밋에서 함께 해소되었다.
+
+테스트: `packages/tui/test/app.test.js` 65a (`/statusline +turn` 후 전체 구성 출력 검증), 65b (`/statusline -turn` 후 전체 구성 출력 검증), 65c (출력에 현재 활성 항목 포함 검증).
+
+**원래 현상** — `+turn`, `-branch` 같은 단순 확인 메시지만 표시. 변경 후 전체 상태바 구성을 함께 보여주지 않아 결과 확인을 위해 `/statusline`을 다시 입력해야 한다.
+
+**원래 제안** — 변경 후 현재 활성 항목 목록을 함께 출력.
 
 ---
 
@@ -112,12 +127,12 @@ i18n 키 `slash_hint.tip`이 `ko.json`에 추가되었다. 테스트: `packages/
 
 ---
 
-## 심각도별 집계 (2026-04-11 업데이트)
+## 심각도별 집계 (2026-04-12 업데이트)
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 2 | resolved: FP-36, FP-37 |
-| **medium** | 5 | 0 | FP-38, FP-39, FP-40, FP-41, FP-42 |
+| **medium** | 2 | 3 | open: FP-41, FP-42 / resolved: FP-38, FP-39, FP-40 |
 | **low** | 3 | 0 | FP-43, FP-44, FP-45 |
 
 ---

@@ -16,6 +16,8 @@ import { InputBar } from '@presence/tui/ui/components/InputBar.js'
 import { App } from '@presence/tui/ui/App.js'
 import { checkServer } from '@presence/tui/http.js'
 import { resolveServerUrl, remainingLabel, SERVER_URL_SOURCE_LABEL } from '@presence/tui/main'
+import { handleStatusline } from '@presence/tui/ui/slash-commands/statusline.js'
+import { handleMemory } from '@presence/tui/ui/slash-commands/memory.js'
 import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -902,6 +904,87 @@ const mountApp = async (props) => {
   assert(['ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'UNKNOWN'].includes(result.reason.code),
     `checkServer: timeout-related code (got ${result.reason.code})`)
 }
+
+// --- FP-12 / FP-40: /statusline 한글화 + 현재 구성 표시 ---
+
+// 65a. /statusline 이 한국어 레이블 + 모든 내부 키 설명
+{
+  const msgs = []
+  handleStatusline('/statusline', {
+    statusItems: ['status', 'session', 'budget'],
+    setStatusItems: () => {},
+    addMessage: (m) => msgs.push(m),
+  })
+  const out = msgs[0].content
+  assert(out.includes('현재 표시'), 'statusline: 한국어 헤더')
+  assert(out.includes('status — 상태'), 'statusline: status 설명')
+  assert(out.includes('session — 세션 이름'), 'statusline: session 설명')
+  assert(out.includes('mem — 메모리 노드 수'), 'statusline: mem 설명 (비활성 목록)')
+  assert(!out.includes('statusline items:'), 'statusline: 영어 헤더 제거')
+}
+
+// 65b. /statusline +turn 이 변경 후 전체 구성 출력 (FP-40)
+{
+  const msgs = []
+  let items = ['status', 'session']
+  handleStatusline('/statusline +turn', {
+    statusItems: items,
+    setStatusItems: (next) => { items = typeof next === 'function' ? next(items) : next },
+    addMessage: (m) => msgs.push(m),
+  })
+  const out = msgs[0].content
+  assert(out.startsWith('+turn'), 'statusline +turn: 변경 액션 표시')
+  assert(out.includes('turn — 턴 번호'), 'statusline +turn: 추가된 항목이 현재 표시에 포함')
+  assert(out.includes('현재 표시'), 'statusline +turn: 전체 구성 함께 출력')
+}
+
+// 65c. /statusline -session 이 변경 후 전체 구성 출력
+{
+  const msgs = []
+  handleStatusline('/statusline -session', {
+    statusItems: ['status', 'session', 'budget'],
+    setStatusItems: () => {},
+    addMessage: (m) => msgs.push(m),
+  })
+  const out = msgs[0].content
+  assert(out.startsWith('-session'), 'statusline -session: 변경 액션 표시')
+  assert(out.includes('session — 세션 이름'), 'statusline -session: 제거 후 비활성 목록에 표시')
+}
+
+// --- FP-38 / FP-39: /memory help 정확성 + clear 피드백 한글화 ---
+
+// 66a. /memory help 에 사라진 tier 필터 언급 없음
+await (async () => {
+  const msgs = []
+  const memory = { allNodes: async () => [] }
+  await handleMemory('/memory help', { memory, addMessage: (m) => msgs.push(m) })
+  const out = msgs[0].content
+  assert(!out.includes('tier'), 'memory help: tier 단어 제거 (FP-38)')
+  assert(!out.includes('episodic'), 'memory help: episodic 단어 제거')
+  assert(!out.includes('semantic'), 'memory help: semantic 단어 제거')
+})()
+
+// 66b. /memory clear 7d 피드백이 한국어
+await (async () => {
+  const msgs = []
+  const memory = { allNodes: async () => [{}], removeOlderThan: async () => 5 }
+  await handleMemory('/memory clear 7d', { memory, addMessage: (m) => msgs.push(m) })
+  const out = msgs[msgs.length - 1].content
+  assert(out.includes('5개 노드 삭제'), 'memory clear: count 표시')
+  assert(out.includes('7d'), 'memory clear: age 파라미터 포함')
+  assert(out.includes('이상 경과'), 'memory clear: 한국어 설명 (FP-39)')
+  assert(!out.toLowerCase().includes('older than'), 'memory clear: 영어 older than 제거')
+})()
+
+// 66c. /memory clear (age 없음) 피드백
+await (async () => {
+  const msgs = []
+  const memory = { allNodes: async () => [{}], clearAll: async () => 3 }
+  await handleMemory('/memory clear', { memory, addMessage: (m) => msgs.push(m) })
+  const out = msgs[msgs.length - 1].content
+  assert(out.includes('3개 노드 삭제'), 'memory clear all: count 표시')
+  assert(!out.includes('이상 경과'), 'memory clear all: age 설명 없음')
+})()
 
 // --- FP-17: resolveServerUrl with source detection ---
 

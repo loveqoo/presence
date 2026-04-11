@@ -51,8 +51,9 @@ const cmdClear = async (args, memory, addMessage) => {
   let removed
   if (!maxAgeMs) removed = await memory.clearAll()
   else removed = await memory.removeOlderThan(maxAgeMs)
-  const desc = maxAgeMs ? `older than ${clearArgs.find(a => DURATION_RE.test(a))}` : ''
-  addMessage({ role: 'system', content: t('memory_cmd.cleared', { count: removed, desc: desc ? ` (${desc})` : '' }), transient: true })
+  const key = maxAgeMs ? 'memory_cmd.cleared_with_age' : 'memory_cmd.cleared'
+  const age = maxAgeMs ? clearArgs.find(a => DURATION_RE.test(a)) : null
+  addMessage({ role: 'system', content: t(key, { count: removed, age }), transient: true })
 }
 
 const handleMemory = async (input, ctx) => {

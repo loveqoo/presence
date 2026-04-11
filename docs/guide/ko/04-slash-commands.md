@@ -1,4 +1,4 @@
-> 최종 업데이트: 2026-04-12 (FP-04/25/26 반영)
+> 최종 업데이트: 2026-04-12 (FP-04/25/26/38/39/40/12 반영)
 
 # 슬래시 커맨드 레퍼런스
 
@@ -187,9 +187,9 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 | `/memory` | 현재 저장된 기억 개수 요약 표시 |
 | `/memory list` | 최근 기억 최대 30개 목록 표시 |
 | `/memory clear` | 저장된 기억 전체 삭제 |
-| `/memory clear 7d` | 7일보다 오래된 기억만 삭제 |
-| `/memory clear 24h` | 24시간보다 오래된 기억만 삭제 |
-| `/memory clear 30m` | 30분보다 오래된 기억만 삭제 |
+| `/memory clear 7d` | 7일 이상 경과한 기억만 삭제 |
+| `/memory clear 24h` | 24시간 이상 경과한 기억만 삭제 |
+| `/memory clear 30m` | 30분 이상 경과한 기억만 삭제 |
 | `/memory help` | `/memory` 도움말 표시 |
 
 ### `/memory` (요약)
@@ -226,8 +226,6 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 - 대괄호 안 숫자는 기억이 저장된 후 경과한 시간입니다. (`s`=초, `m`=분, `h`=시간, `d`=일)
 - 30개를 초과하면 `... +N more` 형태로 나머지 개수를 알려줍니다.
 
-> **주의 — tier 필터는 현재 동작하지 않습니다.** `/memory help`에는 `/memory list episodic` 처럼 종류별 필터 기능이 안내되어 있지만, **현재 구현에서는 종류 인자를 무시하고 항상 전체 목록을 표시합니다.** `/memory list episodic` 을 입력해도 전체 목록이 나옵니다. (UX 감사 FP-3)
-
 ### `/memory clear` (기억 삭제)
 
 ```
@@ -242,12 +240,10 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 **결과 예시:**
 
 ```
-5개 노드 삭제
+5개 노드 삭제 (7d 이상 경과)
 ```
 
 > **영구 변경** — 삭제된 기억은 복구할 수 없습니다. 전체 삭제(`/memory clear`) 전에 `/memory list` 로 내용을 먼저 확인하는 것을 권장합니다.
-
-> **참고** — 기간을 지정하여 삭제할 때 완료 메시지 일부가 영어로 표시될 수 있습니다(예: `older than 7d`). 이는 알려진 표시 문제입니다. (UX 감사 FP-4)
 
 ---
 
@@ -337,26 +333,39 @@ sessions:
 /statusline -항목이름      ← 항목 제거
 ```
 
-**현재 상태 확인 예시:**
+**`/statusline` 입력 시 출력 예시:**
 
 ```
-statusline items: budget, model, dir, branch (status: always on)
-available: turn, mem, tools
-usage: /statusline +item  /statusline -item
+현재 표시:
+  status — 상태 (작업/대기/에러)
+  session — 세션 이름
+  budget — 프롬프트 예산 사용률
+  model — LLM 모델명
+  dir — 작업 디렉토리
+  branch — git 브랜치
+비활성:
+  turn — 턴 번호
+  mem — 메모리 노드 수
+  tools — 도구 개수
+사용법: /statusline +항목  /statusline -항목
 ```
+
+"현재 표시" 아래에 있는 항목이 지금 상태바에 보이는 것들이고, "비활성" 아래에 있는 항목은 숨겨진 것들입니다. 추가하고 싶은 항목은 `/statusline +항목이름`, 숨기고 싶은 항목은 `/statusline -항목이름` 으로 조절합니다.
+
+**항목을 추가/제거한 뒤에도 전체 구성이 바로 표시됩니다.** 예를 들어 `/statusline +turn` 을 입력하면 `+turn` 확인 메시지 뒤에 위와 같은 전체 구성이 이어서 표시되므로 별도로 `/statusline` 을 다시 입력할 필요가 없습니다.
 
 ### 토글 가능한 항목 목록
 
 | 항목 이름 | 표시 내용 |
 |-----------|----------|
-| `session` | 현재 세션 ID (예: `session: work`) |
-| `turn` | 대화 횟수 (예: `turn: 5`) |
-| `mem` | 저장된 기억 개수 (예: `mem: 12`) |
-| `tools` | 사용 가능한 도구 개수 (예: `tools: 8`) |
-| `budget` | 프롬프트 사용률 (예: `budget: 42%`) |
-| `dir` | 현재 작업 폴더 이름 |
-| `branch` | 현재 Git 브랜치 이름 |
-| `model` | 현재 사용 중인 AI 모델 이름 |
+| `session` | 현재 세션 이름 |
+| `turn` | 턴 번호 (대화 횟수) |
+| `mem` | 메모리 노드 수 (저장된 기억 개수) |
+| `tools` | 도구 개수 |
+| `budget` | 프롬프트 예산 사용률 |
+| `dir` | 작업 디렉토리 |
+| `branch` | git 브랜치 이름 |
+| `model` | LLM 모델명 |
 
 > **`status`는 항상 표시됩니다.** 에이전트가 대기 중인지(`● idle`), 처리 중인지(`⠙ thinking...`) 나타내는 항목으로, 제거할 수 없습니다.
 
@@ -380,10 +389,10 @@ usage: /statusline +item  /statusline -item
 ```
 /statusline +turn          ← 대화 횟수 항목 추가
 /statusline -branch        ← Git 브랜치 항목 제거
-/statusline                ← 변경 후 전체 구성 확인
+/statusline                ← 현재 전체 구성 확인
 ```
 
-> **기본 표시 항목** — 앱을 시작하면 `session`, `budget`, `model`, `dir`, `branch` 다섯 항목이 기본으로 표시됩니다. 앱을 재시작하면 이 기본 구성으로 돌아갑니다.
+> **기본 표시 항목** — 앱을 시작하면 `status`, `session`, `budget`, `model`, `dir`, `branch` 여섯 항목이 기본으로 표시됩니다. 앱을 재시작하면 이 기본 구성으로 돌아갑니다.
 
 ---
 
