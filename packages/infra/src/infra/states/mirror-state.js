@@ -19,6 +19,8 @@ const SNAPSHOT_PATHS = [
   'todos', 'events', 'delegates',
 ]
 
+const noop = Function.prototype
+
 function getNestedValue(obj, path) {
   let cur = obj
   for (const key of path.split('.')) {
@@ -83,7 +85,7 @@ class MirrorState extends State {
     })
     this.ws.on('message', this.handleMessage.bind(this))
     this.ws.on('close', this.handleClose.bind(this))
-    this.ws.on('error', Function.prototype)
+    this.ws.on('error', noop)
   }
 
   handleMessage(data) {

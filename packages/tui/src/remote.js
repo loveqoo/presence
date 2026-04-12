@@ -1,5 +1,5 @@
 import { initI18n } from '@presence/infra/i18n'
-import { createTokenRefresher, createAuthClient, detectGitBranch } from './auth-client.js'
+import { createTokenRefresher, createAuthClient } from './auth-client.js'
 import { RemoteSession } from './remote-session.js'
 
 // =============================================================================
@@ -32,7 +32,11 @@ async function runRemote(baseUrl, opts = {}) {
   initI18n(config.locale || 'ko')
 
   const cwd = process.cwd()
-  const gitBranch = await detectGitBranch(cwd)
+  let gitBranch = ''
+  try {
+    const { execSync } = await import('child_process')
+    gitBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+  } catch (_) {}
 
   const session = new RemoteSession({
     wsUrl, authState, username, client,
@@ -54,4 +58,3 @@ async function runRemote(baseUrl, opts = {}) {
 }
 
 export { runRemote }
-export { createAuthClient } from './auth-client.js'

@@ -1,4 +1,4 @@
-import { createAuthClient } from '../src/remote.js'
+import { createAuthClient } from '../src/auth-client.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 // createAuthClient: 401 자동 재시도 + refresh 실패 시 AUTH_FAILED 에러 throw.

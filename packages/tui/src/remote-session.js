@@ -5,6 +5,7 @@ import { t } from '@presence/infra/i18n'
 import { App } from './ui/App.js'
 
 const h = React.createElement
+const noop = Function.prototype
 
 // =============================================================================
 // RemoteSession: 세션 상태 + 전환 + App props 조립을 응집.
@@ -96,10 +97,10 @@ class RemoteSession {
         }
       },
       handleApproveResponse: (approved) => {
-        this.#client.post(`${apiBase}/approve`, { approved }).catch(Function.prototype)
+        this.#client.post(`${apiBase}/approve`, { approved }).catch(noop)
       },
       handleCancel: () => {
-        this.#client.post(`${apiBase}/cancel`).catch(Function.prototype)
+        this.#client.post(`${apiBase}/cancel`).catch(noop)
       },
     }
   }

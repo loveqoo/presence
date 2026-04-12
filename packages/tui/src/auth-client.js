@@ -50,13 +50,4 @@ function createAuthClient(baseUrl, authState, tryRefresh, opts = {}) {
   }
 }
 
-async function detectGitBranch(cwd) {
-  try {
-    const { execSync } = await import('child_process')
-    return execSync('git rev-parse --abbrev-ref HEAD', { cwd, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
-  } catch (_) {
-    return ''
-  }
-}
-
-export { createTokenRefresher, createAuthClient, detectGitBranch }
+export { createTokenRefresher, createAuthClient }
