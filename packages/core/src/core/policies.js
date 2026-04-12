@@ -125,6 +125,10 @@ export const TODO = Object.freeze({
   STATUS_READY: 'ready',
 })
 
+export const CHAT = Object.freeze({
+  MAX_VISIBLE: 50,
+})
+
 export const PROMPT = Object.freeze({
   RESULT_MAX_LEN: 500,
   SUMMARIZED_RESULT_MAX_LEN: 200,

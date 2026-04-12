@@ -3,6 +3,8 @@ import { Box, Text } from 'ink'
 import { PlanView } from './PlanView.js'
 import { MarkdownText, parseInline } from './MarkdownText.js'
 import { ToolResultView } from './ToolResultView.js'
+import { t } from '@presence/infra/i18n'
+import { CHAT } from '@presence/core/core/policies.js'
 
 const h = React.createElement
 
@@ -67,14 +69,16 @@ const ChatMessage = ({ role, content, tag }) => {
   )
 }
 
-const MAX_VISIBLE = 50
-
 const ChatArea = ({ messages = [], toolExpanded = false }) => {
-  const visible = messages.length > MAX_VISIBLE
-    ? messages.slice(-MAX_VISIBLE)
+  const truncatedCount = messages.length > CHAT.MAX_VISIBLE ? messages.length - CHAT.MAX_VISIBLE : 0
+  const visible = truncatedCount > 0
+    ? messages.slice(-CHAT.MAX_VISIBLE)
     : messages
 
   return h(Box, { flexDirection: 'column', flexGrow: 1, paddingX: 1, overflowY: 'hidden' },
+    truncatedCount > 0
+      ? h(Text, { color: 'gray', dimColor: true }, t('chat.truncated', { count: truncatedCount }))
+      : null,
     ...visible.map((msg, i) => {
       if (msg.role === 'plan') {
         return h(PlanView, {
