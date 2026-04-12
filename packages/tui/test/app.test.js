@@ -7,7 +7,7 @@ import { SidePanel } from '@presence/tui/ui/components/SidePanel.js'
 import { TranscriptOverlay, buildLines } from '@presence/tui/ui/components/TranscriptOverlay.js'
 import { ToolResultView, parseFileEntries, toGrid, truncateLines, getSummary } from '@presence/tui/ui/components/ToolResultView.js'
 import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/ui/components/CodeView.js'
-import { detectWholeCodeLang } from '@presence/tui/ui/components/MarkdownText.js'
+import { detectWholeCodeLang, parseInline } from '@presence/tui/ui/components/MarkdownText.js'
 import { deriveStatus, deriveMemoryCount } from '@presence/tui/ui/hooks/useAgentState.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
@@ -1369,6 +1369,74 @@ await (async () => {
 // 78. 마지막 시도 (attempt 2/3) → null (표기 없음)
 {
   assert(remainingLabel(2, 3) === null, 'remainingLabel: attempt 2 → null')
+}
+
+// ==========================================================================
+// parseInline — FP-32 인라인 마크다운 확장
+// ==========================================================================
+
+// parseInline: bold/italic/code/link
+
+{
+  // bold
+  const bold = parseInline('hello **world** end')
+  assert(bold.length === 3, 'PI1: bold 3 parts')
+  assert(bold[1].bold === true, 'PI1: bold flag')
+  assert(bold[1].text === 'world', 'PI1: bold text')
+}
+
+{
+  // italic with *
+  const italic = parseInline('hello *world* end')
+  assert(italic.length === 3, 'PI2: italic 3 parts')
+  assert(italic[1].dimColor === true, 'PI2: dimColor flag')
+  assert(italic[1].text === 'world', 'PI2: italic text')
+}
+
+{
+  // italic with _ (word boundary)
+  const italic = parseInline('hello _world_ end')
+  assert(italic.length === 3, 'PI3: underscore italic 3 parts')
+  assert(italic[1].dimColor === true, 'PI3: dimColor flag')
+  assert(italic[1].text === 'world', 'PI3: italic text')
+}
+
+{
+  // intraword underscore — no italic
+  const intra = parseInline('a_b_c')
+  assert(intra.length === 1, 'PI4: intraword no split')
+  assert(intra[0].text === 'a_b_c', 'PI4: raw text preserved')
+}
+
+{
+  // inline code
+  const code = parseInline('use `npm test` here')
+  assert(code.length === 3, 'PI5: code 3 parts')
+  assert(code[1].color === 'cyan', 'PI5: code cyan')
+}
+
+{
+  // link
+  const link = parseInline('see [docs](https://example.com) here')
+  assert(link.length === 3, 'PI6: link 3 parts')
+  assert(link[1].text === 'docs', 'PI6: link text only')
+  assert(link[1].color === 'blue', 'PI6: link blue')
+}
+
+{
+  // link with nested parentheses
+  const link = parseInline('[x](https://a.com/foo(bar))')
+  const linkPart = link.find(part => part.color === 'blue')
+  assert(linkPart && linkPart.text === 'x', 'PI7: nested parens link text extracted')
+}
+
+{
+  // mixed bold and italic — no crash
+  const mixed = parseInline('**bold** and *italic* and `code`')
+  assert(mixed.length === 5, 'PI8: mixed 5 parts')
+  assert(mixed[0].bold === true, 'PI8: bold first')
+  assert(mixed[2].dimColor === true, 'PI8: italic second')
+  assert(mixed[4].color === 'cyan', 'PI8: code third')
 }
 
 summary()

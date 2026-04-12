@@ -1,7 +1,7 @@
 import React from 'react'
 import { Box, Text } from 'ink'
 import { PlanView } from './PlanView.js'
-import { MarkdownText, parseInline } from './MarkdownText.js'
+import { MarkdownText } from './MarkdownText.js'
 import { ToolResultView } from './ToolResultView.js'
 import { t } from '@presence/infra/i18n'
 import { CHAT } from '@presence/core/core/policies.js'
