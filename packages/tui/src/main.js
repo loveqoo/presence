@@ -128,9 +128,8 @@ const main = async () => {
     process.exit(1)
   }
 
-  const { authState, username } = serverStatus.authRequired
-    ? await loginFlow(baseUrl)
-    : { authState: null, username: null }
+  // 서버는 authEnabled=true 고정 — 인증 필수
+  const { authState, username } = await loginFlow(baseUrl)
 
   console.log('세션을 초기화하는 중...')
   return runRemote(baseUrl, { authState, username })

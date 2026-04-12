@@ -64,6 +64,10 @@ git diff --cached | shasum -a 256 | cut -d' ' -f1 > .claude/.review-hash
 /codex:adversarial-review [플랜 핵심 설계 결정 요약]
 ```
 설계 결함, 엣지 케이스 누락, 복잡도 과잉을 사전에 발견한다. 결과에 따라 플랜을 수정한다.
+리뷰 후 반드시 플랜 리뷰 해시를 기록한다 (`check-plan-review.sh` 훅이 ExitPlanMode 시 검증):
+```bash
+shasum -a 256 ~/.claude/plans/<plan-file>.md | cut -d' ' -f1 > .claude/.plan-review-hash
+```
 
 **막힐 때** — `/codex:rescue`로 디버깅/원인분석을 Codex에 위임한다.
 

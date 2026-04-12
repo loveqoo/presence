@@ -187,15 +187,19 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 **원래 현상**: 트랜스크립트 오버레이(Ctrl+T), 툴 상세 토글(Ctrl+O)이 화면에 전혀 표시되지 않아 발견 불가.
 **원래 제안**: StatusBar 힌트 영역 또는 `/help` 슬래시 커맨드로 노출.
 
-### FP-27 TranscriptOverlay 닫기 시 화면 깜박임 [심각도: low]
-- **위치**: `App.js:68-70`
-- **현상**: `process.stdout.write('\x1b[2J\x1b[H')` 강제 클리어 + Ink 재렌더로 인한 이중 처리. 짧은 플리커 발생.
-- **제안**: 강제 클리어의 필요성 재검토. Ink가 이미 전체 재렌더를 담당한다면 제거.
+### FP-27 TranscriptOverlay 닫기 시 화면 깜박임 [심각도: low] — **resolved (2026-04-12)**
 
-### FP-28 authRequired=false Dead Code 분기 [심각도: low]
+- **위치**: `App.js:68-70`
+- **해소 확인**: `App.js`에서 `setShowTranscript(false)` 직후 실행하던 `process.stdout.write('\x1b[2J\x1b[H')` 수동 클리어가 제거되었다. Ink가 `setShowTranscript(false)` 시 자동 re-render를 담당하므로 이중 처리로 인한 플리커가 해소되었다.
+- **원래 현상**: `process.stdout.write('\x1b[2J\x1b[H')` 강제 클리어 + Ink 재렌더로 인한 이중 처리. 짧은 플리커 발생.
+- **원래 제안**: 강제 클리어의 필요성 재검토. Ink가 이미 전체 재렌더를 담당한다면 제거.
+
+### FP-28 authRequired=false Dead Code 분기 [심각도: low] — **resolved (2026-04-12)**
+
 - **위치**: `main.js:100-103`, 스펙 `E4 "Known Gap"`
-- **현상**: `authEnabled`가 항상 `true`로 하드코딩되어 있으므로 `authRequired=false` 분기는 운영에서 도달 불가. 스펙에 Dead Code로 명시. 실수로 활성화되면 `username=null`로 세션 ID가 `'user-default'`가 되는 예측 어려운 동작 발생.
-- **제안**: 코드 주석으로 "운영 환경 미도달" 명시 또는 제거.
+- **해소 확인**: `main.js`에서 `authRequired=false` dead branch가 제거되었다. `loginFlow`가 무조건 호출되도록 단순화되었다(서버 `authEnabled=true` 고정). KG-02도 함께 해소됨.
+- **원래 현상**: `authEnabled`가 항상 `true`로 하드코딩되어 있으므로 `authRequired=false` 분기는 운영에서 도달 불가. 스펙에 Dead Code로 명시. 실수로 활성화되면 `username=null`로 세션 ID가 `'user-default'`가 되는 예측 어려운 동작 발생.
+- **원래 제안**: 코드 주석으로 "운영 환경 미도달" 명시 또는 제거.
 
 ---
 
@@ -205,4 +209,4 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 |--------|------|----------|------|
 | **high** | 0 | 2 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵) |
 | **medium** | 0 | 6 | resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내) |
-| **low** | 2 | 3 | open: FP-27(깜박임), FP-28(Dead code) / resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출) |
+| **low** | 0 | 5 | resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |

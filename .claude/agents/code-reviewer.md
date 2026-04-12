@@ -4,7 +4,7 @@ description: 코드 변경 사항을 .claude/rules/ 의 모든 규칙(refactor, 
 model: sonnet
 effort: high
 maxTurns: 15
-color: cyan
+color: green
 memory: project
 tools: Read, Glob, Grep
 disallowedTools: Bash, Edit, Write, NotebookEdit, Agent

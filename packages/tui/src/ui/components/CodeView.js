@@ -182,28 +182,31 @@ const highlightLine = (line, lang) => {
 
 // --- CodeView component ---
 
-const CodeView = ({ code, lang = 'text', maxLines = 80 }) => {
+const CodeView = ({ code, lang = 'text', maxLines = 80, path }) => {
   const allLines = (code || '').split('\n')
   const visible = allLines.length > maxLines ? allLines.slice(0, maxLines) : allLines
   const truncated = allLines.length - visible.length
   const gutterWidth = String(visible.length).length
 
+  const truncationHint = path
+    ? `${' '.repeat(gutterWidth)} ... +${truncated} lines (원본: ${path})`
+    : `${' '.repeat(gutterWidth)} ... +${truncated} lines`
+
   return h(Box, { flexDirection: 'column' },
-    ...visible.map((line, i) => {
-      const lineNum = String(i + 1).padStart(gutterWidth)
+    ...visible.map((line, idx) => {
+      const lineNum = String(idx + 1).padStart(gutterWidth)
       const tokens = highlightLine(line, lang)
-      return h(Box, { key: i },
+      return h(Box, { key: idx },
         h(Text, { color: 'gray', dimColor: true }, `${lineNum} `),
         h(Text, null,
-          ...tokens.map((t, j) =>
-            h(Text, { key: j, color: t.color || undefined }, t.text)
+          ...tokens.map((token, tokenIdx) =>
+            h(Text, { key: tokenIdx, color: token.color || undefined }, token.text)
           ),
         ),
       )
     }),
     truncated > 0
-      ? h(Text, { color: 'gray', dimColor: true },
-          `${' '.repeat(gutterWidth)} ... +${truncated} lines`)
+      ? h(Text, { color: 'gray', dimColor: true }, truncationHint)
       : null,
   )
 }

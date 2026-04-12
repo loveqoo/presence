@@ -122,6 +122,23 @@ const handleModels = (input, ctx) => {
   })
 }
 
+const handleCopy = async (_input, ctx) => {
+  const { messages, addMessage } = ctx
+  // 마지막 agent 또는 error 응답을 찾아 클립보드에 복사
+  const lastResponse = [...messages].reverse().find(msg => msg.role === 'agent' || msg.role === 'error')
+  if (!lastResponse) {
+    addMessage({ role: 'system', content: t('copy_cmd.empty'), transient: true })
+    return
+  }
+  try {
+    const { execSync } = await import('child_process')
+    execSync('pbcopy', { input: lastResponse.content, stdio: ['pipe', 'pipe', 'pipe'] })
+    addMessage({ role: 'system', content: t('copy_cmd.copied'), transient: true })
+  } catch (_) {
+    addMessage({ role: 'system', content: lastResponse.content, transient: true })
+  }
+}
+
 // --- Dispatch table ---
 
 const commandMap = new Map([
@@ -143,6 +160,7 @@ const commandMap = new Map([
   ['/todos',      handleTodos],
   ['/sessions',   handleSessions],
   ['/statusline', handleStatusline],
+  ['/copy',       handleCopy],
 ])
 
 // Returns Promise<boolean> — true if input was (or looked like) a slash command.

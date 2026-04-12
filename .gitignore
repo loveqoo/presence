@@ -3,3 +3,4 @@ node_modules/
 *.log
 .claude/agent-memory/
 .claude/.review-hash
+.claude/.plan-review-hash

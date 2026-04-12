@@ -80,10 +80,7 @@ const App = (props) => {
     return h(TranscriptOverlay, {
       debug: agentState.debug, lastPrompt, lastResponse,
       opTrace: agentState.opTrace, recalledMemories: agentState.recalledMemories,
-      onClose: () => {
-        setShowTranscript(false)
-        process.stdout.write('\x1b[2J\x1b[H')
-      },
+      onClose: () => setShowTranscript(false),
     })
   }
 

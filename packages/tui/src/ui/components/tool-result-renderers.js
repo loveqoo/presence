@@ -35,7 +35,7 @@ const renderFileList = (_tool, args, result) => {
 
 const renderFileRead = (_tool, args, result) => ({
   header: h(Text, { color: 'gray' }, `file_read ${args.path || ''}`),
-  body: h(CodeView, { code: result, lang: detectLang(args.path) }),
+  body: h(CodeView, { code: result, lang: detectLang(args.path), path: args.path }),
 })
 
 const renderFileWrite = (_tool, args, result) => ({
