@@ -68,7 +68,7 @@ const useAgentState = (state) => {
         const val = change.nextValue
         setConversationHistory(Array.isArray(val) ? val : [])
       },
-      _retry: (change) => {
+      [STATE_PATH.RETRY]: (change) => {
         const info = change.nextValue
         setRetryInfo(info)
         setActivity(`retry ${info.attempt}/${info.maxRetries}...`)

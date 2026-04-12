@@ -1,4 +1,5 @@
 import { createAuthClient } from '../src/auth-client.js'
+import { REST_ERROR } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 // createAuthClient: 401 자동 재시도 + refresh 실패 시 AUTH_FAILED 에러 throw.
@@ -49,7 +50,7 @@ const run = async () => {
     catch (err) { thrown = err }
 
     assert(thrown !== null, 'createAuthClient: refresh 실패 → throw')
-    assert(thrown?.kind === 'AUTH_FAILED',
+    assert(thrown?.kind === REST_ERROR.AUTH_FAILED,
       'createAuthClient: 에러 kind=AUTH_FAILED (KG-01 sentinel)')
     assert(authFailedCalled, 'createAuthClient: onAuthFailed 콜백 호출')
   }

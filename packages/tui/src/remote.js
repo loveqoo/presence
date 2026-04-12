@@ -1,3 +1,5 @@
+import { WS_CLOSE } from '@presence/core/core/policies.js'
+import { defaultSessionId } from '@presence/infra/infra/constants.js'
 import { initI18n } from '@presence/infra/i18n'
 import { createTokenRefresher, createAuthClient } from './auth-client.js'
 import { RemoteSession } from './remote-session.js'
@@ -21,7 +23,7 @@ async function runRemote(baseUrl, opts = {}) {
     onAuthFailed() { authFailedHolder.handler() },
   })
 
-  const sessionId = username ? `${username}-default` : 'user-default'
+  const sessionId = defaultSessionId(username)
   const sessionBase = `/api/sessions/${sessionId}`
   const [initialTools, agents, config] = await Promise.all([
     client.getJson(`${sessionBase}/tools`).catch(() => []),
@@ -43,7 +45,7 @@ async function runRemote(baseUrl, opts = {}) {
     config, agents, cwd, gitBranch, initialTools, tryRefresh,
   })
 
-  authFailedHolder.handler = function markDisconnected() { session.markDisconnected(4001) }
+  authFailedHolder.handler = function markDisconnected() { session.markDisconnected(WS_CLOSE.AUTH_FAILED) }
 
   function onSignal() { session.disconnect(); process.exit(0) }
   process.on('SIGTERM', onSignal)

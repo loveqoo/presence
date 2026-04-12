@@ -1,3 +1,4 @@
+import { REST_ERROR } from '@presence/core/core/policies.js'
 import { jsonRequest, refreshAccessToken } from './http.js'
 
 // =============================================================================
@@ -37,8 +38,8 @@ function createAuthClient(baseUrl, authState, tryRefresh, opts = {}) {
         return retry.body
       }
       if (onAuthFailed) onAuthFailed()
-      const err = new Error('AUTH_FAILED')
-      err.kind = 'AUTH_FAILED'
+      const err = new Error(REST_ERROR.AUTH_FAILED)
+      err.kind = REST_ERROR.AUTH_FAILED
       throw err
     }
     return res.body

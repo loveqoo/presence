@@ -1,5 +1,7 @@
 import React from 'react'
 import { render } from 'ink'
+import { REST_ERROR } from '@presence/core/core/policies.js'
+import { defaultSessionId } from '@presence/infra/infra/constants.js'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { t } from '@presence/infra/i18n'
 import { App } from './ui/App.js'
@@ -37,7 +39,7 @@ class RemoteSession {
     this.#gitBranch = opts.gitBranch
     this.#currentTools = opts.initialTools
     this.#tryRefresh = opts.tryRefresh
-    this.#currentSessionId = opts.username ? `${opts.username}-default` : 'user-default'
+    this.#currentSessionId = defaultSessionId(opts.username)
     this.#disconnected = null
     this.#pendingInitialMessages = []
     this.#remoteState = this.#createMirrorState(this.#currentSessionId)
@@ -92,7 +94,7 @@ class RemoteSession {
           if (res.type === 'error') throw new Error(res.content)
           return res.content
         } catch (err) {
-          if (err?.kind === 'AUTH_FAILED') return ''
+          if (err?.kind === REST_ERROR.AUTH_FAILED) return ''
           throw err
         }
       },

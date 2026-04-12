@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws'
-import { WS_CLOSE } from '@presence/core/core/policies.js'
+import { WS_CLOSE, WS_RECONNECT, STATE_PATH } from '@presence/core/core/policies.js'
 import { State } from './state.js'
 
 // =============================================================================
@@ -10,13 +10,13 @@ import { State } from './state.js'
 // =============================================================================
 
 const SNAPSHOT_PATHS = [
-  'turnState', 'lastTurn', 'turn',
-  'context.memories', 'context.conversationHistory',
-  '_streaming', '_retry', '_approve',
-  '_debug.lastTurn', '_debug.lastPrompt', '_debug.lastResponse',
-  '_debug.opTrace', '_debug.recalledMemories', '_debug.iterationHistory',
-  '_budgetWarning', '_toolResults',
-  'todos', 'events', 'delegates',
+  STATE_PATH.TURN_STATE, STATE_PATH.LAST_TURN, STATE_PATH.TURN,
+  STATE_PATH.CONTEXT_MEMORIES, STATE_PATH.CONTEXT_CONVERSATION_HISTORY,
+  STATE_PATH.STREAMING, STATE_PATH.RETRY, STATE_PATH.APPROVE,
+  STATE_PATH.DEBUG_LAST_TURN, STATE_PATH.DEBUG_LAST_PROMPT, STATE_PATH.DEBUG_LAST_RESPONSE,
+  STATE_PATH.DEBUG_OP_TRACE, STATE_PATH.DEBUG_RECALLED_MEMORIES, STATE_PATH.DEBUG_ITERATION_HISTORY,
+  STATE_PATH.BUDGET_WARNING, STATE_PATH.TOOL_RESULTS,
+  STATE_PATH.TODOS, STATE_PATH.EVENTS, STATE_PATH.DELEGATES,
 ]
 
 const noop = Function.prototype
@@ -112,7 +112,7 @@ class MirrorState extends State {
       return
     }
     this.setReconnecting(true)
-    const backoff = Math.min(500 * Math.pow(2, this.connectAttempt++), 15_000)
+    const backoff = Math.min(WS_RECONNECT.BACKOFF_BASE_MS * Math.pow(2, this.connectAttempt++), WS_RECONNECT.BACKOFF_MAX_MS)
     this.reconnectTimer = setTimeout(this.connect.bind(this), backoff)
   }
 

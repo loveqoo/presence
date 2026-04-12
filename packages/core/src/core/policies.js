@@ -60,6 +60,15 @@ export const JOB = Object.freeze({
   HISTORY_TTL_DAYS: 90,
 })
 
+export const REST_ERROR = Object.freeze({
+  AUTH_FAILED: 'AUTH_FAILED',
+})
+
+export const WS_RECONNECT = Object.freeze({
+  BACKOFF_BASE_MS: 500,
+  BACKOFF_MAX_MS: 15_000,
+})
+
 // WebSocket close 코드 (wire format)
 export const WS_CLOSE = Object.freeze({
   AUTH_FAILED: 4001,
@@ -89,6 +98,7 @@ export const STATE_PATH = Object.freeze({
   APPROVE: '_approve',
   BUDGET_WARNING: '_budgetWarning',
   COMPACTION_EPOCH: '_compactionEpoch',
+  RETRY: '_retry',
   STREAMING: '_streaming',
   RECONNECTING: '_reconnecting',
   TOOL_RESULTS: '_toolResults',
