@@ -31,6 +31,7 @@ const useAgentState = (state) => {
   const [retryInfo, setRetryInfo] = useState(null)
   const [approve, setApprove] = useState(null)
   const [streaming, setStreaming] = useState(null)
+  const [reconnecting, setReconnecting] = useState(false)
   const [debug, setDebug] = useState(null)
   const [opTrace, setOpTrace] = useState([])
   const [recalledMemories, setRecalledMemories] = useState([])
@@ -50,7 +51,9 @@ const useAgentState = (state) => {
       [STATE_PATH.TURN_STATE]: (change) => {
         const phase = change.nextValue
         setStatus(deriveStatus(state))
-        setActivity(phase.tag === 'working' ? 'thinking...' : null)
+        // activity 는 retry 같은 override 전용. 기본 라벨(thinking/streaming)은
+        // App 이 status + streaming 으로 파생해 StatusBar 에 전달 (FP-15).
+        if (phase.tag !== 'working') setActivity(null)
       },
       [STATE_PATH.LAST_TURN]: (change) => {
         setStatus(deriveStatus(state))
@@ -72,6 +75,7 @@ const useAgentState = (state) => {
       },
       [STATE_PATH.APPROVE]: (change) => setApprove(change.nextValue || null),
       [STATE_PATH.STREAMING]: (change) => setStreaming(change.nextValue || null),
+      [STATE_PATH.RECONNECTING]: (change) => setReconnecting(!!change.nextValue),
       [STATE_PATH.DEBUG_LAST_TURN]: (change) => setDebug(change.nextValue || null),
       [STATE_PATH.DEBUG_OP_TRACE]: (change) => { const v = change.nextValue; setOpTrace(Array.isArray(v) ? v : []) },
       [STATE_PATH.DEBUG_RECALLED_MEMORIES]: (change) => { const v = change.nextValue; setRecalledMemories(Array.isArray(v) ? v : []) },
@@ -100,6 +104,7 @@ const useAgentState = (state) => {
     setTodos(state.get(STATE_PATH.TODOS) || [])
     setApprove(state.get(STATE_PATH.APPROVE) || null)
     setStreaming(state.get(STATE_PATH.STREAMING) || null)
+    setReconnecting(!!state.get(STATE_PATH.RECONNECTING))
     setDebug(state.get(STATE_PATH.DEBUG_LAST_TURN) || null)
     setOpTrace(state.get(STATE_PATH.DEBUG_OP_TRACE) || [])
     setRecalledMemories(state.get(STATE_PATH.DEBUG_RECALLED_MEMORIES) || [])
@@ -117,7 +122,7 @@ const useAgentState = (state) => {
 
   return {
     status, turn, memoryCount, activity, lastTurn,
-    todos, events, delegates, retryInfo, approve, streaming, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolResults, conversationHistory,
+    todos, events, delegates, retryInfo, approve, streaming, reconnecting, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolResults, conversationHistory,
   }
 }
 

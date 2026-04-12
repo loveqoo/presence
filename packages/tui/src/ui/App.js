@@ -66,6 +66,13 @@ const App = (props) => {
 
   const isWorking = agentState.status === 'working'
 
+  // FP-15: 스트리밍 content 가 도착한 뒤에는 "thinking" 이 아니라 "응답 중" 으로 전환.
+  // activity 는 retry 같은 override 가 있으면 우선이고, 없으면 streaming 유무로 결정.
+  // 둘 다 없으면 null → StatusBar 가 기본 "thinking..." 으로 fallback.
+  const streamingActive = isWorking && !!agentState.streaming?.content
+  const statusActivity = agentState.activity
+    || (streamingActive ? t('status.streaming') : null)
+
   // Transcript overlay
   if (showTranscript) {
     const lastPrompt = state ? state.get(STATE_PATH.DEBUG_LAST_PROMPT) : null
@@ -158,10 +165,11 @@ const App = (props) => {
     h(StatusBar, {
       status: agentState.status, turn: agentState.turn,
       memoryCount: agentState.memoryCount, agentName,
-      activity: agentState.activity, toolCount: tools.length,
+      activity: statusActivity, toolCount: tools.length,
       cwd, gitBranch, model: currentModel,
       budgetPct, visibleItems: statusItems,
       sessionId, errorHint,
+      reconnecting: agentState.reconnecting && !disconnected,
     }),
   )
 }

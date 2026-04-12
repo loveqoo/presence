@@ -3,6 +3,9 @@
 import { createInterface } from 'node:readline'
 import { createUserStore } from './user-store.js'
 import { ensureSecret } from './token.js'
+import { removeUserCompletely } from './remove-user.js'
+import { Config } from '../config.js'
+import { Memory } from '../memory.js'
 
 // =============================================================================
 // Auth CLI: 사용자 관리 도구
@@ -96,9 +99,28 @@ const cmdAdd = async ({ username }) => {
   console.log(`User '${user.username}' added with roles: [${user.roles.join(', ')}]`)
 }
 
-const cmdRemove = ({ username }) => {
+const cmdRemove = async ({ username }) => {
   const store = createUserStore()
-  store.removeUser(username)
+  if (!store.findUser(username)) {
+    console.error(`User not found: ${username}`)
+    process.exit(1)
+  }
+
+  // Memory 인스턴스 부팅 — embed credentials 없으면 null 이므로 1 단계는 skip.
+  let memory = null
+  try {
+    const config = Config.loadUserMerged(username)
+    memory = await Memory.create(config)
+  } catch (err) {
+    console.warn(`Memory init skipped: ${err.message}`)
+  }
+
+  const { memoryCount, dirRemoved } = await removeUserCompletely({
+    store, memory, username, userDir: Config.userDataPath(username),
+  })
+
+  if (memoryCount > 0) console.log(`Memory cleared: ${memoryCount} entries.`)
+  if (dirRemoved) console.log(`Removed user directory.`)
   console.log(`User '${username}' removed.`)
 }
 

@@ -9,7 +9,6 @@ import { State } from './state.js'
 // 로컬 cache 갱신 + HookBus publish.
 // =============================================================================
 
-// 서버 WATCHED_PATHS에 대응하는 플랫 경로 목록 (wildcard 제외)
 const SNAPSHOT_PATHS = [
   'turnState', 'lastTurn', 'turn',
   'context.memories', 'context.conversationHistory',
@@ -20,17 +19,23 @@ const SNAPSHOT_PATHS = [
   'todos', 'events', 'delegates',
 ]
 
-const getNestedValue = (obj, path) =>
-  path.split('.').reduce((o, k) => o?.[k], obj)
+function getNestedValue(obj, path) {
+  let cur = obj
+  for (const key of path.split('.')) {
+    if (cur == null) return undefined
+    cur = cur[key]
+  }
+  return cur
+}
 
 class MirrorState extends State {
   constructor(opts = {}) {
     super()
     const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable } = opts
-    this.cache = {}
+    this.cache = { _reconnecting: false }
     this.wsUrl = wsUrl
     this.sessionId = sessionId
-    this.getHeaders = getHeaders || (() => headers)
+    this.getHeaders = getHeaders || (headers ? () => headers : () => undefined)
     this.onAuthFailed = onAuthFailed
     this.onUnrecoverable = onUnrecoverable
     this.ws = null
@@ -43,68 +48,42 @@ class MirrorState extends State {
   get(path) { return this.cache[path] }
   set() { /* no-op: 서버 REST 경유 */ }
 
-  // 서버 state patch 수신: 특정 경로 값 업데이트 + publish
   applyPatch(path, value) {
     const prev = this.cache[path]
     this.cache[path] = value
-    this.publishChange(path, prev, value)
+    this.bus.publish({ path, prevValue: prev, nextValue: value }, this)
   }
 
-  // 서버 init 수신: 전체 스냅샷으로 cache 초기화 + 일괄 publish
   applySnapshot(snapshot) {
     const prev = {}
     for (const path of SNAPSHOT_PATHS) {
       prev[path] = this.cache[path]
       this.cache[path] = getNestedValue(snapshot, path)
     }
-    for (const path of SNAPSHOT_PATHS) this.publishChange(path, prev[path], this.cache[path])
+    for (const path of SNAPSHOT_PATHS) {
+      this.bus.publish({ path, prevValue: prev[path], nextValue: this.cache[path] }, this)
+    }
   }
 
-  // StateChange (remote mirror): prevRoot/nextRoot 없이 path·prevValue·nextValue만.
-  publishChange(path, prevValue, nextValue) {
-    this.bus.publish({ path, prevValue, nextValue }, this)
+  setReconnecting(flag) {
+    if (this.cache._reconnecting === flag) return
+    const prev = this.cache._reconnecting
+    this.cache._reconnecting = flag
+    this.bus.publish({ path: '_reconnecting', prevValue: prev, nextValue: flag }, this)
   }
 
   connect() {
     if (this.stopped) return
-    const headers = this.getHeaders()
-    this.ws = new WebSocket(this.wsUrl, headers ? { headers } : undefined)
-
+    const hdrs = this.getHeaders()
+    this.ws = new WebSocket(this.wsUrl, hdrs ? { headers: hdrs } : undefined)
     this.ws.on('open', () => {
       this.connectAttempt = 0
+      this.setReconnecting(false)
       this.ws.send(JSON.stringify({ type: 'join', session_id: this.sessionId }))
     })
-
-    this.ws.on('message', (data) => this.handleMessage(data))
-
-    this.ws.on('close', (code) => this.handleClose(code))
-
-    this.ws.on('error', () => {})  // close 이벤트에서 재연결 처리
-  }
-
-  async handleClose(code) {
-    if (this.stopped) return
-    // 복구 불가: 비밀번호 변경 필요 / Origin 거부
-    if (code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED || code === WS_CLOSE.ORIGIN_NOT_ALLOWED) {
-      this.stopped = true
-      if (this.onUnrecoverable) this.onUnrecoverable(code)
-      return
-    }
-    // 인증 실패: 토큰 갱신 1회 시도 후 재연결
-    if (code === WS_CLOSE.AUTH_FAILED && this.onAuthFailed) {
-      const refreshed = await this.onAuthFailed().catch(() => false)
-      if (refreshed) {
-        this.connectAttempt = 0
-        this.connect()
-        return
-      }
-      this.stopped = true
-      if (this.onUnrecoverable) this.onUnrecoverable(code)
-      return
-    }
-    // 그 외: 지수 백오프 재연결
-    const delay = Math.min(500 * Math.pow(2, this.connectAttempt++), 15_000)
-    this.reconnectTimer = setTimeout(() => this.connect(), delay)
+    this.ws.on('message', this.handleMessage.bind(this))
+    this.ws.on('close', this.handleClose.bind(this))
+    this.ws.on('error', Function.prototype)
   }
 
   handleMessage(data) {
@@ -115,6 +94,26 @@ class MirrorState extends State {
     } catch (_) {}
   }
 
+  async handleClose(code) {
+    if (this.stopped) return
+    if (code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED || code === WS_CLOSE.ORIGIN_NOT_ALLOWED) {
+      this.stopped = true
+      if (this.onUnrecoverable) this.onUnrecoverable(code)
+      return
+    }
+    if (code === WS_CLOSE.AUTH_FAILED && this.onAuthFailed) {
+      let refreshed = false
+      try { refreshed = await this.onAuthFailed() } catch (_) {}
+      if (refreshed) { this.connectAttempt = 0; this.connect(); return }
+      this.stopped = true
+      if (this.onUnrecoverable) this.onUnrecoverable(code)
+      return
+    }
+    this.setReconnecting(true)
+    const backoff = Math.min(500 * Math.pow(2, this.connectAttempt++), 15_000)
+    this.reconnectTimer = setTimeout(this.connect.bind(this), backoff)
+  }
+
   disconnect() {
     this.stopped = true
     clearTimeout(this.reconnectTimer)
@@ -122,6 +121,6 @@ class MirrorState extends State {
   }
 }
 
-const createMirrorState = (opts) => new MirrorState(opts)
+function createMirrorState(opts) { return new MirrorState(opts) }
 
 export { MirrorState, createMirrorState }

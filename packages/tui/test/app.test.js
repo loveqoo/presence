@@ -844,6 +844,114 @@ const mountApp = async (props) => {
   assert(frame.includes('thinking'), 'App streaming: shows thinking when no content')
 }
 
+// 63b-FP15. App streaming with content → StatusBar 는 "응답 중..." (FP-15)
+{
+  const state = createOriginState({
+    turnState: TurnState.working('query'),
+    lastTurn: null,
+    turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+    _streaming: { status: 'receiving', content: '오늘 서울은 맑고 ', length: 20 },
+  })
+  state.set('_streaming', { status: 'receiving', content: '오늘 서울은 맑고 ', length: 20 })
+  const frame = await mountApp({ state })
+  assert(frame.includes('응답 중'),
+    'FP-15: 스트리밍 content 가 도착하면 StatusBar 가 "응답 중" 으로 전환')
+  assert(!frame.match(/thinking\.\.\./),
+    'FP-15: streaming 중에는 thinking 라벨을 유지하지 않는다')
+}
+
+// 63b-FP23. App reconnecting 상태 → StatusBar 에 "연결 중..." 표시 (FP-23)
+{
+  const state = createOriginState({
+    turnState: TurnState.idle(),
+    lastTurn: null,
+    turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  state.set('_reconnecting', true)
+  const frame = await mountApp({ state })
+  assert(frame.includes('연결 중'),
+    'FP-23: reconnecting=true → StatusBar 에 "연결 중..." indicator')
+  assert(!frame.includes('● idle'),
+    'FP-23: reconnecting 시 idle 인디케이터는 가려진다')
+}
+
+// 63b-FP23b. disconnected 배너가 이미 떠 있으면 reconnecting indicator 는 보이지 않는다
+{
+  const state = createOriginState({
+    turnState: TurnState.idle(),
+    lastTurn: null,
+    turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  state.set('_reconnecting', true)
+  const frame = await mountApp({ state, disconnected: { code: 4001, at: Date.now() } })
+  assert(!frame.includes('연결 중'),
+    'FP-23: disconnected 배너가 있으면 reconnecting indicator 가 중복되지 않는다')
+}
+
+// 63b-FP15/23 StatusBar 단위 렌더 —
+// - activity override(retry 등) 는 thinking/streaming 기본 라벨보다 우선
+// - reconnecting 은 status 보다 우선
+{
+  // FP-15: activity 에 'retry 1/3...' override 가 있으면 그대로 노출
+  const out1 = renderToString(
+    React.createElement(StatusBar, {
+      status: 'working', activity: 'retry 1/3...',
+    })
+  )
+  assert(out1.includes('retry 1/3'),
+    'StatusBar FP-15: activity override(retry) 가 기본 라벨을 대체')
+  assert(!out1.includes('응답 중'),
+    'StatusBar FP-15: retry override 시 streaming 라벨 미표시')
+
+  // FP-15: activity=null 이면 기본 thinking
+  const out2 = renderToString(
+    React.createElement(StatusBar, { status: 'working', activity: null })
+  )
+  assert(out2.includes('thinking'),
+    'StatusBar FP-15: activity=null → 기본 thinking 라벨')
+
+  // FP-15: activity='응답 중...' 이면 그대로 노출 (App 이 streaming 으로부터 파생)
+  const out3 = renderToString(
+    React.createElement(StatusBar, { status: 'working', activity: '응답 중...' })
+  )
+  assert(out3.includes('응답 중'),
+    'StatusBar FP-15: App 이 파생해 넘긴 streaming 라벨 표시')
+  assert(!out3.includes('thinking'),
+    'StatusBar FP-15: streaming 라벨 제시 시 thinking 노출 안 함')
+
+  // FP-23: reconnecting=true 는 working/idle 상관없이 "연결 중..." 노출
+  const out4 = renderToString(
+    React.createElement(StatusBar, { status: 'working', reconnecting: true })
+  )
+  assert(out4.includes('연결 중'),
+    'StatusBar FP-23: reconnecting=true → 연결 중 indicator')
+  assert(!out4.includes('thinking'),
+    'StatusBar FP-23: reconnecting 시 working 라벨 가려짐')
+
+  const out5 = renderToString(
+    React.createElement(StatusBar, { status: 'idle', reconnecting: true })
+  )
+  assert(out5.includes('연결 중'),
+    'StatusBar FP-23: idle 중에도 reconnecting 라벨 우선')
+  assert(!out5.includes('● idle'),
+    'StatusBar FP-23: reconnecting 시 idle dot 가려짐')
+}
+
 // --- FP-04 / FP-09 / FP-25 / FP-26: 키바인딩 힌트 라인 ---
 
 // 63c. idle 상태에서 키 힌트 라인 노출

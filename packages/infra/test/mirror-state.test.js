@@ -239,6 +239,68 @@ async function run() {
     await mock.close()
   }
 
+  // RS10 (FP-23): 복구 가능한 close 후 재연결 중 `_reconnecting` 토글.
+  //   - 초기: false
+  //   - 서버 terminate → handleClose 가 setReconnecting(true) → publish
+  //   - 재연결 성공 (open) → setReconnecting(false) → publish
+  {
+    const mock = createMockWsServer()
+    const port = await mock.start()
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
+
+    await delay(100)
+    assert(rs.get('_reconnecting') === false,
+      'RS10: 초기 상태 _reconnecting=false')
+
+    const events = []
+    rs.hooks.on('_reconnecting', (change) => {
+      events.push(change.nextValue)
+    })
+
+    // 서버 측 강제 종료 → handleClose → 지수 백오프 경로
+    mock.connections[0].terminate()
+    await delay(100)  // backoff 시작되기 전에 toggled true 확인
+    assert(rs.get('_reconnecting') === true,
+      'RS10: 서버 close 직후 _reconnecting=true')
+    assert(events.length >= 1 && events[0] === true,
+      'RS10: _reconnecting=true publish 이벤트 수신')
+
+    // 재연결 완료 대기
+    await delay(700)
+    assert(mock.connections.length === 2,
+      'RS10: 지수 백오프 재연결 성공')
+    assert(rs.get('_reconnecting') === false,
+      'RS10: 재연결 open 후 _reconnecting=false 복귀')
+    assert(events[events.length - 1] === false,
+      'RS10: 마지막 publish 는 false (복귀)')
+
+    rs.disconnect()
+    await mock.close()
+  }
+
+  // RS11 (FP-23): 4002 PASSWORD_CHANGE_REQUIRED 는 재연결 경로가 아니므로
+  // _reconnecting 을 true 로 설정하지 않는다.
+  {
+    const mock = createMockWsServer()
+    const port = await mock.start()
+    const rs = createMirrorState({
+      wsUrl: `ws://127.0.0.1:${port}`,
+      onUnrecoverable: () => {},
+    })
+
+    await delay(50)
+    assert(rs.get('_reconnecting') === false, 'RS11 setup: 초기 false')
+
+    mock.connections[0].close(WS_CLOSE.PASSWORD_CHANGE_REQUIRED)
+    await delay(200)
+
+    assert(rs.get('_reconnecting') === false,
+      'RS11: unrecoverable close 는 reconnecting 플래그 건드리지 않음')
+
+    rs.disconnect()
+    await mock.close()
+  }
+
   summary()
 }
 

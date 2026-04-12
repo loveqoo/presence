@@ -29,6 +29,8 @@
   },
   "status": {
     "thinking": "thinking...",
+    "streaming": "응답 중...",
+    "reconnecting": "연결 중...",
     "retry": "retry {{attempt}}/{{max}}...",
     "retry_notice": "\n⟳ JSON 파싱 실패, 재시도 중... ({{attempt}}/{{max}})"
   },

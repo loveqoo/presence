@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Box, Text } from 'ink'
 import { basename } from 'path'
+import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
@@ -54,12 +55,11 @@ const renderSegments = (segments) => {
   return elements
 }
 
-const buildIndicator = (status, frame, activity, elapsedStr, errorHint) => {
-  if (status === 'working') return h(Text, { color: 'yellow' }, `${SPINNER_FRAMES[frame]} ${activity || 'thinking...'}${elapsedStr}`)
-  if (status === 'error') {
-    const label = errorHint ? `✗ error: ${errorHint}` : '✗ error'
-    return h(Text, { color: 'red' }, label)
-  }
+// 우선순위: reconnecting > working > error > idle.
+const buildIndicator = (ctx) => {
+  if (ctx.reconnecting) return h(Text, { color: 'yellow' }, `${SPINNER_FRAMES[ctx.frame]} ${t('status.reconnecting')}`)
+  if (ctx.status === 'working') return h(Text, { color: 'yellow' }, `${SPINNER_FRAMES[ctx.frame]} ${ctx.activity || t('status.thinking')}${ctx.elapsedStr}`)
+  if (ctx.status === 'error') return h(Text, { color: 'red' }, ctx.errorHint ? `✗ error: ${ctx.errorHint}` : '✗ error')
   return h(Text, { color: 'green' }, '● idle')
 }
 
@@ -68,14 +68,16 @@ const StatusBar = (props) => {
     status = 'idle', turn = 0, memoryCount = 0, activity = null,
     toolCount = 0, cwd = '', gitBranch = '', model = '',
     budgetPct = null, visibleItems = null,
-    sessionId = '', errorHint = null,
+    sessionId = '', errorHint = null, reconnecting = false,
   } = props
   const [frame, setFrame] = useState(0)
   const [elapsed, setElapsed] = useState(0)
   const startRef = useRef(null)
 
+  // spinner 는 working 또는 reconnecting 상태에서 돌아간다 (FP-23).
+  const spinning = status === 'working' || reconnecting
   useEffect(() => {
-    if (status !== 'working') {
+    if (!spinning) {
       startRef.current = null
       setElapsed(0)
       return
@@ -87,11 +89,11 @@ const StatusBar = (props) => {
       if (startRef.current) setElapsed(Date.now() - startRef.current)
     }, 80)
     return () => clearInterval(timer)
-  }, [status])
+  }, [spinning])
 
   const items = visibleItems || DEFAULT_ITEMS
   const elapsedStr = status === 'working' && elapsed > 0 ? ` ${formatElapsed(elapsed)}` : ''
-  const indicator = buildIndicator(status, frame, activity, elapsedStr, errorHint)
+  const indicator = buildIndicator({ status, frame, activity, elapsedStr, errorHint, reconnecting })
 
   const segments = buildSegments(items, {
     turn, memoryCount, toolCount, budgetPct,

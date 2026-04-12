@@ -53,11 +53,13 @@ const tests = [
   'packages/infra/test/local-tools.test.js',
   'packages/infra/test/config.test.js',
   'packages/infra/test/auth-user-store.test.js',
+  'packages/infra/test/auth-remove-user.test.js',
   'packages/infra/test/auth-token.test.js',
   'packages/infra/test/auth-provider.test.js',
   'packages/infra/test/persona.test.js',
   'packages/infra/test/memory.test.js',
   'packages/tui/test/app.test.js',
+  'packages/tui/test/remote.test.js',
   'packages/tui/test/interactive.test.js',
   'packages/tui/test/session-commands.test.js',
   // History compaction

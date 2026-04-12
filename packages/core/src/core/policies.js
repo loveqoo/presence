@@ -90,6 +90,7 @@ export const STATE_PATH = Object.freeze({
   BUDGET_WARNING: '_budgetWarning',
   COMPACTION_EPOCH: '_compactionEpoch',
   STREAMING: '_streaming',
+  RECONNECTING: '_reconnecting',
   TOOL_RESULTS: '_toolResults',
   // debug
   DEBUG_LAST_TURN: '_debug.lastTurn',

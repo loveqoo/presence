@@ -31,7 +31,10 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
   - `POST /api/sessions/:id/approve` — 승인/거절 응답
   - `POST /api/sessions/:id/cancel` — 처리 취소
   각 엔드포인트의 의미는 `session.md`, `auth.md`에 위임한다.
-- I5. **401 자동 refresh**: HTTP 클라이언트(`createAuthClient`)는 401 응답 시 `authState`가 있고 refresh 토큰이 유효하면 `POST /api/auth/refresh` 1회 시도 후 원래 요청을 재시도한다. refresh 실패 또는 `authState` 부재 시 401 응답 body가 호출자에게 전달됨 (재로그인 자동 유도 미구현 — Known Gap). 동시 다발 401 요청은 단일 refreshPromise로 직렬화(`createTokenRefresher`의 Promise 단일화).
+- I5. **401 자동 refresh + 인증 실패 수렴**: HTTP 클라이언트(`createAuthClient`)는 401 응답 시 `authState`가 있고 refresh 토큰이 유효하면 `POST /api/auth/refresh` 1회 시도 후 원래 요청을 재시도한다. refresh 실패 시 `opts.onAuthFailed()` 콜백을 호출한 뒤 `{ kind: 'AUTH_FAILED' }` sentinel error를 throw한다. `handleInput`은 `AUTH_FAILED` 에러를 swallow한다(disconnected 배너가 이미 노출되므로 재출력 없음). 동시 다발 401 요청은 단일 `refreshPromise`로 직렬화(`createTokenRefresher`의 Promise 단일화). `onAuthFailed` 콜백은 `runRemote` 내에서 late-binding으로 교체된다:
+  - 부트스트랩 단계(세션 생성 전): `console.error` + `process.exit(1)` — fail-fast. 유저는 TUI를 재실행해 로그인 루프로 진입.
+  - 세션 생성 후(runtime): `session.markDisconnected(4001)` — WS close 4001과 동일한 disconnected 배너 UX로 수렴. `RemoteSession.markDisconnected(code)`는 `#disconnected = { code, at: Date.now() }`를 설정하고 App을 rerender한다.
+  - `opts.httpFn`은 테스트에서 `jsonRequest`를 대체하기 위한 주입 지점(기본값 `jsonRequest`).
 
 **WebSocket 프로토콜**
 
@@ -79,7 +82,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 ## 테스트 커버리지
 
 - I1, I3 → `packages/server/test/server.test.js` (부팅 플로우, mustChangePassword WS 4002)
-- I5 → (직접 테스트 없음) ⚠️ createAuthClient의 refresh 재시도 로직 단위 테스트 없음
+- I5 → `packages/tui/test/remote.test.js` (401/refresh 성공/refresh 실패/onAuthFailed 호출/AUTH_FAILED throw/부트스트랩 vs runtime onAuthFailed 분기)
 - I7 → `packages/server/test/server.test.js` (join/init/state 시퀀스)
 - I9, I12 → `packages/tui/test/scenarios/session-switch.scenario.js` (FP-14, 전환 후 StatusBar session 세그먼트 표시 검증)
 - I9 (switchSession 시스템 메시지 주입) → (직접 테스트 없음) ⚠️ pendingInitialMessages 소비 및 ChatArea 노출 시나리오 테스트 없음 (FP-37)
@@ -107,3 +110,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-11: FP-29/FP-30/FP-37 해소 반영 — I13에 InputBar hint prop 전달 명시(input_hint.disconnected). I9에 pendingInitialMessages 주입·소비 계약 추가(세션 전환 시스템 메시지). E5 추가(_streaming.length는 wire 필드이나 UI 노출 금지, content 유무만으로 렌더 결정). 테스트 커버리지에 E5(63b), I9 미커버(FP-37) 추가.
 - 2026-04-11: FP-17/FP-18/FP-19/FP-20/FP-21/FP-24 해소 반영 — I13 보강(disconnected.code별 배너 문구 4종 계약화). I14 신규(진입 시 stdout 출력 순서: 연결 중 메시지 + 세션 초기화 메시지). I15 신규(비밀번호 에코 금지). 테스트 커버리지에 I13/I14/I15 미커버 추가.
 - 2026-04-12: FP-04/FP-09/FP-25/FP-26 해소 반영 — I16 신규(cancel 피드백 메시지는 TUI local-only ephemeral). 키 힌트 라인 노출 조건(idle 상태 전용)은 TUI 내부 렌더링 정책이므로 이 스펙에 포함하지 않음. 테스트 커버리지에 I16 미커버 추가.
+- 2026-04-12: KG-01 해소 — I5를 "재로그인 유도 미구현 Known Gap"에서 "AUTH_FAILED 수렴 경로" 불변식으로 갱신. 부트스트랩 fail-fast vs runtime markDisconnected(4001) late-binding 계약 명시. RemoteSession.markDisconnected 추가. 테스트 커버리지 I5를 packages/tui/test/remote.test.js로 교체.
