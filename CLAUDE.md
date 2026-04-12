@@ -54,10 +54,7 @@
 1. `check-code-review.sh` 훅 — staged diff 해시로 code-reviewer 실행 여부를 검증. 미실행 시 커밋 차단.
 2. `pre-commit-codex-review.sh` 훅 — Codex 일반 품질/보안 검토 (경고). git commit 시 자동 실행.
 
-code-reviewer 통과 후 반드시 리뷰 해시를 기록한다:
-```bash
-git diff --cached | shasum -a 256 | cut -d' ' -f1 > .claude/.review-hash
-```
+code-reviewer 에이전트가 리뷰 완료 시 해시를 직접 기록한다. **메인 에이전트는 리뷰 해시를 직접 기록하지 않는다** — `check-review-hash-write.sh` 훅이 차단한다.
 
 **플랜 수립 후** — ExitPlanMode 호출 전에 반드시 `/codex:adversarial-review`를 실행한다:
 ```
