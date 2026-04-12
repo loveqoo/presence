@@ -41,16 +41,38 @@
 
 ## 품질 관리
 
+### 자동 검증 (훅)
+
 - `.claude/hooks/` — PreToolUse hook으로 코드 편집과 커밋 시점에 규칙을 자동 검증
 - `.claude/rules/` — 경로별 코딩 규칙 (FP, 인터프리터, 테스트, 리팩토링, 티켓)
 
 새로운 규칙이나 검증이 필요하면 hook과 rules에 추가한다.
+
+### 듀얼 리뷰 워크플로우
+
+**커밋 전** — Claude의 git commit 시 두 단계 리뷰가 훅으로 강제된다:
+1. `check-code-review.sh` 훅 — staged diff 해시로 code-reviewer 실행 여부를 검증. 미실행 시 커밋 차단.
+2. `pre-commit-codex-review.sh` 훅 — Codex 일반 품질/보안 검토 (경고). git commit 시 자동 실행.
+
+code-reviewer 통과 후 반드시 리뷰 해시를 기록한다:
+```bash
+git diff --cached | shasum -a 256 | cut -d' ' -f1 > .claude/.review-hash
+```
+
+**플랜 수립 후** — ExitPlanMode 호출 전에 반드시 `/codex:adversarial-review`를 실행한다:
+```
+/codex:adversarial-review [플랜 핵심 설계 결정 요약]
+```
+설계 결함, 엣지 케이스 누락, 복잡도 과잉을 사전에 발견한다. 결과에 따라 플랜을 수정한다.
+
+**막힐 때** — `/codex:rescue`로 디버깅/원인분석을 Codex에 위임한다.
 
 ## 작업 체계 — 에이전트 + 티켓
 
 presence 의 변경은 **에이전트 리뷰** 와 **티켓 레지스트리** 두 축으로 관리한다.
 
 **에이전트 (`.claude/agents/`)**
+- `code-reviewer` — `.claude/rules/` 기준 코드 규칙 검증 (커밋 전 필수)
 - `spec-guardian` — 도메인 스펙(`docs/specs/`) 정합성 검증
 - `ux-guardian` — UX 마찰점(`docs/ux/`) 감사
 - `user-guide-writer` — 사용자 가이드(`docs/guide/ko/`) 갱신
