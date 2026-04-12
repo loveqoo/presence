@@ -79,6 +79,7 @@ const App = (props) => {
     return h(TranscriptOverlay, {
       debug: agentState.debug, lastPrompt, lastResponse,
       opTrace: agentState.opTrace, recalledMemories: agentState.recalledMemories,
+      iterationHistory: agentState.iterationHistory,
       onClose: () => setShowTranscript(false),
     })
   }

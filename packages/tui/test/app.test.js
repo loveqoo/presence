@@ -5,6 +5,7 @@ import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { SidePanel } from '@presence/tui/ui/components/SidePanel.js'
 import { TranscriptOverlay, buildLines } from '@presence/tui/ui/components/TranscriptOverlay.js'
+import { buildIterationElements } from '@presence/tui/ui/components/transcript/iterations.js'
 import { ToolResultView, parseFileEntries, toGrid, truncateLines, getSummary } from '@presence/tui/ui/components/ToolResultView.js'
 import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/ui/components/CodeView.js'
 import { detectWholeCodeLang, parseInline } from '@presence/tui/ui/components/MarkdownText.js'
@@ -276,6 +277,53 @@ console.log('UI component tests (renderToString)')
   assert(texts.includes('응답 전송'), 'buildLines opTrace: respond phase 한글화')
   const redLines = lines.filter(l => l.color === 'red')
   assert(redLines.length > 0, 'buildLines opTrace: error line is red')
+}
+
+// --- buildIterationElements ---
+
+// 20c. buildIterationElements with empty history
+{
+  const elements = buildIterationElements([])
+  assert(elements.length === 1, 'buildIterationElements empty: returns 1 element')
+  // i18n 초기화 후이므로 한글 메시지 확인
+  assert(elements[0].props.children.includes('반복 이력'), 'buildIterationElements empty: shows no_iterations message')
+}
+
+// 20d. buildIterationElements with null
+{
+  const elements = buildIterationElements(null)
+  assert(elements.length === 1, 'buildIterationElements null: returns 1 element')
+}
+
+// 20e. buildIterationElements with 1 iteration
+{
+  const history = [{
+    iteration: 0, parsedType: 'tool_use', stepCount: 3,
+    assembly: { used: 1500 }, promptMessages: 2, promptChars: 800,
+    response: '{"result": "ok"}',
+  }]
+  const elements = buildIterationElements(history)
+  // header(count) + blank + iterHeader + meta + response + sep = 6 이상
+  assert(elements.length >= 4, 'buildIterationElements 1 iter: produces multiple elements')
+  const allText = elements.map(el => {
+    if (typeof el.props?.children === 'string') return el.props.children
+    return ''
+  }).join(' ')
+  assert(allText.includes('Iteration 1'), 'buildIterationElements 1 iter: shows iteration number')
+  assert(allText.includes('tool_use'), 'buildIterationElements 1 iter: shows parsedType')
+}
+
+// 20f. buildIterationElements with error iteration
+{
+  const history = [{
+    iteration: 0, parsedType: 'error', stepCount: 0,
+    error: 'timeout exceeded', assembly: { used: 0 },
+    promptMessages: 0, promptChars: 0, response: null,
+  }]
+  const elements = buildIterationElements(history)
+  const errorEl = elements.find(el => el.props?.color === 'red')
+  assert(errorEl, 'buildIterationElements error: has red error element')
+  assert(errorEl.props.children.includes('timeout exceeded'), 'buildIterationElements error: shows error message')
 }
 
 // --- ToolResultView helpers ---

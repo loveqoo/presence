@@ -56,7 +56,8 @@
   },
   "copy_cmd": {
     "copied": "마지막 응답이 클립보드에 복사되었습니다",
-    "empty": "복사할 응답이 없습니다"
+    "empty": "복사할 응답이 없습니다",
+    "fallback": "클립보드 복사 실패 — 응답이 아래에 표시됩니다"
   },
   "chat": {
     "truncated": "↑ {{count}}개 이전 메시지 — Ctrl+T에서 확인"
@@ -68,7 +69,9 @@
     "tab_turn": "턴 정보",
     "tab_prompt": "프롬프트",
     "tab_response": "응답",
+    "tab_iterations": "반복 이력",
     "no_data": "아직 데이터가 없습니다. 턴을 실행하세요.",
+    "no_iterations": "반복 이력이 없습니다. 멀티턴 실행 시 기록됩니다.",
     "no_turn_data": "아직 턴 데이터가 없습니다.",
     "no_prompt_data": "아직 프롬프트 데이터가 없습니다.",
     "no_response_data": "아직 응답 데이터가 없습니다.",

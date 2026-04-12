@@ -54,7 +54,8 @@
   },
   "copy_cmd": {
     "copied": "Last response copied to clipboard",
-    "empty": "No response to copy"
+    "empty": "No response to copy",
+    "fallback": "Clipboard copy failed — response shown below"
   },
   "chat": {
     "truncated": "↑ {{count}} earlier messages — view in Ctrl+T transcript"
@@ -66,7 +67,9 @@
     "tab_turn": "Turn",
     "tab_prompt": "Prompt",
     "tab_response": "Response",
+    "tab_iterations": "Iterations",
     "no_data": "No data yet. Run a turn first.",
+    "no_iterations": "No iteration history. Recorded during multi-turn execution.",
     "no_turn_data": "No turn data yet. Run a turn first.",
     "no_prompt_data": "No prompt data yet.",
     "no_response_data": "No response data yet.",

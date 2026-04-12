@@ -13,6 +13,25 @@ import { handleStatusline } from './slash-commands/statusline.js'
 // 복잡한 handler는 slash-commands/ 하위 파일에서 import.
 // =============================================================================
 
+// 플랫폼별 클립보드 복사. 성공 시 true, 실패 시 false.
+const CLIPBOARD_COMMANDS = Object.freeze({
+  darwin: 'pbcopy',
+  linux: 'xclip -selection clipboard',
+  win32: 'clip.exe',
+})
+
+const copyToClipboard = async (text) => {
+  const cmd = CLIPBOARD_COMMANDS[process.platform]
+  if (!cmd) return false
+  try {
+    const { execSync } = await import('child_process')
+    execSync(cmd, { input: text, stdio: ['pipe', 'pipe', 'pipe'] })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
 const handleMcp = (input, ctx) => {
   const { toolRegistry, addMessage, onInput } = ctx
   // remote 모드: toolRegistry가 null이면 서버로 전달
@@ -54,13 +73,9 @@ const saveReportToDisk = async (report, addMessage) => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const filePath = join(dir, `report-${ts}.md`)
     writeFileSync(filePath, report, 'utf-8')
-    try {
-      const { execSync } = await import('child_process')
-      execSync('pbcopy', { input: report, stdio: ['pipe', 'pipe', 'pipe'] })
-      addMessage({ role: 'system', content: t('report_cmd.saved_with_clipboard', { path: filePath }) })
-    } catch (_) {
-      addMessage({ role: 'system', content: t('report_cmd.saved', { path: filePath }) })
-    }
+    const copied = await copyToClipboard(report)
+    const key = copied ? 'report_cmd.saved_with_clipboard' : 'report_cmd.saved'
+    addMessage({ role: 'system', content: t(key, { path: filePath }) })
   } catch (_) {
     addMessage({ role: 'system', content: report })
   }
@@ -131,20 +146,21 @@ const handleCopy = async (_input, ctx) => {
     addMessage({ role: 'system', content: t('copy_cmd.empty'), transient: true })
     return
   }
-  try {
-    const { execSync } = await import('child_process')
-    execSync('pbcopy', { input: lastResponse.content, stdio: ['pipe', 'pipe', 'pipe'] })
+  const copied = await copyToClipboard(lastResponse.content)
+  if (copied) {
     addMessage({ role: 'system', content: t('copy_cmd.copied'), transient: true })
-  } catch (_) {
-    addMessage({ role: 'system', content: lastResponse.content, transient: true })
+  } else {
+    addMessage({ role: 'system', content: `${t('copy_cmd.fallback')}\n\n${lastResponse.content}`, transient: true })
   }
 }
+
+const handleExit = (_, ctx) => ctx.exit()
 
 // --- Dispatch table ---
 
 const commandMap = new Map([
-  ['/quit',       (_, ctx) => ctx.exit()],
-  ['/exit',       (_, ctx) => ctx.exit()],
+  ['/quit',       handleExit],
+  ['/exit',       handleExit],
   ['/panel',      (_, ctx) => ctx.setShowPanel(p => !p)],
   ['/clear',      (_, ctx) => {
     ctx.setMessages([])

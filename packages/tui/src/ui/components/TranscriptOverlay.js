@@ -5,15 +5,16 @@ import { buildOpChainLines, buildOpChainDetailedLines } from './transcript/op-ch
 import { buildTurnLines } from './transcript/turn.js'
 import { buildPromptLines } from './transcript/prompt.js'
 import { buildResponseElements, buildResponseFallbackLines } from './transcript/response.js'
+import { buildIterationElements } from './transcript/iterations.js'
 
 const h = React.createElement
 
-const TAB_KEYS = ['tab_op_chain', 'tab_turn', 'tab_prompt', 'tab_response']
+const TAB_KEYS = ['tab_op_chain', 'tab_turn', 'tab_prompt', 'tab_response', 'tab_iterations']
 
 const TranscriptOverlay = (props) => {
-  const { debug, lastPrompt, lastResponse, opTrace = [], recalledMemories = [], onClose } = props
+  const { debug, lastPrompt, lastResponse, opTrace = [], recalledMemories = [], iterationHistory = [], onClose } = props
   const [activeTab, setActiveTab] = useState(0)
-  const [scrollOffsets, setScrollOffsets] = useState([0, 0, 0, 0])
+  const [scrollOffsets, setScrollOffsets] = useState([0, 0, 0, 0, 0])
   const [opDetailed, setOpDetailed] = useState(false)
 
   const viewHeight = Math.max(4, (process.stdout.rows || 24) - 4)
@@ -24,6 +25,7 @@ const TranscriptOverlay = (props) => {
     { mode: 'lines', data: buildTurnLines(debug, recalledMemories) },
     { mode: 'lines', data: buildPromptLines(lastPrompt) },
     { mode: 'elements', data: buildResponseElements(lastResponse) },
+    { mode: 'elements', data: buildIterationElements(iterationHistory) },
   ]
   const tab = tabContents[activeTab]
   const itemCount = tab.data.length
