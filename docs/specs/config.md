@@ -22,7 +22,7 @@ Config.DEFAULTS
 - I4. **스키마 검증 non-fatal**: `Config.Schema.safeParse` 실패 시 console.warn 후 미검증 config 그대로 반환. 서버 시작 중단 없음.
 - I5. **apiKey 누락 경고**: `config.llm.apiKey`가 null이면 `Config.validate()`가 경고를 반환한다. 서버는 실행되나 LLM 호출은 실패한다.
 - I6. **설정 파일은 JSON 형식**: `.presence/server.json`, `.presence/users/{username}/config.json` 모두 JSON. 파싱 오류 시 `console.warn` + `Maybe.Nothing()` 반환 (해당 레이어 무시).
-- I7. **Reader 기반 설정 로드**: `Config.loadServerR`, `Config.loadUserR`, `Config.loadUserMergedR`, `Config.mergeUserOverR`는 Reader 모나드. 직접 호출은 레거시 브릿지(`Config.loadServer()`, `Config.loadUser()`, `Config.loadUserMerged()`, `Config.mergeUserOver()`)를 통해서만.
+- I7. **Reader 기반 설정 로드**: `loadServerR`, `loadUserR`, `loadUserMergedR`, `mergeUserOverR`는 Reader 모나드이며 `packages/infra/src/infra/config-loader.js`에 정의된다. `Config` 클래스에는 없다. 직접 호출은 동일 파일의 브릿지 함수(`loadServer()`, `loadUserMerged()`, `mergeUserOver()`)를 통해서만. `loadUser()` 브릿지는 존재하지 않는다 — `loadUserR.run(deps)` 직접 호출 필요.
 - I8. **apiKey는 config/get 응답에서 제거**: `GET /sessions/:id/config` 응답에서 `llm.apiKey`를 제거하여 노출하지 않는다.
 - I9. **presenceDir 기본 경로**: `PRESENCE_DIR` 환경변수가 설정되면 그 값을 그대로 사용. 미설정 시 `HOME`(또는 `USERPROFILE`, 없으면 `.`) 기반으로 `~/.presence/`를 반환. 이 값이 `Config.userDataPath()`, `defaultUserDataPath()`, `defaultMemoryPath()` 등 모든 파생 경로의 루트가 된다.
 - I10. **resolveDir 우선순위**: `Config.resolveDir(basePath)` — 구현은 `basePath || process.env.PRESENCE_DIR || Config.presenceDir()`. basePath가 **truthy인 경우에만** 환경변수보다 우선 적용된다. basePath가 falsy(빈 문자열 `''`, `null`, `undefined` 포함)이면 `PRESENCE_DIR` 환경변수로 폴백한다. basePath를 생략하거나 빈 문자열로 전달하는 것은 동일 동작이다.

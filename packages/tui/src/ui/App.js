@@ -38,11 +38,10 @@ const App = (props) => {
 
   // Slash commands + 일반 입력 처리
   const handleInput = useSlashCommands({
-    state, agentState, config, tools, memory, llm, toolRegistry,
-    addMessage, setMessages, clearTransientMessages, exit,
-    currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems,
-    sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
-    onInput, username,
+    core: { state, agentState, addMessage, setMessages, clearTransientMessages, exit },
+    context: { config, tools, memory, llm, toolRegistry, onInput, username },
+    ui: { messages, currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems },
+    session: { sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession },
   })
 
   // App-level key handlers (overlay가 열려있지 않을 때만)
