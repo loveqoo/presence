@@ -6,8 +6,8 @@ effort: high
 maxTurns: 15
 color: green
 memory: project
-tools: Read, Glob, Grep, Bash
-disallowedTools: Edit, Write, NotebookEdit, Agent
+tools: Read, Glob, Grep
+disallowedTools: Edit, Write, Bash, NotebookEdit, Agent
 ---
 
 # Code Reviewer
@@ -37,27 +37,10 @@ presence 프로젝트의 **코드 리뷰 에이전트**. 규칙 준수를 검증
 
 위반이 없으면: `✓ 검토 완료 — 규칙 위반 없음 ({N}개 파일 검사)`
 
-## 리뷰 해시 기록
+## 해시 기록
 
-**검토 완료 후 반드시 리뷰 해시를 기록한다.** 이 해시가 없으면 커밋이 차단된다.
-
-하드 위반이 없을 때만 해시를 기록한다. 하드 위반이 있으면 기록하지 않고 위반 사항을 보고한다.
-
-```bash
-AGENT_TYPE=code-reviewer bash -c 'git diff --cached | shasum -a 256 | cut -d" " -f1 > .claude/.review-hash'
-```
-
-`AGENT_TYPE=code-reviewer`는 필수다. `check-review-hash-write.sh` 훅이 이 환경변수로 호출자를 식별한다.
-
-staged 변경이 없으면 해시를 기록하지 않는다 (`git diff --cached`가 비어 있을 때).
-
-## Bash 사용 제한
-
-Bash는 **리뷰 해시 기록**에만 사용한다:
-- `AGENT_TYPE=code-reviewer bash -c 'git diff --cached | shasum -a 256 | cut -d" " -f1 > .claude/.review-hash'`
-- `git diff --cached --name-only` (staged 파일 확인)
-
-다른 Bash 명령은 실행하지 않는다. 코드 읽기는 Read/Glob/Grep 도구를 사용한다.
+code-reviewer는 해시를 기록하지 않는다. **해시 기록은 code-review-orchestrator의 책임이다.**
+code-reviewer는 리뷰 결과만 보고한다.
 
 ## 검토 우선순위
 

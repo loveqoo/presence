@@ -51,10 +51,10 @@
 ### 듀얼 리뷰 워크플로우
 
 **커밋 전** — Claude의 git commit 시 두 단계 리뷰가 훅으로 강제된다:
-1. `check-code-review.sh` 훅 — staged diff 해시로 code-reviewer 실행 여부를 검증. 미실행 시 커밋 차단.
+1. `check-code-review.sh` 훅 — staged diff 해시로 코드 리뷰 실행 여부를 검증. 미실행 시 커밋 차단.
 2. `pre-commit-codex-review.sh` 훅 — Codex 일반 품질/보안 검토 (경고). git commit 시 자동 실행.
 
-code-reviewer 에이전트가 리뷰 완료 시 해시를 직접 기록한다. **메인 에이전트는 리뷰 해시를 직접 기록하지 않는다** — `check-review-hash-write.sh` 훅이 차단한다.
+code-review-orchestrator가 리뷰 완료 시 해시를 직접 기록한다. code-reviewer는 리뷰 결과만 보고하고 해시를 기록하지 않는다. **메인 에이전트와 code-reviewer는 리뷰 해시를 직접 기록하지 않는다** — `check-review-hash-write.sh` 훅이 차단한다.
 
 **플랜 수립 후** — ExitPlanMode 호출 전에 반드시 `/codex:adversarial-review`를 실행한다:
 ```
@@ -72,13 +72,21 @@ shasum -a 256 ~/.claude/plans/<plan-file>.md | cut -d' ' -f1 > .claude/.plan-rev
 
 presence 의 변경은 **에이전트 리뷰** 와 **티켓 레지스트리** 두 축으로 관리한다.
 
-**에이전트 (`.claude/agents/`)**
+**실무 에이전트 (`.claude/agents/`)**
 - `code-reviewer` — `.claude/rules/` 기준 코드 규칙 검증 (커밋 전 필수)
 - `spec-guardian` — 도메인 스펙(`docs/specs/`) 정합성 검증
 - `ux-guardian` — UX 마찰점(`docs/ux/`) 감사
 - `user-guide-writer` — 사용자 가이드(`docs/guide/ko/`) 갱신
 
-기능 변경 후 세 에이전트를 병렬 호출해 스펙/UX/가이드를 동기화한다. 각 에이전트는 자기 영역 문서만 수정하며 코드는 읽기만 한다.
+각 에이전트는 자기 영역 문서만 수정하며 코드는 읽기만 한다.
+
+**오케스트레이터 에이전트 (`.claude/agents/`)**
+- `code-review-orchestrator` — code-reviewer를 패키지별로 분할 병렬 실행, 해시 기록 조율
+- `spec-orchestrator` — spec-guardian을 패키지별로 분할 병렬 실행
+- `ux-orchestrator` — ux-guardian을 클라이언트 영역별로 분할 병렬 실행
+- `guide-orchestrator` — user-guide-writer를 가이드 섹션별로 분할 실행
+
+오케스트레이터는 직접 리뷰/수정하지 않고 서브 에이전트에게 위임한다. 대규모 변경 시 단일 에이전트의 maxTurns/컨텍스트 제한을 분할로 해결한다.
 
 **티켓 레지스트리 (`docs/tickets/REGISTRY.md`)**
 - 모든 작업 항목(FP = UX 마찰점, KG = 스펙 Known Gap)을 전역 유일 ID 로 통합 관리
