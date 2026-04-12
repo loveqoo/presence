@@ -1,41 +1,22 @@
 import { createServer } from 'node:http'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import { UserContext } from '@presence/infra/infra/user-context.js'
-import { Config } from '@presence/infra/infra/config.js'
+import { loadServer } from '@presence/infra/infra/config-loader.js'
 import { Memory } from '@presence/infra/infra/memory.js'
-import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
-import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
-import { createSchedulerActor } from '@presence/infra/infra/actors/scheduler-actor.js'
+import { createServerScheduler, registerAgentSessions } from './scheduler-factory.js'
 import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
 import { createAuthSetup } from './auth-setup.js'
 import { createSessionRouter } from './session-api.js'
+import { fireAndForget } from '@presence/core/lib/task.js'
+import { corsMiddleware, mountStaticWebUi, logStartupSummaryR, warnPresenceDirChange, closeAsync, listenAsync } from './server-utils.js'
 
 // =============================================================================
 // PresenceServer: HTTP + WebSocket 서버 facade.
 // =============================================================================
 
-// CORS — localhost cross-origin 허용.
-const corsMiddleware = (req, res, next) => {
-  const origin = req.headers.origin
-  if (origin) {
-    try {
-      const hostname = new URL(origin).hostname
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        res.header('Access-Control-Allow-Origin', origin)
-        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
-        res.header('Access-Control-Allow-Credentials', 'true')
-      }
-    } catch {}
-  }
-  if (req.method === 'OPTIONS') return res.sendStatus(204)
-  next()
-}
 
 class PresenceServer {
   #httpServer
@@ -93,25 +74,28 @@ class PresenceServer {
       handleCancel: this.#defaultSession.handleCancel,
       schedulerActor: this.#scheduler,
       delegateActor: this.#defaultSession.delegateActor,
-      shutdown: () => this.shutdown(),
+      shutdown: this.shutdown.bind(this),
     }
   }
 
   async shutdown() {
     process.off('SIGTERM', this.#onSignal)
     process.off('SIGINT', this.#onSignal)
-    this.#scheduler.stop().fork(() => {}, () => {})
+    fireAndForget(this.#scheduler.stop())
     await this.#userContext.shutdown()
     if (this.#userContextManager) await this.#userContextManager.shutdownAll()
-    await new Promise(resolve => this.#wss.close(resolve))
-    await new Promise(resolve => this.#httpServer.close(resolve))
+    await closeAsync(this.#wss)
+    await closeAsync(this.#httpServer)
   }
 
   // --- private bootstrap ---
 
   async #boot(configOverride, opts) {
     const { persistenceCwd } = opts
-    const config = configOverride || Config.loadServer()
+    const config = configOverride || loadServer()
+
+    // KG-06: PRESENCE_DIR 변경 시 이전 경로 데이터 경고
+    warnPresenceDirChange()
 
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
@@ -129,17 +113,17 @@ class PresenceServer {
       },
     })
     this.#startedAt = Date.now()
-    this.#scheduler = this.#createScheduler()
+    this.#scheduler = createServerScheduler(this.#userContext)
 
     // 기본 세션 + 에이전트 세션
     const defaultUserId = this.#username || 'default'
     const defaultEntry = this.#userContext.sessions.create({
       id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd,
       userId: defaultUserId,
-      onScheduledJobDone: () => {},
+      onScheduledJobDone: Function.prototype,
     })
     this.#defaultSession = defaultEntry.session
-    this.#registerAgentSessions()
+    registerAgentSessions(this.#userContext, this.#username)
 
     // Auth + UserContextManager
     const auth = createAuthSetup()
@@ -158,17 +142,20 @@ class PresenceServer {
     wsHandler.attach(this.#wss)
 
     // Background tasks
-    if (this.#userContext.config.scheduler.enabled) this.#scheduler.start().fork(() => {}, () => {})
-    this.#defaultSession.delegateActor.start().fork(() => {}, () => {})
+    if (this.#userContext.config.scheduler.enabled) fireAndForget(this.#scheduler.start())
+    fireAndForget(this.#defaultSession.delegateActor.start())
 
     // Signal handlers
     process.on('SIGTERM', this.#onSignal)
     process.on('SIGINT', this.#onSignal)
 
     // Listen
-    await new Promise(resolve => this.#httpServer.listen(this.#port, this.#host, resolve))
+    await listenAsync(this.#httpServer, this.#port, this.#host)
     this.#userContext.logger.info(`Server listening on http://${this.#host}:${this.#port}`)
-    this.#logStartupSummary()
+    logStartupSummaryR.run({
+      server: { username: this.#username, host: this.#host, port: this.#port },
+      infra: { config: this.#userContext.config, memory: this.#memory, defaultSession: this.#defaultSession, userContext: this.#userContext },
+    })
   }
 
   // Express 미들웨어 + 라우트 마운트. 순서가 곧 파이프라인.
@@ -202,86 +189,11 @@ class PresenceServer {
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
     }))
     // 8. Static web UI (catch-all — 반드시 마지막)
-    this.#mountStaticWebUi()
+    mountStaticWebUi(this.#expressApp)
   }
 
   #onSignal = async () => { await this.shutdown(); process.exit(0) }
 
-  #createScheduler() {
-    let scheduler
-    scheduler = createSchedulerActor({
-      store: this.#userContext.jobStore,
-      onDispatch: (jobEvent) => {
-        const sessionId = `scheduled-${jobEvent.runId}`
-        const entry = this.#userContext.sessions.create({
-          type: SESSION_TYPE.SCHEDULED,
-          id: sessionId,
-          onScheduledJobDone: (event, outcome) => {
-            const task = outcome.success
-              ? scheduler.jobDone(event.runId, event.jobId, outcome.result)
-              : scheduler.jobFail(event.runId, event.jobId, event.attempt ?? 1, outcome.error)
-            task.fork(() => {}, () => {})
-            this.#userContext.sessions.destroy(sessionId).catch(() => {})
-          },
-        })
-        entry.session.eventActor.enqueue(jobEvent).fork(() => {}, () => {})
-      },
-      logger: this.#userContext.logger,
-      pollIntervalMs: this.#userContext.config.scheduler.pollIntervalMs,
-    })
-    return scheduler
-  }
-
-  #registerAgentSessions() {
-    const userId = this.#username || 'default'
-    for (const agentDef of (this.#userContext.config.agents || [])) {
-      const agentEntry = this.#userContext.sessions.create({
-        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId,
-      })
-      this.#userContext.agentRegistry.register({
-        name: agentDef.name,
-        description: agentDef.description,
-        capabilities: agentDef.capabilities || [],
-        type: DelegationMode.LOCAL,
-        run: (task) => agentEntry.session.handleInput(task),
-      })
-      agentEntry.session.delegateActor.start().fork(() => {}, () => {})
-    }
-  }
-
-  #mountStaticWebUi() {
-    try {
-      const webDist = join(import.meta.dirname, '../../../web/dist')
-      if (!existsSync(webDist)) return false
-      this.#expressApp.use(express.static(webDist))
-      this.#expressApp.get('/{*splat}', (_req, res) => res.sendFile(join(webDist, 'index.html')))
-      return true
-    } catch (_) {
-      return false
-    }
-  }
-
-  #logStartupSummary() {
-    const { config: cfg, mcpConnections, jobStore } = this.#userContext
-    const toolCount = this.#defaultSession.tools.length
-    const agentCount = this.#userContext.agentRegistry.list().length
-    const jobCount = jobStore.listJobs().filter(job => job.enabled).length
-    const hasWebUI = existsSync(join(import.meta.dirname, '../../../web/dist'))
-
-    console.log(`\nPresence server ready`)
-    if (this.#username || process.env.PRESENCE_INSTANCE_ID) console.log(`  User       : ${this.#username || process.env.PRESENCE_INSTANCE_ID}`)
-    console.log(`  URL        : http://${this.#host}:${this.#port}`)
-    console.log(`  WebSocket  : ws://${this.#host}:${this.#port}`)
-    console.log(`  Model      : ${cfg.llm.model}`)
-    console.log(`  Memory     : ${this.#memory ? 'mem0 enabled' : 'disabled'}`)
-    console.log(`  Tools      : ${toolCount}`)
-    console.log(`  Agents     : ${agentCount}`)
-    if (mcpConnections.length > 0) console.log(`  MCP        : ${mcpConnections.length} server(s)`)
-    console.log(`  Scheduler  : ${cfg.scheduler.enabled ? `enabled (${jobCount} active jobs)` : 'disabled'}`)
-    if (hasWebUI) console.log(`  Web UI     : http://${this.#host}:${this.#port}`)
-    console.log(`\n  CLI client : npm run start:cli`)
-    console.log(`  Logs       : ~/.presence/logs/agent.log\n`)
-  }
 }
 
 // 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, shutdown }
@@ -292,28 +204,8 @@ const startServer = async (configOverride, opts = {}) => {
     wss: instance.wss,
     app: instance.app,
     userContext: instance.userContext,
-    shutdown: () => instance.shutdown(),
+    shutdown: instance.shutdown.bind(instance),
   }
 }
 
 export { PresenceServer, startServer, sessionBridgeR }
-
-// CLI 실행
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/^file:\/\//, ''))) {
-  const userStore = createUserStore()
-  if (!userStore.hasUsers()) {
-    console.error('No users configured.')
-    console.error('Run: npm run user -- init')
-    process.exit(1)
-  }
-  const port = Number(process.env.PORT) || 3000
-  const host = process.env.HOST || '127.0.0.1'
-  const config = Config.loadServer()
-  console.log(`Starting Presence server on ${host}:${port}...`)
-  startServer(config, { port, host }).catch(err => {
-    console.error(`\nFailed to start server: ${err.message}`)
-    if (err.code === 'EADDRINUSE') console.error(`  Port ${port} is already in use. Set a different port with PORT=<n>`)
-    else if (err.code === 'EACCES') console.error(`  Permission denied. Try a port above 1024.`)
-    process.exit(1)
-  })
-}

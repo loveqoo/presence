@@ -27,6 +27,7 @@
  *  TE20. iteration — RESPOND 없는 plan → re-plan
  *  TE21. 존재하지 않는 도구 실행 → 에러 표시
  *  TE22. 트랜스크립트 — Ctrl+T 열기 + 4개 탭 전환 + ESC 닫기
+ *  TE23. POST /sessions invalid type → 400 (KG-03)
  */
 
 import React from 'react'
@@ -705,6 +706,28 @@ async function run() {
       assert(!closeFrame.includes('트랜스크립트') || closeFrame.includes('idle'), 'TE22: 트랜스크립트 닫힘')
     } finally {
       await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE23. POST /sessions invalid type → 400 (KG-03)
+  // =========================================================================
+  {
+    const ctx = await createTestServer(
+      () => JSON.stringify({ type: 'direct_response', message: 'ok' })
+    )
+    try {
+      const { port, token } = ctx
+      // invalid type → 400
+      const badRes = await request(port, 'POST', '/api/sessions', { type: 'invalid_type' }, { token })
+      assert(badRes.status === 400, 'TE23: invalid session type → 400')
+      assert(badRes.body?.error?.includes('invalid_type'), 'TE23: error message includes invalid type')
+
+      // valid type → 201
+      const goodRes = await request(port, 'POST', '/api/sessions', { type: 'user' }, { token })
+      assert(goodRes.status === 201, 'TE23: valid session type → 201')
+    } finally {
+      await ctx.shutdown()
     }
   }
 

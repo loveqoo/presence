@@ -5,6 +5,7 @@ import { createUserStore } from './user-store.js'
 import { ensureSecret } from './token.js'
 import { removeUserCompletely } from './remove-user.js'
 import { Config } from '../config.js'
+import { loadUserMerged } from '../config-loader.js'
 import { Memory } from '../memory.js'
 
 // =============================================================================
@@ -109,7 +110,7 @@ const cmdRemove = async ({ username }) => {
   // Memory 인스턴스 부팅 — embed credentials 없으면 null 이므로 1 단계는 skip.
   let memory = null
   try {
-    const config = Config.loadUserMerged(username)
+    const config = loadUserMerged(username)
     memory = await Memory.create(config)
   } catch (err) {
     console.warn(`Memory init skipped: ${err.message}`)

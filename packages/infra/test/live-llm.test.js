@@ -6,7 +6,7 @@
  */
 import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
-import { Config } from '@presence/infra/infra/config.js'
+import { loadUserMerged } from '@presence/infra/infra/config-loader.js'
 import { LLMClient } from '@presence/infra/infra/llm/llm-client.js'
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
@@ -30,7 +30,7 @@ mkdirSync(join(testDir, 'subdir'))
 writeFileSync(join(testDir, 'subdir', 'nested.txt'), 'nested file content')
 
 // --- 인프라 구성 ---
-const config = Config.loadUserMerged(process.env.PRESENCE_USERNAME || 'default')
+const config = loadUserMerged(process.env.PRESENCE_USERNAME || 'default')
 const llm = new LLMClient({
   baseUrl: config.llm.baseUrl,
   model: config.llm.model,

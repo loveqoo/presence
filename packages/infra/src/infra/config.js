@@ -1,9 +1,8 @@
-import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { z } from 'zod'
 import fp from '@presence/core/lib/fun-fp.js'
 
-const { Either, Maybe, Semigroup, Reader } = fp
+const { Maybe, Semigroup } = fp
 
 class Config {
   // --- 스키마 ---
@@ -112,43 +111,16 @@ class Config {
 
   static merge(base, override) { return Config.SG.concat(base, override) }
 
-  // --- 파일 읽기 → Maybe<Config> ---
-
-  static fromFile(filePath, t) {
-    return Either.fold(
-      _ => Maybe.Nothing(),
-      content =>
-        Either.fold(
-          e => {
-            const msg = t
-              ? t('error.config_parse_error', { path: filePath, message: e.message })
-              : `${filePath} JSON parse error: ${e.message}. Using defaults.`
-            console.warn(`[config] ${msg}`)
-            return Maybe.Nothing()
-          },
-          parsed => Maybe.Just(new Config(parsed)),
-          Either.catch(() => JSON.parse(content)),
-        ),
-      existsSync(filePath)
-        ? Either.Right(readFileSync(filePath, 'utf-8'))
-        : Either.Left(null),
-    )
-  }
-
-  // --- 검증 ---
-
-  static validate(config) {
-    const warnings = []
-    if (!config.llm?.apiKey) warnings.push('llm.apiKey is not set — LLM calls will fail')
-    return warnings
-  }
-
   // --- 경로 ---
+
+  static defaultPresenceDir() {
+    const home = process.env.HOME || process.env.USERPROFILE || '.'
+    return join(home, '.presence')
+  }
 
   static presenceDir() {
     if (process.env.PRESENCE_DIR) return process.env.PRESENCE_DIR
-    const home = process.env.HOME || process.env.USERPROFILE || '.'
-    return join(home, '.presence')
+    return Config.defaultPresenceDir()
   }
 
   static userDataPath(username) {
@@ -160,64 +132,6 @@ class Config {
     return basePath || process.env.PRESENCE_DIR || Config.presenceDir()
   }
 
-  // --- Maybe<Config> 배열 → Monoid fold → validate ---
-
-  static loadAndMerge(maybeLayers) {
-    const merged = maybeLayers
-      .reduce((acc, layer) => Config.Monoid.concat(acc, layer), Maybe.Just(Config.DEFAULTS))
-
-    const config = Maybe.fold(() => Config.DEFAULTS, x => x, merged)
-    const result = Config.Schema.safeParse(config)
-    if (!result.success) {
-      result.error.errors.forEach(e =>
-        console.warn(`[config] schema error — ${e.path.join('.')}: ${e.message}`)
-      )
-      return config
-    }
-    return result.data
-  }
-
-  // --- Reader 기반 설정 로드 ---
-
-  // DEFAULTS → server.json
-  static loadServerR = Reader.asks(({ basePath }) => {
-    const dir = Config.resolveDir(basePath)
-    return Config.loadAndMerge([Config.fromFile(join(dir, 'server.json'))])
-  })
-
-  // users/{username}/config.json 원본 (머지 없음)
-  static loadUserR = Reader.asks(({ basePath, username }) => {
-    if (!username) throw new Error('username is required for loadUser')
-    const dir = Config.resolveDir(basePath)
-    return Config.fromFile(join(dir, 'users', username, 'config.json'))
-  })
-
-  // DEFAULTS → server.json → users/{username}/config.json
-  static loadUserMergedR = Reader.asks(({ basePath, username }) => {
-    if (!username) throw new Error('username is required for loadUserMerged')
-    const dir = Config.resolveDir(basePath)
-    return Config.loadAndMerge([
-      Config.fromFile(join(dir, 'server.json')),
-      Config.fromFile(join(dir, 'users', username, 'config.json')),
-    ])
-  })
-
-  // resolved server config 위에 유저 config를 병합.
-  // disk server.json이 아닌, 런타임 서버 config를 base로 사용하여 일관성 보장.
-  static mergeUserOverR = Reader.asks(({ serverConfig, username, basePath }) => {
-    if (!username) throw new Error('username is required for mergeUserOver')
-    const dir = Config.resolveDir(basePath)
-    const base = serverConfig instanceof Config ? serverConfig : new Config(serverConfig)
-    const userLayer = Config.fromFile(join(dir, 'users', username, 'config.json'))
-    return Config.loadAndMerge([Maybe.Just(base), userLayer])
-  })
-
-  // --- 브릿지 ---
-
-  static loadServer(opts = {}) { return Config.loadServerR.run({ basePath: opts.basePath }) }
-  static loadUser(username, opts = {}) { return Config.loadUserR.run({ basePath: opts.basePath, username }) }
-  static loadUserMerged(username, opts = {}) { return Config.loadUserMergedR.run({ basePath: opts.basePath, username }) }
-  static mergeUserOver(serverConfig, username, opts = {}) { return Config.mergeUserOverR.run({ serverConfig, username, basePath: opts.basePath }) }
 }
 
 export { Config }

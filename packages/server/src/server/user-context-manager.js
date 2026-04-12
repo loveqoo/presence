@@ -1,8 +1,8 @@
 import { UserContext } from '@presence/infra/infra/user-context.js'
-import { Config } from '@presence/infra/infra/config.js'
+import { mergeUserOver } from '@presence/infra/infra/config-loader.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
-import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { INACTIVITY_TIMEOUT_MS } from './constants.js'
+import { registerAgentSessions } from './scheduler-factory.js'
 
 // =============================================================================
 // UserContextManager: 유저별 UserContext 생명주기 관리.
@@ -26,7 +26,7 @@ class UserContextManager {
   async getOrCreate(username) {
     if (this.#contexts.has(username)) return this.#contexts.get(username)
     // 런타임 서버 config를 base로 유저 config merge (disk server.json 재독 없음)
-    const userConfig = Config.mergeUserOver(this.#serverConfig, username)
+    const userConfig = mergeUserOver(this.#serverConfig, username)
     const userContext = await UserContext.create(userConfig, {
       username,
       memory: this.#memory,
@@ -35,19 +35,7 @@ class UserContextManager {
       },
     })
     // config.agents 기반 에이전트 세션 등록
-    for (const agentDef of (userContext.config.agents || [])) {
-      const agentEntry = userContext.sessions.create({
-        id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId: username,
-      })
-      userContext.agentRegistry.register({
-        name: agentDef.name,
-        description: agentDef.description,
-        capabilities: agentDef.capabilities || [],
-        type: DelegationMode.LOCAL,
-        run: (task) => agentEntry.session.handleInput(task),
-      })
-      agentEntry.session.delegateActor.start().fork(() => {}, () => {})
-    }
+    registerAgentSessions(userContext, username)
 
     const entry = { userContext, wsConnections: new Set(), lastActivity: Date.now(), shutdownTimer: null }
     this.#contexts.set(username, entry)

@@ -26,6 +26,7 @@ class RemoteSession {
   #currentTools
   #rerender
   #tryRefresh
+  #username
   #disconnected
   #pendingInitialMessages
 
@@ -39,6 +40,7 @@ class RemoteSession {
     this.#gitBranch = opts.gitBranch
     this.#currentTools = opts.initialTools
     this.#tryRefresh = opts.tryRefresh
+    this.#username = opts.username
     this.#currentSessionId = defaultSessionId(opts.username)
     this.#disconnected = null
     this.#pendingInitialMessages = []
@@ -128,6 +130,7 @@ class RemoteSession {
       llm: null,
       toolRegistry: null,
       initialMessages: msgs,
+      username: this.#username,
       sessionId: this.#currentSessionId,
       onListSessions: this.#client.getJson.bind(this.#client, '/api/sessions'),
       onCreateSession: (id) => this.#client.post('/api/sessions', { id, type: 'user' }),

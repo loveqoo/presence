@@ -76,8 +76,8 @@ const createAuthServer = async (memoryPath) => {
   const origDir = process.env.PRESENCE_DIR
   process.env.PRESENCE_DIR = tmpDir
 
-  const { Config } = await import('@presence/infra/infra/config.js')
-  const mergedConfig = Config.loadUserMerged(instanceId, { basePath: tmpDir })
+  const { loadUserMerged } = await import('@presence/infra/infra/config-loader.js')
+  const mergedConfig = loadUserMerged(instanceId, { basePath: tmpDir })
   const result = await startServer(mergedConfig, { port: 0, persistenceCwd: tmpDir, instanceId })
   const port = result.server.address().port
 

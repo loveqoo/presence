@@ -34,4 +34,23 @@ const createAgentRegistry = () => {
  * `createAgentRegistry()` — Creates an in-memory registry of local and remote agents.
  * Returns `{ register, get, list, has }`.
  */
-export { createAgentRegistry }
+// 내장 summarizer 에이전트 등록
+const registerSummarizer = (agentRegistry, llm) => {
+  agentRegistry.register({
+    name: 'summarizer',
+    description: '텍스트 요약 에이전트. 긴 내용을 간결하게 정리할 때 위임하세요.',
+    capabilities: ['summarize'],
+    type: DelegationMode.LOCAL,
+    run: async (task) => {
+      const result = await llm.chat({
+        messages: [
+          { role: 'system', content: '주어진 내용을 간결하게 요약하세요. 핵심만 남기세요.' },
+          { role: 'user', content: task },
+        ],
+      })
+      return result.content
+    },
+  })
+}
+
+export { createAgentRegistry, registerSummarizer }

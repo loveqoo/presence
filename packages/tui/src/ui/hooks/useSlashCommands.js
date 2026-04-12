@@ -8,13 +8,14 @@ import { t } from '@presence/infra/i18n'
 // App에서 handleInput 하나만 받으면 됨.
 // =============================================================================
 
-const useSlashCommands = ({
-  state, agentState, config, tools, memory, llm, toolRegistry,
-  addMessage, setMessages, clearTransientMessages, exit,
-  currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems,
-  sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
-  onInput,
-}) => {
+const useSlashCommands = (props) => {
+  const {
+    state, agentState, config, tools, memory, llm, toolRegistry,
+    addMessage, setMessages, clearTransientMessages, exit,
+    currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems,
+    sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
+    onInput, username,
+  } = props
 
   const handleInput = useCallback(async (input) => {
     // 이전 정보 조회 결과(transient) 제거
@@ -25,7 +26,7 @@ const useSlashCommands = ({
       currentModel, setCurrentModel,
       setMessages, setShowPanel, statusItems, setStatusItems,
       sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
-      onInput,
+      onInput, userId: username,
     }
     if (await dispatchSlashCommand(input, slashCtx)) return
 
@@ -45,7 +46,7 @@ const useSlashCommands = ({
     onInput, exit, agentState, tools, addMessage, clearTransientMessages, statusItems, currentModel,
     llm, memory, config, state, toolRegistry, sessionId,
     onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
-    setMessages, setCurrentModel, setShowPanel, setStatusItems,
+    setMessages, setCurrentModel, setShowPanel, setStatusItems, username,
   ])
 
   return handleInput

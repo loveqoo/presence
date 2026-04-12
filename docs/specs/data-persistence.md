@@ -47,7 +47,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - E5. `users.json`이 없는 경우 → `hasUsers()` false 반환 → 서버 CLI 진입점에서 "No users configured" 출력 후 exit(1).
 - E6. `user-data.db` 경로 상위 디렉토리 없는 경우 → `UserDataStore` 생성자에서 `mkdirSync` recursive.
 - E7. shutdown 후 `flushPersistence()` → PersistenceActor가 이미 멈춘 상태에서 호출 → 에러 catch로 무시.
-- E8. `PRESENCE_DIR` 환경변수 변경 후 서버 재시작 → 이전 경로의 데이터를 읽지 못함. 수동 마이그레이션 필요. ⚠️ 알려진 한계.
+- E8. `PRESENCE_DIR` 환경변수 변경 후 서버 재시작 → 이전 경로의 데이터를 읽지 못함. 수동 마이그레이션 필요. ⚠️ 알려진 한계. PRESENCE_DIR이 기본 경로(`~/.presence`)와 다르고, 기본 경로에 `users.json`이 존재하면 서버 부트 시 경고 로그를 출력한다 (KG-06 해소).
 - E9. `stripTransient` 결과에 남은 key들 중 깊은 중첩 구조에 `_` 접두사가 있는 경우 → 최상위 key만 필터링. 중첩 내부의 `_` 접두사 필드는 저장됨. ⚠️ 알려진 제한.
 
 ## 테스트 커버리지
@@ -85,3 +85,4 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - 2026-04-10: I5 debounce 표기 정정 — 하드코딩 "500ms"에서 상수 참조 "PERSISTENCE.DEBOUNCE_MS(현재 500ms, policies.js 정의)"로 정정.
 - 2026-04-10: I10에 JobStore 이력 보존 정책 추가 — HISTORY_MAX_PER_JOB(50), HISTORY_TTL_DAYS(90). job-store.js 로컬 상수, policies.js 미등록 Known Gap 명시.
 - 2026-04-10: I10 Known Gap 해소 — JOB 상수가 policies.js로 이동, job-store.js는 JOB.HISTORY_MAX_PER_JOB / JOB.HISTORY_TTL_DAYS import 사용.
+- 2026-04-12: KG-06 부분 해소 — E8에 경고 로그 동작 추가. PRESENCE_DIR이 기본 경로와 다르고 기본 경로에 users.json이 존재하면 서버 부트 시 경고 로그 출력. 데이터 미이전 알림 한계는 유지.

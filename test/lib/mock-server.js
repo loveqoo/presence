@@ -100,8 +100,8 @@ const createTestServer = async (llmHandler, opts = {}) => {
   process.env.PRESENCE_DIR = tmpDir
 
   // 서버 시작
-  const { Config } = await import('@presence/infra/infra/config.js')
-  const config = Config.loadUserMerged(INSTANCE_ID, { basePath: tmpDir })
+  const { loadUserMerged } = await import('@presence/infra/infra/config-loader.js')
+  const config = loadUserMerged(INSTANCE_ID, { basePath: tmpDir })
   // configOverrides의 agents를 config에 병합
   if (configOverrides.agents) config.agents = configOverrides.agents
   const result = await startServer(config, { port: 0, persistenceCwd: tmpDir, instanceId: INSTANCE_ID })

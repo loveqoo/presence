@@ -133,7 +133,11 @@ const mountSessionsCrud = (router, deps) => {
   })
   router.post('/sessions', express.json(), async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
-    const { type = 'user', id } = req.body || {}
+    const { type = SESSION_TYPE.USER, id } = req.body || {}
+    const validTypes = Object.values(SESSION_TYPE)
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ error: `Invalid session type: ${type}` })
+    }
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
     const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined

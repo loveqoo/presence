@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "node src/server/index.js"
+    "start": "node src/server/cli.js"
   },
   "exports": {
     ".": "./src/server/index.js"

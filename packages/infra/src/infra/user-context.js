@@ -5,12 +5,12 @@ import { initMcpIntegration } from './tools/mcp-tools.js'
 import { createPersona } from './persona.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm/llm-client.js'
-import { createAgentRegistry } from './agents/agent-registry.js'
-import { DelegationMode } from './agents/delegation.js'
+import { createAgentRegistry, registerSummarizer } from './agents/agent-registry.js'
 import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
+import { loadUserMerged } from './config-loader.js'
 import { initI18n, t } from '../i18n/index.js'
 import { createSessionManager } from './sessions/session-manager.js'
 
@@ -35,24 +35,6 @@ const buildEmbedder = (config) => {
   })
 }
 
-const registerSummarizer = (agentRegistry, llm) => {
-  agentRegistry.register({
-    name: 'summarizer',
-    description: '텍스트 요약 에이전트. 긴 내용을 간결하게 정리할 때 위임하세요.',
-    capabilities: ['summarize'],
-    type: DelegationMode.LOCAL,
-    run: async (task) => {
-      const result = await llm.chat({
-        messages: [
-          { role: 'system', content: '주어진 내용을 간결하게 요약하세요. 핵심만 남기세요.' },
-          { role: 'user', content: task },
-        ],
-      })
-      return result.content
-    },
-  })
-}
-
 class UserContext {
   /**
    * Builds a UserContext for a single user: bootstraps all infrastructure and creates a SessionManager.
@@ -65,10 +47,10 @@ class UserContext {
     const userContext = new UserContext()
 
     // --- Config + logger ---
-    userContext.config = configOverride || Config.loadUserMerged(username)
+    userContext.config = configOverride || loadUserMerged(username)
     initI18n(userContext.config.locale)
     userContext.logger = createLogger().logger
-    for (const w of Config.validate(userContext.config)) userContext.logger.warn(`[config] ${w}`)
+    if (!userContext.config.llm?.apiKey) userContext.logger.warn('[config] llm.apiKey is not set — LLM calls will fail')
 
     // --- Persona ---
     userContext.persona = createPersona()

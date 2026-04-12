@@ -24,7 +24,7 @@ const App = (props) => {
     llm = null, toolRegistry = null, sessionId = 'user-default',
     onListSessions = null, onCreateSession = null,
     onDeleteSession = null, onSwitchSession = null,
-    disconnected = null,
+    disconnected = null, username = null,
   } = props
   const { exit } = useApp()
   const agentState = useAgentState(state)
@@ -42,7 +42,7 @@ const App = (props) => {
     addMessage, setMessages, clearTransientMessages, exit,
     currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems,
     sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession,
-    onInput,
+    onInput, username,
   })
 
   // App-level key handlers (overlay가 열려있지 않을 때만)

@@ -1,4 +1,5 @@
 import { Config } from '@presence/infra/infra/config.js'
+import { fromFile, loadUserMerged } from '@presence/infra/infra/config-loader.js'
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
 const DEFAULTS = Config.DEFAULTS
@@ -48,7 +49,7 @@ async function run() {
   // --- readConfigFile ---
 
   {
-    const result = Config.fromFile('/nonexistent/path.json')
+    const result = fromFile('/nonexistent/path.json')
     assert(Maybe.isNothing(result), 'readConfigFile missing: returns Nothing')
   }
 
@@ -57,7 +58,7 @@ async function run() {
     const path = join(dir, 'config.json')
     writeFileSync(path, JSON.stringify({ llm: { model: 'local-model' } }))
 
-    const result = Config.fromFile(path)
+    const result = fromFile(path)
     assert(Maybe.isJust(result), 'readConfigFile valid: returns Just')
     assert(result.value.llm.model === 'local-model', 'readConfigFile valid: parsed correctly')
     rmSync(dir, { recursive: true, force: true })
@@ -68,7 +69,7 @@ async function run() {
     const path = join(dir, 'config.json')
     writeFileSync(path, '<<<not json>>>')
 
-    const result = Config.fromFile(path)
+    const result = fromFile(path)
     assert(Maybe.isNothing(result), 'readConfigFile invalid JSON: returns Nothing')
     rmSync(dir, { recursive: true, force: true })
   }
@@ -77,7 +78,7 @@ async function run() {
 
   {
     let threw = false
-    try { Config.loadUserMerged() } catch { threw = true }
+    try { loadUserMerged() } catch { threw = true }
     assert(threw, 'loadUserMergedConfig: throws without username')
   }
 
@@ -86,7 +87,7 @@ async function run() {
   {
     const dir = makeTmpDir('user-defaults')
     mkdirSync(join(dir, 'users', 'test'), { recursive: true })
-    const config = Config.loadUserMerged('test', { basePath: dir })
+    const config = loadUserMerged('test', { basePath: dir })
     assert(config.llm.model === DEFAULTS.llm.model, 'loadUserMergedConfig no files: uses defaults')
     assert(config.maxIterations === 10, 'loadUserMergedConfig no files: default maxIterations')
     assert(config.scheduler.enabled === true, 'loadUserMergedConfig no files: scheduler enabled')
@@ -106,7 +107,7 @@ async function run() {
       locale: 'en',
     })
 
-    const config = Config.loadUserMerged('anthony', { basePath: dir })
+    const config = loadUserMerged('anthony', { basePath: dir })
     assert(config.llm.baseUrl === 'http://localhost:8045/v1', 'merge chain: server.json baseUrl preserved')
     assert(config.llm.model === 'override-model', 'merge chain: user overrides model')
     assert(config.llm.apiKey === 'sk-test', 'merge chain: user adds apiKey')

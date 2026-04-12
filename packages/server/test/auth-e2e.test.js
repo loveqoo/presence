@@ -123,8 +123,8 @@ const setupAuthServer = async (llmPort) => {
   process.env.PRESENCE_DIR = tmpDir
 
   // 서버 시작
-  const { Config } = await import('@presence/infra/infra/config.js')
-  const config = Config.loadUserMerged(instanceId, { basePath: tmpDir })
+  const { loadUserMerged } = await import('@presence/infra/infra/config-loader.js')
+  const config = loadUserMerged(instanceId, { basePath: tmpDir })
   const result = await startServer(config, { port: 0, persistenceCwd: tmpDir, instanceId })
 
   const origShutdown = result.shutdown
