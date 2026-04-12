@@ -285,9 +285,9 @@ async function run() {
       await delay(100)
       await typeInput(stdin, '/status')
 
-      await waitFor(() => lastFrame().includes('status:'), { timeout: 3000 })
-      assert(lastFrame().includes('status:'), 'TE7: /status system 메시지')
-      assert(lastFrame().includes('idle'), 'TE7: idle 포함')
+      await waitFor(() => lastFrame().includes('상태:'), { timeout: 3000 })
+      assert(lastFrame().includes('상태:'), 'TE7: /status system 메시지')
+      assert(lastFrame().includes('대기'), 'TE7: idle(대기) 포함')
     } finally {
       await cleanup()
     }

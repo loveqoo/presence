@@ -159,6 +159,15 @@
       "branch": "git 브랜치"
     }
   },
+  "status_cmd": {
+    "label": "상태: {{status}} | 턴: {{turn}} | 메모리: {{mem}} | 마지막 결과: {{last}}",
+    "status_idle": "대기",
+    "status_working": "작업 중",
+    "status_error": "에러",
+    "last_none": "없음",
+    "last_success": "성공",
+    "last_failure": "실패"
+  },
   "plan_op": {
     "exec": "도구 실행: {{tool}}({{args}})",
     "exec_no_args": "도구 실행: {{tool}}",

@@ -4,68 +4,11 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
-import { clearDebugState } from '@presence/core/core/state-commit.js'
-import { STATE_PATH } from '@presence/core/core/policies.js'
+import { handleSlashCommand } from './slash-commands.js'
 
 // =============================================================================
 // Session API: Router를 반환. PresenceServer.#mountRoutes()에서 마운트.
 // =============================================================================
-
-// --- Slash commands (테이블 디스패치) ---
-
-const SLASH_COMMANDS = {
-  mcp: (args, { toolRegistry }) => {
-    const groups = toolRegistry.groups()
-    if (groups.length === 0) return { type: 'system', content: 'No MCP servers configured.' }
-    const sub = args[0] || 'list'
-    if (sub === 'list') {
-      const lines = groups.map(group => `${group.enabled ? '●' : '○'} ${group.group}  ${group.serverName}  (${group.toolCount} tools)`)
-      return { type: 'system', content: `MCP servers:\n${lines.join('\n')}` }
-    }
-    if (sub === 'enable' || sub === 'disable') {
-      const group = args[1]
-      if (!group) return { type: 'system', content: `Usage: /mcp ${sub} <id>` }
-      const ok = sub === 'enable' ? toolRegistry.enableGroup(group) : toolRegistry.disableGroup(group)
-      return { type: 'system', content: ok ? `${group} ${sub}d.` : `Unknown MCP id: ${group}` }
-    }
-    return { type: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' }
-  },
-
-  clear: (_args, { state }) => {
-    clearDebugState(state)
-    return { type: 'system', content: 'Conversation cleared.' }
-  },
-
-  status: (_args, { state }) => {
-    const turnState = state.get(STATE_PATH.TURN_STATE)
-    const lastTurn = state.get(STATE_PATH.LAST_TURN)
-    return {
-      type: 'system',
-      content: `status: ${turnState?.tag || 'idle'} | turn: ${state.get(STATE_PATH.TURN) || 0} | last: ${lastTurn?.tag || 'none'}`,
-    }
-  },
-
-  tools: (_args, { tools }) => {
-    return { type: 'system', content: tools.map(tool => tool.name).join(', ') || '(none)' }
-  },
-
-  memory: async (args, { memory, userId }) => {
-    if (args[0] !== 'list') return null // 미지원 서브커맨드 → 에이전트에 위임
-    if (!memory) return { type: 'system', content: 'Memory disabled.' }
-    const nodes = await memory.allNodes(userId)
-    const summary = nodes.slice(0, 20).map(node => node.label).join('\n')
-    return { type: 'system', content: `${nodes.length} nodes:\n${summary}` }
-  },
-}
-
-const handleSlashCommand = async (input, ctx) => {
-  const [command, ...args] = input.slice(1).trim().split(/\s+/)
-  const handler = SLASH_COMMANDS[command]
-  if (!handler) return { handled: false }
-  const result = await handler(args, ctx)
-  if (!result) return { handled: false } // 핸들러가 null 반환 시 미처리
-  return { handled: true, result }
-}
 
 // --- 세션 검색/생성 공용 로직 ---
 
@@ -178,7 +121,10 @@ const resolveUserContext = async (req, deps) => {
   return userContext
 }
 
-// 세션 CRUD: GET/POST/DELETE /sessions[:sessionId]
+// --- Router factory ---
+
+// --- 세션 CRUD (목록/생성/삭제) ---
+
 const mountSessionsCrud = (router, deps) => {
   router.get('/sessions', async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
@@ -209,7 +155,7 @@ const mountSessionsCrud = (router, deps) => {
   })
 }
 
-const createSessionRouter = (deps) => {
+export const createSessionRouter = (deps) => {
   const router = express.Router()
   router.use('/sessions/:sessionId', express.json(), attachSessionMiddleware(deps))
   mountSessionEndpoints(router, deps)
@@ -217,4 +163,4 @@ const createSessionRouter = (deps) => {
   return router
 }
 
-export { createSessionRouter, findOrCreateSession }
+export { findOrCreateSession }

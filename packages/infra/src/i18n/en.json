@@ -101,6 +101,15 @@
     "current": "(current)",
     "changed": "model changed to {{model}}"
   },
+  "status_cmd": {
+    "label": "status: {{status}} | turn: {{turn}} | mem: {{mem}} | last: {{last}}",
+    "status_idle": "idle",
+    "status_working": "working",
+    "status_error": "error",
+    "last_none": "none",
+    "last_success": "success",
+    "last_failure": "failure"
+  },
   "cancel": {
     "cancelled": "cancelled"
   },

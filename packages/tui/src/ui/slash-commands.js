@@ -1,6 +1,7 @@
 import { buildReport } from './report.js'
 import { clearDebugState } from '@presence/core/core/state-commit.js'
 import { STATE_PATH } from '@presence/core/core/policies.js'
+import { formatStatusR } from '@presence/core/core/format-status.js'
 import { t } from '@presence/infra/i18n'
 import { handleMemory } from './slash-commands/memory.js'
 import { handleSessions } from './slash-commands/sessions.js'
@@ -77,7 +78,16 @@ const handleReport = (_input, ctx) => {
 
 const handleStatus = (_input, ctx) => {
   const lt = ctx.agentState.lastTurn
-  ctx.addMessage({ role: 'system', content: `status: ${ctx.agentState.status} | turn: ${ctx.agentState.turn} | mem: ${ctx.agentState.memoryCount} | last: ${lt?.tag || 'none'}`, transient: true })
+  ctx.addMessage({
+    role: 'system',
+    content: formatStatusR.run({ translate: t })({
+      status: ctx.agentState.status,
+      turn: ctx.agentState.turn,
+      memoryCount: ctx.agentState.memoryCount,
+      lastTurnTag: lt?.tag,
+    }),
+    transient: true,
+  })
 }
 
 const handleToolsList = (_input, ctx) => {
