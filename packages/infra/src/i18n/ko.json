@@ -241,5 +241,22 @@
       "blocked": "⊘",
       "unknown": "·"
     }
+  },
+  "mcp_cmd": {
+    "not_configured": "MCP 서버가 설정되지 않았습니다",
+    "header": "MCP 서버:",
+    "enabled": "{{group}} 활성화됨",
+    "disabled": "{{group}} 비활성화됨",
+    "unknown_id": "알 수 없는 MCP ID: {{group}}",
+    "usage_sub": "사용법: /mcp {{sub}} <id>  (예: mcp0)",
+    "usage": "사용법: /mcp [list | enable <id> | disable <id>]"
+  },
+  "report_cmd": {
+    "saved": "리포트 저장됨: {{path}}",
+    "saved_with_clipboard": "리포트 저장됨: {{path}}\n(클립보드에 복사됨)",
+    "fallback": "리포트를 파일에 저장할 수 없어 화면에 출력합니다"
+  },
+  "streaming": {
+    "thinking": "생각 중..."
   }
 }

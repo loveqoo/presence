@@ -20,27 +20,28 @@ const handleMcp = (input, ctx) => {
     if (onInput) {
       onInput(input).then(content => { if (content) addMessage({ role: 'system', content, transient: true }) }).catch(() => {})
     } else {
-      addMessage({ role: 'system', content: 'No MCP servers configured.' })
+      addMessage({ role: 'system', content: t('mcp_cmd.not_configured') })
     }
     return
   }
   const groups = toolRegistry.groups()
-  if (groups.length === 0) { addMessage({ role: 'system', content: 'No MCP servers configured.' }); return }
+  if (groups.length === 0) { addMessage({ role: 'system', content: t('mcp_cmd.not_configured') }); return }
   const args = input.trim().split(/\s+/).slice(1)
   const sub = args[0] || 'list'
   if (sub === 'list') {
     const lines = groups.map(s => `${s.enabled ? '●' : '○'} ${s.group}  ${s.serverName}  (${s.toolCount} tools)`)
-    addMessage({ role: 'system', content: `MCP servers:\n${lines.join('\n')}` })
+    addMessage({ role: 'system', content: `${t('mcp_cmd.header')}\n${lines.join('\n')}` })
     return
   }
   if (sub === 'enable' || sub === 'disable') {
     const group = args[1]
-    if (!group) { addMessage({ role: 'system', content: `Usage: /mcp ${sub} <id>  (e.g. mcp0)` }); return }
+    if (!group) { addMessage({ role: 'system', content: t('mcp_cmd.usage_sub', { sub }) }); return }
     const ok = sub === 'enable' ? toolRegistry.enableGroup(group) : toolRegistry.disableGroup(group)
-    addMessage({ role: 'system', content: ok ? `${group} ${sub}d.` : `Unknown MCP id: ${group}` })
+    const key = ok ? (sub === 'enable' ? 'mcp_cmd.enabled' : 'mcp_cmd.disabled') : 'mcp_cmd.unknown_id'
+    addMessage({ role: 'system', content: t(key, { group }) })
     return
   }
-  addMessage({ role: 'system', content: 'Usage: /mcp [list | enable <id> | disable <id>]' })
+  addMessage({ role: 'system', content: t('mcp_cmd.usage') })
 }
 
 const saveReportToDisk = async (report, addMessage) => {
@@ -56,9 +57,9 @@ const saveReportToDisk = async (report, addMessage) => {
     try {
       const { execSync } = await import('child_process')
       execSync('pbcopy', { input: report, stdio: ['pipe', 'pipe', 'pipe'] })
-      addMessage({ role: 'system', content: `report saved: ${filePath}\n(clipboard copied)` })
+      addMessage({ role: 'system', content: t('report_cmd.saved_with_clipboard', { path: filePath }) })
     } catch (_) {
-      addMessage({ role: 'system', content: `report saved: ${filePath}` })
+      addMessage({ role: 'system', content: t('report_cmd.saved', { path: filePath }) })
     }
   } catch (_) {
     addMessage({ role: 'system', content: report })

@@ -129,5 +129,22 @@
   "budget": {
     "history_dropped": "⚠ Prompt budget {{pct}}% — {{dropped}} history turns dropped. Use /clear to clean up.",
     "high_usage": "⚠ Prompt budget {{pct}}% — Use /clear or /memory clear to free up context."
+  },
+  "mcp_cmd": {
+    "not_configured": "No MCP servers configured",
+    "header": "MCP servers:",
+    "enabled": "{{group}} enabled",
+    "disabled": "{{group}} disabled",
+    "unknown_id": "Unknown MCP id: {{group}}",
+    "usage_sub": "Usage: /mcp {{sub}} <id>  (e.g. mcp0)",
+    "usage": "Usage: /mcp [list | enable <id> | disable <id>]"
+  },
+  "report_cmd": {
+    "saved": "Report saved: {{path}}",
+    "saved_with_clipboard": "Report saved: {{path}}\n(clipboard copied)",
+    "fallback": "Could not save report to file, displaying on screen"
+  },
+  "streaming": {
+    "thinking": "thinking..."
   }
 }

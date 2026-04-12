@@ -87,7 +87,7 @@ const App = (props) => {
     ? h(Box, { paddingX: 1, paddingLeft: 2, marginTop: 1, flexDirection: 'column' },
         agentState.streaming.content
           ? h(MarkdownText, { content: agentState.streaming.content + '▌' })
-          : h(Text, { color: 'gray' }, 'thinking...'),
+          : h(Text, { color: 'gray' }, t('streaming.thinking')),
       )
     : null
 
