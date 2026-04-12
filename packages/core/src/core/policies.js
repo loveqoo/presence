@@ -118,6 +118,10 @@ export const EMBEDDING = Object.freeze({
 export const LLM = Object.freeze({
   TIMEOUT_MS: 120_000,
   LIST_MODELS_TIMEOUT_MS: 10_000,
+  FINISH_REASON: Object.freeze({
+    STOP: 'stop',
+    LENGTH: 'length',
+  }),
 })
 
 export const TODO = Object.freeze({

@@ -616,11 +616,13 @@ console.log('UI component tests (renderToString)')
 
 // --- buildReport ---
 
-import { buildReport, formatDuration, truncate } from '@presence/tui/ui/report.js'
+import { buildReport } from '@presence/tui/ui/report.js'
+import { formatDuration } from '@presence/tui/ui/components/transcript/op-chain-format.js'
+import { truncate } from '@presence/tui/ui/report-sections.js'
 
 // 51. formatDuration helper
 {
-  assert(formatDuration(null) === '?', 'formatDuration: null → ?')
+  assert(formatDuration(null) === '...', 'formatDuration: null → ...')
   assert(formatDuration(0) === '< 1ms', 'formatDuration: 0 → < 1ms')
   assert(formatDuration(50) === '50ms', 'formatDuration: 50 → 50ms')
   assert(formatDuration(1500) === '1.5s', 'formatDuration: 1500 → 1.5s')

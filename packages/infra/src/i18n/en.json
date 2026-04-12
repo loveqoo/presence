@@ -70,6 +70,7 @@
     "tab_iterations": "Iterations",
     "no_data": "No data yet. Run a turn first.",
     "no_iterations": "No iteration history. Recorded during multi-turn execution.",
+    "error_label": "(error)",
     "no_turn_data": "No turn data yet. Run a turn first.",
     "no_prompt_data": "No prompt data yet.",
     "no_response_data": "No response data yet.",

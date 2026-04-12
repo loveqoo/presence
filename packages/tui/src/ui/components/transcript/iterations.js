@@ -11,22 +11,26 @@ const h = React.createElement
 
 const RESPONSE_TRUNCATE_LIMIT = 500
 
-const buildIterationHeader = (iter) =>
-  h(Text, { key: `h-${iter.iteration}`, bold: true, color: 'cyan' },
-    `── Iteration ${iter.iteration + 1} ──`)
+const buildIterationHeader = (iter) => {
+  const retryTag = iter.retryAttempt > 0 ? ` (retry ${iter.retryAttempt})` : ''
+  return h(Text, { key: `h-${iter.iteration}-${iter.retryAttempt || 0}`, bold: true, color: 'cyan' },
+    `── Iteration ${iter.iteration + 1}${retryTag} ──`)
+}
 
 const buildIterationMeta = (iter) => {
   const lines = []
   lines.push(`  parsedType: ${iter.parsedType || 'unknown'}`)
-  lines.push(`  stepCount:  ${iter.stepCount ?? '?'}`)
-  if (iter.assembly?.used != null) lines.push(`  assembly:   ${iter.assembly.used} tokens`)
+  const stepLabel = iter.error ? t('transcript.error_label') : (iter.stepCount ?? '?')
+  lines.push(`  stepCount:  ${stepLabel}`)
+  if (iter.error) lines.push(`  assembly:   ${t('transcript.error_label')}`)
+  else if (iter.assembly?.used != null) lines.push(`  assembly:   ${iter.assembly.used} tokens`)
   if (iter.promptMessages > 0) lines.push(`  prompt:     ${iter.promptMessages} messages, ${iter.promptChars} chars`)
-  return h(Text, { key: `m-${iter.iteration}`, color: 'white' }, lines.join('\n'))
+  return h(Text, { key: `m-${iter.iteration}-${iter.retryAttempt || 0}`, color: 'white' }, lines.join('\n'))
 }
 
 const buildIterationError = (iter) =>
   iter.error
-    ? h(Text, { key: `e-${iter.iteration}`, color: 'red' }, `  error: ${iter.error}`)
+    ? h(Text, { key: `e-${iter.iteration}-${iter.retryAttempt || 0}`, color: 'red' }, `  error: ${iter.error}`)
     : null
 
 const buildIterationResponse = (iter) => {
@@ -34,7 +38,7 @@ const buildIterationResponse = (iter) => {
   const preview = iter.response.length > RESPONSE_TRUNCATE_LIMIT
     ? iter.response.slice(0, RESPONSE_TRUNCATE_LIMIT) + '\n... (truncated)'
     : iter.response
-  return h(Box, { key: `r-${iter.iteration}`, flexDirection: 'column' },
+  return h(Box, { key: `r-${iter.iteration}-${iter.retryAttempt || 0}`, flexDirection: 'column' },
     h(Text, { color: 'gray' }, `  response (${iter.response.length} chars):`),
     h(Text, { color: 'white' }, `  ${preview.split('\n').join('\n  ')}`),
   )
@@ -57,7 +61,7 @@ const buildIterationElements = (iterationHistory) => {
     if (errorEl) elements.push(errorEl)
     const responseEl = buildIterationResponse(iter)
     if (responseEl) elements.push(responseEl)
-    elements.push(h(Text, { key: `sep-${iter.iteration}` }, ''))
+    elements.push(h(Text, { key: `sep-${iter.iteration}-${iter.retryAttempt || 0}` }, ''))
   }
 
   return elements

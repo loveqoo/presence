@@ -86,9 +86,11 @@ const assemblePrompt = (params) => {
   return {
     messages,
     response_format: buildResponseFormat(responseFormatMode),
+    maxTokens: effectiveBudget.reservedOutputChars || undefined,
     _assembly: {
       budget: usable,
       used: measureMessages(messages),
+      reservedOutput: effectiveBudget.reservedOutputChars,
       historyUsed: fittedHistory.length,
       historyDropped: history.length - fittedHistory.length,
       memoriesUsed: fittedMemories.length,
@@ -117,6 +119,7 @@ const buildRetryPrompt = (originalPrompt, errorMessage) => ({
     { role: 'user', content: `Your previous response was not valid JSON. Error: ${errorMessage}\nPlease respond with ONLY valid JSON. No explanation, no markdown, ONLY the JSON object.` },
   ],
   response_format: originalPrompt.response_format,
+  maxTokens: originalPrompt.maxTokens,
 })
 
 export { assemblePrompt, buildIterationPrompt, buildRetryPrompt }

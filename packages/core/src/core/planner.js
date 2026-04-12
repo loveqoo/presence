@@ -1,137 +1,38 @@
 import { askLLM, respond, updateState, getState } from './op.js'
-import { ops } from './op-handler.js'
+import { parsePlan, normalizeStep, summarizeResults } from './plan-executor.js'
 import { assemblePrompt, buildRetryPrompt } from './prompt/assembly.js'
-import { DEBUG, HISTORY, PROMPT as PROMPT_POLICY, ERROR_KIND, TurnState, TurnOutcome, TurnError, TURN_SOURCE } from './policies.js'
+import { ERROR_KIND, TurnError } from './policies.js'
 import { safeJsonParse, validatePlan } from './validate.js'
+import { TurnLifecycle } from './turn-lifecycle.js'
+import { DebugRecorder } from './debug-recorder.js'
 import fp from '../lib/fun-fp.js'
 
 const { Free, Either, identity } = fp
 
-// step 결과를 budget 제한하여 텍스트로 직렬화.
-const summarizeResults = (results) =>
-  (Array.isArray(results) ? results : [results])
-    .map((r, i) => {
-      const text = typeof r === 'string' ? r : JSON.stringify(r)
-      return `[Step ${i + 1}] ${text.length > PROMPT_POLICY.RESULT_MAX_LEN ? text.slice(0, PROMPT_POLICY.RESULT_MAX_LEN) + '...(truncated)' : text}`
-    }).join('\n')
 
-class TurnLifecycle {
-  constructor() { this.historySeq = 0 }
-
-  truncate(text, max) {
-    return text.length > max ? text.slice(0, max) + '...(truncated)' : text
-  }
-
-  finish(turn, turnResult, response, historyExtra = {}) {
-    return updateState('_streaming', null)
-      .chain(() => turn.source === TURN_SOURCE.USER
-        ? getState('context.conversationHistory').chain(history => {
-            const entry = {
-              id: `h-${Date.now()}-${++this.historySeq}`,
-              input: this.truncate(String(turn.input), HISTORY.MAX_INPUT_CHARS),
-              output: this.truncate(String(response), HISTORY.MAX_OUTPUT_CHARS),
-              ts: Date.now(),
-              ...historyExtra,
-            }
-            const updated = [...(history || []), entry]
-            const trimmed = updated.length > HISTORY.MAX_CONVERSATION
-              ? updated.slice(-HISTORY.MAX_CONVERSATION)
-              : updated
-            return updateState('context.conversationHistory', trimmed)
-          })
-        : Free.of(null))
-      .chain(() => updateState('lastTurn', turnResult))
-      .chain(() => updateState('turnState', TurnState.idle()))
-      .chain(() => Free.of(response))
-  }
-
-  success(turn, result) {
-    return this.finish(turn, TurnOutcome.success(turn.input, result), result)
-  }
-
-  failure(turn, error, response) {
-    return this.finish(turn, TurnOutcome.failure(turn.input, error, response), response, {
-      failed: true, errorKind: error.kind || 'unknown', errorMessage: error.message || String(error),
-    })
-  }
-
-  respondAndFail(turn, error, t = identity) {
-    return respond(t('error.agent_error', { message: error.message }))
-      .chain(msg => this.failure(turn, error, msg))
-  }
-}
-
-class DebugRecorder {
-  record(turn, n, prompt, rawResponse, parsed) {
-    const debugInfo = {
-      input: turn.input,
-      iteration: n,
-      memories: turn.memories.slice(0, 20),
-      prompt: {
-        systemLength: prompt.messages[0]?.content?.length || 0,
-        messageCount: prompt.messages.length,
-        hasRollingContext: turn.previousPlan != null,
-      },
-      llmResponseLength: rawResponse.length,
-      parsedType: Either.fold(() => null, p => p.type, parsed),
-      stepCount: Either.fold(() => null, p => p.steps?.length || 0, parsed),
-      error: Either.fold(e => e.message, () => null, parsed),
-      assembly: prompt._assembly,
-      timestamp: Date.now(),
-    }
-    const iterEntry = {
-      ...debugInfo,
-      promptMessages: prompt.messages.length,
-      promptChars: prompt.messages.reduce((s, m) => s + (m.content?.length || 0), 0),
-      response: rawResponse,
-    }
-    return updateState('_debug.lastTurn', debugInfo)
-      .chain(() => updateState('_debug.lastPrompt', prompt.messages))
-      .chain(() => updateState('_debug.lastResponse', rawResponse))
-      .chain(() => getState('_debug.iterationHistory').chain(prev => {
-        const history = [...(prev || []), iterEntry]
-        const capped = history.length > DEBUG.MAX_ITERATION_HISTORY
-          ? history.slice(-DEBUG.MAX_ITERATION_HISTORY)
-          : history
-        return updateState('_debug.iterationHistory', capped)
-      }))
-  }
-}
+const PLANNER_DEFAULTS = Object.freeze({
+  resolveTools: () => [],
+  resolveAgents: () => [],
+  persona: {},
+  maxRetries: 0,
+  maxIterations: 10,
+  t: identity,
+})
 
 class Planner {
-  constructor({
-    resolveTools = () => [],
-    resolveAgents = () => [],
-    persona = {},
-    responseFormatMode,
-    maxRetries = 0,
-    maxIterations = 10,
-    budget,
-    t = identity,
-  }) {
-    this.resolveTools = resolveTools
-    this.resolveAgents = resolveAgents
-    this.persona = persona
-    this.responseFormatMode = responseFormatMode
-    this.maxRetries = maxRetries
-    this.maxIterations = maxIterations
-    this.budget = budget
-    this.t = t
+  constructor(config = {}) {
+    // undefined 값은 기본값으로 대체 (spread는 undefined를 보존하므로 명시적 필터링)
+    const merged = { ...PLANNER_DEFAULTS }
+    for (const key of Object.keys(config)) {
+      if (config[key] !== undefined) merged[key] = config[key]
+    }
+    this.config = merged
     this.lifecycle = new TurnLifecycle()
     this.debug = new DebugRecorder()
   }
 
   withTools(tools) {
-    return new Planner({
-      resolveTools: () => tools,
-      resolveAgents: this.resolveAgents,
-      persona: this.persona,
-      responseFormatMode: this.responseFormatMode,
-      maxRetries: this.maxRetries,
-      maxIterations: this.maxIterations,
-      budget: this.budget,
-      t: this.t,
-    })
+    return new Planner({ ...this.config, resolveTools: () => tools })
   }
 
   // --- 플래닝 엔진 ---
@@ -146,8 +47,8 @@ class Planner {
       .chain(memories => getState('context.conversationHistory').chain(history =>
         Free.of({
           input, source,
-          tools: this.resolveTools(),
-          agents: this.resolveAgents(),
+          tools: this.config.resolveTools(),
+          agents: this.config.resolveAgents(),
           memories: memories || [],
           history: history || [],
           previousPlan: null,
@@ -157,13 +58,13 @@ class Planner {
   }
 
   planCycle(turn, n) {
-    if (n >= this.maxIterations) {
+    if (n >= this.config.maxIterations) {
       return this.lifecycle.respondAndFail(turn, TurnError(
-        `Max iterations (${this.maxIterations}) exceeded`,
+        `Max iterations (${this.config.maxIterations}) exceeded`,
         ERROR_KIND.MAX_ITERATIONS,
-      ), this.t)
+      ), this.config.t)
     }
-    return this.executeCycle(turn, n, this.maxRetries)
+    return this.executeCycle(turn, n, this.config.maxRetries)
   }
 
   executeCycle(turn, n, retriesLeft) {
@@ -171,10 +72,11 @@ class Planner {
     return askLLM({
       messages: prompt.messages,
       responseFormat: prompt.response_format,
+      maxTokens: prompt.maxTokens,
     }).chain(planJson => {
       const parsed = Either.pipeK(safeJsonParse, p => validatePlan(p, { tools: turn.tools }))(planJson)
       const rawResponse = typeof planJson === 'string' ? planJson : JSON.stringify(planJson)
-      return this.debug.record(turn, n, prompt, rawResponse, parsed)
+      return this.debug.record(turn, prompt, rawResponse, parsed, { iteration: n })
         .chain(() => this.resolveParseResult(turn, n, parsed, prompt, retriesLeft))
     })
   }
@@ -184,15 +86,15 @@ class Planner {
       ? { previousPlan: turn.previousPlan, previousResults: turn.previousResults }
       : null
     return assemblePrompt({
-      persona: this.persona,
+      persona: this.config.persona,
       tools: turn.tools,
       agents: turn.agents,
       memories: turn.memories,
       history: turn.history,
       input: turn.input,
       iterationContext,
-      budget: this.budget,
-      responseFormatMode: this.responseFormatMode,
+      budget: this.config.budget,
+      responseFormatMode: this.config.responseFormatMode,
     })
   }
 
@@ -205,20 +107,22 @@ class Planner {
   }
 
   retryOrFail(turn, n, error, prompt, retriesLeft) {
-    if (retriesLeft <= 0) return this.lifecycle.respondAndFail(turn, error, this.t)
+    if (retriesLeft <= 0) return this.lifecycle.respondAndFail(turn, error, this.config.t)
     return updateState('_retry', {
-      attempt: this.maxRetries - retriesLeft + 1,
-      maxRetries: this.maxRetries,
+      attempt: this.config.maxRetries - retriesLeft + 1,
+      maxRetries: this.config.maxRetries,
       error: error.message,
     }).chain(() => {
       const retryPrompt = buildRetryPrompt(prompt, error.message)
       return askLLM({
         messages: retryPrompt.messages,
         responseFormat: retryPrompt.response_format,
+        maxTokens: retryPrompt.maxTokens,
       }).chain(planJson => {
         const parsed = Either.pipeK(safeJsonParse, p => validatePlan(p, { tools: turn.tools }))(planJson)
         const rawResponse = typeof planJson === 'string' ? planJson : JSON.stringify(planJson)
-        return this.debug.record(turn, n, retryPrompt, rawResponse, parsed)
+        const retryAttempt = this.config.maxRetries - retriesLeft + 1
+        return this.debug.record(turn, retryPrompt, rawResponse, parsed, { iteration: n, retryAttempt })
           .chain(() => this.resolveParseResult(turn, n, parsed, retryPrompt, retriesLeft - 1))
       })
     })
@@ -229,8 +133,8 @@ class Planner {
       return respond(plan.message).chain(msg => this.lifecycle.success(turn, msg))
     }
     const hasRespond = plan.steps.some(s => s.op === 'RESPOND')
-    return this.parsePlan(plan).chain(either => Either.fold(
-      err => this.lifecycle.respondAndFail(turn, TurnError(err, ERROR_KIND.PLANNER_SHAPE), this.t),
+    return parsePlan(plan, normalizeStep).chain(either => Either.fold(
+      err => this.lifecycle.respondAndFail(turn, TurnError(err, ERROR_KIND.PLANNER_SHAPE), this.config.t),
       results => {
         if (hasRespond) {
           return this.lifecycle.success(turn, results[results.length - 1])
@@ -245,48 +149,6 @@ class Planner {
     ))
   }
 
-  // --- 플랜 파싱 ---
-
-  parsePlan(plan) {
-    if (plan.type === 'direct_response') {
-      return respond(plan.message).chain(r => Free.of(Either.Right(r)))
-    }
-
-    const steps = plan.steps || []
-    if (steps.length === 0) return Free.of(Either.Right([]))
-
-    return steps.reduce(
-      (program, step) => program.chain(acc => {
-        if (Either.isLeft(acc)) return Free.of(acc)
-        const normalized = this.normalizeStep(step)
-        const op = ops[normalized.op]
-        if (!op) return Free.of(Either.Left(`unknown op: ${normalized.op}`))
-        return op.run(normalized, acc.value).chain(stepResult =>
-          Either.fold(
-            err => Free.of(Either.Left(err)),
-            val => Free.of(Either.Right([...acc.value, val])),
-            stepResult,
-          )
-        )
-      }),
-      Free.of(Either.Right([])),
-    )
-  }
-
-  normalizeStep(step) {
-    if (step.op !== 'EXEC') return step
-    const a = step.args || {}
-    if (a.tool === 'delegate') {
-      const target = a.target || a.tool_args?.target
-      const task = a.task || a.tool_args?.task
-      if (target) return { op: 'DELEGATE', args: { target, task } }
-    }
-    if (a.tool === 'approve') {
-      const description = a.description || a.tool_args?.description
-      if (description) return { op: 'APPROVE', args: { description } }
-    }
-    return step
-  }
 }
 
-export { Planner, summarizeResults }
+export { Planner }

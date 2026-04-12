@@ -41,6 +41,12 @@ const WEIGHTS = Object.freeze({
 
 const LOGICAL_OPS = new Set(['&&', '||', '??'])
 
+// 체이닝 콜백으로 간주할 메서드 이름 — Fn 카운트에서 제외
+const CHAINING_METHODS = new Set([
+  'chain', 'map', 'flatMap', 'fold', 'reduce', 'then', 'catch', 'finally',
+  'filter', 'find', 'some', 'every', 'forEach',
+])
+
 const NESTING_TYPES = new Set([
   'IfStatement', 'ForStatement', 'ForInStatement', 'ForOfStatement',
   'WhileStatement', 'DoWhileStatement', 'SwitchStatement',
@@ -97,19 +103,32 @@ function analyze(code, filePath) {
     }
   }
 
-  walk.simple(ast, {
+  // 체이닝 콜백인지 판별: 부모가 CallExpression이고 callee가 체이닝 메서드
+  const isChainingCallback = (ancestors) => {
+    if (ancestors.length < 2) return false
+    const parent = ancestors[ancestors.length - 2]
+    if (parent.type !== 'CallExpression') return false
+    const callee = parent.callee
+    // obj.method() 형태
+    if (callee.type === 'MemberExpression' && callee.property.type === 'Identifier') {
+      return CHAINING_METHODS.has(callee.property.name)
+    }
+    return false
+  }
+
+  walk.ancestor(ast, {
     ImportDeclaration() { imports++ },
 
     FunctionDeclaration(node) {
       functions++
       if (node.params.length > maxParams) maxParams = node.params.length
     },
-    FunctionExpression(node) {
-      functions++
+    FunctionExpression(node, ancestors) {
+      if (!isChainingCallback(ancestors)) functions++
       if (node.params.length > maxParams) maxParams = node.params.length
     },
-    ArrowFunctionExpression(node) {
-      functions++
+    ArrowFunctionExpression(node, ancestors) {
+      if (!isChainingCallback(ancestors)) functions++
       if (node.params.length > maxParams) maxParams = node.params.length
     },
     MethodDefinition(node) {

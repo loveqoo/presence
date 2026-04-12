@@ -11,12 +11,12 @@
 
 ## 요약
 
-7개 마찰 포인트 식별. 심각도 분포: high 0(해소 2), medium 1(해소 2), low 0(해소 2).
+9개 마찰 포인트 식별. 심각도 분포: high 0(해소 2), medium 0(해소 5), low 0(해소 2).
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 2 | resolved: FP-29, FP-30 |
-| **medium** | 0 | 3 | resolved: FP-31, FP-32, FP-33 |
+| **medium** | 0 | 5 | resolved: FP-31, FP-32, FP-33, FP-52, FP-53 |
 | **low** | 0 | 2 | resolved: FP-34, FP-35 |
 
 ---
@@ -157,10 +157,65 @@ FP-04 해소(2026-04-11) 시 `App.js`에 idle 전용 키 힌트 라인이 신설
 |---------|------|
 | 최초 진입 | idle 힌트 라인에 `Ctrl+T 전사` 표시됨 (FP-33 resolved) |
 | 도달 경로 | 슬래시 커맨드는 1단계, 전사는 Ctrl+T 단축키 |
-| 피드백 | 스트리밍은 `▌`로 표시, 입력 비활성 힌트 추가됨 (FP-29, FP-30 resolved). 잘린 메시지 배너 추가 (FP-34 resolved) |
+| 피드백 | 스트리밍은 `▌`로 표시, 입력 비활성 힌트 추가됨 (FP-29, FP-30 resolved). 잘린 메시지 배너 추가 (FP-34 resolved). LLM truncation 시 경고 표시됨 (FP-52 resolved) |
 | 가역성 | ESC로 작업 취소 가능. 히스토리로 이전 입력 복원 가능. /help에 `↑↓ 입력 히스토리` 추가됨 (FP-35 resolved) |
 | 상태 가시성 | 비활성 힌트 표시로 개선됨 (FP-29 resolved) |
 | 용어 | `receiving N chars...` 제거됨 (FP-30 resolved) |
 | 실수 유도 | 비활성 상태 힌트 추가로 개선됨 (FP-29 resolved) |
 | 접근성 | 키보드만으로 기능 접근 가능. `/copy` 커맨드로 클립보드 복사 가능 (FP-31 resolved) |
 | 누락 | `/copy` 슬래시 커맨드 추가로 클립보드 복사 경로 확보됨 (FP-31 resolved) |
+
+---
+
+## [FP-52] KG-09 연계 — LLM truncation 시 유저에게 경고 없음 (2026-04-12) — **resolved (2026-04-12)**
+
+**관련 KG**: KG-09 (LLM 응답 max_tokens 미설정 → truncation)
+**심각도**: medium
+**영역**: `packages/tui/src/ui/components/ChatArea.js` + StatusBar retry 경로
+
+**해소 확인**
+
+- `sse-parser`가 `finish_reason: "length"` 감지 → `truncated` 플래그를 전파한다.
+- `streamingUi.set({ status: 'truncated' })`로 truncation 상태가 설정된다.
+- 유저에게 응답이 길이 제한으로 잘렸음을 알리는 경고가 표시된다.
+- `max_tokens`가 assembly budget에서 API까지 전달되어 truncation 발생 빈도 자체가 줄어들었다.
+
+**원래 관찰**
+
+`useAgentState.js:74`에 retry 발생 시 `activity: 'retry N/M...'`가 StatusBar에 노출된다. 즉, retry 자체는 유저에게 보인다.
+
+그러나 `finish_reason: "length"` 와 `"stop"` 을 구분하지 않아 다음 두 가지 UX 마찰이 발생했다:
+
+1. **최종 응답이 truncation으로 끊긴 경우** — retry가 모두 소진되거나 재조립에 실패하면 짧아진 응답이 그냥 출력된다. 유저는 응답이 중간에 잘렸다는 사실을 알 수 없다.
+2. **retry 중 진행 상황** — StatusBar에 `retry 2/3...` 은 표시되지만 "왜 다시 시도 중인지" (JSON 파싱 실패인지, LLM이 응답을 잘랐는지) 알 수 없다.
+
+**원래 제안**
+
+truncation으로 인한 retry가 발생할 때 StatusBar activity 또는 retry 완료 후 system 메시지로 "응답이 잘려 다시 요청 중" 안내를 추가한다. 최종 응답이 truncation으로 끊긴 경우 응답 아래에 경고 한 줄(`[응답이 길이 제한으로 잘렸습니다]`)을 표시한다.
+
+---
+
+## [FP-53] KG-10 연계 — Iterations 탭에서 retry 중복 번호 혼란 (2026-04-12) — **resolved (2026-04-12)**
+
+**관련 KG**: KG-10 (Planner retry 시 iteration index 중복 기록)
+**심각도**: medium
+**영역**: `packages/tui/src/ui/components/transcript/iterations.js:16`, `packages/tui/src/ui/report.js:83`
+
+**해소 확인**
+
+- `iterationHistory`에 `retryAttempt` 필드가 추가되었다.
+- `iterations.js`에서 `retryAttempt > 0`이면 헤더에 `(retry N)` 태그를 표시한다.
+- `report.js`에서도 동일한 `(retry N)` 태그가 표시된다.
+- 유저는 Iterations 탭과 `/report` 양쪽에서 retry 발생 여부와 횟수를 구분할 수 있다.
+
+**원래 관찰**
+
+`iterations.js`가 각 항목의 헤더를 `── Iteration ${iter.iteration + 1} ──` 로 렌더했다 (line 16). retry 시 동일 `iter.iteration` 값이 두 번 이상 기록되면 Iterations 탭에 `── Iteration 2 ──` 가 연속으로 두 번 나타났다.
+
+유저 시나리오: 멀티턴 작업 중 에이전트가 retry를 수행했을 때 `Ctrl+T` → Iterations 탭에서 이력을 확인하려 한다. 동일 번호가 중복 등장하면 "몇 번 retry가 발생했는지"를 세기 어렵고 어떤 것이 최종 결과인지 혼란스럽다.
+
+`report.js:83`도 동일하게 `iter.iteration + 1` 을 사용하므로 `/report` 출력에서도 같은 중복이 발생한다.
+
+**원래 제안**
+
+iteration 헤더에 배열 내 표시 순서(index)와 실제 `iter.iteration` 번호를 함께 표시한다. 예: `── [표시 1] Iteration 2 (retry) ──`. 또는 동일 번호가 중복될 때 `(retry)` 태그를 붙인다. KG-10 해소(서버 측 index 중복 수정) 이후에도 UI 레이어에서 방어적으로 표시 순서를 별도로 유지하는 것이 안전하다.

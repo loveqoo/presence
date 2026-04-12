@@ -1,6 +1,6 @@
 import fp from '../lib/fun-fp.js'
 
-const { Free, Either, Task, StateT, identity, once, pipe } = fp
+const { Free, Reader, identity } = fp
 
 const FUNCTOR = Symbol.for('fun-fp-js/Functor')
 
@@ -24,27 +24,42 @@ const GetState      = makeOp('GetState')
 const Parallel      = makeOp('Parallel')
 const Spawn         = makeOp('Spawn')
 
-// --- DSL (Op → Free) ---
+// --- DSL Reader (Op → Free, Reader 기반 합성 가능) ---
 
-const askLLM       = ({ messages, tools, responseFormat, context } = {}) => {
+const askLLMR = Reader.asks(({ messages, tools, responseFormat, maxTokens, context }) => {
   if (!Array.isArray(messages)) {
     throw new TypeError(`askLLM: messages must be an array, got ${typeof messages}`)
   }
-  return Free.liftF(AskLLM({ messages, tools, responseFormat, context }))
-}
-const executeTool  = (name, args)      => Free.liftF(ExecuteTool({ name, args }))
-const respond      = (message)         => Free.liftF(Respond({ message }))
-const approve      = (description)     => Free.liftF(Approve({ description }))
-const delegate     = (target, task)    => Free.liftF(Delegate({ target, task }))
-const observe      = (source, data)    => Free.liftF(Observe({ source, data }))
-const updateState  = (path, value)     => Free.liftF(UpdateState({ path, value }))
-const getState     = (path)            => Free.liftF(GetState({ path }))
-const parallel     = (programs)        => Free.liftF(Parallel({ programs }))
-const spawn        = (programs)        => Free.liftF(Spawn({ programs }))
+  return Free.liftF(AskLLM({ messages, tools, responseFormat, maxTokens, context }))
+})
+const executeToolR = Reader.asks(({ name, args }) => Free.liftF(ExecuteTool({ name, args })))
+const respondR     = Reader.asks(({ message }) => Free.liftF(Respond({ message })))
+const approveR     = Reader.asks(({ description }) => Free.liftF(Approve({ description })))
+const delegateR    = Reader.asks(({ target, task }) => Free.liftF(Delegate({ target, task })))
+const observeR     = Reader.asks(({ source, data }) => Free.liftF(Observe({ source, data })))
+const updateStateR = Reader.asks(({ path, value }) => Free.liftF(UpdateState({ path, value })))
+const getStateR    = Reader.asks(({ path }) => Free.liftF(GetState({ path })))
+const parallelR    = Reader.asks(({ programs }) => Free.liftF(Parallel({ programs })))
+const spawnR       = Reader.asks(({ programs }) => Free.liftF(Spawn({ programs })))
+
+// --- 레거시 브릿지 (기존 호출처 호환, 단일 라인 위임) ---
+
+const askLLM       = (params) => askLLMR.run(params)
+const executeTool  = (name, args) => executeToolR.run({ name, args })
+const respond      = (message) => respondR.run({ message })
+const approve      = (description) => approveR.run({ description })
+const delegate     = (target, task) => delegateR.run({ target, task })
+const observe      = (source, data) => observeR.run({ source, data })
+const updateState  = (path, value) => updateStateR.run({ path, value })
+const getState     = (path) => getStateR.run({ path })
+const parallel     = (programs) => parallelR.run({ programs })
+const spawn        = (programs) => spawnR.run({ programs })
 
 export {
   AskLLM, ExecuteTool, Respond, Approve, Delegate,
   Observe, UpdateState, GetState, Parallel, Spawn,
+  askLLMR, executeToolR, respondR, approveR, delegateR,
+  observeR, updateStateR, getStateR, parallelR, spawnR,
   askLLM, executeTool, respond, approve, delegate,
   observe, updateState, getState, parallel, spawn,
 }

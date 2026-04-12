@@ -1,6 +1,6 @@
 import { buildIterationPrompt } from '@presence/core/core/prompt/assembly.js'
 import { formatToolList, formatAgentList, formatMemories } from '@presence/core/core/prompt/formatters.js'
-import { summarizeResults } from '@presence/core/core/planner.js'
+import { summarizeResults } from '@presence/core/core/plan-executor.js'
 import { planSchema } from '@presence/core/core/prompt/schema.js'
 import { PROMPT_SECTIONS } from '@presence/core/core/prompt/sections.js'
 
