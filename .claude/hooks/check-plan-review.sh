@@ -38,8 +38,10 @@ if [ -f "$REVIEW_FILE" ]; then
   fi
 fi
 
-echo "❌ /codex:adversarial-review 를 먼저 실행하세요." >&2
-echo "  ExitPlanMode 전에 플랜 리뷰가 필요합니다." >&2
+echo "❌ plan-reviewer 서브에이전트로 플랜 리뷰를 먼저 받으세요." >&2
+echo "  Agent 툴: subagent_type=\"plan-reviewer\"" >&2
+echo "  프롬프트 예시: \"플랜 파일: $PLAN_FILE\\n리뷰 포커스: <요약>\"" >&2
+echo "  (adversarial-review 는 git diff 전용 — 플랜 파일을 리뷰하지 않습니다)" >&2
 echo "  리뷰 후 해시를 기록하세요:" >&2
 echo "  shasum -a 256 \"$PLAN_FILE\" | cut -d' ' -f1 > .claude/.plan-review-hash" >&2
 exit 2

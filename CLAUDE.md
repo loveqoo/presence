@@ -59,17 +59,29 @@ code-reviewer 통과 후 반드시 리뷰 해시를 기록한다:
 git diff --cached | shasum -a 256 | cut -d' ' -f1 > .claude/.review-hash
 ```
 
-**플랜 수립 후** — ExitPlanMode 호출 전에 반드시 `/codex:adversarial-review`를 실행한다:
+**플랜 수립 후** — ExitPlanMode 호출 전에 반드시 `plan-reviewer` 서브에이전트를 호출해 Codex 리뷰를 받는다. 메인 에이전트는 Agent 툴로 다음과 같이 호출한다:
+
 ```
-/codex:adversarial-review [플랜 핵심 설계 결정 요약]
+Agent({
+  subagent_type: "plan-reviewer",
+  description: "plan review — <슬러그>",
+  prompt: "플랜 파일: <절대경로>\n리뷰 포커스: <플랜 핵심 설계 결정 요약>"
+})
 ```
-설계 결함, 엣지 케이스 누락, 복잡도 과잉을 사전에 발견한다. 결과에 따라 플랜을 수정한다.
-리뷰 후 반드시 플랜 리뷰 해시를 기록한다 (`check-plan-review.sh` 훅이 ExitPlanMode 시 검증):
+
+`plan-reviewer` 는 Codex companion 의 `task` 서브커맨드로 forward 하는 thin wrapper 로, 플랜 파일을 `.claude/plan-under-review.md` 로 복사해 Codex 가 직접 읽고 리뷰하게 한다.
+
+**주의 — 도구 선택의 함정:**
+- ❌ `Skill` 툴로 `codex:adversarial-review` 호출 금지 — `commands/*.md` 의 `disable-model-invocation: true` 플래그로 차단된다.
+- ❌ Bash 로 `codex-companion.mjs adversarial-review` 직접 호출 금지 — 이 서브커맨드는 **git working tree diff 전용** 이며, `USER_FOCUS` 는 보조 힌트일 뿐 플랜 파일을 리뷰하지 않는다 (`scripts/codex-companion.mjs:238-246`). 코드 구현 플랜에서는 우연히 동작하는 것처럼 보일 수 있으나 문서 전용 플랜에서는 실질 리뷰가 불가능하다.
+- ✅ 반드시 `plan-reviewer` subagent 경로를 사용한다.
+
+리뷰 결과에 따라 플랜을 수정한 뒤, 반드시 플랜 리뷰 해시를 기록한다 (`check-plan-review.sh` 훅이 ExitPlanMode 시 검증):
 ```bash
 shasum -a 256 ~/.claude/plans/<plan-file>.md | cut -d' ' -f1 > .claude/.plan-review-hash
 ```
 
-**막힐 때** — `/codex:rescue`로 디버깅/원인분석을 Codex에 위임한다.
+**막힐 때** — `codex-rescue` 서브에이전트 (Agent 툴, subagent_type=`codex-rescue`) 로 디버깅/원인분석을 Codex 에 위임한다. `/codex:rescue` slash command 는 사용자 직접 입력용이다.
 
 ## 작업 체계 — 에이전트 + 티켓
 
