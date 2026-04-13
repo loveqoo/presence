@@ -54,15 +54,6 @@
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-tickets.sh"
           }
         ]
-      },
-      {
-        "matcher": "ExitPlanMode",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-plan-review.sh"
-          }
-        ]
       }
     ]
   }
