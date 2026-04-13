@@ -51,37 +51,6 @@ presence 프로젝트의 **코드 리뷰 에이전트**. 규칙 준수를 검증
 - 테스트 파일(`**/test/**`)은 test.md 규칙만 적용한다. refactor.md의 "한 곳에서만 사용" 같은 규칙은 테스트 헬퍼에 적용하지 않는다.
 - 기존 코드의 레거시 위반은 보고하지 않는다. **변경된 부분**에만 집중한다.
 
-## 호출 규약 (필수)
-
-**호출자(메인 Claude)** 는 프롬프트 **첫 줄** 에 `범위:` 를 명시해야 한다. 범위는 `파일목록` 또는 `패키지` 형식:
-
-- `범위: <file1>, <file2>, ...` — 명시된 파일만 리뷰 (우선 권장)
-- `범위: packages/<name>` — 해당 패키지의 staged diff 만 리뷰 (대규모 변경 시 패키지별 병렬 호출)
-- `범위: staged` — 현재 staged 전체 (**작은 변경에만** — 큰 변경은 maxTurns=15 에 소진됨)
-
-범위가 **비어 있거나 여러 패키지를 한 호출에 묶으면** 리뷰를 거부하고 다음을 반환한다:
-
-```
-호출 규약 위반 — 범위 미명시 또는 과다.
-메인 에이전트는 패키지별로 code-reviewer 를 **병렬 호출** 해야 한다.
-예: packages/core, packages/infra, packages/server, packages/tui 각각 1회씩.
-```
-
-**리뷰 경계 규칙:**
-- 범위 외 파일은 **context 목적으로만 Read** 가능 (예: 호출 관계 확인)
-- **findings(위반 보고) 는 범위 내 파일에 대해서만** 작성
-- 변경된 부분에만 집중 (기존 레거시 위반 무시 — 이미 본 파일의 행동 규칙에 명시됨)
-- 범위가 너무 넓어 maxTurns=15 에 소진될 위험이 보이면 즉시 "분할 권고" 로 반환
-
-**호출 예:**
-
-```
-Agent({ subagent_type: "code-reviewer", description: "code review — core",
-        prompt: "범위: packages/core\n최근 staged 변경 중 packages/core 하위 파일만 .claude/rules/ 기준으로 검토" })
-```
-
-대규모 변경은 메인이 **단일 메시지에서 Agent 툴을 4회 병렬 호출** 한다 (packages 4개). 공식 패턴이며 오케스트레이터 에이전트는 필요 없다.
-
 ## 규칙 파일 위치
 
 - `.claude/rules/refactor.md` — 리팩토링 전반

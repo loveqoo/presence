@@ -2,5 +2,3 @@ node_modules/
 .DS_Store
 *.log
 .claude/agent-memory/
-.claude/.review-hash
-.claude/.plan-review-hash

@@ -50,33 +50,22 @@
 
 새로운 규칙이나 검증이 필요하면 hook과 rules에 추가한다.
 
-### 듀얼 리뷰 워크플로우
+### 막힐 때
 
-**커밋 전** — Claude의 git commit 시 두 단계 리뷰가 훅으로 강제된다:
-1. `check-code-review.sh` 훅 — staged diff 해시로 code-reviewer 실행 여부를 검증. 미실행 시 커밋 차단.
-2. `pre-commit-codex-review.sh` 훅 — Codex 일반 품질/보안 검토 (경고). git commit 시 자동 실행.
-
-code-reviewer 통과 후 반드시 리뷰 해시를 기록한다:
-```bash
-git diff --cached | shasum -a 256 | cut -d' ' -f1 > .claude/.review-hash
-```
-
-**플랜 수립 후** — (임시 중단 2026-04-14) Codex 플랜 리뷰 강제 게이트는 Openclaw heartbeat 가 Codex quota 를 공유 소진하는 문제로 일시 해제되었다. `check-plan-review.sh` 훅의 ExitPlanMode wiring 제거, hook script 와 `plan-reviewer` 서브에이전트는 보존 (복구 용이). Codex quota 제약이 해소되면 `.claude/settings.json` 에 ExitPlanMode 훅을 다시 등록해 복구한다. 그동안 플랜 리뷰는 선택적이며, 필요 시 `plan-reviewer` 서브에이전트를 수동 호출할 수 있다.
-
-**막힐 때** — `codex-rescue` 서브에이전트 (Agent 툴, subagent_type=`codex-rescue`) 로 디버깅/원인분석을 Codex 에 위임한다. `/codex:rescue` slash command 는 사용자 직접 입력용이다.
+`codex-rescue` 서브에이전트 (Agent 툴, `subagent_type=codex-rescue`) 로 디버깅/원인분석을 Codex 에 위임한다. `/codex:rescue` slash command 는 사용자 직접 입력용이다.
 
 ## 작업 체계 — 에이전트 + 티켓
 
 presence 의 변경은 **에이전트 리뷰** 와 **티켓 레지스트리** 두 축으로 관리한다.
 
 **에이전트 (`.claude/agents/`)**
-- `code-reviewer` — `.claude/rules/` 기준 코드 규칙 검증 (커밋 전 필수)
-- `plan-reviewer` — 플랜 파일 Codex 리뷰 (ExitPlanMode 전 게이트는 2026-04-14 임시 해제, 수동 호출만 가능. `task` 서브커맨드 wrapper)
+- `code-reviewer` — `.claude/rules/` 기준 코드 규칙 검증
+- `plan-reviewer` — 플랜 파일 Codex 리뷰 (`task` 서브커맨드 wrapper)
 - `spec-guardian` — 도메인 스펙(`docs/specs/`) 정합성 검증
 - `ux-guardian` — UX 마찰점(`docs/ux/`) 감사
 - `user-guide-writer` — 사용자 가이드(`docs/guide/ko/`) 갱신
 
-**오케스트레이터 에이전트는 없다.** 메인 Claude 가 직접 Agent 툴로 guardian 을 호출한다. 기능 변경 후 메인이 `spec-guardian` / `ux-guardian` / `user-guide-writer` 를 병렬로 호출해 스펙/UX/가이드를 동기화한다 (공식 패턴: 단일 메시지에 Agent 툴 호출 여러 개). 각 guardian 은 자기 영역 문서만 수정하며 코드는 읽기만 한다. guardian 호출 시 반드시 `.claude/agents/<name>.md` 의 `## 호출 규약` 에 따라 **감사 범위** 를 프롬프트 첫 줄에 명시해야 한다 — 범위가 비면 maxTurns 소진 또는 scope drift 위험.
+에이전트 호출은 사용자가 직접 수행한다. 각 에이전트는 자기 영역 문서만 수정하며 코드는 읽기만 한다.
 
 **티켓 레지스트리 (`docs/tickets/REGISTRY.md`)**
 - 모든 작업 항목(FP = UX 마찰점, KG = 스펙 Known Gap)을 전역 유일 ID 로 통합 관리
