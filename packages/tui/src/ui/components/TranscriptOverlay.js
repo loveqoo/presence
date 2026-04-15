@@ -5,7 +5,7 @@ import { buildOpChainLines, buildOpChainDetailedLines } from './transcript/op-ch
 import { buildTurnLines } from './transcript/turn.js'
 import { buildPromptLines } from './transcript/prompt.js'
 import { buildResponseElements, buildResponseFallbackLines } from './transcript/response.js'
-import { buildIterationElements } from './transcript/iterations.js'
+import { buildIterationLines } from './transcript/iterations.js'
 
 const h = React.createElement
 
@@ -25,7 +25,7 @@ const TranscriptOverlay = (props) => {
     { mode: 'lines', data: buildTurnLines(debug, recalledMemories) },
     { mode: 'lines', data: buildPromptLines(lastPrompt) },
     { mode: 'elements', data: buildResponseElements(lastResponse) },
-    { mode: 'elements', data: buildIterationElements(iterationHistory) },
+    { mode: 'lines', data: buildIterationLines(iterationHistory) },
   ]
   const tab = tabContents[activeTab]
   const itemCount = tab.data.length
@@ -66,16 +66,22 @@ const TranscriptOverlay = (props) => {
     ? visible.map((line, i) => h(Text, { key: i, color: line.color || undefined }, line.text))
     : visible
 
-  return h(Box, { flexDirection: 'column', height: '100%' },
+  // 레이아웃 고정: 깜빡임 방지 — 렌더마다 프레임 총 높이가 일정해야 한다.
+  // - 루트에서 `height: '100%'` 제거: 자식 합계로 자연 사이징
+  // - 컨텐츠 박스는 `flexGrow` 대신 고정 `height={viewHeight}`
+  // - footer 는 항상 렌더, hasMore 아닐 때는 공백 한 줄로 자리 유지
+  const footerText = hasMore
+    ? t('transcript.more_lines', { count: itemCount - scrollOffset - viewHeight })
+    : ' '
+
+  return h(Box, { flexDirection: 'column' },
     h(Box, { paddingX: 1 },
       h(Text, { bold: true, color: 'cyan' }, t('transcript.header')),
       h(Text, { color: 'gray' }, t('transcript.controls')),
     ),
     h(Box, { paddingX: 1, gap: 1 }, ...tabBar),
-    h(Box, { flexDirection: 'column', paddingX: 2, flexGrow: 1 }, ...contentItems),
-    hasMore
-      ? h(Box, { paddingX: 2 }, h(Text, { color: 'gray' }, t('transcript.more_lines', { count: itemCount - scrollOffset - viewHeight })))
-      : null,
+    h(Box, { flexDirection: 'column', paddingX: 2, height: viewHeight }, ...contentItems),
+    h(Box, { paddingX: 2 }, h(Text, { color: 'gray' }, footerText)),
   )
 }
 

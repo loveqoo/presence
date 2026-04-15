@@ -1,70 +1,51 @@
-import React from 'react'
-import { Box, Text } from 'ink'
 import { t } from '@presence/infra/i18n'
-
-const h = React.createElement
 
 // =============================================================================
 // Iterations tab: 멀티턴 iteration history 렌더러.
-// report.js 의 iteration 렌더링과 동일한 데이터 구조를 React 요소로 변환.
+// 1 아이템 = 1 터미널 행을 보장하기 위해 { text, color } 평탄화 라인 배열로 반환.
+// (FP-57: 이전 element 모드는 멀티라인 Text 가 섞여 스크롤 슬라이스가 행 수와 어긋났다.)
 // =============================================================================
 
 const RESPONSE_TRUNCATE_LIMIT = 500
 
-const buildIterationHeader = (iter) => {
-  const retryTag = iter.retryAttempt > 0 ? ` (retry ${iter.retryAttempt})` : ''
-  return h(Text, { key: `h-${iter.iteration}-${iter.retryAttempt || 0}`, bold: true, color: 'cyan' },
-    `── Iteration ${iter.iteration + 1}${retryTag} ──`)
-}
-
-const buildIterationMeta = (iter) => {
-  const lines = []
-  lines.push(`  parsedType: ${iter.parsedType || 'unknown'}`)
+const pushIterationMeta = (lines, iter) => {
+  lines.push({ text: `  parsedType: ${iter.parsedType || 'unknown'}`, color: 'white' })
   const stepLabel = iter.error ? t('transcript.error_label') : (iter.stepCount ?? '?')
-  lines.push(`  stepCount:  ${stepLabel}`)
-  if (iter.error) lines.push(`  assembly:   ${t('transcript.error_label')}`)
-  else if (iter.assembly?.used != null) lines.push(`  assembly:   ${iter.assembly.used} tokens`)
-  if (iter.promptMessages > 0) lines.push(`  prompt:     ${iter.promptMessages} messages, ${iter.promptChars} chars`)
-  return h(Text, { key: `m-${iter.iteration}-${iter.retryAttempt || 0}`, color: 'white' }, lines.join('\n'))
+  lines.push({ text: `  stepCount:  ${stepLabel}`, color: 'white' })
+  if (iter.error) lines.push({ text: `  assembly:   ${t('transcript.error_label')}`, color: 'white' })
+  else if (iter.assembly?.used != null) lines.push({ text: `  assembly:   ${iter.assembly.used} tokens`, color: 'white' })
+  if (iter.promptMessages > 0) lines.push({ text: `  prompt:     ${iter.promptMessages} messages, ${iter.promptChars} chars`, color: 'white' })
 }
 
-const buildIterationError = (iter) =>
-  iter.error
-    ? h(Text, { key: `e-${iter.iteration}-${iter.retryAttempt || 0}`, color: 'red' }, `  error: ${iter.error}`)
-    : null
-
-const buildIterationResponse = (iter) => {
-  if (!iter.response) return null
+const pushIterationResponse = (lines, iter) => {
+  if (!iter.response) return
   const preview = iter.response.length > RESPONSE_TRUNCATE_LIMIT
     ? iter.response.slice(0, RESPONSE_TRUNCATE_LIMIT) + '\n... (truncated)'
     : iter.response
-  return h(Box, { key: `r-${iter.iteration}-${iter.retryAttempt || 0}`, flexDirection: 'column' },
-    h(Text, { color: 'gray' }, `  response (${iter.response.length} chars):`),
-    h(Text, { color: 'white' }, `  ${preview.split('\n').join('\n  ')}`),
-  )
+  lines.push({ text: `  response (${iter.response.length} chars):`, color: 'gray' })
+  for (const bodyLine of preview.split('\n')) lines.push({ text: `  ${bodyLine}`, color: 'white' })
 }
 
-const buildIterationElements = (iterationHistory) => {
+const buildIterationLines = (iterationHistory) => {
   if (!iterationHistory || iterationHistory.length === 0) {
-    return [h(Text, { key: 'empty', color: 'gray' }, t('transcript.no_iterations'))]
+    return [{ text: t('transcript.no_iterations'), color: 'gray' }]
   }
 
-  const elements = [
-    h(Text, { key: 'count', color: 'cyan' }, `${iterationHistory.length} iterations`),
-    h(Text, { key: 'blank' }, ''),
+  const lines = [
+    { text: `${iterationHistory.length} iterations`, color: 'cyan' },
+    { text: '', color: null },
   ]
 
   for (const iter of iterationHistory) {
-    elements.push(buildIterationHeader(iter))
-    elements.push(buildIterationMeta(iter))
-    const errorEl = buildIterationError(iter)
-    if (errorEl) elements.push(errorEl)
-    const responseEl = buildIterationResponse(iter)
-    if (responseEl) elements.push(responseEl)
-    elements.push(h(Text, { key: `sep-${iter.iteration}-${iter.retryAttempt || 0}` }, ''))
+    const retryTag = iter.retryAttempt > 0 ? ` (retry ${iter.retryAttempt})` : ''
+    lines.push({ text: `── Iteration ${iter.iteration + 1}${retryTag} ──`, color: 'cyan' })
+    pushIterationMeta(lines, iter)
+    if (iter.error) lines.push({ text: `  error: ${iter.error}`, color: 'red' })
+    pushIterationResponse(lines, iter)
+    lines.push({ text: '', color: null })
   }
 
-  return elements
+  return lines
 }
 
-export { buildIterationElements }
+export { buildIterationLines }

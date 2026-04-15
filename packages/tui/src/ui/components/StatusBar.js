@@ -1,22 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React from 'react'
 import { Box, Text } from 'ink'
 import { basename } from 'path'
 import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-
 const DEFAULT_ITEMS = ['status', 'session', 'budget', 'model', 'dir', 'branch']
 
 // status는 항상 표시 (토글 불가), 나머지만 토글 가능
 const TOGGLEABLE_ITEMS = ['session', 'turn', 'mem', 'tools', 'budget', 'dir', 'branch', 'model']
 const ALL_ITEM_KEYS = ['status', ...TOGGLEABLE_ITEMS]
-
-const formatElapsed = (ms) => {
-  const s = Math.floor(ms / 1000)
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60}s`
-}
 
 const budgetColor = (pct) => pct >= 95 ? 'red' : pct >= 80 ? 'yellow' : 'green'
 
@@ -56,9 +49,10 @@ const renderSegments = (segments) => {
 }
 
 // 우선순위: reconnecting > working > error > idle.
+// FP-58 실험: spinner 완전 제거. 정적 인디케이터로 re-render 삭제.
 const buildIndicator = (ctx) => {
-  if (ctx.reconnecting) return h(Text, { color: 'yellow' }, `${SPINNER_FRAMES[ctx.frame]} ${t('status.reconnecting')}`)
-  if (ctx.status === 'working') return h(Text, { color: 'yellow' }, `${SPINNER_FRAMES[ctx.frame]} ${ctx.activity || t('status.thinking')}${ctx.elapsedStr}`)
+  if (ctx.reconnecting) return h(Text, { color: 'yellow' }, `◌ ${t('status.reconnecting')}`)
+  if (ctx.status === 'working') return h(Text, { color: 'yellow' }, `◌ ${ctx.activity || t('status.thinking')}`)
   if (ctx.status === 'error') return h(Text, { color: 'red' }, ctx.errorHint ? `✗ error: ${ctx.errorHint}` : '✗ error')
   return h(Text, { color: 'green' }, '● idle')
 }
@@ -70,30 +64,12 @@ const StatusBar = (props) => {
     budgetPct = null, visibleItems = null,
     sessionId = '', errorHint = null, reconnecting = false,
   } = props
-  const [frame, setFrame] = useState(0)
-  const [elapsed, setElapsed] = useState(0)
-  const startRef = useRef(null)
 
-  // spinner 는 working 또는 reconnecting 상태에서 돌아간다 (FP-23).
-  const spinning = status === 'working' || reconnecting
-  useEffect(() => {
-    if (!spinning) {
-      startRef.current = null
-      setElapsed(0)
-      return
-    }
-    startRef.current = Date.now()
-    setElapsed(0)
-    const timer = setInterval(() => {
-      setFrame(f => (f + 1) % SPINNER_FRAMES.length)
-      if (startRef.current) setElapsed(Date.now() - startRef.current)
-    }, 80)
-    return () => clearInterval(timer)
-  }, [spinning])
-
+  // FP-58: 애니메이션 spinner 제거 — 100ms 주기 setInterval 이 전체 App frame 을
+  // 매번 erase+rewrite 하며 깜빡임을 유발했다. 정적 indicator 로 대체.
+  // elapsed 도 제거 (turn 번호와 idle/working 상태로 진행 여부는 충분히 식별 가능).
   const items = visibleItems || DEFAULT_ITEMS
-  const elapsedStr = status === 'working' && elapsed > 0 ? ` ${formatElapsed(elapsed)}` : ''
-  const indicator = buildIndicator({ status, frame, activity, elapsedStr, errorHint, reconnecting })
+  const indicator = buildIndicator({ status, activity, errorHint, reconnecting })
 
   const segments = buildSegments(items, {
     turn, memoryCount, toolCount, budgetPct,
@@ -105,4 +81,4 @@ const StatusBar = (props) => {
   return h(Box, { paddingX: 1 }, indicator, ...segmentElements)
 }
 
-export { StatusBar, SPINNER_FRAMES, DEFAULT_ITEMS, ALL_ITEM_KEYS, TOGGLEABLE_ITEMS }
+export { StatusBar, DEFAULT_ITEMS, ALL_ITEM_KEYS, TOGGLEABLE_ITEMS }

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Box, Text, Static } from 'ink'
 import { PlanView } from './PlanView.js'
 import { MarkdownText } from './MarkdownText.js'
 import { ToolResultView } from './ToolResultView.js'
@@ -69,31 +69,38 @@ const ChatMessage = ({ role, content, tag }) => {
   )
 }
 
-const ChatArea = ({ messages = [], toolExpanded = false }) => {
-  const truncatedCount = messages.length > CHAT.MAX_VISIBLE ? messages.length - CHAT.MAX_VISIBLE : 0
-  const visible = truncatedCount > 0
-    ? messages.slice(-CHAT.MAX_VISIBLE)
-    : messages
+const renderMessage = (msg, key, toolExpanded) => {
+  if (msg.role === 'plan') {
+    return h(PlanView, {
+      key,
+      iteration: msg.iteration,
+      maxIterations: msg.maxIterations,
+      steps: msg.steps,
+      status: msg.status,
+    })
+  }
+  if (msg.role === 'tool') {
+    return h(ToolResultView, { key, tool: msg.tool, args: msg.args, result: msg.result, expanded: toolExpanded })
+  }
+  return h(ChatMessage, { key, role: msg.role, content: msg.content, tag: msg.tag })
+}
 
-  return h(Box, { flexDirection: 'column', flexGrow: 1, paddingX: 1, overflowY: 'hidden' },
-    truncatedCount > 0
-      ? h(Text, { color: 'gray', dimColor: true }, t('chat.truncated', { count: truncatedCount }))
+// FP-58: 완료된 메시지는 Static 으로 스크롤백에 append-only 렌더.
+// 이후 dynamic frame rewrite 대상에서 제외 → streaming chunk 가 와도 과거 메시지는 재기록 안 됨.
+// 단 transient 메시지(시스템 안내 등)는 dynamic 으로 유지 — Esc 로 지워질 수 있어야 하므로.
+const ChatArea = ({ messages = [], toolExpanded = false }) => {
+  const staticMessages = messages.filter(m => !m.transient)
+  const transientMessages = messages.filter(m => m.transient)
+
+  return h(React.Fragment, null,
+    h(Static, { items: staticMessages.map((msg, idx) => ({ msg, idx })) },
+      ({ msg, idx }) => h(Box, { key: idx, paddingX: 1 }, renderMessage(msg, idx, toolExpanded))
+    ),
+    transientMessages.length > 0
+      ? h(Box, { flexDirection: 'column', paddingX: 1 },
+          ...transientMessages.map((msg, i) => renderMessage(msg, `t-${i}`, toolExpanded))
+        )
       : null,
-    ...visible.map((msg, i) => {
-      if (msg.role === 'plan') {
-        return h(PlanView, {
-          key: i,
-          iteration: msg.iteration,
-          maxIterations: msg.maxIterations,
-          steps: msg.steps,
-          status: msg.status,
-        })
-      }
-      if (msg.role === 'tool') {
-        return h(ToolResultView, { key: i, tool: msg.tool, args: msg.args, result: msg.result, expanded: toolExpanded })
-      }
-      return h(ChatMessage, { key: i, role: msg.role, content: msg.content, tag: msg.tag })
-    }),
   )
 }
 

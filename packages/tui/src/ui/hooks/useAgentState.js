@@ -1,5 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { STATE_PATH } from '@presence/core/core/policies.js'
+import { createTrailingThrottle } from './trailing-throttle.js'
+
+// FP-58: streaming chunk 가 60ms 주기로 쏟아져 App re-render → Ink frame rewrite.
+// 200ms throttle 로 16 Hz → 5 Hz 감소. 최신 값은 항상 보존 (trailing flush).
+const STREAMING_THROTTLE_MS = 200
 
 /**
  * State + Hook 시스템을 React 상태에 바인딩.
@@ -40,12 +45,24 @@ const useAgentState = (state) => {
   const [toolResults, setToolResults] = useState([])
   const [conversationHistory, setConversationHistory] = useState([])
 
+  const streamingTimerRef = useRef(null)
+  const streamingLatestRef = useRef(null)
+
   useEffect(() => {
     if (!state) return
 
     // events/delegates는 하위 경로(events.queue 등)로 변경되므로 wildcard 구독 필요
     const refreshEvents = () => setEvents(state.get(STATE_PATH.EVENTS) || { queue: [], deadLetter: [] })
     const refreshDelegates = () => setDelegates(state.get(STATE_PATH.DELEGATES) || { pending: [] })
+
+    // FP-58: streaming 은 60ms 주기 chunk → trailing throttle 로 5 Hz 제한.
+    // null (시작/종료) 전환은 즉시 flush. 중간 chunk 는 200ms 간격으로 최신 값만 반영.
+    const streamThrottle = createTrailingThrottle({
+      delayMs: STREAMING_THROTTLE_MS,
+      onFlush: setStreaming,
+      timerRef: streamingTimerRef,
+      latestRef: streamingLatestRef,
+    })
 
     const handlers = {
       [STATE_PATH.TURN_STATE]: (change) => {
@@ -74,7 +91,11 @@ const useAgentState = (state) => {
         setActivity(`retry ${info.attempt}/${info.maxRetries}...`)
       },
       [STATE_PATH.APPROVE]: (change) => setApprove(change.nextValue || null),
-      [STATE_PATH.STREAMING]: (change) => setStreaming(change.nextValue || null),
+      [STATE_PATH.STREAMING]: (change) => {
+        const value = change.nextValue || null
+        if (value === null) streamThrottle.flushNow(null)
+        else streamThrottle.scheduleOrFlush(value)
+      },
       [STATE_PATH.RECONNECTING]: (change) => setReconnecting(!!change.nextValue),
       [STATE_PATH.DEBUG_LAST_TURN]: (change) => setDebug(change.nextValue || null),
       [STATE_PATH.DEBUG_OP_TRACE]: (change) => { const v = change.nextValue; setOpTrace(Array.isArray(v) ? v : []) },
@@ -117,6 +138,7 @@ const useAgentState = (state) => {
       for (const [path, handler] of Object.entries(handlers)) {
         state.hooks.off(path, handler)
       }
+      streamThrottle.dispose()
     }
   }, [state])
 

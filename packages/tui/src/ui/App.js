@@ -84,13 +84,13 @@ const App = (props) => {
     })
   }
 
-  const streamingView = agentState.streaming
-    ? h(Box, { paddingX: 1, paddingLeft: 2, marginTop: 1, flexDirection: 'column' },
-        agentState.streaming.content
-          ? h(MarkdownText, { content: agentState.streaming.content + '▌' })
-          : h(Text, { color: 'gray' }, t('streaming.thinking')),
-      )
-    : null
+  // FP-58: streamingView 가 null ↔ Box 토글로 프레임 height 흔들림 → 항상 렌더, 비활성 시 공백.
+  const streamingChild = agentState.streaming
+    ? agentState.streaming.content
+      ? h(MarkdownText, { content: agentState.streaming.content + '▌' })
+      : h(Text, { color: 'gray' }, t('streaming.thinking'))
+    : h(Text, { color: 'gray' }, ' ')
+  const streamingView = h(Box, { paddingX: 1, paddingLeft: 2, marginTop: 1, flexDirection: 'column' }, streamingChild)
 
   const budgetPct = agentState.debug?.assembly?.budget && agentState.debug.assembly.budget !== Infinity
     ? Math.round(agentState.debug.assembly.used / agentState.debug.assembly.budget * 100)
@@ -110,9 +110,11 @@ const App = (props) => {
 
   // 키바인딩 힌트 (FP-04/09/25/26): idle 상태에서만 노출. 작업 중/승인/끊김에는
   // InputBar 가 이미 상황별 힌트를 보여주므로 중복 표시를 피한다.
+  // FP-58: 조건부로 null 반환 시 프레임 높이가 변동해 Ink 이전 프레임이 잔존 (ghost).
+  //        항상 렌더하되, 해당되지 않으면 공백 한 줄로 자리 유지.
   const hasTransient = messages.some(msg => msg.transient)
-  const keyHintLine = disconnected || isWorking || agentState.approve
-    ? null
+  const keyHintText = disconnected || isWorking || agentState.approve
+    ? ' '
     : hasTransient
       ? `${t('key_hint.idle')} · ${t('key_hint.transient')}`
       : t('key_hint.idle')
@@ -130,9 +132,13 @@ const App = (props) => {
       )
     : null
 
-  return h(Box, { flexDirection: 'column', height: '100%' },
+  // FP-58: 루트 `height: '100%'` + 중간 `flexGrow: 1` 제거.
+  // 인라인 모드에서는 이 조합이 frame 을 터미널 행 수만큼 강제로 늘려, 매 re-render 마다
+  // 30+ 라인 전체를 stdout 으로 다시 쓰며 시각적 깜빡임이 발생한다.
+  // 자연 사이징으로 두면 frame 이 실제 콘텐츠 높이만큼만 그려져 깜빡임이 사라진다.
+  return h(Box, { flexDirection: 'column' },
     disconnectedBanner,
-    h(Box, { flexGrow: 1 },
+    h(Box, null,
       h(Box, { flexDirection: 'column', flexGrow: 1 },
         h(ChatArea, { messages, toolExpanded }),
         streamingView,
@@ -153,9 +159,7 @@ const App = (props) => {
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),
     h(InputBar, { onSubmit: handleInput, disabled: isWorking || !!agentState.approve || !!disconnected, isActive: !showTranscript && !disconnected, hint: inputHint, historyRef: inputHistoryRef }),
-    keyHintLine
-      ? h(Box, { paddingX: 1 }, h(Text, { color: 'gray' }, keyHintLine))
-      : null,
+    h(Box, { paddingX: 1 }, h(Text, { color: 'gray' }, keyHintText)),
     h(Box, { paddingX: 1 },
       h(Text, { color: 'gray' }, '─'.repeat(Math.max(10, (process.stdout.columns || 80) - 2))),
     ),

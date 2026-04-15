@@ -5,7 +5,7 @@ import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { SidePanel } from '@presence/tui/ui/components/SidePanel.js'
 import { TranscriptOverlay, buildLines } from '@presence/tui/ui/components/TranscriptOverlay.js'
-import { buildIterationElements } from '@presence/tui/ui/components/transcript/iterations.js'
+import { buildIterationLines } from '@presence/tui/ui/components/transcript/iterations.js'
 import { ToolResultView, parseFileEntries, toGrid, truncateLines, getSummary } from '@presence/tui/ui/components/ToolResultView.js'
 import { CodeView, detectLang, highlightJS, highlightJSON } from '@presence/tui/ui/components/CodeView.js'
 import { detectWholeCodeLang, parseInline } from '@presence/tui/ui/components/MarkdownText.js'
@@ -279,51 +279,132 @@ console.log('UI component tests (renderToString)')
   assert(redLines.length > 0, 'buildLines opTrace: error line is red')
 }
 
-// --- buildIterationElements ---
+// --- buildIterationLines (FP-57: 1 item = 1 terminal row 보장) ---
 
-// 20c. buildIterationElements with empty history
+// 20c. buildIterationLines with empty history
 {
-  const elements = buildIterationElements([])
-  assert(elements.length === 1, 'buildIterationElements empty: returns 1 element')
-  // i18n 초기화 후이므로 한글 메시지 확인
-  assert(elements[0].props.children.includes('반복 이력'), 'buildIterationElements empty: shows no_iterations message')
+  const lines = buildIterationLines([])
+  assert(lines.length === 1, 'buildIterationLines empty: returns 1 line')
+  assert(lines[0].text.includes('반복 이력'), 'buildIterationLines empty: shows no_iterations message')
 }
 
-// 20d. buildIterationElements with null
+// 20d. buildIterationLines with null
 {
-  const elements = buildIterationElements(null)
-  assert(elements.length === 1, 'buildIterationElements null: returns 1 element')
+  const lines = buildIterationLines(null)
+  assert(lines.length === 1, 'buildIterationLines null: returns 1 line')
 }
 
-// 20e. buildIterationElements with 1 iteration
+// 20e. buildIterationLines with 1 iteration — 모든 라인은 단일 행(\n 없음)
 {
   const history = [{
     iteration: 0, parsedType: 'tool_use', stepCount: 3,
     assembly: { used: 1500 }, promptMessages: 2, promptChars: 800,
     response: '{"result": "ok"}',
   }]
-  const elements = buildIterationElements(history)
-  // header(count) + blank + iterHeader + meta + response + sep = 6 이상
-  assert(elements.length >= 4, 'buildIterationElements 1 iter: produces multiple elements')
-  const allText = elements.map(el => {
-    if (typeof el.props?.children === 'string') return el.props.children
-    return ''
-  }).join(' ')
-  assert(allText.includes('Iteration 1'), 'buildIterationElements 1 iter: shows iteration number')
-  assert(allText.includes('tool_use'), 'buildIterationElements 1 iter: shows parsedType')
+  const lines = buildIterationLines(history)
+  assert(lines.length >= 6, 'buildIterationLines 1 iter: produces multiple lines')
+  for (const line of lines) {
+    assert(typeof line.text === 'string', 'buildIterationLines: text is string')
+    assert(!line.text.includes('\n'), 'buildIterationLines: no embedded newlines (FP-57)')
+  }
+  const allText = lines.map(l => l.text).join(' ')
+  assert(allText.includes('Iteration 1'), 'buildIterationLines 1 iter: shows iteration number')
+  assert(allText.includes('tool_use'), 'buildIterationLines 1 iter: shows parsedType')
 }
 
-// 20f. buildIterationElements with error iteration
+// 20f. buildIterationLines with error iteration
 {
   const history = [{
     iteration: 0, parsedType: 'error', stepCount: 0,
     error: 'timeout exceeded', assembly: { used: 0 },
     promptMessages: 0, promptChars: 0, response: null,
   }]
-  const elements = buildIterationElements(history)
-  const errorEl = elements.find(el => el.props?.color === 'red')
-  assert(errorEl, 'buildIterationElements error: has red error element')
-  assert(errorEl.props.children.includes('timeout exceeded'), 'buildIterationElements error: shows error message')
+  const lines = buildIterationLines(history)
+  const errorLine = lines.find(l => l.color === 'red')
+  assert(errorLine, 'buildIterationLines error: has red error line')
+  assert(errorLine.text.includes('timeout exceeded'), 'buildIterationLines error: shows error message')
+}
+
+// 20g. buildIterationLines with multi-line response — 응답 줄바꿈도 개별 라인으로 분해
+{
+  const history = [{
+    iteration: 0, parsedType: 'direct_response', stepCount: 1,
+    assembly: { used: 100 }, promptMessages: 1, promptChars: 50,
+    response: 'line1\nline2\nline3',
+  }]
+  const lines = buildIterationLines(history)
+  for (const line of lines) {
+    assert(!line.text.includes('\n'), 'buildIterationLines multi-line response: each line is 1 row')
+  }
+  const bodyLines = lines.filter(l => l.text.trim() === 'line1' || l.text.trim() === 'line2' || l.text.trim() === 'line3')
+  assert(bodyLines.length === 3, 'buildIterationLines multi-line response: splits into 3 body lines')
+}
+
+// 20h. FP-57 회귀 — TranscriptOverlay Iterations 탭 ↓ 스크롤 후 헤더가 프레임에 1회만 존재
+{
+  const origRows = process.stdout.rows
+  Object.defineProperty(process.stdout, 'rows', { value: 15, configurable: true })
+  const iterationHistory = [
+    {
+      iteration: 0, parsedType: 'direct_response', stepCount: 1, retryAttempt: 0,
+      assembly: { used: 100 }, promptMessages: 1, promptChars: 50,
+      response: Array.from({ length: 20 }, (_, i) => `response line ${i + 1}`).join('\n'),
+    },
+    {
+      iteration: 1, parsedType: 'plan', stepCount: 2, retryAttempt: 0,
+      assembly: { used: 200 }, promptMessages: 2, promptChars: 80,
+      response: Array.from({ length: 20 }, (_, i) => `second line ${i + 1}`).join('\n'),
+    },
+  ]
+  const r = inkRender(React.createElement(TranscriptOverlay, {
+    debug: null, lastPrompt: null, lastResponse: null,
+    opTrace: [], recalledMemories: [], iterationHistory,
+    onClose: () => {},
+  }))
+  await new Promise(res => setTimeout(res, 30))
+  // → x4: Op Chain → Iterations
+  for (let i = 0; i < 4; i++) r.stdin.write('\u001B[C')
+  await new Promise(res => setTimeout(res, 20))
+  // ↓ x5: scroll
+  for (let i = 0; i < 5; i++) r.stdin.write('\u001B[B')
+  await new Promise(res => setTimeout(res, 30))
+  const frame = r.lastFrame()
+  r.unmount()
+  Object.defineProperty(process.stdout, 'rows', { value: origRows, configurable: true })
+  const headerCount = (frame.match(/트랜스크립트/g) || []).length
+  assert(headerCount === 1, `FP-57: header appears once per frame (got ${headerCount})`)
+  const frameLines = frame.split('\n').length
+  assert(frameLines <= 18, `FP-57: frame height bounded by rows + small margin (got ${frameLines})`)
+  assert(frame.includes('response line') || frame.includes('parsedType') || frame.includes('assembly'), 'FP-57: Iterations tab content visible after scroll')
+}
+
+// 20i. FP-57 깜빡임 회귀 — 스크롤 양 끝에서 프레임 총 높이가 일정 (hasMore 토글로 layout 흔들리지 않음)
+{
+  const origRows = process.stdout.rows
+  Object.defineProperty(process.stdout, 'rows', { value: 15, configurable: true })
+  const iterationHistory = [{
+    iteration: 0, parsedType: 'direct_response', stepCount: 1, retryAttempt: 0,
+    assembly: { used: 100 }, promptMessages: 1, promptChars: 50,
+    response: Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n'),
+  }]
+  const r = inkRender(React.createElement(TranscriptOverlay, {
+    debug: null, lastPrompt: null, lastResponse: null,
+    opTrace: [], recalledMemories: [], iterationHistory,
+    onClose: () => {},
+  }))
+  await new Promise(res => setTimeout(res, 30))
+  for (let i = 0; i < 4; i++) r.stdin.write('\u001B[C') // reach Iterations tab
+  await new Promise(res => setTimeout(res, 20))
+  const frameTop = r.lastFrame()
+  const topHeight = frameTop.split('\n').length
+  // scroll to end — hasMore becomes false, footer text becomes placeholder
+  for (let i = 0; i < 50; i++) r.stdin.write('\u001B[B')
+  await new Promise(res => setTimeout(res, 30))
+  const frameBottom = r.lastFrame()
+  const bottomHeight = frameBottom.split('\n').length
+  r.unmount()
+  Object.defineProperty(process.stdout, 'rows', { value: origRows, configurable: true })
+  assert(topHeight === bottomHeight, `FP-57: frame height stable across scroll (top=${topHeight}, bottom=${bottomHeight})`)
 }
 
 // --- ToolResultView helpers ---
@@ -951,6 +1032,154 @@ const mountApp = async (props) => {
   const frame = await mountApp({ state, disconnected: { code: 4001, at: Date.now() } })
   assert(!frame.includes('연결 중'),
     'FP-23: disconnected 배너가 있으면 reconnecting indicator 가 중복되지 않는다')
+}
+
+// --- FP-58: re-render 측정 테스트 ---
+// working 상태에서 spinner tick 이 돌 때 전체 App 프레임이 몇 번 다시 쓰이는지 측정한다.
+// 가설: StatusBar 의 setFrame(100ms) + setElapsed(1s) 가 React re-render 를 유발하고
+// 그 결과 ink-testing-library 의 stdout.frames 배열이 꾸준히 증가한다.
+// 측정 결과에 따라 어느 최적화가 효과가 있었는지 실제 숫자로 확인할 수 있다.
+
+{
+  const state = createOriginState({
+    turnState: TurnState.working('query'),
+    lastTurn: null,
+    turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  // 의도적으로 ChatArea 에 5 개 메시지를 채워 frame 을 크게 만든다.
+  const messages = [
+    { role: 'user', content: 'hello 1' },
+    { role: 'agent', content: 'response 1' },
+    { role: 'user', content: 'hello 2' },
+    { role: 'agent', content: 'response 2' },
+    { role: 'user', content: 'hello 3' },
+  ]
+  const r = inkRender(React.createElement(App, {
+    state, onInput: () => {}, onApprove: () => {}, onCancel: () => {},
+    initialMessages: messages,
+  }))
+  // mount 직후 초기 frame 이 여러 개 올 수 있어 안정화 대기.
+  await new Promise(res => setTimeout(res, 150))
+  const framesBefore = r.stdout.frames.length
+  // 1 초 동안 spinner tick 을 돌린다. 100ms × 10 = 10 ticks
+  await new Promise(res => setTimeout(res, 1000))
+  const framesAfter = r.stdout.frames.length
+  const delta = framesAfter - framesBefore
+  r.unmount()
+
+  // 측정 결과를 로그로 남긴다 (정확한 수치는 가설 검증 후 upper bound 로 고정).
+  console.log(`  [measure] spinner 1s 동안 frame writes: ${delta}`)
+  // spinner 가 100ms 주기면 최대 11 회 (10 ticks + 여유 1). 이를 넘으면 과도한 re-render.
+  assert(delta <= 15, `FP-58: spinner 1s 동안 frame writes ≤ 15 (got ${delta})`)
+  // 또한 마지막 frame 이 ChatArea 메시지를 계속 포함해야 한다 (sanity).
+  const last = r.stdout.frames[r.stdout.frames.length - 1] || ''
+  // 실제 frame 크기를 로그로 남긴다 — Ink 가 매 tick 마다 전체 frame 을 써내는지 확인.
+  const lineCount = last.split('\n').length
+  console.log(`  [measure] 마지막 frame lines: ${lineCount}, bytes: ${last.length}`)
+  assert(last.length > 100, 'FP-58 sanity: 마지막 frame 이 비어있지 않음')
+
+  // 모든 frame 의 평균 크기. 각 write 가 전체 frame 을 재기록한다면 frame[i].length 가 모두 비슷하다.
+  const sizes = r.stdout.frames.map(f => f.length)
+  const avgSize = Math.round(sizes.reduce((a, b) => a + b, 0) / sizes.length)
+  const maxSize = Math.max(...sizes)
+  console.log(`  [measure] frame avg: ${avgSize} bytes, max: ${maxSize} bytes, total writes: ${sizes.length}`)
+
+  // 진짜 중요한 질문: unique frame 은 몇 개인가? Ink 는 동일 frame 은 skip 하므로
+  // delta = 10 이라는 것은 10 번의 실제 string 변화가 있었다는 뜻이다.
+  const uniqueFrames = new Set(r.stdout.frames).size
+  console.log(`  [measure] unique frames: ${uniqueFrames} (총 ${sizes.length} writes)`)
+}
+
+// --- FP-58: 스트리밍 중 frame write 측정 ---
+// LLM chunk 가 도착하지 않아도 working 상태 그 자체로 write 가 발생하는지 확인.
+// 사용자 증언: 채팅 입력 후 응답 대기 중에 깜빡임. 스트리밍 시작 전 구간이다.
+{
+  const state = createOriginState({
+    turnState: TurnState.working('query'),
+    lastTurn: null,
+    turn: 1,
+    context: { memories: [], conversationHistory: [{ input: 'q1', output: 'r1' }] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  const r = inkRender(React.createElement(App, {
+    state, onInput: () => {}, onApprove: () => {}, onCancel: () => {},
+  }))
+  await new Promise(res => setTimeout(res, 200))
+  const framesBefore = r.stdout.frames.length
+  // 2 초간 아무 것도 하지 않고 대기 (실제 사용자의 "응답 대기 중" 시뮬레이션)
+  await new Promise(res => setTimeout(res, 2000))
+  const framesAfter = r.stdout.frames.length
+  const delta = framesAfter - framesBefore
+  r.unmount()
+  console.log(`  [measure] working 2s idle 대기 중 frame writes: ${delta}`)
+  assert(delta <= 2, `FP-58 working-idle: frame writes ≤ 2 (got ${delta})`)
+}
+
+// --- FP-58: 스트리밍 chunk throttle 검증 ---
+// 실환경 계측에서 streaming 이 60ms 주기로 도착 (16 Hz). useAgentState 의
+// 200ms trailing throttle 로 5 Hz 이하로 제한되어야 한다.
+{
+  const state = createOriginState({
+    turnState: TurnState.working('query'),
+    lastTurn: null,
+    turn: 1,
+    context: { memories: [], conversationHistory: [] },
+    todos: [],
+    events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] },
+    _toolResults: [],
+  })
+  const r = inkRender(React.createElement(App, {
+    state, onInput: () => {}, onApprove: () => {}, onCancel: () => {},
+  }))
+  await new Promise(res => setTimeout(res, 100))
+  const framesBefore = r.stdout.frames.length
+  // 실환경 재현: 1 초 동안 60ms 간격으로 chunk 16개 push
+  for (let i = 1; i <= 16; i++) {
+    state.set('_streaming', { status: 'receiving', content: 'abcdefghij'.repeat(i), length: i * 10 })
+    await new Promise(res => setTimeout(res, 60))
+  }
+  // throttle trailing flush 대기
+  await new Promise(res => setTimeout(res, 250))
+  const framesAfter = r.stdout.frames.length
+  const delta = framesAfter - framesBefore
+  r.unmount()
+  console.log(`  [measure] streaming 16 chunks/1s frame writes: ${delta}`)
+  // throttle 없음 = 16, 200ms throttle = 약 5-6. 안전 상한으로 8 이하 요구.
+  assert(delta <= 8, `FP-58 streaming throttle: frame writes ≤ 8 (got ${delta})`)
+  // 그리고 완전히 0 이면 trailing flush 가 작동 안 한 것
+  assert(delta >= 2, `FP-58 streaming throttle: trailing flush 작동 (got ${delta})`)
+}
+
+// --- FP-58: idle 상태에서는 거의 re-render 가 없어야 한다 ---
+{
+  const state = createOriginState({
+    turnState: TurnState.idle(),
+    lastTurn: null, turn: 0,
+    context: { memories: [], conversationHistory: [] },
+    todos: [], events: { queue: [], deadLetter: [] },
+    delegates: { pending: [] }, _toolResults: [],
+  })
+  const r = inkRender(React.createElement(App, {
+    state, onInput: () => {}, onApprove: () => {}, onCancel: () => {},
+  }))
+  await new Promise(res => setTimeout(res, 150))
+  const framesBefore = r.stdout.frames.length
+  await new Promise(res => setTimeout(res, 1000))
+  const framesAfter = r.stdout.frames.length
+  const delta = framesAfter - framesBefore
+  r.unmount()
+  console.log(`  [measure] idle 1s 동안 frame writes: ${delta}`)
+  // idle 은 타이머 없음 → 0 또는 1 (초기 안정화 여유) 이어야 함
+  assert(delta <= 2, `FP-58 idle: frame writes ≤ 2 (got ${delta})`)
 }
 
 // 63b-FP15/23 StatusBar 단위 렌더 —

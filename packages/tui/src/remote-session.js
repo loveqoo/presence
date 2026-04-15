@@ -5,6 +5,7 @@ import { defaultSessionId } from '@presence/infra/infra/constants.js'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { t } from '@presence/infra/i18n'
 import { App } from './ui/App.js'
+import { instrumentMirror } from '../diag/instrument-mirror.js'
 
 const h = React.createElement
 const noop = Function.prototype
@@ -72,7 +73,7 @@ class RemoteSession {
   }
 
   #createMirrorState(sessionId) {
-    return createMirrorState({
+    const mirror = createMirrorState({
       wsUrl: this.#wsUrl,
       sessionId,
       getHeaders: () => this.#authState?.accessToken
@@ -84,6 +85,10 @@ class RemoteSession {
         if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
       },
     })
+    // FP-58 진단: PRESENCE_TRACE_PATCHES=1 로 실행하면 모든 수신 patch 를
+    // /tmp/presence-patches.log 에 기록한다. 실환경 깜빡임 원인을 찾기 위함.
+    if (process.env.PRESENCE_TRACE_PATCHES === '1') instrumentMirror(mirror)
+    return mirror
   }
 
 
