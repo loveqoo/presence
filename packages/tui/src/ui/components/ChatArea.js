@@ -1,5 +1,5 @@
 import React from 'react'
-import { Box, Text, Static } from 'ink'
+import { Box, Text } from 'ink'
 import { PlanView } from './PlanView.js'
 import { MarkdownText } from './MarkdownText.js'
 import { ToolResultView } from './ToolResultView.js'
@@ -85,22 +85,18 @@ const renderMessage = (msg, key, toolExpanded) => {
   return h(ChatMessage, { key, role: msg.role, content: msg.content, tag: msg.tag })
 }
 
-// FP-58: 완료된 메시지는 Static 으로 스크롤백에 append-only 렌더.
-// 이후 dynamic frame rewrite 대상에서 제외 → streaming chunk 가 와도 과거 메시지는 재기록 안 됨.
-// 단 transient 메시지(시스템 안내 등)는 dynamic 으로 유지 — Esc 로 지워질 수 있어야 하므로.
+// FP-34: MAX_VISIBLE 초과 시 오래된 메시지를 잘라내고 배너로 안내.
+// FP-58 Static 패턴 대신 동적 렌더 + 메시지 수 제한으로 frame 크기를 억제.
+// /clear 와 양립 가능하며, 깜빡임은 spinner 제거 + streaming throttle 로 충분히 완화.
 const ChatArea = ({ messages = [], toolExpanded = false }) => {
-  const staticMessages = messages.filter(m => !m.transient)
-  const transientMessages = messages.filter(m => m.transient)
+  const truncatedCount = Math.max(0, messages.length - CHAT.MAX_VISIBLE)
+  const visible = truncatedCount > 0 ? messages.slice(truncatedCount) : messages
 
-  return h(React.Fragment, null,
-    h(Static, { items: staticMessages.map((msg, idx) => ({ msg, idx })) },
-      ({ msg, idx }) => h(Box, { key: idx, paddingX: 1 }, renderMessage(msg, idx, toolExpanded))
-    ),
-    transientMessages.length > 0
-      ? h(Box, { flexDirection: 'column', paddingX: 1 },
-          ...transientMessages.map((msg, i) => renderMessage(msg, `t-${i}`, toolExpanded))
-        )
+  return h(Box, { flexDirection: 'column', paddingX: 1 },
+    truncatedCount > 0
+      ? h(Text, { color: 'gray', dimColor: true }, t('chat.truncated', { count: truncatedCount }))
       : null,
+    ...visible.map((msg, i) => renderMessage(msg, truncatedCount + i, toolExpanded)),
   )
 }
 
