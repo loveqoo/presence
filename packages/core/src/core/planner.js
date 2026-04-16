@@ -112,8 +112,10 @@ class Planner {
       attempt: this.config.maxRetries - retriesLeft + 1,
       maxRetries: this.config.maxRetries,
       error: error.message,
+      truncated: !!error.truncated,
     }).chain(() => {
-      const retryPrompt = buildRetryPrompt(prompt, error.message)
+      // FP-52: error 객체를 직접 전달 — truncated 힌트가 retry 프롬프트에 포함됨
+      const retryPrompt = buildRetryPrompt(prompt, error)
       return askLLM({
         messages: retryPrompt.messages,
         responseFormat: retryPrompt.response_format,

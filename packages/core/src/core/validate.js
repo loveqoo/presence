@@ -18,9 +18,24 @@ const extractJson = (str) => {
   return str.slice(idx)
 }
 
+// FP-52: JSON parse 실패 시 truncation 여부를 휴리스틱으로 탐지.
+// 200자 이상이고 }, ], " 로 끝나지 않으면 max_tokens 절단으로 추정.
+const isTruncationLikely = (str) => {
+  if (typeof str !== 'string' || str.length < 200) return false
+  const last = str.trimEnd().slice(-1)
+  return last !== '}' && last !== ']' && last !== '"'
+}
+
 const safeJsonParse = (str) =>
   Either.fold(
-    e => Either.Left(TurnError(e.message || String(e), ERROR_KIND.PLANNER_PARSE)),
+    e => {
+      const truncated = isTruncationLikely(str)
+      const base = e.message || String(e)
+      const message = truncated
+        ? `${base} (response likely truncated at ${str.length} chars — try a shorter response)`
+        : base
+      return Either.Left(TurnError(message, ERROR_KIND.PLANNER_PARSE, truncated))
+    },
     parsed => Either.Right(parsed),
     Either.catch(() => typeof str === 'string' ? JSON.parse(extractJson(str)) : str),
   )

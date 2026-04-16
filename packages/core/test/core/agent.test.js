@@ -166,6 +166,22 @@ async function run() {
     const validateFail = safeJsonParse('{"type":"unknown"}').chain(validatePlan)
     assert(Either.isLeft(validateFail), 'parse+validate chain: validate fail → Left')
     assert(validateFail.value.kind === ERROR_KIND.PLANNER_SHAPE, 'parse+validate chain: validate error kind')
+
+    // FP-52: truncation 탐지 — 200자 이상이고 }, ], " 로 끝나지 않으면 truncated
+    const truncatedStr = '{"type":"direct_response","message":"' + 'x'.repeat(300)
+    const truncResult = safeJsonParse(truncatedStr)
+    assert(Either.isLeft(truncResult), 'safeJsonParse: truncated → Left')
+    assert(truncResult.value.truncated === true, 'safeJsonParse: truncated flag set')
+    assert(truncResult.value.message.includes('truncated'), 'safeJsonParse: error mentions truncated')
+
+    // 짧은 실패는 truncated 아님
+    const shortFail = safeJsonParse('{"bad')
+    assert(Either.isLeft(shortFail), 'safeJsonParse: short invalid → Left')
+    assert(!shortFail.value.truncated, 'safeJsonParse: short fail not truncated')
+
+    // 정상 종결 JSON 은 truncated 아님 (다른 이유로 실패해도)
+    const validEndFail = safeJsonParse('{"type":"unknown"}')
+    assert(Either.isLeft(validEndFail.chain(validatePlan)), 'safeJsonParse: valid JSON wrong type → Left via validate')
   }
 
   // T8. 구조 검증

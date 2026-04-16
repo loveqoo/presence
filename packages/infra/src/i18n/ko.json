@@ -32,6 +32,7 @@
     "streaming": "응답 중...",
     "reconnecting": "연결 중...",
     "retry": "재시도 {{attempt}}/{{max}}...",
+    "retry_truncated": "재시도 {{attempt}}/{{max}} — 응답 절단",
     "retry_notice": "\n⟳ JSON 파싱 실패, 재시도 중... ({{attempt}}/{{max}})"
   },
   "startup": {

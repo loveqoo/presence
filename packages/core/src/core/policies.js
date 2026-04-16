@@ -19,7 +19,7 @@ export const TurnOutcome = Object.freeze({
   failure: (input, error, response) => ({ tag: RESULT.FAILURE, input, error, response }),
 })
 
-export const TurnError = (message, kind) => ({ message, kind })
+export const TurnError = (message, kind, truncated = false) => ({ message, kind, truncated })
 
 // --- 실행 설정 ---
 

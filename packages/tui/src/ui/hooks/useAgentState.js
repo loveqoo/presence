@@ -89,7 +89,9 @@ const useAgentState = (state) => {
       [STATE_PATH.RETRY]: (change) => {
         const info = change.nextValue
         setRetryInfo(info)
-        setActivity(t('status.retry', { attempt: info.attempt, max: info.maxRetries }))
+        // FP-52: truncated 일 때 사유 표시
+        const key = info.truncated ? 'status.retry_truncated' : 'status.retry'
+        setActivity(t(key, { attempt: info.attempt, max: info.maxRetries }))
       },
       [STATE_PATH.APPROVE]: (change) => setApprove(change.nextValue || null),
       [STATE_PATH.STREAMING]: (change) => {

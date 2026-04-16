@@ -112,14 +112,22 @@ const buildIterationPrompt = (params) => {
   })
 }
 
-const buildRetryPrompt = (originalPrompt, errorMessage) => ({
-  messages: [
-    ...originalPrompt.messages,
-    { role: 'assistant', content: '(invalid JSON)' },
-    { role: 'user', content: `Your previous response was not valid JSON. Error: ${errorMessage}\nPlease respond with ONLY valid JSON. No explanation, no markdown, ONLY the JSON object.` },
-  ],
-  response_format: originalPrompt.response_format,
-  maxTokens: originalPrompt.maxTokens,
-})
+// FP-52: error 가 TurnError 객체면 truncated 힌트를 retry 프롬프트에 추가
+const buildRetryPrompt = (originalPrompt, error) => {
+  const errorMessage = typeof error === 'string' ? error : error.message
+  const truncated = typeof error === 'object' && error.truncated
+  const hint = truncated
+    ? '\nYour response was too long and got truncated. Use a MUCH shorter response — prefer direct_response with a brief message, or a plan with fewer steps.'
+    : ''
+  return {
+    messages: [
+      ...originalPrompt.messages,
+      { role: 'assistant', content: '(invalid JSON)' },
+      { role: 'user', content: `Your previous response was not valid JSON. Error: ${errorMessage}${hint}\nPlease respond with ONLY valid JSON. No explanation, no markdown, ONLY the JSON object.` },
+    ],
+    response_format: originalPrompt.response_format,
+    maxTokens: originalPrompt.maxTokens,
+  }
+}
 
 export { assemblePrompt, buildIterationPrompt, buildRetryPrompt }

@@ -30,6 +30,7 @@
   "status": {
     "thinking": "thinking...",
     "retry": "retry {{attempt}}/{{max}}...",
+    "retry_truncated": "retry {{attempt}}/{{max}} — response truncated",
     "retry_notice": "\n⟳ JSON parse failed, retrying... ({{attempt}}/{{max}})"
   },
   "startup": {
