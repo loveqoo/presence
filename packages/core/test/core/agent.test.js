@@ -125,6 +125,13 @@ async function run() {
     const fail2 = validatePlan({ type: 'direct_response', message: 42 })
     assert(Either.isLeft(fail2), 'validatePlan: non-string message → Left')
 
+    // I10: direct_response 빈 메시지 차단
+    const failEmpty = validatePlan({ type: 'direct_response', message: '' })
+    assert(Either.isLeft(failEmpty), 'validatePlan: empty message → Left')
+
+    const failWhitespace = validatePlan({ type: 'direct_response', message: '   \n  ' })
+    assert(Either.isLeft(failWhitespace), 'validatePlan: whitespace-only message → Left')
+
     const fail3 = validatePlan({ type: 'plan', steps: [] })
     assert(Either.isLeft(fail3), 'validatePlan: empty steps → Left')
 

@@ -109,9 +109,13 @@ const validatePlan = (plan, { tools = [] } = {}) => {
       `planner response is not a valid object: ${String(plan)}`, ERROR_KIND.PLANNER_SHAPE))
   }
   if (plan.type === 'direct_response') {
-    return typeof plan.message === 'string'
-      ? Either.Right(plan)
-      : Either.Left(TurnError('direct_response requires a valid message (string)', ERROR_KIND.PLANNER_SHAPE))
+    if (typeof plan.message !== 'string') {
+      return Either.Left(TurnError('direct_response requires a valid message (string)', ERROR_KIND.PLANNER_SHAPE))
+    }
+    if (plan.message.trim().length === 0) {
+      return Either.Left(TurnError('direct_response message must not be empty. Provide a meaningful response to the user.', ERROR_KIND.PLANNER_SHAPE))
+    }
+    return Either.Right(plan)
   }
   if (plan.type === 'plan') {
     if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
