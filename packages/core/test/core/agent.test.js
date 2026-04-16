@@ -154,6 +154,39 @@ async function run() {
     assert(Either.isRight(okExecLast), 'validatePlan: EXEC last without RESPOND → Right (convergence)')
   }
 
+  // T6b. KG-12: web_fetch SERP URL 차단
+  {
+    const webTools = [{ name: 'web_fetch', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } }]
+
+    // SERP URL → Left
+    const serpGoogle = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'web_fetch', tool_args: { url: 'https://www.google.com/search?q=busan+cafe' } } },
+      { op: 'RESPOND', args: { ref: 1 } },
+    ] }, { tools: webTools })
+    assert(Either.isLeft(serpGoogle), 'validatePlan: google SERP → Left')
+    assert(serpGoogle.value.message.includes('search engine'), 'validatePlan: SERP error message')
+
+    const serpBing = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'web_fetch', tool_args: { url: 'https://bing.com/search?q=test' } } },
+      { op: 'RESPOND', args: { ref: 1 } },
+    ] }, { tools: webTools })
+    assert(Either.isLeft(serpBing), 'validatePlan: bing SERP → Left')
+
+    // 일반 URL → Right
+    const okUrl = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'web_fetch', tool_args: { url: 'https://example.com/page' } } },
+      { op: 'RESPOND', args: { ref: 1 } },
+    ] }, { tools: webTools })
+    assert(Either.isRight(okUrl), 'validatePlan: normal URL → Right')
+
+    // google.com (SERP 아닌 경로) → Right
+    const okGoogle = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'web_fetch', tool_args: { url: 'https://www.google.com/maps' } } },
+      { op: 'RESPOND', args: { ref: 1 } },
+    ] }, { tools: webTools })
+    assert(Either.isRight(okGoogle), 'validatePlan: google non-SERP → Right')
+  }
+
   // T7. safeJsonParse.chain(validatePlan) — Either 합성
   {
     const ok = safeJsonParse('{"type":"direct_response","message":"hi"}').chain(validatePlan)

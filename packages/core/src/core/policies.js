@@ -133,6 +133,19 @@ export const CHAT = Object.freeze({
   MAX_VISIBLE: 50,
 })
 
+// KG-12: web_fetch 에 SERP URL 이 들어오면 plan validation 에서 차단.
+// 검색 엔진 결과 페이지는 HTML 스크래핑이 막히거나 의미 없는 결과를 반환한다.
+export const WEB_FETCH = Object.freeze({
+  BLOCKED_SERP_PATTERNS: Object.freeze([
+    /^https?:\/\/(www\.)?google\.\w+\/search/i,
+    /^https?:\/\/(www\.)?bing\.com\/search/i,
+    /^https?:\/\/search\.yahoo\.com/i,
+    /^https?:\/\/(www\.)?duckduckgo\.com\/\?.*q=/i,
+    /^https?:\/\/(www\.)?yandex\.\w+\/search/i,
+    /^https?:\/\/(www\.)?baidu\.com\/s/i,
+  ]),
+})
+
 export const PROMPT = Object.freeze({
   RESULT_MAX_LEN: 500,
   SUMMARIZED_RESULT_MAX_LEN: 200,

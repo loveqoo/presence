@@ -1,7 +1,7 @@
 import fp from '../lib/fun-fp.js'
 const { Either } = fp
 import { ops } from './op-handler.js'
-import { ERROR_KIND, TurnError } from './policies.js'
+import { ERROR_KIND, TurnError, WEB_FETCH } from './policies.js'
 
 const validateStep = (step) => {
   if (!step || typeof step !== 'object') return Either.Left(`invalid step: ${String(step)}`)
@@ -40,19 +40,31 @@ const safeJsonParse = (str) =>
     Either.catch(() => typeof str === 'string' ? JSON.parse(extractJson(str)) : str),
   )
 
+// KG-12: web_fetch URL 이 SERP 패턴이면 차단
+const isSerpUrl = (url) =>
+  typeof url === 'string' && WEB_FETCH.BLOCKED_SERP_PATTERNS.some(pattern => pattern.test(url))
+
 const validateExecArgs = (step, tools) => {
   if (step.op !== 'EXEC' || !tools || tools.length === 0) return Either.Right(true)
   const a = step.args || {}
   const toolDef = tools.find(t => t.name === a.tool)
   if (!toolDef) return Either.Left(TurnError(`EXEC: unknown tool: ${a.tool}`, ERROR_KIND.PLANNER_SHAPE))
 
-  const required = toolDef.parameters?.required || []
-  if (required.length === 0) return Either.Right(true)
-
   const resolvedArgs = a.tool_args || (() => {
     const { tool, ...rest } = a
     return rest
   })()
+
+  // KG-12: web_fetch SERP URL 차단
+  if (a.tool === 'web_fetch' && isSerpUrl(resolvedArgs.url)) {
+    return Either.Left(TurnError(
+      `web_fetch: search engine result pages cannot be fetched. Do not use URLs like google.com/search. Use direct_response to ask the user for a specific URL, or answer from available context.`,
+      ERROR_KIND.PLANNER_SHAPE))
+  }
+
+  const required = toolDef.parameters?.required || []
+  if (required.length === 0) return Either.Right(true)
+
   const missing = required.filter(r => resolvedArgs[r] == null && resolvedArgs[r] !== 0 && resolvedArgs[r] !== false)
   return missing.length === 0
     ? Either.Right(true)
