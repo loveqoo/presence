@@ -308,7 +308,7 @@ console.log('UI component tests (renderToString)')
     assert(!line.text.includes('\n'), 'buildIterationLines: no embedded newlines (FP-57)')
   }
   const allText = lines.map(l => l.text).join(' ')
-  assert(allText.includes('Iteration 1'), 'buildIterationLines 1 iter: shows iteration number')
+  assert(allText.includes('1') && (allText.includes('Iteration') || allText.includes('반복')), 'buildIterationLines 1 iter: shows iteration number')
   assert(allText.includes('tool_use'), 'buildIterationLines 1 iter: shows parsedType')
 }
 

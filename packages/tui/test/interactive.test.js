@@ -5,7 +5,10 @@ import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { App } from '@presence/tui/ui/App.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
+import { initI18n } from '@presence/infra/i18n'
 import { assert, summary } from '../../../test/lib/assert.js'
+
+await initI18n('ko')
 
 const h = React.createElement
 
@@ -105,7 +108,7 @@ async function run() {
     state.set('_retry', { attempt: 1, maxRetries: 2, error: 'parse error' })
     await new Promise(r => setTimeout(r, 50))
     frame = lastFrame()
-    assert(frame.includes('retry 1/2'), 'App retry: shows retry status')
+    assert(frame.includes('1/2'), 'App retry: shows retry status')
 
     // idle 복귀
     state.set('lastTurn', TurnOutcome.success('test', 'result'))

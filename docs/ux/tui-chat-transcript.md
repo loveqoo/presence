@@ -11,15 +11,15 @@
 
 ## 요약
 
-13개 마찰 포인트 식별. 심각도 분포: high 1(해소 4), medium 1(해소 5), low 1(해소 3).
+15개 마찰 포인트 식별. 심각도 분포: high 0(해소 4), medium 4(해소 4), low 1(해소 3).
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 4 | resolved: FP-29, FP-30, FP-57, FP-58 |
-| **medium** | 1 | 5 | open: FP-55 / resolved: FP-31, FP-32, FP-33, FP-52, FP-53 |
+| **medium** | 4 | 4 | open: FP-52, FP-55, FP-59, FP-60 / resolved: FP-31, FP-32, FP-33, FP-53 |
 | **low** | 1 | 3 | open: FP-56 / resolved: FP-34, FP-35, FP-54 |
 
-(REGISTRY: FP-55, FP-56, FP-57, FP-58)
+(REGISTRY: FP-52, FP-55, FP-56, FP-57, FP-58, FP-59, FP-60)
 
 ---
 
@@ -159,7 +159,7 @@ FP-04 해소(2026-04-11) 시 `App.js`에 idle 전용 키 힌트 라인이 신설
 |---------|------|
 | 최초 진입 | idle 힌트 라인에 `Ctrl+T 전사` 표시됨 (FP-33 resolved) |
 | 도달 경로 | 슬래시 커맨드는 1단계, 전사는 Ctrl+T 단축키 |
-| 피드백 | 스트리밍은 `▌`로 표시, 입력 비활성 힌트 추가됨 (FP-29, FP-30 resolved). 잘린 메시지 배너 추가 (FP-34 resolved). LLM truncation 시 경고 표시됨 (FP-52 resolved) |
+| 피드백 | 스트리밍은 `▌`로 표시, 입력 비활성 힌트 추가됨 (FP-29, FP-30 resolved). 잘린 메시지 배너 추가 (FP-34 resolved). LLM truncation 경고 미완 — TUI 소비 경로 없음 (FP-52 reopened) |
 | 가역성 | ESC로 작업 취소 가능. 히스토리로 이전 입력 복원 가능. /help에 `↑↓ 입력 히스토리` 추가됨 (FP-35 resolved) |
 | 상태 가시성 | 비활성 힌트 표시로 개선됨 (FP-29 resolved) |
 | 용어 | `receiving N chars...` 제거됨 (FP-30 resolved) |
@@ -169,7 +169,7 @@ FP-04 해소(2026-04-11) 시 `App.js`에 idle 전용 키 힌트 라인이 신설
 
 ---
 
-## [FP-52] KG-09 연계 — LLM truncation 시 유저에게 경고 없음 (2026-04-12) — **resolved (2026-04-12)**
+## [FP-52] KG-09 연계 — LLM truncation 시 유저에게 경고 없음 (2026-04-12) — **reopened (2026-04-16)**
 
 **관련 KG**: KG-09 (LLM 응답 max_tokens 미설정 → truncation)
 **심각도**: medium
@@ -181,6 +181,25 @@ FP-04 해소(2026-04-11) 시 `App.js`에 idle 전용 키 힌트 라인이 신설
 - `streamingUi.set({ status: 'truncated' })`로 truncation 상태가 설정된다.
 - 유저에게 응답이 길이 제한으로 잘렸음을 알리는 경고가 표시된다.
 - `max_tokens`가 assembly budget에서 API까지 전달되어 truncation 발생 빈도 자체가 줄어들었다.
+
+**재개 사유 (2026-04-16)**
+
+debug report 재검토로 아래 두 가지가 해소되지 않았음을 확인했다.
+
+1. **UX 경로 단절**: `core/interpreter/llm.js:76, 84` 가 `streamingUi.set({ status: 'truncated' })` 를 호출하지만 `packages/tui/src/` 어디에서도 이 상태를 소비하지 않는다. 경고가 표시된다고 주장한 `**해소 확인**` 4번째 항목은 사실이 아니다.
+2. **retry 트리거 누락**: `planner` retry 는 JSON parse 실패로만 트리거된다. `truncated` 플래그를 직접 검사하지 않으므로, 끊긴 JSON 이 우연히 valid 하면 (예: 문자열 닫힘 직전 절단) retry 없이 잘린 응답이 그대로 출력된다. 역으로 이 debug report 처럼 JSON 이 깨지면 retry 는 발생하지만 "왜 재시도하는지" 정보는 여전히 없다.
+
+**실증 케이스**: 2026-04-15 15:49 debug report. direct_response 658 자에서 mid-string 절단 → parse error (position 657) → 6.3s retry 낭비 → plan 타입으로 복구. 유저는 왜 응답이 지연됐는지 알 수 없음.
+
+**수정 방향**
+
+- `planner` retry 조건에 `truncated` 플래그 검사 추가 (JSON parse 성공이어도 truncated 면 retry)
+- `ChatArea` 에 truncated 상태 배너 렌더 (`[응답이 길이 제한으로 잘렸습니다]`)
+- `StatusBar` retry activity 에 사유 포함 (`retry N/M — 응답 절단` 또는 `retry N/M — JSON 오류`)
+
+**추가 실증 케이스 (2026-04-15 두 번째 report)**
+
+같은 병리가 iteration cascade 와 엮여 재현됨. Iteration 2 에서 planner 가 direct_response.message 에 long-form 투어 일정 (1971 chars, 1898 chars) 을 쓰다가 두 번 연속 절단 → 3 LLM 호출 ≈ 34 초 낭비 → 결국 616 chars 짧은 변명으로 복구. FP-60 (RESPOND 누락) 와 이 FP-52 가 겹치면 단일 turn 에서 발생하는 낭비가 수십 초 단위로 커진다.
 
 **원래 관찰**
 
@@ -396,3 +415,105 @@ Op Chain 탭의 마지막 줄:
 ### 근거
 
 Ink 인라인 모드는 부분 프레임 업데이트를 지원하지 않고 매 commit 마다 전체 frame 을 erase+rewrite 한다. 프레임이 작으면 시지각 임계 아래지만, 대화 UI 는 본질적으로 프레임이 크다. 해결책은 (a) 재렌더 빈도 낮추기 (throttle), (b) 프레임 자체 축소 (Static). 두 가지를 병행해야 완전한 해소.
+
+---
+
+## [FP-59] Plan EXEC 가 검증되지 않은 URL 을 tool_args 로 생성 (2026-04-16) — **open**
+
+**관련 KG**: KG-12 (planner tool_args 가 finite 선택 공간 바깥이라 hallucination 방어 없음)
+**심각도**: medium
+**영역**: `packages/core/src/core/agent.js` planner 파이프라인, `packages/core/src/core/plan.js` parser, tool 실행 전 검증
+
+**관찰**
+
+2026-04-15 debug report 에서 plan 타입 응답이 다음 EXEC 스텝들을 생성:
+
+```json
+[
+  { "op": "EXEC", "args": { "tool": "web_fetch", "tool_args": { "url": "https://www.visitbusan.net/ko/guide/detail?gId=10234" } } },
+  { "op": "EXEC", "args": { "tool": "web_fetch", "tool_args": { "url": "https://www.tripadvisor.com/Attraction_Review-g293851-d470615-Reviews-Gwangalli_Beach-Busan_Gyeongsangnamdo_Province_of_South_Korea.html" } } }
+]
+```
+
+두 URL 모두 planner LLM 이 "그럴듯한" 패턴으로 생성한 것으로 보이며, 사용자 질의 ("바다가 보였으면 좋겠어요") 나 recalled memories (광안리 카페 관심) 로부터 grounded 된 출처가 아니다. 이전 대화 히스토리에도 등장하지 않은 URL 이다.
+
+CLAUDE.md 설계 철학이 직접 경고하는 구조적 결함에 해당한다:
+
+> "Op ADT 바깥 계층 (subagent 결과, 자유 텍스트 출력 등) 에서 구조화된 보고를 받으면 hallucination 가능성을 먼저 의심할 것 — 그 계층에는 아직 finite 선택 공간이 없다."
+
+`tool_args.url` 은 현재 finite 선택 공간이 아니라 free-text 필드이므로 planner LLM 이 도메인/경로/쿼리를 환각할 수 있다.
+
+**사용자 영향**
+
+1. 존재하지 않거나 접근 불가한 URL 에 web_fetch 호출 → 네트워크 왕복 + 시간 낭비 (debug report 에서 63ms + 232ms, 운 좋게 응답은 왔으나 내용 검증 없음).
+2. 응답이 돌아오더라도 실제 내용과 사용자 의도의 연관성이 없어 다음 AskLLM 단계 컨텍스트가 오염됨 → 환각 증폭.
+3. "plan" 타입이 "direct_response" 보다 structured 하다는 신뢰는 표면적이다. steps 배열 안의 tool_args 는 여전히 free text 이므로 실질적 hallucination 방어가 되지 않는다.
+
+**수정 방향**
+
+세 가지 방어선 중 하나 이상:
+
+1. **Host whitelist**: `policies.js` 에 web_fetch 허용 호스트 목록을 두고, 목록 밖 URL 은 approval 요청으로 돌림.
+2. **Grounded reference 만 허용**: tool_args URL 은 이전 turn 의 검색 결과/메모리에서 인용된 URL 만 허용. planner 프롬프트에 "URL 은 직전 컨텍스트에 등장한 것만 사용" 명시 + parser 검증.
+3. **Pre-execution approval**: 모든 web_fetch URL 을 default 로 approval 요청으로 돌리고, 유저가 승인한 URL 만 실행.
+
+1번이 구현 비용이 가장 낮고 2번이 이상적이다. 3번은 유저 마찰이 커서 back-up.
+
+**추가 사례 (2026-04-15 두 번째 report)**
+
+두 번째 debug report 에서는 plan 이 `web_fetch` 에 `https://www.google.com/search?q=busan+cafe+tour+路线+gwangalli+seomyeon+daeondong+gwangbokro` 와 `https://www.google.com/search?q=busan+cafe+suggestions` 를 꽂았다. 검색 엔진 결과 페이지 (SERP) 는 대부분 스크래핑을 막으며, planner LLM 이 "web_fetch 에 google 검색 URL 을 넣으면 자동으로 검색이 될 것" 이라고 환각한 것으로 보인다. 첫 사례 (visitbusan.net, tripadvisor.com) 와 달리 호스트 자체는 실재하지만 용도 혼동 — 같은 hallucination 카테고리의 변종이다. Host whitelist 만으로는 부족하고, "web_fetch 가 기대하는 것은 콘텐츠 페이지이지 SERP 가 아니다" 라는 프롬프트 가이드가 필요.
+
+---
+
+## [FP-60] Plan 의 마지막 스텝이 ASK_LLM 인데 RESPOND 가 없어 결과가 폐기됨 (2026-04-16) — **open**
+
+**관련 KG**: KG-13 (planner 가 "plan 은 RESPOND 로 수렴해야 한다" 를 불변식으로 강제하지 않음)
+**심각도**: medium
+**영역**: `packages/core/src/core/planner.js:131-150` `executePlan`, planner 프롬프트, `docs/specs/planner.md` E 섹션
+
+**관찰**
+
+2026-04-15 debug report 의 Iteration 1 plan:
+
+```json
+{ "type": "plan", "steps": [
+  { "op": "EXEC", "args": { "tool": "web_fetch", "tool_args": { "url": "https://www.google.com/search?q=..." } } },
+  { "op": "EXEC", "args": { "tool": "web_fetch", "tool_args": { "url": "https://www.google.com/search?q=..." } } },
+  { "op": "ASK_LLM", "args": { "prompt": "$1과 $2 결과를 바탕으로 ... 일정을 만들어주세요 ..." } }
+] }
+```
+
+`RESPOND` 스텝이 없다. `planner.js:135` `hasRespond = false` → `planCycle(turn + previousResults, n+1)` 로 재귀 호출하여 iteration 2 진입. **Op 11 (ASK_LLM, 26.9s) 의 출력은 유저에게 전달되지 않고** `summarizeResults` 로 직렬화되어 다음 planner 프롬프트의 "Step results:" 블록에만 재주입.
+
+그 다음 planner 는 step results 를 본 뒤 직접 긴 `direct_response.message` 를 써내려 함 → 1971 chars 에서 JSON 절단 (FP-52 병리) → retry 2 회 → 최종 616 chars 의 변명성 응답으로 복구 ("검색 결과가 제대로 표시되지 않아, 기존 기억된 정보...").
+
+**총 소요**: 66.2 초. 유저가 얻은 실질 가치는 recalled memories 와 일반 상식으로 쓸 수 있던 616 chars.
+
+**왜 문제인가**
+
+planner.md E5 는 "RESPOND 가 마지막이 아닌 경우 거부" 만 검사하고, "RESPOND 가 아예 없는 경우" 는 침묵한다. `planner.js` 는 이것을 **의도적 수렴 루프** 로 처리해 다음 iteration 으로 넘긴다. 설계 철학상 맞지만, planner LLM 이 아래 두 가지를 혼동하면 심각한 낭비가 발생한다:
+
+1. "ASK_LLM 결과 = 유저 응답" 으로 의도하고 RESPOND 생략 → 실제로는 결과 폐기 + 재계획
+2. 다음 iteration 에서 planner 가 다시 plan 을 만들지 direct_response 를 쓸지 혼동 → direct_response 로 긴 문장 뱉음 → FP-52 truncation
+
+실질적으로 planner LLM 이 "3단계 plan 으로 조사 후 마지막에 LLM 으로 조립" 이라는 **두뇌 의도** 를 가지고 있지만, 스펙은 그것을 RESPOND 없는 plan 으로 표현하라는 관습을 강제하지 않는다. 또한 프롬프트도 이 관습을 명시하지 않는다.
+
+**사용자 영향**
+
+- 긴 대기 (수십 초) 뒤 결과 폐기 → 재요청 → retry cascade → 최종 저품질 응답
+- 내부 tool 호출 (web_fetch × 2, inner ASK_LLM) 의 네트워크/compute 자원이 낭비됨
+- "에이전트가 뭔가 열심히 했는데 결과가 실망스럽다" 는 신뢰도 하락
+
+**수정 방향 후보**
+
+1. **Validator 강화**: `validatePlan` 에서 `plan.steps` 가 비어있지 않고 마지막 스텝이 `RESPOND` 가 아니면 Either.Left. 즉 RESPOND 누락을 parse error 로 승격. 재시도 경로에 올라감.
+   - 단점: 수렴 루프 철학과 충돌. 일부 정당한 케이스 (여러 iteration 이 필요한 조사 태스크) 가 거부됨.
+2. **Implicit RESPOND wrap**: `parsePlan` 이 마지막 스텝이 ASK_LLM 이고 RESPOND 가 없으면 `RESPOND { ref: <lastIdx> }` 를 자동 append.
+   - 단점: 수렴 루프가 필요한 케이스를 덮어써버림. planner 가 진짜로 "추가 조사가 더 필요" 로 의도한 경우 구분 불가.
+3. **Planner 프롬프트 강화**: system prompt 에 "plan 의 마지막 스텝은 반드시 RESPOND 여야 하며, RESPOND.ref 로 앞 스텝 결과를 참조한다. 추가 조사가 필요하면 RESPOND 를 넣지 말고 후속 iteration 을 기다려라" 를 명시. few-shot 예제 추가.
+   - 장점: 철학 유지, 소프트 가이드. 단점: LLM 준수 여부 불확실.
+4. **Iteration cap 강화 + 경고 UX**: max_iterations 초과 시점이 아니라, iteration >= 2 에서 FP-52 스타일 retry 가 발생하면 "수렴 실패" 경고 + 조기 중단.
+
+우선순위: 3 → 1 → 2. 3 은 비용 낮고 회귀 위험 적음. 1 은 확실하지만 철학 변경. 2 는 마법적이라 디버깅 어려움.
+
+**실증 케이스**: 2026-04-15 15:10 debug report. 37 ops, 66.2s, 최종 direct_response 616 chars 변명성 응답.

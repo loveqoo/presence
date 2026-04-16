@@ -31,7 +31,7 @@
     "thinking": "thinking...",
     "streaming": "응답 중...",
     "reconnecting": "연결 중...",
-    "retry": "retry {{attempt}}/{{max}}...",
+    "retry": "재시도 {{attempt}}/{{max}}...",
     "retry_notice": "\n⟳ JSON 파싱 실패, 재시도 중... ({{attempt}}/{{max}})"
   },
   "startup": {
@@ -93,7 +93,17 @@
     "memories_injected": "메모리: {{count}}개 프롬프트에 주입",
     "recalled_memories": "조회된 메모리 ({{count}}개)",
     "none": "(없음)",
-    "more_lines": "↓ {{count}}줄 더"
+    "more_lines": "↓ {{count}}줄 더",
+    "iter_count": "{{count}}회 반복",
+    "iter_header": "── 반복 {{n}}{{retry}} ──",
+    "iter_retry_tag": " (재시도 {{attempt}})",
+    "iter_parsed_type": "  응답 유형: {{type}}",
+    "iter_step_count": "  단계 수: {{count}}",
+    "iter_assembly": "  어셈블리: {{used}} 토큰",
+    "iter_prompt_stats": "  프롬프트: {{messages}}개 메시지, {{chars}}자",
+    "iter_response_header": "  응답 ({{chars}}자):",
+    "iter_error": "  오류: {{message}}",
+    "iter_truncated": "... (잘림)"
   },
   "memory_cmd": {
     "summary": "메모리: {{count}}개 노드 ({{detail}})",

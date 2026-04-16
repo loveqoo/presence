@@ -91,7 +91,17 @@
     "memories_injected": "Memories: {{count}} injected into prompt",
     "recalled_memories": "Recalled Memories ({{count}})",
     "none": "(none)",
-    "more_lines": "↓ {{count}} more lines"
+    "more_lines": "↓ {{count}} more lines",
+    "iter_count": "{{count}} iterations",
+    "iter_header": "── Iteration {{n}}{{retry}} ──",
+    "iter_retry_tag": " (retry {{attempt}})",
+    "iter_parsed_type": "  parsedType: {{type}}",
+    "iter_step_count": "  stepCount: {{count}}",
+    "iter_assembly": "  assembly: {{used}} tokens",
+    "iter_prompt_stats": "  prompt: {{messages}} messages, {{chars}} chars",
+    "iter_response_header": "  response ({{chars}} chars):",
+    "iter_error": "  error: {{message}}",
+    "iter_truncated": "... (truncated)"
   },
   "memory_cmd": {
     "summary": "memory: {{count}} nodes ({{detail}})",

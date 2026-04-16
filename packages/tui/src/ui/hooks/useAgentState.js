@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { STATE_PATH } from '@presence/core/core/policies.js'
+import { t } from '@presence/infra/i18n'
 import { createTrailingThrottle } from './trailing-throttle.js'
 
 // FP-58: streaming chunk 가 60ms 주기로 쏟아져 App re-render → Ink frame rewrite.
@@ -88,7 +89,7 @@ const useAgentState = (state) => {
       [STATE_PATH.RETRY]: (change) => {
         const info = change.nextValue
         setRetryInfo(info)
-        setActivity(`retry ${info.attempt}/${info.maxRetries}...`)
+        setActivity(t('status.retry', { attempt: info.attempt, max: info.maxRetries }))
       },
       [STATE_PATH.APPROVE]: (change) => setApprove(change.nextValue || null),
       [STATE_PATH.STREAMING]: (change) => {
