@@ -96,7 +96,9 @@ Read-only actions (file_read, file_list, web_fetch, mcp_search_tools) do NOT nee
 6. If your plan includes ASK_LLM to synthesize the final answer, you MUST add RESPOND as the last step to deliver it. Without RESPOND, the ASK_LLM result is discarded and a new iteration starts.
 7. ALWAYS use tools for real-time data. NEVER answer from memory for file/command requests.
 8. Every EXEC tool_args MUST include all required parameters. Check each tool's required fields.
-9. Do NOT use RESPOND to pass raw intermediate results. If the user's request requires further processing (calculation, summarization, comparison), continue planning instead of ending early with RESPOND.`),
+9. Do NOT use RESPOND to pass raw intermediate results. If the user's request requires further processing (calculation, summarization, comparison), continue planning instead of ending early with RESPOND.
+10. Do NOT fabricate URLs. Only use URLs from: (a) the user's message, (b) recalled memories, (c) results from previous steps. If none are available, use direct_response to ask the user for a URL or explain that you cannot search.
+11. web_fetch retrieves a specific web page. It is NOT a search engine. Do NOT pass search engine query URLs (google.com/search, bing.com/search, etc.) to web_fetch — they return HTML that cannot be parsed into useful results.`),
 })
 
 export { PROMPT_SECTIONS, section }

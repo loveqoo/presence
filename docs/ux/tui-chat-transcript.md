@@ -11,12 +11,12 @@
 
 ## 요약
 
-15개 마찰 포인트 식별. 심각도 분포: high 0(해소 4), medium 2(해소 6), low 1(해소 3).
+15개 마찰 포인트 식별. 심각도 분포: high 0(해소 4), medium 1(해소 7), low 1(해소 3).
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 4 | resolved: FP-29, FP-30, FP-57, FP-58 |
-| **medium** | 2 | 6 | open: FP-55, FP-59 / resolved: FP-31, FP-32, FP-33, FP-52, FP-53, FP-60 |
+| **medium** | 1 | 7 | open: FP-55 / resolved: FP-31, FP-32, FP-33, FP-52, FP-53, FP-59, FP-60 |
 | **low** | 1 | 3 | open: FP-56 / resolved: FP-34, FP-35, FP-54 |
 
 (REGISTRY: FP-52, FP-55, FP-56, FP-57, FP-58, FP-59, FP-60)
@@ -430,11 +430,20 @@ Ink 인라인 모드는 부분 프레임 업데이트를 지원하지 않고 매
 
 ---
 
-## [FP-59] Plan EXEC 가 검증되지 않은 URL 을 tool_args 로 생성 (2026-04-16) — **open**
+## [FP-59] Plan EXEC 가 검증되지 않은 URL 을 tool_args 로 생성 (2026-04-16) — **resolved (2026-04-16)**
 
 **관련 KG**: KG-12 (planner tool_args 가 finite 선택 공간 바깥이라 hallucination 방어 없음)
 **심각도**: medium
 **영역**: `packages/core/src/core/agent.js` planner 파이프라인, `packages/core/src/core/plan.js` parser, tool 실행 전 검증
+
+**해소 확인**
+
+프롬프트 가이드 + 도구 설명 강화로 완화하였다. 구조적 방어 (host whitelist, grounded reference 검증) 는 KG-12 가 여전히 open 으로 추적한다.
+
+- `PLAN_RULES` Rule 10: "URL 환각 금지 — 대화·메모리·이전 스텝 결과에 등장한 URL 만 사용. 없으면 direct_response 로 사용자에게 URL 요청"
+- `PLAN_RULES` Rule 11: "web_fetch 는 검색 엔진이 아님 — google.com/search 등 SERP URL 사용 금지"
+- `web_fetch` 도구 설명: "NOT a search engine — only use with URLs from conversation context or step results. Do not fabricate URLs."
+- 수정 방향 후보 중 2번(Grounded reference 프롬프트 가이드) 적용. 1번(Host whitelist)·3번(Pre-execution approval) 은 KG-12 open 에서 추적.
 
 **관찰**
 

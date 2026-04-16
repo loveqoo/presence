@@ -155,7 +155,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
 
     {
       name: 'web_fetch', source: TOOL_SOURCE.LOCAL, promptVisible: true,
-      description: 'Fetch content from a URL. Returns text content.',
+      description: 'Fetch content from a specific URL. NOT a search engine — only use with URLs from conversation context or step results. Do not fabricate URLs.',
       parameters: {
         type: 'object',
         properties: {
