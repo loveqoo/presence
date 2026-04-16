@@ -31,10 +31,10 @@ class OriginState extends State {
   snapshot() { return this.cell.snapshot() }
 
   set(path, value) {
-    const prevRoot = this.cell.snapshot()
-    const nextRoot = setByPathPure(prevRoot, path, value)
+    const prevValue = getByPath(this.cell.snapshot(), path)
+    const nextRoot = setByPathPure(this.cell.snapshot(), path, value)
     this.cell.apply(nextRoot)
-    this.bus.publish(StateChange(path, prevRoot, nextRoot), this)
+    this.bus.publish(StateChange(path, prevValue, value), this)
   }
 }
 

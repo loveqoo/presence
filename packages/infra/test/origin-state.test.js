@@ -48,14 +48,15 @@ function run() {
   s6.set('v', 1)
   assert(asyncDone === false, 'async hook: set returns before async work completes')
 
-  // 7. change carries prevRoot/nextRoot (structural sharing verified)
+  // 7. change carries prevValue/nextValue only (prevRoot/nextRoot 제거 — GC 리스크 해소)
   const s7 = createOriginState({ a: { b: 1 }, c: { d: 2 } })
-  let changeWithRoots = null
-  s7.hooks.on('a.b', (change) => { changeWithRoots = change })
+  let changeNoPrevRoot = null
+  s7.hooks.on('a.b', (change) => { changeNoPrevRoot = change })
   s7.set('a.b', 99)
-  assert(changeWithRoots.prevRoot.a.b === 1, 'prevRoot preserved')
-  assert(changeWithRoots.nextRoot.a.b === 99, 'nextRoot reflects new value')
-  assert(changeWithRoots.prevRoot.c === changeWithRoots.nextRoot.c, 'untouched branch keeps reference (structural sharing)')
+  assert(changeNoPrevRoot.prevValue === 1, 'prevValue preserved')
+  assert(changeNoPrevRoot.nextValue === 99, 'nextValue reflects new value')
+  assert(changeNoPrevRoot.prevRoot === undefined, 'prevRoot removed from StateChange')
+  assert(changeNoPrevRoot.nextRoot === undefined, 'nextRoot removed from StateChange')
 
   summary()
 }

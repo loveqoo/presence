@@ -88,13 +88,13 @@ async function run() {
   bus8.publish(mkChange('nothing', null, 1), null)
   assert(true, 'publish on unregistered path: no error')
 
-  // 9. StateChange ADT: full shape
-  const change = StateChange('a.b', { a: { b: 1 } }, { a: { b: 2 } })
+  // 9. StateChange ADT: prevValue/nextValue only (prevRoot/nextRoot 제거됨)
+  const change = StateChange('a.b', 1, 2)
   assert(change.path === 'a.b', 'StateChange: path')
   assert(change.prevValue === 1, 'StateChange: prevValue')
   assert(change.nextValue === 2, 'StateChange: nextValue')
-  assert(change.prevRoot.a.b === 1, 'StateChange: prevRoot')
-  assert(change.nextRoot.a.b === 2, 'StateChange: nextRoot')
+  assert(change.prevRoot === undefined, 'StateChange: prevRoot removed')
+  assert(change.nextRoot === undefined, 'StateChange: nextRoot removed')
 
   summary()
 }

@@ -1,5 +1,4 @@
 import fp from '@presence/core/lib/fun-fp.js'
-import { getByPath } from '@presence/core/lib/path.js'
 
 const { Reader } = fp
 
@@ -12,12 +11,12 @@ const { Reader } = fp
 // =============================================================================
 
 // --- StateChange ADT: 상태 전이를 값으로 표현 ---
-const StateChange = (path, prevRoot, nextRoot) => ({
+// prevRoot/nextRoot 는 포함하지 않음 — full root 참조가 hook 콜백에 남으면
+// old tree 가 GC 되지 않아 메모리 누수 위험. 소비처는 prevValue/nextValue 만 사용.
+const StateChange = (path, prevValue, nextValue) => ({
   path,
-  prevValue: getByPath(prevRoot, path),
-  nextValue: getByPath(nextRoot, path),
-  prevRoot,
-  nextRoot,
+  prevValue,
+  nextValue,
 })
 
 // --- Wildcard 매칭: 'events.*'가 'events.github'를 매치 (한 단계만) ---
