@@ -11,12 +11,12 @@
 
 ## 요약
 
-15개 마찰 포인트 식별. 심각도 분포: high 0(해소 4), medium 4(해소 4), low 1(해소 3).
+15개 마찰 포인트 식별. 심각도 분포: high 0(해소 4), medium 3(해소 5), low 1(해소 3).
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 4 | resolved: FP-29, FP-30, FP-57, FP-58 |
-| **medium** | 4 | 4 | open: FP-52, FP-55, FP-59, FP-60 / resolved: FP-31, FP-32, FP-33, FP-53 |
+| **medium** | 3 | 5 | open: FP-52, FP-55, FP-59 / resolved: FP-31, FP-32, FP-33, FP-53, FP-60 |
 | **low** | 1 | 3 | open: FP-56 / resolved: FP-34, FP-35, FP-54 |
 
 (REGISTRY: FP-52, FP-55, FP-56, FP-57, FP-58, FP-59, FP-60)
@@ -465,11 +465,18 @@ CLAUDE.md 설계 철학이 직접 경고하는 구조적 결함에 해당한다:
 
 ---
 
-## [FP-60] Plan 의 마지막 스텝이 ASK_LLM 인데 RESPOND 가 없어 결과가 폐기됨 (2026-04-16) — **open**
+## [FP-60] Plan 의 마지막 스텝이 ASK_LLM 인데 RESPOND 가 없어 결과가 폐기됨 (2026-04-16) — **resolved (2026-04-16)**
 
 **관련 KG**: KG-13 (planner 가 "plan 은 RESPOND 로 수렴해야 한다" 를 불변식으로 강제하지 않음)
 **심각도**: medium
 **영역**: `packages/core/src/core/planner.js:131-150` `executePlan`, planner 프롬프트, `docs/specs/planner.md` E 섹션
+
+**해소 확인**
+
+- `validatePlan` 이 마지막 스텝이 ASK_LLM 이고 RESPOND 가 없으면 `Either.Left` 를 반환한다. 이 에러는 `retryOrFail` 경로로 진입하며, retry 프롬프트에 "Add RESPOND as the last step" 가이드가 포함된다.
+- `PLAN_RULES` Rule 6 이 `$N` 참조 (미구현) → "ASK_LLM 마지막이면 RESPOND 필수" 가이드로 교체되었다.
+- `ROLE_DEFINITION` 예제에 ASK_LLM + RESPOND 패턴이 추가되었다 (web_fetch → ASK_LLM → RESPOND).
+- 수정 방향 후보 중 1번(Validator 강화) + 3번(프롬프트 강화) 을 조합 적용.
 
 **관찰**
 

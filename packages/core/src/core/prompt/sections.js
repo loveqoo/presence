@@ -47,6 +47,10 @@ Do NOT use RESPOND here. The user wants a summary, not raw content. Return a pla
 User: "show the first 10 lines of src/main.js"
 → {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "file_read", "tool_args": {"path": "src/main.js", "maxLines": 10}}}, {"op": "RESPOND", "args": {"ref": 1}}]}
 
+User: "search for cafes near Gangnam and recommend top 3"
+→ {"type": "plan", "steps": [{"op": "EXEC", "args": {"tool": "web_fetch", "tool_args": {"url": "..."}}}, {"op": "ASK_LLM", "args": {"prompt": "Based on the search results, recommend top 3 cafes near Gangnam.", "ctx": [1]}}, {"op": "RESPOND", "args": {"ref": 2}}]}
+When ASK_LLM synthesizes the final answer, RESPOND must follow it to deliver the result. Without RESPOND, the ASK_LLM output is discarded and a new iteration starts — wasting time.
+
 IMPORTANT:
 - All string values MUST be double-quoted (including op values)
 - Use "message" field (NOT "content")
@@ -89,7 +93,7 @@ Read-only actions (file_read, file_list, web_fetch, mcp_search_tools) do NOT nee
 3. RESPOND is optional — use it only to pass a step result directly to the user as a fast exit. If included, it must be the LAST step.
 4. Only use available tools and agents.
 5. ref and ctx numbers must reference EARLIER steps only (1-based). Cannot reference self or later steps.
-6. Use "$N" strings in tool_args to reference previous step results.
+6. If your plan includes ASK_LLM to synthesize the final answer, you MUST add RESPOND as the last step to deliver it. Without RESPOND, the ASK_LLM result is discarded and a new iteration starts.
 7. ALWAYS use tools for real-time data. NEVER answer from memory for file/command requests.
 8. Every EXEC tool_args MUST include all required parameters. Check each tool's required fields.
 9. Do NOT use RESPOND to pass raw intermediate results. If the user's request requires further processing (calculation, summarization, comparison), continue planning instead of ending early with RESPOND.`),

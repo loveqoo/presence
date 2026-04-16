@@ -96,6 +96,14 @@ const validatePlan = (plan, { tools = [] } = {}) => {
         `RESPOND must be the last step in a plan (found at index ${respondIndex} of ${plan.steps.length}).`,
         ERROR_KIND.PLANNER_SHAPE))
     }
+    // KG-13: ASK_LLM 이 마지막 스텝이면 RESPOND 로 결과를 전달해야 한다.
+    // RESPOND 없으면 ASK_LLM 출력이 폐기되고 재계획 iteration 이 시작되어 낭비.
+    const lastStep = plan.steps[plan.steps.length - 1]
+    if (lastStep?.op === 'ASK_LLM' && respondIndex === -1) {
+      return Either.Left(TurnError(
+        'Plan ends with ASK_LLM but has no RESPOND. Add RESPOND as the last step to deliver the ASK_LLM result, or use direct_response instead.',
+        ERROR_KIND.PLANNER_SHAPE))
+    }
     return plan.steps.reduce(
       (acc, step, i) => acc.chain(() => validateStepFull(step, i, tools)),
       Either.Right(true),

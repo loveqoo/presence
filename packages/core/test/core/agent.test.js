@@ -130,6 +130,28 @@ async function run() {
 
     const fail4 = validatePlan({ type: 'unknown' })
     assert(Either.isLeft(fail4), 'validatePlan: unknown type → Left')
+
+    // KG-13: ASK_LLM 이 마지막 스텝이면 RESPOND 필수
+    const failAskLast = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'test', tool_args: {} } },
+      { op: 'ASK_LLM', args: { prompt: 'summarize', ctx: [1] } },
+    ] })
+    assert(Either.isLeft(failAskLast), 'validatePlan: ASK_LLM last without RESPOND → Left')
+    assert(failAskLast.value.message.includes('ASK_LLM'), 'validatePlan: error mentions ASK_LLM')
+
+    // ASK_LLM + RESPOND 는 정상
+    const okAskRespond = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'test', tool_args: {} } },
+      { op: 'ASK_LLM', args: { prompt: 'summarize', ctx: [1] } },
+      { op: 'RESPOND', args: { ref: 2 } },
+    ] })
+    assert(Either.isRight(okAskRespond), 'validatePlan: ASK_LLM + RESPOND → Right')
+
+    // EXEC 마지막 (RESPOND 없음) 은 허용 — 수렴 루프
+    const okExecLast = validatePlan({ type: 'plan', steps: [
+      { op: 'EXEC', args: { tool: 'test', tool_args: {} } },
+    ] })
+    assert(Either.isRight(okExecLast), 'validatePlan: EXEC last without RESPOND → Right (convergence)')
   }
 
   // T7. safeJsonParse.chain(validatePlan) — Either 합성
