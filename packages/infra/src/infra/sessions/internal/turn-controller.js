@@ -42,10 +42,24 @@ class TurnController {
   getAbortSignal() { return this.turnAbort?.signal }
 
   handleCancel() {
+    // 턴 실행 중: abort signal 로 중단 시도
     if (this.turnAbort && !this.turnAbort.signal.aborted) {
       this.turnAbort.abort()
       this.logger.info('Turn cancelled by user')
+      return
     }
+    // 턴 이미 완료: 마지막 history entry 에 cancelled 태그
+    this.markLastEntryCancelled()
+  }
+
+  markLastEntryCancelled() {
+    const history = this.state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
+    if (!Array.isArray(history) || history.length === 0) return
+    const last = history[history.length - 1]
+    if (last.cancelled) return
+    const updated = [...history.slice(0, -1), { ...last, cancelled: true }]
+    this.state.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, updated)
+    this.logger.info('Last history entry marked as cancelled')
   }
 
   // --- Approve 정리 ---

@@ -731,6 +731,60 @@ async function run() {
     }
   }
 
+  // =========================================================================
+  // TE24. ESC cancel → 취소 응답 무시 + 새 채팅 순서 보존
+  // =========================================================================
+  {
+    let callCount = 0
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E(() => {
+      callCount++
+      // 첫 번째 응답은 약간 지연 — cancel 할 시간 확보
+      if (callCount === 1) {
+        return new Promise(resolve =>
+          setTimeout(() => resolve(JSON.stringify({ type: 'direct_response', message: '취소될응답' })), 500)
+        )
+      }
+      return JSON.stringify({ type: 'direct_response', message: '새응답' })
+    })
+
+    try {
+      await delay(100)
+
+      // 첫 번째 질문 → working 상태 대기
+      await typeInput(stdin, '첫질문')
+      await waitFor(() => lastFrame().includes('thinking'), { timeout: 5000 })
+
+      // ESC cancel
+      stdin.write('\x1B')
+      await delay(200)
+
+      // 취소 메시지 표시 확인
+      await waitFor(() => lastFrame().includes('취소'), { timeout: 3000 })
+      assert(lastFrame().includes('취소'), 'TE24: cancel message shown')
+
+      // 취소된 응답이 도착해도 표시되지 않아야 함
+      await delay(1000)
+      assert(!lastFrame().includes('취소될응답'), 'TE24: cancelled response not shown')
+
+      // 두 번째 질문 → 정상 응답
+      await typeInput(stdin, '새질문')
+      await waitFor(() => lastFrame().includes('새응답'), { timeout: 10000 })
+
+      const frame = lastFrame()
+      // 새 응답이 표시됨
+      assert(frame.includes('새응답'), 'TE24: new response shown')
+
+      // 순서: 취소 메시지가 새 응답 위에 있어야 함 (취소 → 새질문 → 새응답)
+      const cancelPos = frame.indexOf('취소')
+      const newQPos = frame.indexOf('새질문')
+      const newAPos = frame.indexOf('새응답')
+      assert(cancelPos < newQPos, 'TE24: cancel message before new question')
+      assert(newQPos < newAPos, 'TE24: new question before new answer')
+    } finally {
+      await cleanup()
+    }
+  }
+
   summary()
 }
 

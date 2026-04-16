@@ -34,6 +34,7 @@ const App = (props) => {
   const [showTranscript, setShowTranscript] = useState(false)
   const [statusItems, setStatusItems] = useState([...DEFAULT_ITEMS])
   const [toolExpanded, setToolExpanded] = useState(false)
+  const cancelledRef = useRef(false)
   const inputHistoryRef = useRef([])
 
   // Slash commands + 일반 입력 처리
@@ -48,6 +49,7 @@ const App = (props) => {
   useInput((input, key) => {
     if (key.escape && agentState.status === 'working' && onCancel) {
       onCancel()
+      cancelledRef.current = true
       addMessage({ role: 'system', content: t('key_hint.cancelled') })
       return
     }
@@ -84,8 +86,12 @@ const App = (props) => {
     })
   }
 
+  // cancelled 상태를 다음 턴 시작 시 리셋
+  if (isWorking && cancelledRef.current) cancelledRef.current = false
+
   // FP-58: streamingView 가 null ↔ Box 토글로 프레임 height 흔들림 → 항상 렌더, 비활성 시 공백.
-  const streamingChild = agentState.streaming
+  // cancelled 상태에서는 streaming content 를 표시하지 않음 — 유저 취소 의사 존중.
+  const streamingChild = (!cancelledRef.current && agentState.streaming)
     ? agentState.streaming.content
       ? h(MarkdownText, { content: agentState.streaming.content + '▌' })
       : h(Text, { color: 'gray' }, t('streaming.thinking'))

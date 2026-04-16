@@ -248,6 +248,35 @@ async function run() {
     unmount()
   }
 
+  // cancelled history entry → output 이 화면에 표시되지 않음
+  {
+    const state = createOriginState({
+      turnState: TurnState.idle(),
+      lastTurn: TurnOutcome.success('취소 질문', '취소 응답'),
+      turn: 2,
+      context: {
+        memories: [],
+        conversationHistory: [
+          { id: 'h-1', input: '일반 질문', output: '일반 응답', ts: 1 },
+          { id: 'h-2', input: '취소 질문', output: '취소 응답', ts: 2, cancelled: true },
+        ],
+      },
+    })
+
+    const { lastFrame, unmount } = render(h(App, { state }))
+    await new Promise(r => setTimeout(r, 100))
+    const frame = lastFrame()
+
+    // 일반 응답은 표시됨
+    assert(frame.includes('일반 응답'), 'cancel filter: normal response shown')
+    // cancelled entry 의 output 은 표시되지 않음
+    assert(!frame.includes('취소 응답'), 'cancel filter: cancelled response hidden')
+    // cancelled entry 의 input 은 표시됨 (유저가 입력한 건 보여줘야 함)
+    assert(frame.includes('취소 질문'), 'cancel filter: cancelled input still shown')
+
+    unmount()
+  }
+
   summary()
 }
 
