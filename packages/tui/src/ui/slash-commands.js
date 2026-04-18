@@ -163,8 +163,8 @@ const commandMap = new Map([
   ['/exit',       handleExit],
   ['/panel',      (_, ctx) => ctx.setShowPanel(p => !p)],
   ['/clear',      (_, ctx) => {
-    ctx.setMessages([])
-    // 서버 state(conversationHistory)도 초기화 → persistence 반영
+    // optimistic: 즉시 화면 비움. 서버 reset 은 onInput 으로 병렬 전송.
+    if (ctx.optimisticClearNow) ctx.optimisticClearNow()
     if (ctx.onInput) ctx.onInput('/clear').catch(() => {})
   }],
   ['/help',       (_, ctx) => ctx.addMessage({ role: 'system', content: t('help.commands'), transient: true })],
@@ -183,15 +183,21 @@ const commandMap = new Map([
 // Returns Promise<boolean> — true if input was (or looked like) a slash command.
 // `/` 로 시작하는 모든 입력은 이 디스패처가 흡수한다. 알 수 없는 커맨드는
 // 에이전트로 넘기지 않고 시스템 메시지로 차단 (FP-42).
+//
+// ctx 는 addTransient 를 제공 (useSlashCommands). 기존 하위 handler 가
+// addMessage 를 기대하므로 alias 로 흡수. 호출자가 addMessage 만 준 경우도 허용.
+// 모든 slash 결과는 transient — 영속적 메시지는 서버 history 경유로 반영된다.
 const dispatchSlashCommand = async (input, ctx) => {
+  const addFn = ctx.addTransient || ctx.addMessage
+  const compatCtx = { ...ctx, addMessage: addFn }
   const name = input.trim().split(/\s+/)[0]
   const handler = commandMap.get(name)
   if (handler) {
-    await handler(input, ctx)
+    await handler(input, compatCtx)
     return true
   }
   if (name.startsWith('/')) {
-    ctx.addMessage({
+    compatCtx.addMessage({
       role: 'system',
       content: t('slash_cmd.unknown', { name }),
       transient: true,

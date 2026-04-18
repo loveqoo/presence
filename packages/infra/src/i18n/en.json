@@ -135,6 +135,11 @@
   "cancel": {
     "cancelled": "cancelled"
   },
+  "history": {
+    "cancel_notice": "User cancelled the response.",
+    "approve_notice": "Approved: {{description}}",
+    "reject_notice": "Rejected: {{description}}"
+  },
   "compaction": {
     "completed": "History compacted: {{before}} → {{after}} turns",
     "discarded": "History compaction discarded: history was reset during compaction",

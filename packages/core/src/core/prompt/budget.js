@@ -1,26 +1,31 @@
 import { measureMessages, estimateTokens } from '../../lib/tokenizer.js'
 import { PROMPT as PROMPT_POLICY } from '../policies.js'
+import { isTurnEntry, turnEntriesOnly } from '../history-writer.js'
 
 // =============================================================================
 // Prompt budget helpers: 토큰 예산 내에서 history/memories를 trim.
 // assemblePrompt가 조립 시 사용.
+//
+// INV-SYS-1: SYSTEM entry (type === 'system') 는 prompt 조립에서 배제한다.
 // =============================================================================
 
-// history turn 배열을 {user, assistant} 메시지 시퀀스로 평탄화.
+// history turn 배열을 {user, assistant} 메시지 시퀀스로 평탄화. SYSTEM 은 skip.
 const flattenHistory = (turns) =>
-  turns.flatMap(t => [
-    { role: 'user', content: t.input },
-    { role: 'assistant', content: t.output },
-  ])
+  turnEntriesOnly(turns)
+    .flatMap(t => [
+      { role: 'user', content: t.input },
+      { role: 'assistant', content: t.output },
+    ])
 
-// 뒤에서부터 담아 budget 초과 전까지 포함. 최신 turn 우선.
+// 뒤에서부터 담아 budget 초과 전까지 포함. 최신 turn 우선. SYSTEM entry 는 유지하되 비용 0.
 const fitHistory = (turns, charBudget) => {
   const fitted = []
   let used = 0
   for (let i = turns.length - 1; i >= 0; i--) {
-    const cost = measureMessages(flattenHistory([turns[i]]))
+    const entry = turns[i]
+    const cost = isTurnEntry(entry) ? measureMessages(flattenHistory([entry])) : 0
     if (used + cost > charBudget) break
-    fitted.unshift(turns[i])
+    fitted.unshift(entry)
     used += cost
   }
   return fitted

@@ -1,8 +1,10 @@
 import { buildIterationPrompt } from '@presence/core/core/prompt/assembly.js'
+import { flattenHistory, fitHistory } from '@presence/core/core/prompt/budget.js'
 import { formatToolList, formatAgentList, formatMemories } from '@presence/core/core/prompt/formatters.js'
 import { summarizeResults } from '@presence/core/core/plan-executor.js'
 import { planSchema } from '@presence/core/core/prompt/schema.js'
 import { PROMPT_SECTIONS } from '@presence/core/core/prompt/sections.js'
+import { HISTORY_ENTRY_TYPE } from '@presence/core/core/policies.js'
 
 import { assert, summary } from '../../../../test/lib/assert.js'
 
@@ -205,6 +207,39 @@ console.log('Prompt builder tests')
   })
   assert(prompt._assembly.sections.includes('custom_role'), '_assembly.sections: custom_role with persona')
   assert(!prompt._assembly.sections.includes('role_definition'), '_assembly.sections: no default role with persona')
+}
+
+// 25. flattenHistory: SYSTEM entry 배제 (INV-SYS-1)
+{
+  const history = [
+    { id: '1', input: 'q1', output: 'a1' },
+    { id: '2', type: HISTORY_ENTRY_TYPE.SYSTEM, content: '사용자가 응답을 취소함', tag: 'cancel' },
+    { id: '3', input: 'q2', output: 'a2' },
+  ]
+  const msgs = flattenHistory(history)
+  assert(msgs.length === 4, 'flattenHistory: SYSTEM excluded → 4 msgs (2 turns × 2)')
+  assert(msgs[0].content === 'q1', 'flattenHistory: first user = q1')
+  assert(msgs[2].content === 'q2', 'flattenHistory: third user = q2 (SYSTEM skipped)')
+  assert(!msgs.some(m => m.content === '사용자가 응답을 취소함'), 'flattenHistory: SYSTEM content not in prompt')
+}
+
+// 26. flattenHistory: type 생략 = turn (하위 호환)
+{
+  const history = [{ input: 'legacy', output: 'ok' }]
+  const msgs = flattenHistory(history)
+  assert(msgs.length === 2, 'flattenHistory: no-type entry treated as turn')
+  assert(msgs[0].content === 'legacy', 'flattenHistory: legacy input preserved')
+}
+
+// 27. fitHistory: SYSTEM 포함하지만 비용 0 (자리 유지)
+{
+  const history = [
+    { input: 'q1', output: 'a1' },
+    { type: HISTORY_ENTRY_TYPE.SYSTEM, content: 's' },
+    { input: 'q2', output: 'a2' },
+  ]
+  const fitted = fitHistory(history, 10000)
+  assert(fitted.length === 3, 'fitHistory: SYSTEM preserved under generous budget')
 }
 
 summary()

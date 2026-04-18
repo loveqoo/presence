@@ -27,12 +27,13 @@ class Planner {
       if (config[key] !== undefined) merged[key] = config[key]
     }
     this.config = merged
-    this.lifecycle = new TurnLifecycle()
+    // Session 이 주입한 TurnLifecycle 을 공유. 주입이 없는 테스트 경로에서만 내부 생성.
+    this.lifecycle = config.lifecycle || new TurnLifecycle(merged.t)
     this.debug = new DebugRecorder()
   }
 
   withTools(tools) {
-    return new Planner({ ...this.config, resolveTools: () => tools })
+    return new Planner({ ...this.config, lifecycle: this.lifecycle, resolveTools: () => tools })
   }
 
   // --- 플래닝 엔진 ---

@@ -2,7 +2,8 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { PHASE, RESULT, TurnState, TurnOutcome } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
-import { applyFinalState, MANAGED_PATHS } from '@presence/core/core/state-commit.js'
+import { applyFinalState, MANAGED_PATHS, clearDebugState } from '@presence/core/core/state-commit.js'
+import { STATE_PATH } from '@presence/core/core/policies.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { getByPath } from '@presence/core/lib/path.js'
@@ -345,6 +346,44 @@ async function run() {
 
     // lastTurn은 이전 값 유지
     assert(state.get('lastTurn')?.result === 'old result', 'F13: undefined path preserves old value')
+  }
+
+  // --- clearDebugState (INV-CLR-1) ---
+
+  // F14. clearDebugState 는 pending/transcript/budgetWarning 모두 초기화
+  {
+    const state = createOriginState({
+      turnState: TurnState.idle(),
+      context: { memories: ['m1'], conversationHistory: [{ id: 'h-1', input: 'q', output: 'a' }] },
+      _pendingInput: { input: 'in-flight', ts: 123 },
+      _toolTranscript: [{ tool: 't', args: {}, result: 'r' }],
+      _budgetWarning: { type: 'high_usage', pct: 95 },
+      _compactionEpoch: 2,
+      _debug: { lastTurn: { input: 'x' }, opTrace: ['o'] },
+    })
+
+    clearDebugState(state)
+
+    assert(state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY).length === 0, 'F14: history cleared')
+    assert(state.get(STATE_PATH.CONTEXT_MEMORIES).length === 0, 'F14: memories cleared')
+    assert(state.get(STATE_PATH.PENDING_INPUT) === null, 'F14: pendingInput cleared (INV-CLR-1)')
+    assert(state.get(STATE_PATH.TOOL_TRANSCRIPT).length === 0, 'F14: toolTranscript cleared (INV-CLR-1)')
+    assert(state.get(STATE_PATH.BUDGET_WARNING) === null, 'F14: budgetWarning cleared (INV-CLR-1)')
+    assert(state.get(STATE_PATH.COMPACTION_EPOCH) === 3, 'F14: compactionEpoch incremented')
+    assert(state.get(STATE_PATH.DEBUG_LAST_TURN) === null, 'F14: debug.lastTurn cleared')
+  }
+
+  // F15. clearDebugState 빈 상태에서도 안전
+  {
+    const state = createOriginState({ turnState: TurnState.idle() })
+    clearDebugState(state)
+    assert(state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY).length === 0, 'F15: empty state safe')
+    assert(state.get(STATE_PATH.PENDING_INPUT) === null, 'F15: pendingInput null safe')
+  }
+
+  // F16. MANAGED_PATHS 에 PENDING_INPUT 포함
+  {
+    assert(MANAGED_PATHS.includes(STATE_PATH.PENDING_INPUT), 'F16: MANAGED_PATHS includes PENDING_INPUT')
   }
 
   summary()

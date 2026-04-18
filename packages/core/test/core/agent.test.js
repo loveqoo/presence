@@ -669,12 +669,103 @@ async function run() {
     assert(thrown.message === 'interpreter boom', 'Executor.run: preserves error message')
     // recover() 가 세 경로를 원자적으로 초기화한다
     assert(state.get('_streaming') === null, 'Executor.recover: _streaming cleared')
+    assert(state.get('_pendingInput') === null, 'Executor.recover: _pendingInput cleared')
     assert(state.get('turnState').tag === PHASE.IDLE, 'Executor.recover: turnState → idle')
     const last = state.get('lastTurn')
     assert(last.tag === RESULT.FAILURE, 'Executor.recover: lastTurn failure')
     assert(last.input === 'orig input', 'Executor.recover: failure retains original input')
     assert(last.error.kind === ERROR_KIND.INTERPRETER, 'Executor.recover: error kind INTERPRETER')
     assert(last.error.message === 'interpreter boom', 'Executor.recover: error message preserved')
+  }
+
+  // Executor.beginLifecycle → _pendingInput set (입력 즉시 표시)
+  {
+    const { Executor } = await import('@presence/core/core/executor.js')
+    const state = initState()
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' })
+    })
+    const { askLLM } = await import('@presence/core/core/op.js')
+    const executor = new Executor({ interpret, ST, state })
+    // beginLifecycle 이 턴 시작 시 동기적으로 pending 을 set 하는지만 관찰.
+    executor.beginLifecycle('hello world')
+    const pending = state.get('_pendingInput')
+    assert(pending?.input === 'hello world', 'Executor.beginLifecycle: _pendingInput.input set')
+    assert(typeof pending?.ts === 'number' && pending.ts > 0, 'Executor.beginLifecycle: _pendingInput.ts set')
+  }
+
+  // Executor.recover — abort 경로 분기 (INV-ABT-1)
+  {
+    const { Executor } = await import('@presence/core/core/executor.js')
+    const { TurnLifecycle } = await import('@presence/core/core/turn-lifecycle.js')
+    const state = initState({ context: { memories: [], conversationHistory: [] } })
+    state.set('turnState', TurnState.working('cancelled input'))
+
+    const abortError = Object.assign(new Error('user cancelled'), { name: 'AbortError' })
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => { throw abortError }
+    })
+    const { askLLM } = await import('@presence/core/core/op.js')
+    const program = askLLM({ messages: [] })
+
+    const lifecycle = new TurnLifecycle()
+    const executor = new Executor({
+      interpret, ST, state,
+      actors: { turnLifecycle: lifecycle, isAborted: () => true },
+    })
+
+    let thrown = null
+    try { await executor.run(program, 'cancelled input') } catch (e) { thrown = e }
+
+    assert(thrown !== null, 'Executor.recover abort: rethrows')
+    const last = state.get('lastTurn')
+    assert(last.tag === RESULT.FAILURE, 'Executor.recover abort: lastTurn failure')
+    assert(last.error.kind === ERROR_KIND.ABORTED, 'Executor.recover abort: kind = ABORTED')
+
+    const history = state.get('context.conversationHistory')
+    assert(history.length === 2, 'Executor.recover abort: turn entry + SYSTEM entry appended')
+    assert(history[0].cancelled === true, 'Executor.recover abort: turn entry cancelled')
+    assert(history[0].errorKind === ERROR_KIND.ABORTED, 'Executor.recover abort: turn entry errorKind')
+    assert(history[1].type === 'system', 'Executor.recover abort: SYSTEM entry')
+    assert(history[1].tag === 'cancel', 'Executor.recover abort: SYSTEM tag=cancel')
+  }
+
+  // Executor.recover — 일반 error 경로는 SYSTEM entry 없음
+  {
+    const { Executor } = await import('@presence/core/core/executor.js')
+    const { TurnLifecycle } = await import('@presence/core/core/turn-lifecycle.js')
+    const state = initState({ context: { memories: [], conversationHistory: [] } })
+    state.set('turnState', TurnState.working('input'))
+
+    const { interpret, ST } = createTestInterpreter({
+      AskLLM: () => { throw new Error('boom') }
+    })
+    const { askLLM } = await import('@presence/core/core/op.js')
+    const program = askLLM({ messages: [] })
+
+    const lifecycle = new TurnLifecycle()
+    const executor = new Executor({
+      interpret, ST, state,
+      actors: { turnLifecycle: lifecycle, isAborted: () => false },
+    })
+
+    try { await executor.run(program, 'input') } catch (_) {}
+
+    const history = state.get('context.conversationHistory')
+    assert(history.length === 1, 'Executor.recover failure: only failed turn entry (no SYSTEM)')
+    assert(history[0].failed === true, 'Executor.recover failure: failed=true')
+    assert(history[0].cancelled === undefined, 'Executor.recover failure: not cancelled')
+    const last = state.get('lastTurn')
+    assert(last.error.kind === ERROR_KIND.INTERPRETER, 'Executor.recover failure: kind = INTERPRETER')
+  }
+
+  // Agent 가 주입받은 lifecycle 을 Planner 로 forward (세션 내 단일 인스턴스 보장)
+  {
+    const { TurnLifecycle } = await import('@presence/core/core/turn-lifecycle.js')
+    const lifecycle = new TurnLifecycle()
+    const { interpret, ST } = createTestInterpreter({})
+    const agent = new Agent({ interpret, ST, state: initState(), lifecycle })
+    assert(agent.planner.lifecycle === lifecycle, 'Agent: lifecycle forwarded to Planner (single instance)')
   }
 
   // Agent.run() success

@@ -785,6 +785,123 @@ async function run() {
     }
   }
 
+  // =========================================================================
+  // TE25. pendingInput 즉시 표시 — LLM 지연 중에도 유저 입력 즉시 렌더
+  // =========================================================================
+  {
+    let resolver = null
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E(() =>
+      new Promise(resolve => { resolver = resolve })
+    )
+
+    try {
+      await delay(100)
+      await typeInput(stdin, '즉시표시테스트')
+
+      // LLM 응답 전에도 pendingInput 이 화면에 즉시 표시되어야 함
+      await waitFor(() => lastFrame().includes('즉시표시테스트'), { timeout: 3000 })
+      assert(lastFrame().includes('즉시표시테스트'), 'TE25: pendingInput 즉시 렌더')
+      assert(lastFrame().includes('thinking'), 'TE25: LLM 대기 중 thinking 표시')
+
+      // LLM 응답 도착 → history 에 turn entry 기록 + pendingInput null
+      resolver(JSON.stringify({ type: 'direct_response', message: '응답완료' }))
+      await waitFor(() => lastFrame().includes('응답완료'), { timeout: 5000 })
+
+      // 유저 입력이 persisted 로 대체됐지만 중복 없이 1번만 보임
+      const frame = lastFrame()
+      const firstIdx = frame.indexOf('즉시표시테스트')
+      const lastIdx = frame.lastIndexOf('즉시표시테스트')
+      assert(firstIdx === lastIdx, 'TE25: 유저 입력 중복 없음 (pending → persisted 전환)')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE26. /clear optimistic — 즉시 빈 화면 + 서버 reset 후 안정
+  // =========================================================================
+  {
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: '초기응답' })
+    )
+
+    try {
+      await delay(100)
+      await typeInput(stdin, '첫입력')
+      await waitFor(() => lastFrame().includes('초기응답'), { timeout: 10000 })
+      assert(lastFrame().includes('초기응답'), 'TE26: 첫 턴 응답 표시')
+
+      // /clear 실행 — optimistic 즉시 비움
+      await typeInput(stdin, '/clear')
+      await delay(200)
+      const afterClear = lastFrame()
+      assert(!afterClear.includes('첫입력'), 'TE26: /clear 후 유저 입력 사라짐')
+      assert(!afterClear.includes('초기응답'), 'TE26: /clear 후 에이전트 응답 사라짐')
+
+      // 서버 reset 완료 후에도 빈 상태 유지
+      await delay(500)
+      const afterServerReset = lastFrame()
+      assert(!afterServerReset.includes('첫입력'), 'TE26: 서버 reset 후에도 유저 입력 없음')
+      assert(!afterServerReset.includes('초기응답'), 'TE26: 서버 reset 후에도 응답 없음')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE27. approve SYSTEM entry 기록 — (인프라 단위 테스트로 대체)
+  // approve flow e2e 는 mock LLM 이 plan + APPROVE step 을 생성해야 하고
+  // TUI 의 ApprovePrompt 상호작용까지 필요해서 복잡. packages/infra/test/
+  // turn-controller.test.js TC6/TC7 이 appendSystemEntrySync 호출을 직접 검증.
+  // =========================================================================
+
+  // =========================================================================
+  // TE28. 같은 input 연속 질문 — 각 pending 이 별도 렌더 (regression guard)
+  // =========================================================================
+  {
+    const { lastFrame, stdin, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: '같은질문응답' })
+    )
+
+    try {
+      await delay(100)
+      // 첫 질문
+      await typeInput(stdin, '반복질문')
+      await waitFor(() => lastFrame().includes('같은질문응답'), { timeout: 10000 })
+      await delay(200)
+
+      // 같은 질문 재전송 — pending 렌더되어야 함
+      await typeInput(stdin, '반복질문')
+      await delay(200)
+      const frame = lastFrame()
+      // history 에 첫 턴 + pending 에 두 번째 입력 = '반복질문' 두 번 보임
+      const firstIdx = frame.indexOf('반복질문')
+      const secondIdx = frame.indexOf('반복질문', firstIdx + 1)
+      assert(firstIdx !== -1 && secondIdx !== -1, 'TE28: 같은 input 연속 질문 — 두 번 모두 렌더 (ts 기반 dedup)')
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // =========================================================================
+  // TE29. _toolTranscript SNAPSHOT_PATHS 포함 — MirrorState init 시 수신 가능
+  // =========================================================================
+  {
+    const { remoteState, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: 'ok' })
+    )
+    try {
+      await delay(200)
+      // MirrorState.cache 에 _toolTranscript 가 있어야 함 (snapshot 에 포함되어 초기화).
+      // 실제 tool 실행 후 append 는 packages/core/test/interpreter/prod.test.js 테스트 18 이 검증.
+      const cache = remoteState.cache
+      assert('_toolTranscript' in cache, 'TE29: _toolTranscript SNAPSHOT_PATHS 포함')
+      assert('_pendingInput' in cache, 'TE29: _pendingInput SNAPSHOT_PATHS 포함')
+    } finally {
+      await cleanup()
+    }
+  }
+
   summary()
 }
 

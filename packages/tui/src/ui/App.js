@@ -28,42 +28,41 @@ const App = (props) => {
   } = props
   const { exit } = useApp()
   const agentState = useAgentState(state)
-  const { messages, setMessages, addMessage, clearTransientMessages } = useAgentMessages(state, agentState, initialMessages)
+  const { messages, addTransient, clearTransient, optimisticClearNow } = useAgentMessages(state, agentState, initialMessages)
   const [currentModel, setCurrentModel] = useState(initialModel)
   const [showPanel, setShowPanel] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
   const [statusItems, setStatusItems] = useState([...DEFAULT_ITEMS])
   const [toolExpanded, setToolExpanded] = useState(false)
+  // streaming chunk 가 서버 cancel 확정보다 먼저 도착할 수 있음 → flash 억제용.
   const cancelledRef = useRef(false)
   const inputHistoryRef = useRef([])
 
   // Slash commands + 일반 입력 처리
   const handleInput = useSlashCommands({
-    core: { state, agentState, addMessage, setMessages, clearTransientMessages, exit },
+    core: { state, agentState, addTransient, clearTransient, optimisticClearNow, exit },
     context: { config, tools, memory, llm, toolRegistry, onInput, username },
     ui: { messages, currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems },
     session: { sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession },
   })
 
-  // App-level key handlers (overlay가 열려있지 않을 때만)
+  // App-level key handlers (overlay가 열려있지 않을 때만).
+  // cancel/approve 피드백은 서버 SYSTEM entry 로 기록되므로 여기서는 addMessage 호출하지 않는다.
   useInput((input, key) => {
     if (key.escape && agentState.status === 'working' && onCancel) {
       onCancel()
       cancelledRef.current = true
-      addMessage({ role: 'system', content: t('key_hint.cancelled') })
       return
     }
-    if (key.escape && agentState.status !== 'working') clearTransientMessages()
+    if (key.escape && agentState.status !== 'working') clearTransient()
     if (key.ctrl && input === 't') setShowTranscript(true)
     if (key.ctrl && input === 'o') setToolExpanded(prev => !prev)
   }, { isActive: !showTranscript })
 
   const handleApprove = useCallback((approved) => {
     if (onApprove) onApprove(approved)
-    const desc = agentState.approve?.description ?? ''
-    const tag = approved ? t('approve.approved_log') : t('approve.rejected_log')
-    addMessage({ role: 'system', content: `${tag} ${desc}` })
-  }, [onApprove, agentState.approve, addMessage])
+    // approve SYSTEM entry 는 서버 turn-controller.handleApproveResponse 가 기록.
+  }, [onApprove])
 
   const isWorking = agentState.status === 'working'
 

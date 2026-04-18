@@ -7,6 +7,7 @@ const MANAGED_PATHS = Object.freeze([
   STATE_PATH.STREAMING, STATE_PATH.LAST_TURN,
   STATE_PATH.CONTEXT_CONVERSATION_HISTORY,
   STATE_PATH.DEBUG_LAST_TURN, STATE_PATH.DEBUG_LAST_PROMPT, STATE_PATH.DEBUG_LAST_RESPONSE, STATE_PATH.DEBUG_ITERATION_HISTORY, '_retry',
+  STATE_PATH.PENDING_INPUT,
   STATE_PATH.TURN_STATE,
 ])
 
@@ -23,10 +24,15 @@ const applyFinalState = (reactiveState, finalState, { initialEpoch } = {}) => {
   }
 }
 
+// INV-CLR-1: /clear 는 conversationHistory, pendingInput, toolTranscript,
+// budgetWarning 을 모두 초기화해야 TUI 가 optimistic clear 이후에도 깔끔하게 수렴한다.
 const clearDebugState = (state) => {
   state.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, [])
   state.set(STATE_PATH.CONTEXT_MEMORIES, [])
   state.set(STATE_PATH.COMPACTION_EPOCH, (state.get(STATE_PATH.COMPACTION_EPOCH) || 0) + 1)
+  state.set(STATE_PATH.PENDING_INPUT, null)
+  state.set(STATE_PATH.TOOL_TRANSCRIPT, [])
+  state.set(STATE_PATH.BUDGET_WARNING, null)
   state.set(STATE_PATH.DEBUG_LAST_TURN, null)
   state.set(STATE_PATH.DEBUG_LAST_PROMPT, null)
   state.set(STATE_PATH.DEBUG_LAST_RESPONSE, null)

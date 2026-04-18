@@ -34,6 +34,10 @@ class Executor {
     this.state.set(STATE_PATH.TURN_STATE, TurnState.working(input))
     this.state.set(STATE_PATH.TURN, (this.state.get(STATE_PATH.TURN) || 0) + 1)
     this.state.set(STATE_PATH.DEBUG_ITERATION_HISTORY, [])
+    // 입력 즉시 표시용 pending input (FE 가 WS 로 받아 render).
+    // ts 는 "이 pending 이 언제 시작되었는가" 를 기록. 이후 turn entry 의 ts 와 비교하여
+    // "같은 input 의 과거 턴" vs "이번 pending 이 persisted" 를 구분 가능 (TUI dedup).
+    this.state.set(STATE_PATH.PENDING_INPUT, { input, ts: Date.now() })
   }
 
   async recallMemories(input) {
@@ -53,7 +57,7 @@ class Executor {
   }
 
   afterTurn(finalState, initialEpoch) {
-    const { actors: { memoryActor, compactionActor, persistenceActor } } = this
+    const { actors: { memoryActor, compactionActor } } = this
     if (memoryActor) this.postTurnMemory(memoryActor, finalState)
     if (compactionActor) {
       const history = getByPath(finalState, 'context.conversationHistory') || []
@@ -80,15 +84,25 @@ class Executor {
     }
   }
 
+  // 실패/중단 경로. abort 확정 여부로 TurnLifecycle 의 imperative API 를 선택.
+  // INV-ABT-1: abort 판별 = err.name === 'AbortError' || turnController.isAborted() (OR).
   recover(input, err) {
-    if (this.state) {
-      const recovery = {
-        [STATE_PATH.STREAMING]: null,
-        [STATE_PATH.LAST_TURN]: TurnOutcome.failure(input, TurnError(err.message || String(err), ERROR_KIND.INTERPRETER), null),
-        [STATE_PATH.TURN_STATE]: TurnState.idle(),
-      }
-      for (const [key, value] of Object.entries(recovery)) this.state.set(key, value)
+    if (!this.state) return
+    const { turnLifecycle, isAborted } = this.actors
+    const aborted = err?.name === 'AbortError' || (isAborted && isAborted())
+    const turn = { input }
+
+    if (turnLifecycle) {
+      if (aborted) turnLifecycle.recordAbortSync(this.state, turn)
+      else turnLifecycle.recordFailureSync(this.state, turn, err)
     }
+
+    const kind = aborted ? ERROR_KIND.ABORTED : ERROR_KIND.INTERPRETER
+    const error = TurnError(err?.message || String(err), kind)
+    this.state.set(STATE_PATH.STREAMING, null)
+    this.state.set(STATE_PATH.PENDING_INPUT, null)
+    this.state.set(STATE_PATH.LAST_TURN, TurnOutcome.failure(input, error, null))
+    this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
     this.persist()
   }
 }

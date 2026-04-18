@@ -3,6 +3,7 @@ import { render } from 'ink-testing-library'
 import { StatusBar } from '@presence/tui/ui/components/StatusBar.js'
 import { ChatArea } from '@presence/tui/ui/components/ChatArea.js'
 import { App } from '@presence/tui/ui/App.js'
+import { deriveMessages } from '@presence/tui/ui/hooks/useAgentMessages.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { ERROR_KIND, TurnState, TurnOutcome, TurnError } from '@presence/core/core/policies.js'
 import { initI18n } from '@presence/infra/i18n'
@@ -176,7 +177,7 @@ async function run() {
     unmount()
   }
 
-  // _toolResults 상태 변경 → App이 tool 메시지로 변환
+  // _toolTranscript 상태 변경 → App이 tool 메시지로 변환 (SSoT 전환)
   {
     const state = createOriginState({
       turnState: TurnState.idle(),
@@ -190,9 +191,9 @@ async function run() {
     )
     await new Promise(r => setTimeout(r, 50))
 
-    // 인터프리터가 tool result를 emit하는 상황 시뮬레이션
-    state.set('_toolResults', [
-      { tool: 'file_list', args: { path: '.' }, result: '[dir] src\n[file] index.js' },
+    // 인터프리터가 tool result를 emit하는 상황 시뮬레이션 → _toolTranscript 에 append
+    state.set('_toolTranscript', [
+      { tool: 'file_list', args: { path: '.' }, result: '[dir] src\n[file] index.js', ts: 1000 },
     ])
     await new Promise(r => setTimeout(r, 100))
 
@@ -203,9 +204,9 @@ async function run() {
     assert(!frame.includes('[dir]'), 'App toolResult: no raw [dir] tag')
 
     // 두 번째 tool result 추가 — 기존 것 위에 누적
-    state.set('_toolResults', [
-      { tool: 'file_list', args: { path: '.' }, result: '[dir] src\n[file] index.js' },
-      { tool: 'calculate', args: { expression: '2+3' }, result: '5' },
+    state.set('_toolTranscript', [
+      { tool: 'file_list', args: { path: '.' }, result: '[dir] src\n[file] index.js', ts: 1000 },
+      { tool: 'calculate', args: { expression: '2+3' }, result: '5', ts: 2000 },
     ])
     await new Promise(r => setTimeout(r, 100))
 
@@ -216,7 +217,7 @@ async function run() {
     unmount()
   }
 
-  // 턴 시작 시 _toolResults 초기화 확인
+  // 턴 넘어가도 _toolTranscript 는 유지 (SSoT, /clear 까지)
   {
     const state = createOriginState({
       turnState: TurnState.idle(),
@@ -226,24 +227,24 @@ async function run() {
     })
 
     const { lastFrame, unmount } = render(
-      h(App, { state, agentName: 'ResetTest' })
+      h(App, { state, agentName: 'PersistTest' })
     )
     await new Promise(r => setTimeout(r, 50))
 
-    // 이전 턴의 tool result
-    state.set('_toolResults', [
-      { tool: 'calculate', args: { expression: '1+1' }, result: '2' },
+    state.set('_toolTranscript', [
+      { tool: 'calculate', args: { expression: '1+1' }, result: '2', ts: 1000 },
     ])
     await new Promise(r => setTimeout(r, 100))
-    assert(lastFrame().includes('= 2'), 'toolResult reset: first turn result shown')
+    assert(lastFrame().includes('= 2'), 'toolTranscript: first turn result shown')
 
-    // 새 턴 시작 → _toolResults 초기화됨
+    // 새 턴 시작 → _toolTranscript 유지됨
     state.set('turnState', TurnState.working('new turn'))
     await new Promise(r => setTimeout(r, 100))
 
-    const toolResults = state.get('_toolResults')
-    assert(Array.isArray(toolResults) && toolResults.length === 0,
-      'toolResult reset: _toolResults cleared on turn start')
+    const transcript = state.get('_toolTranscript')
+    assert(Array.isArray(transcript) && transcript.length === 1,
+      'toolTranscript: preserved across turns (INV-CLR-1 에서만 초기화)')
+    assert(lastFrame().includes('= 2'), 'toolTranscript: still rendered in new turn')
 
     unmount()
   }
@@ -275,6 +276,56 @@ async function run() {
     assert(frame.includes('취소 질문'), 'cancel filter: cancelled input still shown')
 
     unmount()
+  }
+
+  // deriveMessages: pendingInput 이 lastTurn 이후 persisted → dedup (finish WS race)
+  {
+    // pendingInput.ts=50, 그 후 finish 가 history entry를 ts=150 으로 기록 → lastTurn.ts >= pending.ts
+    const history = [{ id: 'h-1', input: '안녕', output: '반갑습니다', ts: 150 }]
+    const msgs = deriveMessages({
+      history, toolTranscript: [],
+      pendingInput: { input: '안녕', ts: 50 },
+      budgetWarning: null, transient: [], optimisticClearTs: 0,
+    })
+    const userMsgs = msgs.filter(m => m.role === 'user' && m.content === '안녕')
+    assert(userMsgs.length === 1, 'pending dedup: shown only once when finish persisted this pending')
+    assert(userMsgs[0].pending === undefined, 'pending dedup: renders persisted history entry (not pending)')
+  }
+
+  // deriveMessages: 같은 input 의 "과거 턴" 은 dedup 하지 않음 (정상 시나리오)
+  // 사용자가 "안녕" 을 보내고 응답 후 다시 "안녕" 을 보낸 상황 → 새 pending 은 보여야 함
+  {
+    const history = [{ id: 'h-1', input: '안녕', output: '반갑습니다', ts: 100 }]
+    const msgs = deriveMessages({
+      history, toolTranscript: [],
+      pendingInput: { input: '안녕', ts: 500 },  // 이전 turn 이후 시작된 새 pending
+      budgetWarning: null, transient: [], optimisticClearTs: 0,
+    })
+    const pendings = msgs.filter(m => m.pending === true && m.content === '안녕')
+    assert(pendings.length === 1, 'pending render: 같은 input 연속 질문 — 새 pending 렌더')
+  }
+
+  // deriveMessages: pendingInput 이 다른 값이면 별도 렌더
+  {
+    const history = [{ id: 'h-1', input: '이전 질문', output: '이전 응답', ts: 100 }]
+    const msgs = deriveMessages({
+      history, toolTranscript: [],
+      pendingInput: { input: '새 질문', ts: 200 },
+      budgetWarning: null, transient: [], optimisticClearTs: 0,
+    })
+    const pending = msgs.find(m => m.pending === true)
+    assert(pending?.content === '새 질문', 'pending render: 다른 input 은 pending 으로 표시')
+  }
+
+  // deriveMessages: history 가 비어있으면 pending 그대로 렌더
+  {
+    const msgs = deriveMessages({
+      history: [], toolTranscript: [],
+      pendingInput: { input: '첫 질문', ts: 100 },
+      budgetWarning: null, transient: [], optimisticClearTs: 0,
+    })
+    const pending = msgs.find(m => m.pending === true)
+    assert(pending?.content === '첫 질문', 'pending render: empty history → pending shown')
   }
 
   summary()

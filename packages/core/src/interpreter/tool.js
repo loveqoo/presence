@@ -14,7 +14,7 @@ const toolInterpreterR = Reader.asks(({ ST, toolRegistry, userDataStore, toolRes
         .catch(err => `[ERROR] ${f.name}: ${err.message}`)
     )())
       .map(result => {
-        toolResultUi.append({ tool: f.name, args: f.args, result })
+        toolResultUi.append({ tool: f.name, args: f.args, result, ts: Date.now() })
         return f.next(result)
       })
   }))

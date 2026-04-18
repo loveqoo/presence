@@ -40,7 +40,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 
 - I6. **WS 연결 인증**: `createMirrorState` 호출 시 `authState.accessToken`이 있으면 `Authorization: Bearer <token>` 헤더를 포함해 WebSocket upgrade 요청을 보낸다. 서버의 WS 인증 3단계 폴백(헤더 → query param → 쿠키) 중 TUI는 헤더 방식만 사용한다.
 - I7. **WS 메시지 시퀀스**: 연결(`open`) 즉시 클라이언트가 `{ type: 'join', session_id: <sessionId> }`를 전송한다. 서버는 순서대로 `{ type: 'init', session_id, state: <snapshot> }` → `{ type: 'state', session_id, path, value }` (변경 발생 시마다)를 push한다.
-- I8. **MirrorState 구독 경로**: `MirrorState.applySnapshot()`은 `SNAPSHOT_PATHS`에 정의된 경로(turnState, lastTurn, turn, context.memories, context.conversationHistory, _streaming, _retry, _approve, _debug.*, _budgetWarning, _toolResults, todos, events, delegates)만 local cache에 반영한다. 그 외 경로는 수신해도 무시한다.
+- I8. **MirrorState 구독 경로**: `MirrorState.applySnapshot()`은 `SNAPSHOT_PATHS`에 정의된 경로(turnState, lastTurn, turn, context.memories, context.conversationHistory, _streaming, _retry, _approve, _debug.*, _budgetWarning, _toolResults, _toolTranscript, _pendingInput, todos, events, delegates)만 local cache에 반영한다. 그 외 경로는 수신해도 무시한다.
 - I10. **WS close 코드 분기 처리**: `MirrorState.handleClose(code)`는 close 코드에 따라 세 가지 경로로 분기한다.
   - `4002`(`PASSWORD_CHANGE_REQUIRED`) / `4003`(`ORIGIN_NOT_ALLOWED`): 재연결 즉시 중단 + `onUnrecoverable(code)` 콜백 호출.
   - `4001`(`AUTH_FAILED`): `onAuthFailed()` 콜백으로 토큰 갱신 1회 시도. 성공 시 즉시 재연결, 실패 시 `onUnrecoverable(code)` 호출 후 중단.
@@ -64,12 +64,38 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 
 **세션 전환**
 
-- I9. **switchSession 순서**: `MirrorState.disconnect()` → `currentSessionId` 갱신 → `createMirrorState(newId)` (새 WS 연결) → `GET /api/sessions/:newId/tools` → `#pendingInitialMessages`에 `{ role: 'system', content: t('sessions_cmd.switched', { id }) }` 주입 → App 재렌더. App 재렌더 시 `#buildAppProps()`가 `#consumePendingInitialMessages()`를 한 번 소비하여 `initialMessages` prop으로 전달한다. 소비 후 `#pendingInitialMessages`는 초기화된다. tools 조회 실패 시 이전 tools를 유지한다.
+- I9. **switchSession 순서**: `MirrorState.disconnect()` → `currentSessionId` 갱신 → `createMirrorState(newId)` (새 WS 연결) → `GET /api/sessions/:newId/tools` → `#pendingInitialMessages`에 `{ role: 'system', content: t('sessions_cmd.switched', { id }), transient: true }` 주입 → App 재렌더. App 재렌더 시 `#buildAppProps()`가 `#consumePendingInitialMessages()`를 한 번 소비하여 `initialMessages` prop으로 전달한다. 소비 후 `#pendingInitialMessages`는 초기화된다. tools 조회 실패 시 이전 tools를 유지한다. 주입되는 메시지는 `transient: true` 필드를 포함하며 TUI는 이를 과도 메시지(transient)로 처리한다. TUI 초기 마운트 시 (`initialMessages = []`) 배너는 표시되지 않는다 — 세션 전환이 발생한 경우에만 주입된다.
 
 **취소 피드백**
 
-- I16. **cancel 피드백 메시지는 TUI local-only**: Esc 키가 working 상태에서 `POST /api/sessions/:id/cancel`을 유발하면, `App.handleInput`의 `onCancel()` 직후 `addMessage({ role: 'system', content: t('key_hint.cancelled') })`로 피드백 메시지를 ChatArea에 추가한다. 이 메시지는 `conversationHistory`(서버 세션 상태)에 저장되지 않으며, 세션 재접속 시 소멸한다. 승인 결정 기록(`approve.md I4`)과 동일한 ephemeral 특성을 가진다.
+- I16. **cancel 피드백 기록 경로**: Esc 키가 working 상태에서 `POST /api/sessions/:id/cancel`을 유발하면 서버 turn-controller는 abort 신호만 전송한다. abort가 확정되어 interpreter가 예외를 throw하면 executor.recover가 `INV-ABT-1`의 OR 조건으로 abort를 판별하여, abort 확정 경로에서만 `turnLifecycle.recordAbortSync(state, turn)`을 호출한다. 이 호출은 `conversationHistory`에 cancelled turn entry (`{ cancelled: true, failed: true, errorKind: 'aborted' }`)와 SYSTEM cancel entry (`{ type: 'system', tag: 'cancel', content: '사용자가 응답을 취소했습니다.' }`)를 순서대로 append한다. 이미 완료된 턴에 대한 후행 cancel은 `turnLifecycle.markLastTurnCancelledSync`가 가장 최근 turn entry에 `cancelled: true` 플래그만 부여 (SYSTEM entry는 생성하지 않음).
 - I12. **세션 전환 후 StatusBar 갱신**: `switchSession` 완료 후 App 재렌더 시 `sessionId` prop이 새 세션 ID로 업데이트된다. StatusBar는 이를 받아 `session: {id}` 세그먼트를 갱신한다. `session` 항목은 `DEFAULT_ITEMS`에 포함되므로 기본 표시된다. 서버 세션 모델에 `name` 필드가 없으므로 표시 식별자는 `sessionId` 단일 경로다.
+
+**히스토리 스키마**
+
+- INV-SYS-1. **conversationHistory entry 타입 구분**: `conversationHistory`의 entry는 `type` 필드로 구분된다. `type: 'turn'` (생략 가능)은 기존 `{ id, input, output, ts, cancelled?, failed?, errorKind?, errorMessage? }` 형식이고, `type: 'system'`은 `{ id, type: 'system', content, tag?, ts }` 형식이다. SYSTEM entry는 prompt assembly (`flattenHistory`) 및 compaction (`compactionPrompt`, `extractForCompaction`)에서 배제된다. 판별식은 `entry.type || 'turn'`으로 하위 호환되며 migration은 불필요.
+- INV-SYS-2. **cancel SYSTEM entry 생성 경로**: cancel SYSTEM entry는 abort 확정 경로 (executor.recover)에서만 append된다. turn-controller.handleCancel은 abort 신호 전송과 후행 cancel 플래그만 담당한다.
+- INV-SYS-3. **approve/reject SYSTEM entry 생성 경로**: approve / reject SYSTEM entry는 turn-controller.handleApproveResponse 시점에 `turnLifecycle.appendSystemEntrySync`로 기록된다. 동일한 seq/trim 규칙 (history-writer의 makeEntry, appendAndTrim, HISTORY.MAX_CONVERSATION)을 공유.
+
+**abort 판별**
+
+- INV-ABT-1. **executor.recover abort 판별 조건**: executor.recover의 abort 판별은 `err.name === 'AbortError' || (actors.isAborted && actors.isAborted())` (OR 조건)이다. LLM 인터프리터가 AbortError를 항상 throw하지 않을 수 있으므로 `turnController.isAborted()` getter로 보강한다. abort 확정 시 `lastTurn.tag === 'failure'` + `lastTurn.error.kind === 'aborted'`로 표시된다 (TurnOutcome 확장 없이 errorKind로 구분).
+
+**/clear 초기화 범위**
+
+- INV-CLR-1. **clearDebugState 초기화 범위**: `clearDebugState()`는 `context.conversationHistory`, `context.memories`, `_pendingInput`, `_toolTranscript`, `_budgetWarning`, 디버그 state를 모두 초기화하며 `_compactionEpoch`를 증분한다. TUI는 optimistic clear (`optimisticClearTs = Date.now()`)로 즉시 화면을 비우고, 서버 reset 후 history가 빈 배열로 전이되는 순간 `optimisticClearTs`를 0으로 reset.
+
+**후행 cancel 타겟**
+
+- INV-CNC-1. **markLastTurnCancelledSync 타겟 탐색**: `markLastTurnCancelledSync`는 history 배열을 뒤에서부터 순회하여 가장 최근 turn entry에 `cancelled: true` 플래그를 부여한다. SYSTEM entry는 건너뛴다 (approve/cancel SYSTEM entry가 turn entry 뒤에 붙을 수 있음).
+
+**pendingInput 계약**
+
+- INV-PND-1. **_pendingInput 수명 계약**: `_pendingInput`은 executor.beginLifecycle에서 user input으로 set되고, turn-lifecycle.finish / executor.recover / clearDebugState에서 null로 정리된다 (4 경로 cleanup). TUI는 `_pendingInput`이 non-null인 동안 user 메시지로 렌더하고, 서버 history에 turn entry가 기록되면 pendingInput null로 전환되며 history entry로 자연스럽게 대체된다.
+
+**toolTranscript 계약**
+
+- INV-TTR-1. **_toolTranscript 누적 계약**: `_toolTranscript`는 tool 실행 결과가 append-only로 누적되는 경로다. 각 entry는 `{ tool, args, result, ts }` 형식이며 `HISTORY.MAX_TOOL_TRANSCRIPT` (현재 500) 상한. `/clear`에서만 초기화되며 턴 경계에서 reset되지 않는다 (`_toolResults`와 달리 세션 전체 누적).
 
 ## 경계 조건 (Edge Cases)
 
@@ -91,7 +117,13 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - I13 → (직접 테스트 없음) ⚠️ onUnrecoverable 발동 시 code별 배너 문구 + InputBar disabled 시나리오 테스트 없음 (FP-22, FP-24)
 - I14 → (직접 테스트 없음) ⚠️ 진입 시 stdout 출력 순서(resolveServerUrl 출력, 세션 초기화 출력) 단위 테스트 없음 (FP-17, FP-21)
 - I15 → (직접 테스트 없음) ⚠️ promptPassword 에코 억제 단위 테스트 없음 (FP-18)
-- I16 → (직접 테스트 없음) ⚠️ Esc 취소 후 system 메시지가 ChatArea에 추가되고 서버 상태에 기록되지 않음을 검증하는 테스트 없음
+- I16 → (직접 테스트 없음) ⚠️ abort 확정 후 conversationHistory에 cancelled turn entry + SYSTEM cancel entry 순서대로 append됨을 검증하는 테스트 없음
+- INV-SYS-1/2/3 → (직접 테스트 없음) ⚠️ SYSTEM entry 타입 구분, cancel/approve SYSTEM entry 생성 경로 단위 테스트 없음
+- INV-ABT-1 → (직접 테스트 없음) ⚠️ isAborted() getter OR 조건 분기 테스트 없음
+- INV-CLR-1 → (직접 테스트 없음) ⚠️ clearDebugState _pendingInput/_toolTranscript 초기화 + TUI optimisticClearTs reset 시나리오 테스트 없음
+- INV-CNC-1 → (직접 테스트 없음) ⚠️ markLastTurnCancelledSync SYSTEM entry 건너뛰기 단위 테스트 없음
+- INV-PND-1 → (직접 테스트 없음) ⚠️ _pendingInput 4 경로 cleanup + TUI 렌더 대체 시나리오 테스트 없음
+- INV-TTR-1 → (직접 테스트 없음) ⚠️ _toolTranscript 세션 누적 + /clear 리셋 + MAX_TOOL_TRANSCRIPT 상한 테스트 없음
 
 ## 관련 코드
 
@@ -111,3 +143,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-11: FP-17/FP-18/FP-19/FP-20/FP-21/FP-24 해소 반영 — I13 보강(disconnected.code별 배너 문구 4종 계약화). I14 신규(진입 시 stdout 출력 순서: 연결 중 메시지 + 세션 초기화 메시지). I15 신규(비밀번호 에코 금지). 테스트 커버리지에 I13/I14/I15 미커버 추가.
 - 2026-04-12: FP-04/FP-09/FP-25/FP-26 해소 반영 — I16 신규(cancel 피드백 메시지는 TUI local-only ephemeral). 키 힌트 라인 노출 조건(idle 상태 전용)은 TUI 내부 렌더링 정책이므로 이 스펙에 포함하지 않음. 테스트 커버리지에 I16 미커버 추가.
 - 2026-04-12: KG-01 해소 — I5를 "재로그인 유도 미구현 Known Gap"에서 "AUTH_FAILED 수렴 경로" 불변식으로 갱신. 부트스트랩 fail-fast vs runtime markDisconnected(4001) late-binding 계약 명시. RemoteSession.markDisconnected 추가. 테스트 커버리지 I5를 packages/tui/test/remote.test.js로 교체.
+- 2026-04-18: FP-61 / KG-14 반영 — 메시지 아키텍처 재설계. 서버 conversationHistory를 TUI 메시지의 단일 진실의 원천으로 승격. history-writer pure helpers와 TurnLifecycle 재구성으로 write 규칙 단일화. I8 갱신 (SNAPSHOT_PATHS에 `_pendingInput`, `_toolTranscript` 추가). I9 갱신 (pendingInitialMessages transient 처리, 초기 마운트 배너 미표시 명시). I16 재정의 (cancel SYSTEM entry로 승격 — TUI local-only ephemeral 에서 서버 conversationHistory 기록으로 변경). INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1 신규.

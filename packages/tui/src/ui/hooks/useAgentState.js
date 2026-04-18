@@ -43,8 +43,9 @@ const useAgentState = (state) => {
   const [recalledMemories, setRecalledMemories] = useState([])
   const [iterationHistory, setIterationHistory] = useState([])
   const [budgetWarning, setBudgetWarning] = useState(null)
-  const [toolResults, setToolResults] = useState([])
+  const [toolTranscript, setToolTranscript] = useState([])
   const [conversationHistory, setConversationHistory] = useState([])
+  const [pendingInput, setPendingInput] = useState(null)
 
   const streamingTimerRef = useRef(null)
   const streamingLatestRef = useRef(null)
@@ -65,6 +66,10 @@ const useAgentState = (state) => {
       latestRef: streamingLatestRef,
     })
 
+    // setter factory — 동일 shape 의 단순 handler 를 재사용해 Fn 카운트 억제.
+    const asArray = (setter) => (change) => setter(Array.isArray(change.nextValue) ? change.nextValue : [])
+    const asNullable = (setter) => (change) => setter(change.nextValue || null)
+
     const handlers = {
       [STATE_PATH.TURN_STATE]: (change) => {
         const phase = change.nextValue
@@ -82,10 +87,7 @@ const useAgentState = (state) => {
         const val = change.nextValue
         setMemoryCount(Array.isArray(val) ? val.length : 0)
       },
-      [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: (change) => {
-        const val = change.nextValue
-        setConversationHistory(Array.isArray(val) ? val : [])
-      },
+      [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: asArray(setConversationHistory),
       [STATE_PATH.RETRY]: (change) => {
         const info = change.nextValue
         setRetryInfo(info)
@@ -93,20 +95,21 @@ const useAgentState = (state) => {
         const key = info.truncated ? 'status.retry_truncated' : 'status.retry'
         setActivity(t(key, { attempt: info.attempt, max: info.maxRetries }))
       },
-      [STATE_PATH.APPROVE]: (change) => setApprove(change.nextValue || null),
+      [STATE_PATH.APPROVE]: asNullable(setApprove),
       [STATE_PATH.STREAMING]: (change) => {
         const value = change.nextValue || null
         if (value === null) streamThrottle.flushNow(null)
         else streamThrottle.scheduleOrFlush(value)
       },
       [STATE_PATH.RECONNECTING]: (change) => setReconnecting(!!change.nextValue),
-      [STATE_PATH.DEBUG_LAST_TURN]: (change) => setDebug(change.nextValue || null),
-      [STATE_PATH.DEBUG_OP_TRACE]: (change) => { const v = change.nextValue; setOpTrace(Array.isArray(v) ? v : []) },
-      [STATE_PATH.DEBUG_RECALLED_MEMORIES]: (change) => { const v = change.nextValue; setRecalledMemories(Array.isArray(v) ? v : []) },
-      [STATE_PATH.DEBUG_ITERATION_HISTORY]: (change) => { const v = change.nextValue; setIterationHistory(Array.isArray(v) ? v : []) },
-      [STATE_PATH.BUDGET_WARNING]: (change) => setBudgetWarning(change.nextValue || null),
-      [STATE_PATH.TOOL_RESULTS]: (change) => setToolResults(change.nextValue || []),
-      [STATE_PATH.TODOS]: (change) => { const v = change.nextValue; setTodos(Array.isArray(v) ? v : []) },
+      [STATE_PATH.DEBUG_LAST_TURN]: asNullable(setDebug),
+      [STATE_PATH.DEBUG_OP_TRACE]: asArray(setOpTrace),
+      [STATE_PATH.DEBUG_RECALLED_MEMORIES]: asArray(setRecalledMemories),
+      [STATE_PATH.DEBUG_ITERATION_HISTORY]: asArray(setIterationHistory),
+      [STATE_PATH.BUDGET_WARNING]: asNullable(setBudgetWarning),
+      [STATE_PATH.TOOL_TRANSCRIPT]: asArray(setToolTranscript),
+      [STATE_PATH.PENDING_INPUT]: asNullable(setPendingInput),
+      [STATE_PATH.TODOS]: asArray(setTodos),
       // exact match (전체 객체 교체 시)
       [STATE_PATH.EVENTS]: (change) => setEvents(change.nextValue || { queue: [], deadLetter: [] }),
       [STATE_PATH.DELEGATES]: (change) => setDelegates(change.nextValue || { pending: [] }),
@@ -133,7 +136,8 @@ const useAgentState = (state) => {
     setOpTrace(state.get(STATE_PATH.DEBUG_OP_TRACE) || [])
     setRecalledMemories(state.get(STATE_PATH.DEBUG_RECALLED_MEMORIES) || [])
     setIterationHistory(state.get(STATE_PATH.DEBUG_ITERATION_HISTORY) || [])
-    setToolResults(state.get(STATE_PATH.TOOL_RESULTS) || [])
+    setToolTranscript(state.get(STATE_PATH.TOOL_TRANSCRIPT) || [])
+    setPendingInput(state.get(STATE_PATH.PENDING_INPUT) || null)
     refreshEvents()
     refreshDelegates()
 
@@ -147,7 +151,7 @@ const useAgentState = (state) => {
 
   return {
     status, turn, memoryCount, activity, lastTurn,
-    todos, events, delegates, retryInfo, approve, streaming, reconnecting, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolResults, conversationHistory,
+    todos, events, delegates, retryInfo, approve, streaming, reconnecting, debug, opTrace, recalledMemories, iterationHistory, budgetWarning, toolTranscript, conversationHistory, pendingInput,
   }
 }
 

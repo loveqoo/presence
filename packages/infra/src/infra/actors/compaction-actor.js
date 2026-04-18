@@ -1,13 +1,19 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { HISTORY } from '@presence/core/core/policies.js'
+import { isTurnEntry } from '@presence/core/core/history-writer.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
 const { Task, Maybe, Reader } = fp
 
 const SUMMARY_MARKER = '[conversation summary]'
 
+// INV-SYS-1: SYSTEM entry 는 compaction 임계치 카운트와 prompt 모두에서 배제.
+
 const extractForCompaction = (history, threshold, keep) => {
-  if (!Array.isArray(history) || history.length <= threshold) return Maybe.Nothing()
+  if (!Array.isArray(history)) return Maybe.Nothing()
+  // turn entry 만 카운트. SYSTEM 이 섞여도 임계치 왜곡 없음.
+  const turnCount = history.reduce((n, e) => n + (isTurnEntry(e) ? 1 : 0), 0)
+  if (turnCount <= threshold) return Maybe.Nothing()
   if (keep <= 0 || keep >= history.length || keep >= threshold) return Maybe.Nothing()
   return Maybe.Just({
     extracted: history.slice(0, history.length - keep),
@@ -26,8 +32,10 @@ const summaryEntry = (content) => {
 }
 
 const compactionPrompt = (toCompact) => {
-  const hasPreviousSummary = toCompact[0]?.input === SUMMARY_MARKER
-  const parts = toCompact.map(h => {
+  // SYSTEM entry 는 compaction prompt 에 포함하지 않음 (INV-SYS-1).
+  const turnsOnly = toCompact.filter(isTurnEntry)
+  const hasPreviousSummary = turnsOnly[0]?.input === SUMMARY_MARKER
+  const parts = turnsOnly.map(h => {
     if (h.input === SUMMARY_MARKER) return `[Previous Summary]\n${h.output}`
     return `User: ${h.input}\nAssistant: ${h.output}`
   })

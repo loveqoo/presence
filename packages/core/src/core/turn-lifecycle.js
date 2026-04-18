@@ -1,41 +1,38 @@
 /**
- * Turn Lifecycle — 턴 완료/실패 처리 + 대화 히스토리 기록
+ * Turn Lifecycle — 턴 완료/실패 처리 + 대화 히스토리 기록.
  *
- * planner.js에서 분리. Planner가 소유하여 사용.
+ * Free API (planner 경로): recordSuccess, recordFailure, finish.
+ * Imperative API (executor.recover / turn-controller 경로):
+ *   recordAbortSync, recordFailureSync, appendSystemEntrySync, markLastTurnCancelledSync.
+ *
+ * 두 경로 모두 history-writer 의 pure helper (makeEntry/appendAndTrim/markLastTurnCancelled)
+ * 를 공유해서 id/ts/truncate/trim 규칙을 단일화한다.
+ *
+ * 인스턴스 소유권: Session 생성자 최상단에서 1회 생성 → planner/executor/turn-controller 주입.
  */
 import { respond, updateState, getState } from './op.js'
-import { HISTORY, TurnState, TurnOutcome, TURN_SOURCE } from './policies.js'
+import { STATE_PATH, TurnState, TurnOutcome, TURN_SOURCE, HISTORY_ENTRY_TYPE, HISTORY_TAG, ERROR_KIND } from './policies.js'
+import { makeEntry, appendAndTrim, markLastTurnCancelled, createSeq } from './history-writer.js'
 import fp from '../lib/fun-fp.js'
 
 const { Free, identity } = fp
 
 class TurnLifecycle {
-  constructor() { this.historySeq = 0 }
-
-  truncate(text, max) {
-    return text.length > max ? text.slice(0, max) + '...(truncated)' : text
+  constructor(t = identity) {
+    this.seq = createSeq()
+    this.t = t
   }
 
+  // --- Free API (planner 경로) ---
+
   finish(turn, turnResult, response, historyExtra = {}) {
-    return updateState('_streaming', null)
+    return updateState(STATE_PATH.STREAMING, null)
       .chain(() => turn.source === TURN_SOURCE.USER
-        ? getState('context.conversationHistory').chain(history => {
-            const entry = {
-              id: `h-${Date.now()}-${++this.historySeq}`,
-              input: this.truncate(String(turn.input), HISTORY.MAX_INPUT_CHARS),
-              output: this.truncate(String(response), HISTORY.MAX_OUTPUT_CHARS),
-              ts: Date.now(),
-              ...historyExtra,
-            }
-            const updated = [...(history || []), entry]
-            const trimmed = updated.length > HISTORY.MAX_CONVERSATION
-              ? updated.slice(-HISTORY.MAX_CONVERSATION)
-              : updated
-            return updateState('context.conversationHistory', trimmed)
-          })
+        ? this.#appendTurnEntryFree(turn, response, historyExtra)
         : Free.of(null))
-      .chain(() => updateState('lastTurn', turnResult))
-      .chain(() => updateState('turnState', TurnState.idle()))
+      .chain(() => updateState(STATE_PATH.LAST_TURN, turnResult))
+      .chain(() => updateState(STATE_PATH.PENDING_INPUT, null))
+      .chain(() => updateState(STATE_PATH.TURN_STATE, TurnState.idle()))
       .chain(() => Free.of(response))
   }
 
@@ -49,9 +46,63 @@ class TurnLifecycle {
     })
   }
 
-  respondAndFail(turn, error, t = identity) {
-    return respond(t('error.agent_error', { message: error.message }))
+  respondAndFail(turn, error) {
+    return respond(this.t('error.agent_error', { message: error.message }))
       .chain(msg => this.failure(turn, error, msg))
+  }
+
+  #appendTurnEntryFree(turn, response, extra) {
+    return getState(STATE_PATH.CONTEXT_CONVERSATION_HISTORY).chain(history => {
+      const entry = makeEntry({ input: turn.input, output: response, extra, seq: this.seq })
+      return updateState(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, appendAndTrim(history, entry))
+    })
+  }
+
+  // --- Imperative API (executor.recover, turn-controller 경로) ---
+
+  recordAbortSync(state, turn) {
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || []
+    const turnEntry = makeEntry({
+      input: turn.input, output: '',
+      extra: { cancelled: true, failed: true, errorKind: ERROR_KIND.ABORTED },
+      seq: this.seq,
+    })
+    const systemEntry = makeEntry({
+      type: HISTORY_ENTRY_TYPE.SYSTEM,
+      content: this.t('history.cancel_notice'),
+      tag: HISTORY_TAG.CANCEL,
+      seq: this.seq,
+    })
+    const withTurn = appendAndTrim(history, turnEntry)
+    const withSystem = appendAndTrim(withTurn, systemEntry)
+    state.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, withSystem)
+  }
+
+  recordFailureSync(state, turn, error) {
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || []
+    const entry = makeEntry({
+      input: turn.input, output: '',
+      extra: {
+        failed: true,
+        errorKind: error?.kind || ERROR_KIND.INTERPRETER,
+        errorMessage: error?.message || String(error),
+      },
+      seq: this.seq,
+    })
+    state.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, appendAndTrim(history, entry))
+  }
+
+  appendSystemEntrySync(state, params) {
+    const { content, tag } = params
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || []
+    const entry = makeEntry({ type: HISTORY_ENTRY_TYPE.SYSTEM, content, tag, seq: this.seq })
+    state.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, appendAndTrim(history, entry))
+  }
+
+  markLastTurnCancelledSync(state) {
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
+    const next = markLastTurnCancelled(history)
+    if (next !== history) state.set(STATE_PATH.CONTEXT_CONVERSATION_HISTORY, next)
   }
 }
 

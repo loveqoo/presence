@@ -1,138 +1,16 @@
-import { createOriginState } from '../states/origin-state.js'
-import { ToolRegistryView } from '../tools/tool-registry.js'
-import { PROMPT, TurnState } from '@presence/core/core/policies.js'
-import { Agent } from '@presence/core/core/agent.js'
-import { charsToTokens } from '@presence/core/lib/tokenizer.js'
-import { t } from '../../i18n/index.js'
-import { TurnController } from './internal/turn-controller.js'
-import { IdleMonitor } from './internal/idle-monitor.js'
-import { sessionInterpreterR } from './internal/session-interpreter.js'
-import { SessionActors } from './internal/session-actors.js'
 import { Session } from './session.js'
-
-const resolveBudget = (prompt) => {
-  const maxContextTokens = prompt.maxContextTokens
-    || (prompt.maxContextChars ? charsToTokens(prompt.maxContextChars) : PROMPT.DEFAULT_MAX_CONTEXT_TOKENS)
-  const reservedOutputTokens = prompt.reservedOutputTokens
-    || (prompt.reservedOutputChars ? charsToTokens(prompt.reservedOutputChars) : PROMPT.DEFAULT_RESERVED_OUTPUT_TOKENS)
-  return { maxContextChars: maxContextTokens, reservedOutputChars: reservedOutputTokens }
-}
-
-const NOOP_TASK = { fork: (_err, res) => res('skip') }
-const NOOP_PERSISTENCE_ACTOR = { send: () => NOOP_TASK, save: () => NOOP_TASK, flush: () => NOOP_TASK }
+import { ephemeralInits } from './internal/ephemeral-inits.js'
 
 // =============================================================================
 // EphemeralSession: 일회성 세션 (SCHEDULED, AGENT 공통).
 // Session 알고리즘의 기본 구현. persistence 없음, scheduler 없음.
+//
+// init 단계는 복잡도 억제를 위해 `ephemeralInits` 로 분리되어 prototype 에 부착.
+// UserSession 등 파생 클래스는 기존대로 메서드를 override 할 수 있다.
 // =============================================================================
 
 class EphemeralSession extends Session {
-
-  // --- 생성 단계 구현 ---
-
-  initState() {
-    this.state = createOriginState({
-      turnState: TurnState.idle(),
-      lastTurn: null,
-      turn: 0,
-      context: { memories: [], conversationHistory: [] },
-      events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
-      delegates: { pending: [] },
-      todos: [],
-    })
-  }
-
-  initTurnControl() {
-    this.turnController = new TurnController(this.state, this.logger, () => this.actors.turnActor)
-  }
-
-  initPersistence() {
-    this.persistenceActor = NOOP_PERSISTENCE_ACTOR
-  }
-
-  restoreState() {}
-
-  initToolRegistry(userContext) {
-    const personaFilter = (tool) => {
-      const persona = userContext.persona.get()
-      if (!persona.tools || persona.tools.length === 0) return true
-      return new Set(persona.tools).has(tool.name)
-    }
-    this.toolView = new ToolRegistryView(userContext.toolRegistry, personaFilter)
-    this.getTools = () => this.toolView.list()
-  }
-
-  initInterpreter(userContext) {
-    this.interpreter = sessionInterpreterR.run({
-      llm: userContext.llm,
-      toolRegistry: this.toolView,
-      userDataStore: userContext.userDataStore,
-      state: this.state,
-      agentRegistry: userContext.agentRegistry,
-      turnController: this.turnController,
-      logger: this.logger,
-    })
-  }
-
-  initActors(userContext, opts) {
-    this.actors = new SessionActors({
-      userContext, state: this.state, logger: this.logger,
-      persistenceActor: this.persistenceActor,
-      userId: this.userId,
-      dispatchTurn: (input, turnOpts) => this.runAgent(input, turnOpts),
-      onScheduledJobDone: this.resolveJobDoneHandler(opts),
-    })
-  }
-
-  resolveJobDoneHandler(opts) { return opts.onScheduledJobDone || null }
-
-  initAgent(userContext) {
-    this.agent = new Agent({
-      resolveTools: this.getTools,
-      resolveAgents: () => userContext.agentRegistry.list(),
-      persona: userContext.persona.get(),
-      responseFormatMode: userContext.config.llm.responseFormat,
-      maxRetries: userContext.config.llm.maxRetries,
-      maxIterations: userContext.config.maxIterations,
-      budget: resolveBudget(userContext.config.prompt),
-      t,
-      interpret: this.interpreter.interpret,
-      ST: this.interpreter.ST,
-      state: this.state,
-      actors: this.actors.forAgent(this.logger),
-    })
-  }
-
-  initScheduler() {}
-
-  initTools() {}
-
-  initMonitor(opts) {
-    this.idleMonitor = new IdleMonitor(this.state, {
-      eventActor: this.actors.eventActor,
-      delegateActor: this.actors.delegateActor,
-      budgetActor: this.actors.budgetActor,
-      resetTrace: this.interpreter.resetTrace,
-      idleTimeoutMs: opts.idleTimeoutMs,
-      onIdle: opts.onIdle,
-    })
-  }
-
-  // --- Turn 실행: allowedTools로 Agent 툴 제한 ---
-
-  runAgent(input, opts) {
-    const { allowedTools = [] } = opts || {}
-    if (allowedTools.length === 0) return this.agent.run(input, opts)
-
-    const currentTools = this.getTools()
-    const effectiveTools = currentTools.filter(tool =>
-      allowedTools.some(pattern => { try { return new RegExp(pattern).test(tool.name) } catch (_unused) { return false } })
-    )
-    if (effectiveTools.length === currentTools.length) return this.agent.run(input, opts)
-    return this.agent.withTools(effectiveTools).run(input, opts)
-  }
-
-  // --- Public 인터페이스 ---
+  // --- Public 인터페이스 (turnController / actors 위임) ---
 
   async handleInput(input) { return this.turnController.handleInput(input) }
   handleApproveResponse(approved) { this.turnController.handleApproveResponse(approved) }
@@ -144,12 +22,12 @@ class EphemeralSession extends Session {
   get delegateActor() { return this.actors.delegateActor }
   get schedulerActor() { return null }
 
-  // --- 종료 단계 구현 ---
-
-  shutdownScheduler() {}
   shutdownActors() { this.actors.shutdown() }
   clearTimers() { this.idleMonitor.clearTimer() }
-  async flushPersistence() {}
 }
+
+// init 메서드들을 prototype 에 부착. Session 의 Template Method 가 this.initX() 를
+// 호출할 때 이 메서드들이 해석된다. UserSession 이 override 시 class 메서드가 우선.
+Object.assign(EphemeralSession.prototype, ephemeralInits)
 
 export { EphemeralSession }

@@ -472,6 +472,32 @@ async function run() {
     assert(toolResults[0].args.after === true, 'Parallel UI restore: only post-parallel tool recorded')
   }
 
+  // 18. ExecuteTool → _toolTranscript 에도 누적 (세션 누적 로그)
+  {
+    const toolReg = createToolRegistry()
+    toolReg.register({ name: 'acc-tool', handler: (args) => `out-${args.n}` })
+    const rs = createOriginState({ _toolResults: [], _toolTranscript: [] })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
+    const program = executeTool('acc-tool', { n: 1 }).chain(() => executeTool('acc-tool', { n: 2 }))
+    await runProg(interpret, ST)(program)
+    const transcript = rs.get('_toolTranscript') || []
+    assert(transcript.length === 2, '_toolTranscript: accumulates across ExecuteTool calls')
+    assert(transcript[0].args.n === 1, '_toolTranscript: first tool preserved')
+    assert(transcript[1].args.n === 2, '_toolTranscript: second tool preserved')
+  }
+
+  // 19. Parallel 브랜치는 _toolTranscript 에도 append 되지 않음 (격리)
+  {
+    const toolReg = createToolRegistry()
+    toolReg.register({ name: 'par-tool', handler: (args) => `r-${args.k}` })
+    const rs = createOriginState({ _toolResults: [], _toolTranscript: [] })
+    const { interpret, ST } = prodInterpreterR.run({ llm: mockLLM(''), toolRegistry: toolReg, reactiveState: rs })
+    const programs = [executeTool('par-tool', { k: 'a' }), executeTool('par-tool', { k: 'b' })]
+    await runProg(interpret, ST)(parallel(programs))
+    const transcript = rs.get('_toolTranscript') || []
+    assert(transcript.length === 0, '_toolTranscript: parallel branches suppressed')
+  }
+
   summary()
 }
 

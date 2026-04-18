@@ -8,6 +8,7 @@ import { delegateInterpreterR } from './delegate.js'
 import { approvalInterpreterR } from '@presence/core/interpreter/approval.js'
 import { controlInterpreterR } from '@presence/core/interpreter/control.js'
 import { parallelInterpreterR } from '@presence/core/interpreter/parallel.js'
+import { HISTORY, STATE_PATH } from '@presence/core/core/policies.js'
 
 const { StateT, Reader } = fp
 const ST = StateT('task')
@@ -28,10 +29,17 @@ const createUiHelpers = (reactiveState) => {
 
   const toolResultUi = {
     append: (entry) => {
-      if (isEnabled()) {
-        const prev = reactiveState.get('_toolResults') || []
-        reactiveState.set('_toolResults', [...prev, entry])
-      }
+      if (!isEnabled()) return
+      // 현재 턴 UI 용 — 다음 턴 시작 시 reset (기존 동작 유지).
+      const prev = reactiveState.get(STATE_PATH.TOOL_RESULTS) || []
+      reactiveState.set(STATE_PATH.TOOL_RESULTS, [...prev, entry])
+      // 세션 누적 tool 로그 — /clear 까지 유지 (INV-CLR-1 에서 초기화).
+      const transcript = reactiveState.get(STATE_PATH.TOOL_TRANSCRIPT) || []
+      const next = [...transcript, entry]
+      const trimmed = next.length > HISTORY.MAX_TOOL_TRANSCRIPT
+        ? next.slice(-HISTORY.MAX_TOOL_TRANSCRIPT)
+        : next
+      reactiveState.set(STATE_PATH.TOOL_TRANSCRIPT, trimmed)
     },
   }
 

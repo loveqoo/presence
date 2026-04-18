@@ -14,7 +14,12 @@ import { delegateActorR } from '../../actors/delegate-actor.js'
 // =============================================================================
 
 class SessionActors {
-  constructor({ userContext, state, logger, persistenceActor, userId, dispatchTurn, onScheduledJobDone }) {
+  constructor(opts) {
+    const { userContext, state, logger, persistenceActor, userId, turnLifecycle, turnController, dispatchTurn, onScheduledJobDone } = opts
+    // --- Turn 라이프사이클 (Session 이 주입한 단일 인스턴스) ---
+    this.turnLifecycle = turnLifecycle
+    this.turnController = turnController
+
     // --- 메모리/압축 Actor ---
     const sessionEnv = { memory: userContext.memory, userId, logger, llm: userContext.llm, state }
     this.memoryActor = memoryActorR.run(sessionEnv)
@@ -79,6 +84,9 @@ class SessionActors {
       memoryActor: this.memoryActor,
       compactionActor: this.compactionActor,
       persistenceActor: this.persistenceActor,
+      turnLifecycle: this.turnLifecycle,
+      // executor.recover 가 abort 판별에 사용. 순환 참조 회피 위해 콜백 형태.
+      isAborted: () => !!(this.turnController && this.turnController.isAborted()),
       logger,
     }
   }

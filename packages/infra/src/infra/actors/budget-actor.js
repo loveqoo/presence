@@ -41,8 +41,9 @@ class BudgetActor extends ActorWrapper {
   #detectWarning({ budget, used, historyDropped }) {
     if (budget === Infinity) return Maybe.Nothing()
     const pct = Math.round(used / budget * 100)
-    if (historyDropped > 0) return Maybe.Just({ type: 'history_dropped', dropped: historyDropped, pct })
-    if (pct >= PROMPT.BUDGET_WARN_PCT) return Maybe.Just({ type: 'high_usage', pct })
+    const ts = Date.now()
+    if (historyDropped > 0) return Maybe.Just({ type: 'history_dropped', dropped: historyDropped, pct, ts })
+    if (pct >= PROMPT.BUDGET_WARN_PCT) return Maybe.Just({ type: 'high_usage', pct, ts })
     return Maybe.Nothing()
   }
 }

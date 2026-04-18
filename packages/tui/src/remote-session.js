@@ -55,7 +55,8 @@ class RemoteSession {
     this.#currentSessionId = newId
     this.#remoteState = this.#createMirrorState(newId)
     this.#currentTools = await this.#client.getJson(`/api/sessions/${newId}/tools`).catch(() => this.#currentTools)
-    this.#pendingInitialMessages = [{ role: 'system', content: t('sessions_cmd.switched', { id: newId }) }]
+    // transient 로 1회 표시. 다음 ESC 또는 턴 시작 시 clearTransient 로 자연 소멸.
+    this.#pendingInitialMessages = [{ role: 'system', content: t('sessions_cmd.switched', { id: newId }), transient: true }]
     if (this.#rerender) this.#rerender(h(App, this.#buildAppProps()))
   }
 

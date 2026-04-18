@@ -7,6 +7,23 @@ export const ERROR_KIND = Object.freeze({
   PLANNER_SHAPE:   'planner_shape',
   INTERPRETER:     'interpreter',
   MAX_ITERATIONS:  'max_iterations',
+  ABORTED:         'aborted',
+})
+
+// history entry 타입. 기존 entry 는 type 없음 → 'turn' 으로 해석.
+export const HISTORY_ENTRY_TYPE = Object.freeze({
+  TURN:   'turn',
+  SYSTEM: 'system',
+})
+
+// SYSTEM entry / transient system message 의 tag 태깅.
+// 동일 리터럴이 turn-controller, turn-lifecycle, useAgentMessages 에 등장 → 단일 진원.
+export const HISTORY_TAG = Object.freeze({
+  CANCEL:  'cancel',
+  APPROVE: 'approve',
+  REJECT:  'reject',
+  WARNING: 'warning',
+  ERROR:   'error',
 })
 
 export const TurnState = Object.freeze({
@@ -33,6 +50,7 @@ export const HISTORY = Object.freeze({
   COMPACTION_KEEP: 5,
   MAX_INPUT_CHARS: 500,
   MAX_OUTPUT_CHARS: 1000,
+  MAX_TOOL_TRANSCRIPT: 500,
 })
 
 export const TURN_SOURCE = Object.freeze({
@@ -102,6 +120,8 @@ export const STATE_PATH = Object.freeze({
   STREAMING: '_streaming',
   RECONNECTING: '_reconnecting',
   TOOL_RESULTS: '_toolResults',
+  TOOL_TRANSCRIPT: '_toolTranscript',
+  PENDING_INPUT: '_pendingInput',
   // debug
   DEBUG_LAST_TURN: '_debug.lastTurn',
   DEBUG_LAST_PROMPT: '_debug.lastPrompt',

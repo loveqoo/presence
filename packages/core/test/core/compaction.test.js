@@ -119,6 +119,40 @@ async function run() {
     assert(prompt.messages.length === 2, 'compactionPrompt: empty array still produces 2 messages')
   }
 
+  // B4. SYSTEM entry 는 prompt 에서 배제 (INV-SYS-1)
+  {
+    const turns = [
+      { input: 'q1', output: 'a1' },
+      { type: 'system', content: '사용자가 응답을 취소함', tag: 'cancel' },
+      { input: 'q2', output: 'a2' },
+    ]
+    const prompt = compactionPrompt(turns)
+    assert(prompt.messages[1].content.includes('User: q1'), 'compactionPrompt SYSTEM: q1 included')
+    assert(prompt.messages[1].content.includes('User: q2'), 'compactionPrompt SYSTEM: q2 included')
+    assert(!prompt.messages[1].content.includes('취소'), 'compactionPrompt SYSTEM: content excluded')
+  }
+
+  // E10. extractForCompaction: SYSTEM entry 는 임계치 카운트에서 배제 (INV-SYS-1)
+  {
+    const mixed = [
+      ...makeHistory(15),
+      { type: 'system', content: 'c1', tag: 'cancel' },
+      { type: 'system', content: 'c2', tag: 'approve' },
+    ]
+    const result = extractForCompaction(mixed, 15, 5)
+    assert(Maybe.isNothing(result), 'extractForCompaction SYSTEM: turn count 15 == threshold → Nothing')
+  }
+
+  // E11. extractForCompaction: turn count 초과 시 SYSTEM 포함 전체 추출
+  {
+    const mixed = [
+      ...makeHistory(16),
+      { type: 'system', content: 'c1', tag: 'cancel' },
+    ]
+    const result = extractForCompaction(mixed, 15, 5)
+    assert(Maybe.isJust(result), 'extractForCompaction SYSTEM: turn count 16 > 15 → Just')
+  }
+
   // =============================================
   // summaryEntry 테스트
   // =============================================
