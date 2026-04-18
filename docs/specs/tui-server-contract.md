@@ -117,13 +117,15 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - I13 → (직접 테스트 없음) ⚠️ onUnrecoverable 발동 시 code별 배너 문구 + InputBar disabled 시나리오 테스트 없음 (FP-22, FP-24)
 - I14 → (직접 테스트 없음) ⚠️ 진입 시 stdout 출력 순서(resolveServerUrl 출력, 세션 초기화 출력) 단위 테스트 없음 (FP-17, FP-21)
 - I15 → (직접 테스트 없음) ⚠️ promptPassword 에코 억제 단위 테스트 없음 (FP-18)
-- I16 → (직접 테스트 없음) ⚠️ abort 확정 후 conversationHistory에 cancelled turn entry + SYSTEM cancel entry 순서대로 append됨을 검증하는 테스트 없음
-- INV-SYS-1/2/3 → (직접 테스트 없음) ⚠️ SYSTEM entry 타입 구분, cancel/approve SYSTEM entry 생성 경로 단위 테스트 없음
-- INV-ABT-1 → (직접 테스트 없음) ⚠️ isAborted() getter OR 조건 분기 테스트 없음
-- INV-CLR-1 → (직접 테스트 없음) ⚠️ clearDebugState _pendingInput/_toolTranscript 초기화 + TUI optimisticClearTs reset 시나리오 테스트 없음
-- INV-CNC-1 → (직접 테스트 없음) ⚠️ markLastTurnCancelledSync SYSTEM entry 건너뛰기 단위 테스트 없음
-- INV-PND-1 → (직접 테스트 없음) ⚠️ _pendingInput 4 경로 cleanup + TUI 렌더 대체 시나리오 테스트 없음
-- INV-TTR-1 → (직접 테스트 없음) ⚠️ _toolTranscript 세션 누적 + /clear 리셋 + MAX_TOOL_TRANSCRIPT 상한 테스트 없음
+- I16 → `packages/core/test/core/agent.test.js` "Executor.recover abort 경로 분기" (cancelled turn entry + SYSTEM cancel entry 순서 검증), `test/e2e/tui-e2e.test.js` TE24 (cancel 순서 보존)
+- INV-SYS-1 → `packages/core/test/core/prompt.test.js` 25 (flattenHistory SYSTEM 배제), 26 (type 생략 하위 호환), 27 (fitHistory SYSTEM 비용 0), `packages/core/test/core/compaction.test.js` B4 (compactionPrompt SYSTEM 배제), E10 (extractForCompaction SYSTEM 임계치 카운트 배제), E11 (turn count 초과 시 SYSTEM 포함 추출)
+- INV-SYS-2 → `packages/infra/test/turn-controller.test.js` TC1 (handleCancel 은 abort 신호만, SYSTEM entry 직접 쓰지 않음), `packages/core/test/core/agent.test.js` "Executor.recover abort 경로 분기" (recordAbortSync 호출)
+- INV-SYS-3 → `packages/infra/test/turn-controller.test.js` TC6 (approve SYSTEM entry), TC7 (reject SYSTEM entry), `packages/core/test/core/turn-lifecycle.test.js` S1 (appendSystemEntrySync)
+- INV-ABT-1 → `packages/core/test/core/agent.test.js` "Executor.recover abort 경로 분기" (isAborted=true 경로, cancelled turn + SYSTEM entry 기록), "Executor.recover 일반 error 경로는 SYSTEM entry 없음" (isAborted=false 경로), `packages/infra/test/turn-controller.test.js` TC8 (isAborted() getter), TC1b (turnState=idle이면 abort no-op 회피)
+- INV-CLR-1 → `packages/core/test/core/apply-final-state.test.js` F14 (history/pendingInput/toolTranscript/budgetWarning 모두 초기화), F15 (빈 state 안전), F16 (MANAGED_PATHS에 PENDING_INPUT 포함)
+- INV-CNC-1 → `packages/core/test/core/history-writer.test.js` C4 (SYSTEM entry 건너뜀), C5 (이미 cancelled), C6 (all SYSTEM entries), C7 (여러 SYSTEM skip), `packages/infra/test/turn-controller.test.js` TC5 (turn-controller 경유), `packages/core/test/core/turn-lifecycle.test.js` M1 (뒤에서부터 첫 turn 탐색), M2 (이미 cancelled no-op), M3 (turn 없음 no-op)
+- INV-PND-1 → `packages/core/test/core/agent.test.js` "Executor.beginLifecycle → _pendingInput set" ({input, ts} 구조 검증), "Executor.recover: _pendingInput cleared", `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `test/e2e/tui-e2e.test.js` TE25 (pendingInput 즉시 표시 + dedup)
+- INV-TTR-1 → `packages/core/test/interpreter/prod.test.js` 18 (ExecuteTool _toolTranscript 누적), 19 (Parallel 브랜치 격리), `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `packages/tui/test/interactive.test.js` "toolTranscript: preserved across turns"
 
 ## 관련 코드
 
@@ -144,3 +146,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-12: FP-04/FP-09/FP-25/FP-26 해소 반영 — I16 신규(cancel 피드백 메시지는 TUI local-only ephemeral). 키 힌트 라인 노출 조건(idle 상태 전용)은 TUI 내부 렌더링 정책이므로 이 스펙에 포함하지 않음. 테스트 커버리지에 I16 미커버 추가.
 - 2026-04-12: KG-01 해소 — I5를 "재로그인 유도 미구현 Known Gap"에서 "AUTH_FAILED 수렴 경로" 불변식으로 갱신. 부트스트랩 fail-fast vs runtime markDisconnected(4001) late-binding 계약 명시. RemoteSession.markDisconnected 추가. 테스트 커버리지 I5를 packages/tui/test/remote.test.js로 교체.
 - 2026-04-18: FP-61 / KG-14 반영 — 메시지 아키텍처 재설계. 서버 conversationHistory를 TUI 메시지의 단일 진실의 원천으로 승격. history-writer pure helpers와 TurnLifecycle 재구성으로 write 규칙 단일화. I8 갱신 (SNAPSHOT_PATHS에 `_pendingInput`, `_toolTranscript` 추가). I9 갱신 (pendingInitialMessages transient 처리, 초기 마운트 배너 미표시 명시). I16 재정의 (cancel SYSTEM entry로 승격 — TUI local-only ephemeral 에서 서버 conversationHistory 기록으로 변경). INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1 신규.
+- 2026-04-18: FP-61/KG-14 커버리지 매트릭스 갱신 — INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1, I16 의 "(직접 테스트 없음) ⚠️" 를 실제 테스트 경로로 교체.
