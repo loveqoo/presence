@@ -10,7 +10,7 @@ import { useAgentState } from './hooks/useAgentState.js'
 import { useAgentMessages } from './hooks/useAgentMessages.js'
 import { useSlashCommands } from './hooks/useSlashCommands.js'
 import { MarkdownText } from './components/MarkdownText.js'
-import { STATE_PATH } from '@presence/core/core/policies.js'
+import { STATE_PATH, ERROR_KIND } from '@presence/core/core/policies.js'
 import { t } from '@presence/infra/i18n'
 
 const h = React.createElement
@@ -101,7 +101,9 @@ const App = (props) => {
     ? Math.round(agentState.debug.assembly.used / agentState.debug.assembly.budget * 100)
     : null
 
+  // aborted 는 사용자 의도이므로 error hint 도 표시하지 않음 (status='idle' 로 복귀).
   const errorHint = agentState.lastTurn?.tag === 'failure'
+    && agentState.lastTurn.error?.kind !== ERROR_KIND.ABORTED
     ? (agentState.lastTurn.error?.kind || null)
     : null
 

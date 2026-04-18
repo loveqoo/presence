@@ -125,6 +125,24 @@ console.log('UI component tests (renderToString)')
   assert(deriveStatus(state) === 'idle', 'deriveStatus: idle when lastTurn=null')
 }
 
+// 10b. lastTurn=failure with kind=aborted → 'idle' (사용자 의도 취소, UX 일관성)
+{
+  const state = createOriginState({
+    turnState: TurnState.idle(),
+    lastTurn: TurnOutcome.failure('q', TurnError('aborted', ERROR_KIND.ABORTED), null),
+  })
+  assert(deriveStatus(state) === 'idle', 'deriveStatus: aborted → idle (not error)')
+}
+
+// 10c. lastTurn=failure with kind=interpreter → 'error' (실제 에러는 그대로)
+{
+  const state = createOriginState({
+    turnState: TurnState.idle(),
+    lastTurn: TurnOutcome.failure('q', TurnError('boom', ERROR_KIND.INTERPRETER), null),
+  })
+  assert(deriveStatus(state) === 'error', 'deriveStatus: non-aborted failure remains error')
+}
+
 // --- deriveMemoryCount selector ---
 
 // 11. context.memories가 배열이면 길이 반환

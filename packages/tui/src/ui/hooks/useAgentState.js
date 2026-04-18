@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { STATE_PATH } from '@presence/core/core/policies.js'
+import { STATE_PATH, ERROR_KIND } from '@presence/core/core/policies.js'
 import { t } from '@presence/infra/i18n'
 import { createTrailingThrottle } from './trailing-throttle.js'
 
@@ -12,11 +12,14 @@ const STREAMING_THROTTLE_MS = 200
  * 에이전트 State의 변경이 UI를 자동으로 갱신한다.
  */
 // 순수 셀렉터 — 테스트에서도 사용
+// INV-ABT-1 후속: 사용자가 의도적으로 ESC 로 취소한 턴은 error 가 아닌 idle 로 표시.
+// lastTurn.error.kind === 'aborted' 면 SYSTEM cancel entry 가 이미 history 에 있어
+// 사용자는 무슨 일이 있었는지 알 수 있다. StatusBar 의 빨간 ✗ error 는 진짜 failure 전용.
 const deriveStatus = (state) => {
   const ts = state.get(STATE_PATH.TURN_STATE)
   if (ts?.tag === 'working') return 'working'
   const lt = state.get(STATE_PATH.LAST_TURN)
-  if (lt?.tag === 'failure') return 'error'
+  if (lt?.tag === 'failure' && lt?.error?.kind !== ERROR_KIND.ABORTED) return 'error'
   return 'idle'
 }
 
