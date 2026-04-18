@@ -1,4 +1,6 @@
 import { Transition, makeFSM, step } from '@presence/core/core/fsm/fsm.js'
+import { makeCommand } from '@presence/core/core/fsm/command.js'
+import { makeEvent } from '@presence/core/core/fsm/event.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { assert, assertDeepEqual, summary } from '../../../../test/lib/assert.js'
 
@@ -289,6 +291,97 @@ console.log('FSM core tests')
   const result = step(fsm, 'a', { type: 'go' })
   assertDeepEqual(result.value.events, [{ topic: 'from:a', payload: 'go' }],
     'X2: emit function evaluated with (state, command)')
+}
+
+// --- makeCommand ---
+
+// C1. type 만 있는 최소 command
+{
+  const c = makeCommand({ type: 'chat' })
+  assertDeepEqual(c, { type: 'chat' }, 'C1: minimal command')
+  assert(!('ts' in c), 'C1: ts 주입 안 됨')
+}
+
+// C2. 모든 선택 필드 pass-through
+{
+  const c = makeCommand({
+    type: 'chat',
+    origin: 'tui:A',
+    principal: 'user:gunam',
+    payload: { text: 'hi' },
+    id: 'uuid-1',
+  })
+  assertDeepEqual(c, {
+    type: 'chat',
+    origin: 'tui:A',
+    principal: 'user:gunam',
+    payload: { text: 'hi' },
+    id: 'uuid-1',
+  }, 'C2: all optional fields')
+}
+
+// C3. type 누락 → throw
+{
+  let thrown = null
+  try { makeCommand({ origin: 'x' }) } catch (e) { thrown = e }
+  assert(thrown !== null, 'C3: missing type throws')
+}
+
+// C4. type 이 빈 문자열 → throw
+{
+  let thrown = null
+  try { makeCommand({ type: '' }) } catch (e) { thrown = e }
+  assert(thrown !== null, 'C4: empty type throws')
+}
+
+// C5. undefined 선택 필드는 제외
+{
+  const c = makeCommand({ type: 'chat', origin: undefined, payload: undefined })
+  assert(!('origin' in c) && !('payload' in c), 'C5: undefined fields omitted')
+}
+
+// --- makeEvent ---
+
+// V1. topic 만 있는 최소 event
+{
+  const e = makeEvent({ topic: 'turn.started' })
+  assertDeepEqual(e, { topic: 'turn.started' }, 'V1: minimal event')
+  assert(!('ts' in e), 'V1: ts 주입 안 됨')
+}
+
+// V2. 선택 필드 pass-through
+{
+  const e = makeEvent({ topic: 'turn.started', payload: { id: 1 }, source: 'turnGate' })
+  assertDeepEqual(e, { topic: 'turn.started', payload: { id: 1 }, source: 'turnGate' },
+    'V2: all optional fields')
+}
+
+// V3. topic 누락 → throw
+{
+  let thrown = null
+  try { makeEvent({ payload: 1 }) } catch (e) { thrown = e }
+  assert(thrown !== null, 'V3: missing topic throws')
+}
+
+// V4. topic 이 빈 문자열 → throw
+{
+  let thrown = null
+  try { makeEvent({ topic: '' }) } catch (e) { thrown = e }
+  assert(thrown !== null, 'V4: empty topic throws')
+}
+
+// V5. makeEvent 가 step 과 호환 (emit 으로 전달된 후 pass-through 확인)
+{
+  const fsm = makeFSM('ev', 'a', [
+    Transition({
+      from: 'a', on: 'go', to: 'b',
+      emit: (s, c) => [makeEvent({ topic: `from:${s}`, payload: c.type })],
+    }),
+  ])
+  const result = step(fsm, 'a', makeCommand({ type: 'go' }))
+  assertDeepEqual(result.value.events, [{ topic: 'from:a', payload: 'go' }],
+    'V5: makeEvent + makeCommand interoperate with step')
+  assert(!('ts' in result.value.events[0]), 'V5: step pass-through 유지 (no ts)')
 }
 
 summary()
