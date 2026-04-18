@@ -115,10 +115,60 @@ function stepAtomic(fsm, state, command) {
   })
 }
 
-// --- stepProduct — product.js 구현 후 여기에 추가 (Step 3) ---
+// --- stepProduct ---
+//
+// R1 aggregation 규칙:
+//   1. keys.length === 0  → Right({ state: {}, events: [] })   (vacuous identity)
+//   2. accepted ≥ 1        → Right (state merge, events key-order, perFsm)
+//   3. 0 accepted + explicit 존재 → Left (primary = 첫 explicit)
+//   4. 0 accepted + explicit 없음 → Left (primary = 'unhandled')
+//
+// ⚠ Phase 1 PoC 임시 규칙: accept 가 explicit reject 를 덮음. Phase 3 재평가 필수.
 
-function stepProduct(_fsm, _state, _command) {
-  throw new Error('stepProduct: not implemented yet (Step 3)')
+function stepProduct(fsm, state, command) {
+  const { keys, children } = fsm
+
+  if (keys.length === 0) {
+    return Either.Right({ state: {}, events: [] })
+  }
+
+  const results = keys.map(k => step(children[k], state[k], command))
+  const acceptedCount = results.reduce((n, r) => n + (r.isRight() ? 1 : 0), 0)
+
+  if (acceptedCount >= 1) {
+    const nextState = {}
+    const events = []
+    const perFsm = {}
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i]
+      const r = results[i]
+      perFsm[k] = r
+      if (r.isRight()) {
+        nextState[k] = r.value.state
+        for (const ev of r.value.events) events.push(ev)
+      } else {
+        nextState[k] = state[k]
+      }
+    }
+    return Either.Right({ state: nextState, events, perFsm })
+  }
+
+  // 0 accepted
+  const reasonsAll = []
+  for (let i = 0; i < keys.length; i++) {
+    const r = results[i]
+    if (r.isLeft()) {
+      for (const reason of r.value.reasons) reasonsAll.push(reason)
+    }
+  }
+  const firstExplicit = reasonsAll.find(r => r.kind === 'explicit')
+  const primaryReason = firstExplicit ? firstExplicit.reason : 'unhandled'
+  return Either.Left({
+    command,
+    state,
+    reasons: reasonsAll,
+    primaryReason,
+  })
 }
 
 // --- step 단일 진입점 ---
