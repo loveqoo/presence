@@ -39,6 +39,11 @@ const tests = [
   'packages/infra/test/tools.test.js',
   'packages/core/test/core/agent.test.js',
   'packages/core/test/core/assembly.test.js',
+  // FSM Transition Algebra (Phase 1 PoC)
+  'packages/core/test/core/fsm-core.test.js',
+  'packages/core/test/core/fsm-product.test.js',
+  'packages/core/test/core/fsm-laws.test.js',
+  'packages/infra/test/turn-gate-fsm.test.js',
   // Phase 1 infra
   'packages/infra/test/logger.test.js',
   'packages/infra/test/persistence.test.js',
