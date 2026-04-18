@@ -321,3 +321,94 @@ React custom hook 추출, RemoteSession 클래스 전환.
   - 2단: 다중 파일 비교, 조건 분기, 4턴 체인, 도구+판단, 커맨드 혼합
   - 3단: 에러 복구, 6턴 맥락(5/5 기억), 도구 3턴 연쇄, /clear+도구, 커맨드↔대화 교차
   - 4단: streaming, 멀티 이터레이션, approve, cancel, 세션 전환
+
+---
+
+## Phase F: 티켓 레지스트리 + UX 정비 + 메시지 아키텍처 (2026-04)
+
+Phase 6 까지 핵심 기능 완성 이후, **운영 중 드러난 UX 마찰점과 스펙 Known Gap 을
+체계적으로 해소하는 사이클**. 전역 티켓 레지스트리를 단일 진실의 원천으로 도입하고
+묶음 단위로 FP/KG 를 resolved 했다. 총 75개 티켓 (FP 61 + KG 14) 전부 해소.
+
+### F-0. 티켓 레지스트리 인프라
+
+- `docs/tickets/REGISTRY.md` — FP (UX friction point) + KG (spec Known Gap) 전역 ID 관리
+- `scripts/tickets.sh next-id/list/check` — 번호 부여 + pre-commit 정합성 검증
+- `.claude/rules/tickets.md` — 에이전트/개발자 절차 정의
+
+### F-1. 승인 + 에러 가시성 클러스터 (FP-01/02/03/16/22/46)
+
+- ApprovePrompt 위험도 분류 (High/Medium/Low) + 거부 피드백 + HIGH_RISK_PATTERNS 21개
+- StatusBar errorHint(ERROR_KIND) 표시
+- disconnected 배너 + close code 별 사유 분기 (4001/4002/4003)
+
+### F-2. 진입 / 로그인 / 상태 인지 (FP-04/09/15/17~21/23/24/25/26/29/30/36/37)
+
+- resolveServerUrl source 표시 (`--server` / `PRESENCE_SERVER` / 기본값)
+- promptPassword 완전 mute, 로그인 실패 횟수 표시
+- 스트리밍 중 "thinking → 응답 중" 라벨 전환, `_reconnecting` publish
+- idle 전용 키 힌트 라인, Esc 임시메시지 닫기
+- `/sessions switch` 성공 피드백, InputBar disabled 상태 메시지
+
+### F-3. 슬래시 커맨드 한글화 + 인식 정확성 (FP-05~08/10~13/27/28/31~35/38~45/47~51 + KG-02/03/05/06)
+
+- 모든 슬래시 커맨드 출력 i18n (한글 고정 문자열 제거)
+- 알 수 없는 `/xxx` 슬래시 커맨드 에이전트 전달 차단 (FP-42)
+- `/copy` 크로스플랫폼 클립보드 (darwin/linux/win32), `/report` 디스크 저장
+- MarkdownText 이탤릭/목록/링크 렌더링 확장
+- TranscriptOverlay 5개 탭 (FP-27/KG-08 포함), ChatArea truncation 배너
+- POST /sessions SESSION_TYPE 검증, PRESENCE_DIR 변경 감지, authRequired=false dead code 제거
+
+### F-4. 데이터 품질 / 디버그 보강 (KG-09~13, FP-52~60)
+
+- LLM max_tokens 파이프라인 + truncation 탐지 + retry 원인 표시
+- `safeJsonParse` 절단 휴리스틱 + TurnError.truncated
+- Planner retry iteration index (retryAttempt) + 에러 레이블 개선
+- SERP URL 구조적 차단 (`policies.js` 정규식 6개 + validatePlan)
+- Plan 마지막 ASK_LLM + RESPOND 누락 거부 (I9), `$N` 미구현 규칙 제거
+- StatusBar retry 활동 i18n, TranscriptOverlay Iterations 탭 스크롤 스태킹 해소
+
+### F-5. 메인 뷰 깜빡임 해소 (FP-58)
+
+- StatusBar spinner 제거 (`setInterval(100ms)` → 정적 `◌`)
+- streaming chunk 200ms trailing throttle (16Hz → 5Hz)
+- `<Static>` 패턴 제거 → 동적 렌더 + MAX_VISIBLE 제한 (/clear 양립)
+- `PRESENCE_TRACE_PATCHES=1` 진단 인프라, measure-writes.js / measure-patches.js
+
+### F-6. 메시지 아키텍처 재설계 (FP-61 / KG-14)
+
+**배경**: `useAgentMessages` 의 이중 출처(서버 conversationHistory + TUI addMessage)
+로 순서 역전 / abort 메시지 소실 / cancel flash 가 누더기 패치 4회 반복. 근본 원인을
+구조적으로 해소.
+
+**핵심 변경**:
+- `history-writer.js` 신규 pure helpers (makeEntry / appendAndTrim / markLastTurnCancelled)
+  — Free 경로와 Imperative 경로가 공유
+- `TurnLifecycle` 재구성: Free API (recordSuccess/recordFailure/finish) +
+  Imperative API (recordAbortSync/recordFailureSync/appendSystemEntrySync/
+  markLastTurnCancelledSync). Session 이 소유해 planner/executor/turn-controller 가 동일 인스턴스 공유.
+- `HISTORY_ENTRY_TYPE` (turn/system) — SYSTEM entry (cancel/approve 기록) 가 prompt
+  assembly 및 compaction 에서 배제 (INV-SYS-1)
+- `executor.recover` — abort OR 조건 (`err.name === 'AbortError' || isAborted()`) 으로
+  `recordAbortSync` 또는 `recordFailureSync` 분기
+- `turn-controller` — turnState 확인 + handleInput finally 의 fallback markLastTurnCancelled
+  로 race condition 해소 (cancel 이 applyFinalState 진행 중 도착해도 플래그 부여)
+- `_pendingInput { input, ts }` + TUI useMemo dedup — 같은 input 연속 질문 정상 렌더
+- `_toolTranscript` append-only 로 세션 누적 tool 로그, `/clear` 때만 초기화
+- `clearDebugState` (INV-CLR-1) — history / pendingInput / toolTranscript / budgetWarning 모두 초기화
+- TUI `useAgentMessages` 전면 재작성 — addMessage 제거 → addTransient/clearTransient/optimisticClearNow
+- StatusBar ABORTED semantics — 사용자 ESC 취소는 error 가 아닌 idle 로 표시
+
+**스펙**: `docs/specs/tui-server-contract.md` I8/I9/I16 갱신 + INV-SYS-1/2/3, INV-CLR-1,
+INV-CNC-1, INV-ABT-1, INV-PND-1, INV-TTR-1 신규. 커버리지 매트릭스 실제 테스트 경로 반영.
+
+**검증**: mock 2654 통과 (history-writer 46, turn-lifecycle 23, turn-controller 23,
+e2e TE24~29), live (qwen3.5-35b) tui-live-focus 18 통과.
+
+### F-7. 에이전트 + 플랜 리뷰 워크플로우
+
+- `plan-reviewer` 서브에이전트 — 플랜 파일 Codex adversarial 리뷰
+- `code-reviewer` — `.claude/rules/` 기준 코드 규칙 검증
+- `spec-guardian` / `ux-guardian` / `user-guide-writer` — 각 영역 문서 소유권 가드
+- 문서 소유권 훅 (`check-doc-ownership.sh`) — docs/{specs,ux,guide} 를 가디언에게만 위임
+- `codex-rescue` 서브에이전트 — 디버깅/원인분석 Codex 위임
