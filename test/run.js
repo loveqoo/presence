@@ -47,6 +47,8 @@ const tests = [
   // FSM Runtime + EventBus (Phase 2 PoC)
   'packages/core/test/core/fsm-event-bus.test.js',
   'packages/core/test/core/fsm-runtime.test.js',
+  // FSM Bridge (Phase 4)
+  'packages/infra/test/turn-gate-bridge.test.js',
   // Phase 1 infra
   'packages/infra/test/logger.test.js',
   'packages/infra/test/persistence.test.js',
