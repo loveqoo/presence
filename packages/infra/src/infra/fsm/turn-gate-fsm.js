@@ -78,6 +78,15 @@ const transitions = [
     emit: [{ topic: 'turn.cancelled', payload: { turnState: TurnState.idle() } }],
   }),
 
+  // working + abort_complete → idle (handleCancel 없이 외부 abort 되는 방어 경로)
+  // 예: LLM SDK 자체 abort, 외부 SIGTERM 등. cancelling 을 거치지 않은 abort 도 idle 로 수렴.
+  Transition({
+    from: isWorking,
+    on: 'abort_complete',
+    to: () => TurnState.idle(),
+    emit: [{ topic: 'turn.cancelled', payload: { turnState: TurnState.idle() } }],
+  }),
+
   // --- Explicit rejections ---
   Transition({ from: isWorking,    on: 'chat',   reject: 'session-busy' }),
   Transition({ from: isCancelling, on: 'chat',   reject: 'cancelling-in-progress' }),

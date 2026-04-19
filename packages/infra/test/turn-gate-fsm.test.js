@@ -74,6 +74,19 @@ const working = (input) => TurnState.working(input)
   )
 }
 
+// A6. working + abort_complete → idle (handleCancel 없이 외부 abort 방어)
+// LLM SDK 자체 abort, SIGTERM 등 cancelling 을 거치지 않은 abort 도 idle 로 수렴.
+{
+  const r = step(turnGateFSM, working('q'), { type: 'abort_complete' })
+  assert(r.isRight(), 'A6: working+abort_complete accept (외부 abort 방어)')
+  assertDeepEqual(r.value.state, IDLE, 'A6: state=idle')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.cancelled', payload: { turnState: IDLE } }],
+    'A6: turn.cancelled payload'
+  )
+}
+
 // --- Explicit rejections ---
 
 // E1. working + chat → Left session-busy
