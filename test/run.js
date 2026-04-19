@@ -49,6 +49,9 @@ const tests = [
   'packages/core/test/core/fsm-runtime.test.js',
   // FSM Bridge (Phase 4)
   'packages/infra/test/turn-gate-bridge.test.js',
+  // approveFSM + bridge (Phase 6)
+  'packages/infra/test/approve-fsm.test.js',
+  'packages/infra/test/approve-bridge.test.js',
   // Phase 1 infra
   'packages/infra/test/logger.test.js',
   'packages/infra/test/persistence.test.js',
