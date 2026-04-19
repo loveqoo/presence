@@ -25,11 +25,21 @@ class SessionBridge {
     }
   }
 
-  watchSession(sessionId, state) {
+  // Phase 5: session 전체를 받아 turnGateRuntime.stateVersion 도 broadcast 에 첨부.
+  // 클라이언트 MirrorState 가 최신성 판단 + stale 감지용으로 사용.
+  watchSession(sessionId, session) {
+    const state = session.state
+    const getVersion = () => session.turnGateRuntime?.stateVersion ?? null
     for (const path of WATCHED_PATHS) {
       const broadcastPath = path.replace('.*', '')
       state.hooks.on(path, () => {
-        this.broadcast({ type: 'state', session_id: sessionId, path: broadcastPath, value: state.get(broadcastPath) })
+        this.broadcast({
+          type: 'state',
+          session_id: sessionId,
+          path: broadcastPath,
+          value: state.get(broadcastPath),
+          stateVersion: getVersion(),
+        })
       })
     }
   }
@@ -136,7 +146,12 @@ class WsHandler {
       ws.send(JSON.stringify({ type: 'error', code: 403, message: 'Access denied: session belongs to another user' }))
       return
     }
-    ws.send(JSON.stringify({ type: 'init', session_id: sessionId, state: entry.session.state.snapshot() }))
+    ws.send(JSON.stringify({
+      type: 'init',
+      session_id: sessionId,
+      state: entry.session.state.snapshot(),
+      stateVersion: entry.session.turnGateRuntime?.stateVersion ?? null,
+    }))
   }
 }
 

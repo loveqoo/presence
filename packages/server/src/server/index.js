@@ -109,7 +109,7 @@ class PresenceServer {
       username: this.#username,
       memory: this.#memory,
       onSessionCreated: ({ id, type, session }) => {
-        if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session.state)
+        if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },
     })
     this.#startedAt = Date.now()

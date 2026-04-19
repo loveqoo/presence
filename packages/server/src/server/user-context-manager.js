@@ -31,7 +31,7 @@ class UserContextManager {
       username,
       memory: this.#memory,
       onSessionCreated: ({ id, type, session }) => {
-        if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session.state)
+        if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },
     })
     // config.agents 기반 에이전트 세션 등록
