@@ -30,6 +30,21 @@ const { Either } = fp
 
 const REJECTION_TOPIC = 'fsm.rejected'
 
+// stateVersion 기본 생성기 — sortable (lexicographic 순서) + monotonic (단일 프로세스 내).
+// Date.now() rollback (NTP 보정 / 테스트 주입) 방어: prevTs 보다 작은 now 가 오면 prevTs 유지.
+// 같은 ms 안의 연속 호출은 counter 로 unique. 12 자리 ts (16 진수) + 6 자리 counter.
+const makeDefaultVersionGen = () => {
+  let prevTs = 0
+  let counter = 0
+  return () => {
+    const now = Date.now()
+    const ts = now > prevTs ? now : prevTs
+    if (ts === prevTs) counter++
+    else { prevTs = ts; counter = 0 }
+    return `${ts.toString(16).padStart(12, '0')}-${counter.toString(16).padStart(6, '0')}`
+  }
+}
+
 // plain object / array 만 재귀 freeze. class instance / Map / Set 은 top-level only.
 // turnGateFSM 은 string state, product 는 {k: v} plain object map 이므로 Phase 2 FSM 에 충분.
 const deepFreeze = (value) => {
@@ -50,14 +65,15 @@ function makeFSMRuntime({
   bus,
   clock = () => Date.now(),
   idGen = () => randomUUID(),
+  versionGen = makeDefaultVersionGen(),
 }) {
   if (!fsm) throw new Error('makeFSMRuntime: `fsm` required')
   if (!bus) throw new Error('makeFSMRuntime: `bus` required')
 
   let currentState = initial !== undefined ? initial : fsm.initial
-  // stateVersion: 수락 (accept) 시마다 새 UUID. 구독자가 stale 이벤트 감지에 사용.
+  // stateVersion: 수락 (accept) 시마다 versionGen 으로 새 값 발급. 구독자가 stale 감지에 사용.
   // reject 시에는 상태 변경이 없으므로 버전도 변경하지 않는다.
-  // 초기값은 null — 첫 submit 이전. 구독자의 초기 상태 취급은 런타임 외부에서 결정.
+  // 초기값 null — 첫 submit 이전. 구독자의 초기 상태 취급은 런타임 외부에서 결정.
   let stateVersion = null
 
   const submit = (cmd) => {
@@ -74,7 +90,7 @@ function makeFSMRuntime({
 
     if (result.isRight()) {
       currentState = deepFreeze(result.value.state)
-      stateVersion = idGen()
+      stateVersion = versionGen()
       const version = stateVersion
       const enrichedEvents = Object.freeze(result.value.events.map((ev) => Object.freeze({
         ...ev,
@@ -128,4 +144,4 @@ function makeFSMRuntime({
   }
 }
 
-export { makeFSMRuntime, REJECTION_TOPIC, deepFreeze }
+export { makeFSMRuntime, REJECTION_TOPIC, deepFreeze, makeDefaultVersionGen }

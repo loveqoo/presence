@@ -1,6 +1,6 @@
 import { Transition, makeFSM } from '@presence/core/core/fsm/fsm.js'
 import { makeFsmEventBus } from '@presence/core/core/fsm/event-bus.js'
-import { makeFSMRuntime, REJECTION_TOPIC } from '@presence/core/core/fsm/runtime.js'
+import { makeFSMRuntime, REJECTION_TOPIC, makeDefaultVersionGen } from '@presence/core/core/fsm/runtime.js'
 import { turnGateFSM } from '@presence/infra/infra/fsm/turn-gate-fsm.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, assertDeepEqual, summary } from '../../../../test/lib/assert.js'
@@ -387,12 +387,16 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
   const bus = makeFsmEventBus()
   const received = []
   bus.subscribe('*', (ev) => received.push(ev))
-  const runtime = makeFSMRuntime({ fsm, bus, clock: () => 999, idGen: () => 'V' })
+  const runtime = makeFSMRuntime({
+    fsm, bus, clock: () => 999,
+    idGen: () => 'V',
+    versionGen: () => 'VER',
+  })
 
   const result = runtime.submit({ type: 'x' })
-  assertDeepEqual(runtime.stateVersion, 'V', 'SV2: accept 후 stateVersion 발급')
-  assertDeepEqual(result.value.stateVersion, 'V', 'SV2: Right.value 에 stateVersion')
-  assertDeepEqual(received[0].stateVersion, 'V', 'SV2: 이벤트에 stateVersion 자동 첨부')
+  assertDeepEqual(runtime.stateVersion, 'VER', 'SV2: accept 후 stateVersion 발급')
+  assertDeepEqual(result.value.stateVersion, 'VER', 'SV2: Right.value 에 stateVersion')
+  assertDeepEqual(received[0].stateVersion, 'VER', 'SV2: 이벤트에 stateVersion 자동 첨부')
 }
 
 // SV3. 매 accept 마다 새 stateVersion
@@ -438,6 +442,41 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
 
   runtime.submit({ type: 'chat' })
   assertDeepEqual(received[0].stateVersion, null, 'SV5: 초기 상태에서 reject → stateVersion=null')
+}
+
+// SV7. 기본 versionGen 이 sortable + monotonic — lex 순서 보장
+{
+  const gen = makeDefaultVersionGen()
+  const v1 = gen()
+  const v2 = gen()
+  const v3 = gen()
+  assert(v1 < v2, 'SV7: v1 < v2 (lex 순서)')
+  assert(v2 < v3, 'SV7: v2 < v3')
+  assert(v1 !== v2 && v2 !== v3, 'SV7: 모두 unique')
+  // format: 12 hex ts - 6 hex counter
+  assert(/^[0-9a-f]{12}-[0-9a-f]{6}$/.test(v1), 'SV7: format 12-6 hex')
+}
+
+// SV8. clock rollback 방어 — Date.now() 가 뒤로 가도 순서 유지
+{
+  let nowStub = 1000
+  const origDateNow = Date.now
+  Date.now = () => nowStub
+  try {
+    const gen = makeDefaultVersionGen()
+    const v1 = gen()   // ts=1000
+    nowStub = 500      // 뒤로 감 (NTP 보정 시뮬)
+    const v2 = gen()   // prevTs=1000 유지, counter 증가
+    nowStub = 1000
+    const v3 = gen()   // now === prevTs, counter 증가
+    nowStub = 2000
+    const v4 = gen()   // forward, counter reset
+    assert(v1 < v2, 'SV8: rollback 후에도 v1 < v2')
+    assert(v2 < v3, 'SV8: v2 < v3 (같은 ts counter 증가)')
+    assert(v3 < v4, 'SV8: forward 시 v3 < v4')
+  } finally {
+    Date.now = origDateNow
+  }
 }
 
 // SV6. accept 후 reject — rejection event 에 최신 accept 버전 첨부
