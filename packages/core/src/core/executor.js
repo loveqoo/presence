@@ -32,17 +32,18 @@ class Executor {
 
   beginLifecycle(input) {
     if (!this.state) return
-    this.state.set(STATE_PATH.TURN_STATE, TurnState.working(input))
     this.state.set(STATE_PATH.TURN, (this.state.get(STATE_PATH.TURN) || 0) + 1)
     this.state.set(STATE_PATH.DEBUG_ITERATION_HISTORY, [])
     // 입력 즉시 표시용 pending input (FE 가 WS 로 받아 render).
     // ts 는 "이 pending 이 언제 시작되었는가" 를 기록. 이후 turn entry 의 ts 와 비교하여
     // "같은 input 의 과거 턴" vs "이번 pending 이 persisted" 를 구분 가능 (TUI dedup).
     this.state.set(STATE_PATH.PENDING_INPUT, { input, ts: Date.now() })
-    // FSM runtime 에도 전이 알림. bridge 가 state.set(TURN_STATE) 시도하지만 이미 같은
-    // 값이므로 skip. 단계 5e 에서 위의 state.set(TURN_STATE) 제거해 bridge 로 일원화.
+    // TURN_STATE 는 turnGateRuntime 이 authoritative. bridge 가 state.set 수행.
     if (this.turnGateRuntime) {
       this.turnGateRuntime.submit({ type: 'chat', payload: { input } })
+    } else {
+      // runtime 미주입 환경 (단위 테스트 등) — legacy 직접 set 으로 fallback.
+      this.state.set(STATE_PATH.TURN_STATE, TurnState.working(input))
     }
   }
 
@@ -70,13 +71,16 @@ class Executor {
       fireAndForget(compactionActor.check(history, initialEpoch))
     }
     applyFinalState(this.state, finalState, { initialEpoch })
-    // FSM runtime 에도 전이 알림. 단계 5e 에서 applyFinalState 의 TURN_STATE 커밋
-    // 제거 + turn-lifecycle.finish 의 updateState(TURN_STATE) 제거 후에는 이 호출이
-    // 유일한 state.set(TURN_STATE, idle) 경로가 된다.
+    // TURN_STATE 는 runtime 이 authoritative. applyFinalState 의 MANAGED_PATHS 에서도 제외됨.
+    // bridge 가 마지막에 state.set(TURN_STATE, idle) 수행 — hook 순서 계약 (lastTurn,
+    // history 등 다른 path 가 이미 커밋된 뒤 idle hook 발동) 유지.
     if (this.turnGateRuntime) {
       const lastTurn = getByPath(finalState, 'lastTurn')
       const type = lastTurn?.tag === RESULT.SUCCESS ? 'complete' : 'failure'
       this.turnGateRuntime.submit({ type })
+    } else {
+      // runtime 미주입 환경 — legacy 직접 set 으로 fallback.
+      this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
     }
     this.persist()
   }
@@ -116,10 +120,13 @@ class Executor {
     this.state.set(STATE_PATH.STREAMING, null)
     this.state.set(STATE_PATH.PENDING_INPUT, null)
     this.state.set(STATE_PATH.LAST_TURN, TurnOutcome.failure(input, error, null))
-    this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
-    // FSM runtime 에도 전이 알림. aborted 면 cancelling→idle, 아니면 working→idle.
+    // TURN_STATE 는 turnGateRuntime 이 authoritative. bridge 가 마지막에 state.set 수행
+    // — hook 순서 계약 (lastTurn 등이 이미 커밋된 뒤 idle hook 발동) 유지.
     if (this.turnGateRuntime) {
       this.turnGateRuntime.submit({ type: aborted ? 'abort_complete' : 'failure' })
+    } else {
+      // runtime 미주입 환경 — legacy 직접 set 으로 fallback.
+      this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
     }
     this.persist()
   }

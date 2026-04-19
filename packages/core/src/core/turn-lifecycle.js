@@ -26,13 +26,14 @@ class TurnLifecycle {
   // --- Free API (planner 경로) ---
 
   finish(turn, turnResult, response, historyExtra = {}) {
+    // TURN_STATE 는 이 Free chain 이 쓰지 않는다 — executor.afterTurn 이
+    // applyFinalState 후 turnGateRuntime.submit 을 호출하고 bridge 가 commit.
     return updateState(STATE_PATH.STREAMING, null)
       .chain(() => turn.source === TURN_SOURCE.USER
         ? this.#appendTurnEntryFree(turn, response, historyExtra)
         : Free.of(null))
       .chain(() => updateState(STATE_PATH.LAST_TURN, turnResult))
       .chain(() => updateState(STATE_PATH.PENDING_INPUT, null))
-      .chain(() => updateState(STATE_PATH.TURN_STATE, TurnState.idle()))
       .chain(() => Free.of(response))
   }
 

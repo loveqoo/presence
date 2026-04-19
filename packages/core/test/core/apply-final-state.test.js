@@ -8,19 +8,38 @@ import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { getByPath } from '@presence/core/lib/path.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
+import { makeFsmEventBus } from '@presence/core/core/fsm/event-bus.js'
+import { makeFSMRuntime } from '@presence/core/core/fsm/runtime.js'
+import { turnGateFSM } from '@presence/infra/infra/fsm/turn-gate-fsm.js'
+import { makeTurnGateBridge } from '@presence/infra/infra/fsm/turn-gate-bridge.js'
 
 import { assert, summary } from '../../../../test/lib/assert.js'
+
+// Phase 4 single-writer: TURN_STATE 는 bridge 가 커밋. F1-F5 는 executor.afterTurn 의
+// 흐름을 재현 — applyFinalState 로 다른 path 먼저 커밋 → runtime.submit → bridge 가
+// state.set(TURN_STATE, idle). hook 순서 계약 (다른 path 이미 반영된 뒤 idle hook 발동) 검증.
+const setupFsmChain = (state) => {
+  const bus = makeFsmEventBus()
+  const runtime = makeFSMRuntime({ fsm: turnGateFSM, bus, initial: TurnState.working('q') })
+  const dispose = makeTurnGateBridge({
+    runtime, state, bus, getAbortController: () => null,
+  })
+  return { bus, runtime, dispose }
+}
 
 async function run() {
   console.log('applyFinalState ordering + turn chaining tests')
 
   // ===========================================
-  // 경로 순서: turnState는 반드시 마지막
+  // 경로 순서: bridge 가 turnState 를 마지막에 커밋
+  // applyFinalState (다른 path) → runtime.submit → bridge.state.set(TURN_STATE, idle)
+  // 이 순서로 idle hook 시점에 다른 path 가 이미 반영되어 있음을 보장.
   // ===========================================
 
-  // F1. turnState=idle 시점에 lastTurn이 이미 반영되어야 함
+  // F1. idle hook 시점에 lastTurn 이 이미 반영되어야 함
   {
     const state = createOriginState({ turnState: TurnState.working('q'), lastTurn: null })
+    const { runtime } = setupFsmChain(state)
     let lastTurnAtIdleHook = 'NOT_CAPTURED'
 
     state.hooks.on("turnState", (change) => { const phase = change.nextValue;
@@ -32,20 +51,21 @@ async function run() {
     applyFinalState(state, {
       _streaming: null,
       lastTurn: TurnOutcome.success('q', 'result'),
-      turnState: TurnState.idle(),
     }, {})
+    runtime.submit({ type: 'complete' })  // bridge → state.set(TURN_STATE, idle)
 
     assert(lastTurnAtIdleHook !== null, 'F1: lastTurn captured at idle hook')
     assert(lastTurnAtIdleHook !== 'NOT_CAPTURED', 'F1: hook actually fired')
     assert(lastTurnAtIdleHook.tag === RESULT.SUCCESS, 'F1: lastTurn is success at idle hook time')
   }
 
-  // F2. turnState=idle 시점에 conversationHistory가 이미 반영되어야 함
+  // F2. idle hook 시점에 conversationHistory 가 이미 반영되어야 함
   {
     const state = createOriginState({
       turnState: TurnState.working('q'),
       context: { conversationHistory: [] },
     })
+    const { runtime } = setupFsmChain(state)
     let historyAtIdleHook = null
 
     state.hooks.on("turnState", (change) => { const phase = change.nextValue;
@@ -55,18 +75,19 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: TurnState.idle(),
       lastTurn: TurnOutcome.success('q', 'ok'),
       context: { conversationHistory: [{ id: 'h-1', input: 'q', output: 'ok' }] },
     }, { initialEpoch: 0 })
+    runtime.submit({ type: 'complete' })
 
     assert(historyAtIdleHook !== null, 'F2: history captured at idle hook')
     assert(historyAtIdleHook.length === 1, 'F2: history has 1 entry at idle hook time')
   }
 
-  // F3. turnState=idle 시점에 _debug.* 가 이미 반영되어야 함
+  // F3. idle hook 시점에 _debug.* 가 이미 반영되어야 함
   {
     const state = createOriginState({ turnState: TurnState.working('q') })
+    const { runtime } = setupFsmChain(state)
     let debugAtIdleHook = 'NOT_SET'
 
     state.hooks.on("turnState", (change) => { const phase = change.nextValue;
@@ -76,21 +97,22 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: TurnState.idle(),
       lastTurn: TurnOutcome.success('q', 'ok'),
       _debug: { lastTurn: { input: 'q', iteration: 0 } },
     }, {})
+    runtime.submit({ type: 'complete' })
 
     assert(debugAtIdleHook !== 'NOT_SET', 'F3: debug captured at idle hook')
     assert(debugAtIdleHook?.input === 'q', 'F3: debug.lastTurn reflects current turn')
   }
 
-  // F4. turnState=idle 시점에 _streaming이 이미 null이어야 함
+  // F4. idle hook 시점에 _streaming 이 이미 null 이어야 함
   {
     const state = createOriginState({
       turnState: TurnState.working('q'),
       _streaming: { content: 'partial', status: 'streaming' },
     })
+    const { runtime } = setupFsmChain(state)
     let streamingAtIdleHook = 'NOT_CHECKED'
 
     state.hooks.on("turnState", (change) => { const phase = change.nextValue;
@@ -100,18 +122,18 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: TurnState.idle(),
       lastTurn: TurnOutcome.success('q', 'ok'),
       _streaming: null,
     }, {})
+    runtime.submit({ type: 'complete' })
 
     assert(streamingAtIdleHook === null, 'F4: _streaming is null at idle hook time')
   }
 
-  // F5. MANAGED_PATHS에서 turnState가 마지막인지 구조 검증
+  // F5. MANAGED_PATHS 에는 TURN_STATE 가 없음 (bridge 가 유일한 writer)
   {
-    assert(MANAGED_PATHS[MANAGED_PATHS.length - 1] === 'turnState',
-      'F5: turnState is last in MANAGED_PATHS')
+    assert(!MANAGED_PATHS.includes(STATE_PATH.TURN_STATE),
+      'F5: TURN_STATE is not in MANAGED_PATHS — bridge 가 유일한 writer')
   }
 
   // ===========================================
@@ -193,13 +215,14 @@ async function run() {
   // epoch 변경 + idle hook
   // ===========================================
 
-  // F8. epoch 불일치: history 스킵되지만 turnState idle hook은 정상 발동
+  // F8. epoch 불일치: history 스킵되지만 bridge 경유 turnState idle hook 은 정상 발동
   {
     const state = createOriginState({
       turnState: TurnState.working('q'),
       _compactionEpoch: 1,
       context: { conversationHistory: [{ id: 'old', input: 'old' }] },
     })
+    const { runtime } = setupFsmChain(state)
     let hookFired = false
 
     state.hooks.on("turnState", (change) => { const phase = change.nextValue;
@@ -207,10 +230,10 @@ async function run() {
     })
 
     applyFinalState(state, {
-      turnState: TurnState.idle(),
       lastTurn: TurnOutcome.success('q', 'ok'),
       context: { conversationHistory: [{ id: 'old' }, { id: 'new' }] },
     }, { initialEpoch: 0 }) // epoch 불일치
+    runtime.submit({ type: 'complete' })  // bridge → state.set(TURN_STATE, idle)
 
     assert(hookFired, 'F8: idle hook fires despite epoch mismatch')
     const history = state.get('context.conversationHistory')
