@@ -117,13 +117,14 @@ function stepAtomic(fsm, state, command) {
 
 // --- stepProduct ---
 //
-// R1 aggregation 규칙:
-//   1. keys.length === 0  → Right({ state: {}, events: [] })   (vacuous identity)
-//   2. accepted ≥ 1        → Right (state merge, events key-order, perFsm)
-//   3. 0 accepted + explicit 존재 → Left (primary = 첫 explicit)
-//   4. 0 accepted + explicit 없음 → Left (primary = 'unhandled')
+// R1 aggregation 규칙 (Phase 3 확정):
+//   1. keys.length === 0   → Right({ state: {}, events: [] })  (vacuous identity)
+//   2. hasExplicit         → Left  (명시적 거부가 수락을 이긴다. primary = 첫 explicit)
+//   3. accepted ≥ 1        → Right (state merge, events key-order, perFsm)
+//   4. 전원 no-match       → Left (primary = 'unhandled')
 //
-// ⚠ Phase 1 PoC 임시 규칙: accept 가 explicit reject 를 덮음. Phase 3 재평가 필수.
+// 근거: "명시적 거부는 항상 존중" 이 안전한 기본값. FSM 정의자가 "무관심" 하려면
+// 해당 transition 을 빼서 no-match 로 두면 된다. reject 는 적극적 거부 의미.
 
 function stepProduct(fsm, state, command) {
   const { keys, children } = fsm
@@ -133,8 +134,28 @@ function stepProduct(fsm, state, command) {
   }
 
   const results = keys.map(k => step(children[k], state[k], command))
-  const acceptedCount = results.reduce((n, r) => n + (r.isRight() ? 1 : 0), 0)
 
+  // 모든 Left 의 reasons 를 모아 둔다. explicit 존재 여부가 분기 기준.
+  const reasonsAll = []
+  for (const r of results) {
+    if (r.isLeft()) {
+      for (const reason of r.value.reasons) reasonsAll.push(reason)
+    }
+  }
+  const firstExplicit = reasonsAll.find(r => r.kind === 'explicit')
+
+  // explicit 이 하나라도 있으면 전체 거부 (수락이 있어도)
+  if (firstExplicit) {
+    return Either.Left({
+      command,
+      state,
+      reasons: reasonsAll,
+      primaryReason: firstExplicit.reason,
+    })
+  }
+
+  // explicit 없음 + 수락 ≥ 1 → 전체 수락 (state slot isolation)
+  const acceptedCount = results.reduce((n, r) => n + (r.isRight() ? 1 : 0), 0)
   if (acceptedCount >= 1) {
     const nextState = {}
     const events = []
@@ -153,21 +174,12 @@ function stepProduct(fsm, state, command) {
     return Either.Right({ state: nextState, events, perFsm })
   }
 
-  // 0 accepted
-  const reasonsAll = []
-  for (let i = 0; i < keys.length; i++) {
-    const r = results[i]
-    if (r.isLeft()) {
-      for (const reason of r.value.reasons) reasonsAll.push(reason)
-    }
-  }
-  const firstExplicit = reasonsAll.find(r => r.kind === 'explicit')
-  const primaryReason = firstExplicit ? firstExplicit.reason : 'unhandled'
+  // 전원 no-match (explicit 도 없고 수락도 없음)
   return Either.Left({
     command,
     state,
     reasons: reasonsAll,
-    primaryReason,
+    primaryReason: 'unhandled',
   })
 }
 

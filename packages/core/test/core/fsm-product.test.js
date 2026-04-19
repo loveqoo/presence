@@ -95,7 +95,7 @@ console.log('FSM product tests')
   assertDeepEqual(result.value.events, [{ topic: 'a.moved' }], 'A2: only a events')
 }
 
-// A3. state slot isolation — explicit reject slot 도 불변
+// A3. explicit 거부가 수락을 이긴다 — 전체 Left, 모든 slot 불변
 {
   const aFsm = makeFSM('a', 'x', [
     Transition({ from: 'x', on: 'go', to: 'y' }),
@@ -105,8 +105,9 @@ console.log('FSM product tests')
   ])
   const p = product({ a: aFsm, b: bFsm })
   const result = step(p, { a: 'x', b: 'busy' }, { type: 'go' })
-  assert(result.isRight(), 'A3: a accept → Right (accept dominates explicit, Phase 1 임시)')
-  assertDeepEqual(result.value.state, { a: 'y', b: 'busy' }, 'A3: b reject slot 불변')
+  assert(result.isLeft(), 'A3: 한 FSM 이라도 explicit 거부면 전체 Left')
+  assertDeepEqual(result.value.primaryReason, 'b-busy', 'A3: primary = 첫 explicit reason')
+  assertDeepEqual(result.value.state, { a: 'x', b: 'busy' }, 'A3: state 전체 불변 (a slot 도 전이 안 됨)')
 }
 
 // A4. event 순서 = key array 순서 (객체 생성 순서)
