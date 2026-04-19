@@ -70,6 +70,14 @@ class Executor {
       fireAndForget(compactionActor.check(history, initialEpoch))
     }
     applyFinalState(this.state, finalState, { initialEpoch })
+    // FSM runtime 에도 전이 알림. 단계 5e 에서 applyFinalState 의 TURN_STATE 커밋
+    // 제거 + turn-lifecycle.finish 의 updateState(TURN_STATE) 제거 후에는 이 호출이
+    // 유일한 state.set(TURN_STATE, idle) 경로가 된다.
+    if (this.turnGateRuntime) {
+      const lastTurn = getByPath(finalState, 'lastTurn')
+      const type = lastTurn?.tag === RESULT.SUCCESS ? 'complete' : 'failure'
+      this.turnGateRuntime.submit({ type })
+    }
     this.persist()
   }
 
