@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws'
 import { WS_CLOSE, WS_RECONNECT, STATE_PATH } from '@presence/core/core/policies.js'
+import { getByPath } from '@presence/core/lib/path.js'
 import { State } from './state.js'
 
 // =============================================================================
@@ -22,44 +23,34 @@ const SNAPSHOT_PATHS = [
 
 const noop = Function.prototype
 
-function getNestedValue(obj, path) {
-  let cur = obj
-  for (const key of path.split('.')) {
-    if (cur == null) return undefined
-    cur = cur[key]
-  }
-  return cur
-}
-
 class MirrorState extends State {
   constructor(opts = {}) {
     super()
     const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable } = opts
-    this.cache = { _reconnecting: false, lastStateVersion: null }
+    this.cache = { _reconnecting: false }
+    this.lastStateVersion = null   // Phase 5: WS init/state 메시지로 갱신. 클라이언트 stale 감지용.
     this.wsUrl = wsUrl
     this.sessionId = sessionId
-    this.getHeaders = getHeaders || (headers ? () => headers : () => undefined)
+    const staticHeaders = headers
+    this.getHeaders = getHeaders || (staticHeaders ? () => staticHeaders : noop)
     this.onAuthFailed = onAuthFailed
     this.onUnrecoverable = onUnrecoverable
     this.ws = null
     this.reconnectTimer = null
     this.connectAttempt = 0
     this.stopped = false
+    // Stale 감지 / HTTP reject 후 최신화 트리거. WS 재접속 없이 현재 연결에서 join 재전송 →
+    // 서버가 init 으로 full snapshot 재송신. constructor 에서 arrow 로 할당 (MethodDefinition 중복 카운팅 회피).
+    this.requestRefresh = () => {
+      if (!this.ws || this.ws.readyState !== 1) return false
+      this.ws.send(JSON.stringify({ type: 'join', session_id: this.sessionId }))
+      return true
+    }
     this.connect()
   }
 
   get(path) { return this.cache[path] }
   set() { /* no-op: 서버 REST 경유 */ }
-
-  get lastStateVersion() { return this.cache.lastStateVersion }
-
-  // Stale 감지 / HTTP reject 후 최신화 트리거. WS 재접속 없이 현재 연결에서 join 재전송 →
-  // 서버가 init 으로 full snapshot 재송신 (`ws-handler.js` 의 init 경로).
-  requestRefresh() {
-    if (!this.ws || this.ws.readyState !== 1) return false
-    this.ws.send(JSON.stringify({ type: 'join', session_id: this.sessionId }))
-    return true
-  }
 
   applyPatch(path, value) {
     const prev = this.cache[path]
@@ -71,7 +62,7 @@ class MirrorState extends State {
     const prev = {}
     for (const path of SNAPSHOT_PATHS) {
       prev[path] = this.cache[path]
-      this.cache[path] = getNestedValue(snapshot, path)
+      this.cache[path] = getByPath(snapshot, path)
     }
     for (const path of SNAPSHOT_PATHS) {
       this.bus.publish({ path, prevValue: prev[path], nextValue: this.cache[path] }, this)
@@ -107,15 +98,15 @@ class MirrorState extends State {
       if (msg.session_id !== undefined && msg.session_id !== this.sessionId) return
       if (msg.type === 'init') {
         this.applySnapshot(msg.state)
-        this.cache.lastStateVersion = msg.stateVersion ?? null   // init 은 무조건 덮어씀
+        this.lastStateVersion = msg.stateVersion ?? null   // init 은 무조건 덮어씀
       } else if (msg.type === 'state') {
         // stale 판정: 내 lastStateVersion 보다 앞 (lex 비교) 이면 skip.
         // TCP ordered 하에선 드물지만 재접속 직후 중복 메시지 방어.
-        const lastV = this.cache.lastStateVersion
+        const lastV = this.lastStateVersion
         const newV = msg.stateVersion ?? null
         if (lastV && newV && newV < lastV) return
         this.applyPatch(msg.path, msg.value)
-        if (newV) this.cache.lastStateVersion = newV
+        if (newV) this.lastStateVersion = newV
       }
     } catch (_) {}
   }

@@ -902,6 +902,34 @@ async function run() {
     }
   }
 
+  // TE30. Phase 5 — MirrorState 가 init/state 메시지의 stateVersion 을 기록한다.
+  {
+    const { stdin, remoteState, cleanup } = await setupTuiE2E(
+      () => JSON.stringify({ type: 'direct_response', message: '응답' })
+    )
+    try {
+      // 초기 init 후 lastStateVersion 이 기록되어 있는지 (서버가 첨부하면 null 아님).
+      await delay(100)
+      const initVersion = remoteState.lastStateVersion
+      // 최초 runtime 은 첫 accept 전이므로 server 에서 null 일 수 있음. 허용.
+
+      // 채팅 전송 → runtime accept → bridge state.set → WS state 메시지 stateVersion 첨부
+      await typeInput(stdin, '안녕')
+      await delay(500)
+
+      const afterChatVersion = remoteState.lastStateVersion
+      assert(afterChatVersion !== null && afterChatVersion !== undefined,
+        'TE30: chat 후 lastStateVersion 기록됨')
+      // 초기 null 에서 값 설정되었거나, 초기에도 값이 있었다면 더 최신 값으로 갱신됐는지.
+      if (initVersion) {
+        assert(afterChatVersion >= initVersion,
+          'TE30: lastStateVersion 이 후진하지 않음 (lex 비교)')
+      }
+    } finally {
+      await cleanup()
+    }
+  }
+
   summary()
 }
 
