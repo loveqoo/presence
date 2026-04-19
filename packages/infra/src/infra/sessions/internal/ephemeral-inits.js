@@ -4,10 +4,7 @@ import { PROMPT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { TurnLifecycle } from '@presence/core/core/turn-lifecycle.js'
 import { charsToTokens } from '@presence/core/lib/tokenizer.js'
-import { makeFsmEventBus } from '@presence/core/core/fsm/event-bus.js'
-import { makeFSMRuntime } from '@presence/core/core/fsm/runtime.js'
-import { turnGateFSM } from '../../fsm/turn-gate-fsm.js'
-import { makeTurnGateBridge } from '../../fsm/turn-gate-bridge.js'
+import { makeSessionFsm } from './session-fsm-init.js'
 import { t } from '../../../i18n/index.js'
 import { TurnController } from './turn-controller.js'
 import { IdleMonitor } from './idle-monitor.js'
@@ -53,24 +50,22 @@ const ephemeralInits = {
   },
 
   initFsm() {
-    // turnGateFSM runtime + bus + bridge 를 세션 수명 동안 보유.
+    // 단일 bus — turnGate / approve 모두 공유. 각 bridge 는 exact topic 구독으로 간섭 차단.
     // turnAbort 은 handleInput 안에서 늦게 생성되므로 bridge 는 closure 로 지연 접근.
-    this.fsmBus = makeFsmEventBus()
-    this.turnGateRuntime = makeFSMRuntime({ fsm: turnGateFSM, bus: this.fsmBus })
-    this.turnGateBridgeDispose = makeTurnGateBridge({
-      runtime: this.turnGateRuntime,
-      state: this.state,
-      bus: this.fsmBus,
-      getAbortController: () => this.turnController?.turnAbort,
-    })
+    const fsm = makeSessionFsm({ state: this.state, turnController: this.turnController })
+    this.fsmBus = fsm.fsmBus
+    this.turnGateRuntime = fsm.turnGateRuntime
+    this.approveRuntime = fsm.approveRuntime
+    this.sessionFsmDispose = fsm.disposeAll
     // 늦은 주입 — initTurnControl 이 먼저 실행되어 turnController 는 이미 존재.
     this.turnController.setTurnGateRuntime(this.turnGateRuntime)
+    this.turnController.setApproveRuntime(this.approveRuntime)
   },
 
   shutdownFsm() {
-    if (this.turnGateBridgeDispose) {
-      this.turnGateBridgeDispose()
-      this.turnGateBridgeDispose = null
+    if (this.sessionFsmDispose) {
+      this.sessionFsmDispose()
+      this.sessionFsmDispose = null
     }
   },
 

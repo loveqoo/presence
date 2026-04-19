@@ -3,6 +3,10 @@ await initI18n('ko')
 import { STATE_PATH, HISTORY_ENTRY_TYPE } from '@presence/core/core/policies.js'
 import { TurnController } from '@presence/infra/infra/sessions/internal/turn-controller.js'
 import { TurnLifecycle } from '@presence/core/core/turn-lifecycle.js'
+import { makeFsmEventBus } from '@presence/core/core/fsm/event-bus.js'
+import { makeFSMRuntime } from '@presence/core/core/fsm/runtime.js'
+import { approveFSM } from '@presence/infra/infra/fsm/approve-fsm.js'
+import { makeApproveBridge } from '@presence/infra/infra/fsm/approve-bridge.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const noop = () => {}
@@ -127,13 +131,13 @@ async function run() {
   }
 
   // TC6: approve → SYSTEM entry 기록 (INV-SYS-3)
+  // Phase 6: legacy 경로 — approveRuntime 미주입 시. approvalPending 필드로 통합.
   {
     const state = createMockState({ [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: [] })
     const logger = createMockLogger()
     const controller = new TurnController(state, logger, noop, mkLifecycle())
     controller.interactive = true
-    controller.approveResolve = () => {}
-    controller.approveDescription = 'write_file'
+    controller.approvalPending = { resolve: () => {}, description: 'write_file' }
 
     controller.handleApproveResponse(true)
 
@@ -150,8 +154,7 @@ async function run() {
     const logger = createMockLogger()
     const controller = new TurnController(state, logger, noop, mkLifecycle())
     controller.interactive = true
-    controller.approveResolve = () => {}
-    controller.approveDescription = 'dangerous_op'
+    controller.approvalPending = { resolve: () => {}, description: 'dangerous_op' }
 
     controller.handleApproveResponse(false)
 
@@ -168,6 +171,92 @@ async function run() {
     assert(controller.isAborted() === false, 'TC8: not yet aborted → false')
     controller.turnAbort.abort()
     assert(controller.isAborted() === true, 'TC8: after abort → true')
+  }
+
+  // --- Phase 6: approveFSM 주입 시나리오 (운영 ship 경로) ---
+
+  // setup helper — turnController + approveFSM runtime + bridge 를 실제로 연결.
+  const setupFsmApprove = () => {
+    const state = createMockState({
+      [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: [],
+      [STATE_PATH.APPROVE]: null,
+    })
+    const logger = createMockLogger()
+    const controller = new TurnController(state, logger, noop, mkLifecycle())
+    const bus = makeFsmEventBus()
+    const runtime = makeFSMRuntime({ fsm: approveFSM, bus })
+    makeApproveBridge({
+      runtime, state, bus,
+      resolvePending: (approved) => controller.resolveApproval(approved),
+    })
+    controller.setApproveRuntime(runtime)
+    controller.interactive = true
+    return { state, controller, runtime, logger }
+  }
+
+  // TF1. FSM 경로 onApprove → runtime awaitingApproval + reactiveState.APPROVE 세팅
+  {
+    const { state, controller, runtime } = setupFsmApprove()
+    const promise = controller.onApprove('file.delete')
+    assert(promise instanceof Promise, 'TF1: onApprove 가 Promise 반환')
+    assert(runtime.state.tag === 'awaitingApproval', 'TF1: runtime 상태 awaitingApproval')
+    const approve = state.get(STATE_PATH.APPROVE)
+    assert(approve && approve.description === 'file.delete',
+      'TF1: reactiveState.APPROVE = { description }')
+  }
+
+  // TF2. FSM 경로 handleApproveResponse(true) → runtime idle + resolve(true) + SYSTEM entry
+  {
+    const { state, controller, runtime } = setupFsmApprove()
+    let resolvedWith = null
+    controller.onApprove('write').then(v => { resolvedWith = v })
+    controller.handleApproveResponse(true)
+    // 동기 경로: submit → bridge → resolveApproval → promise 는 microtask 로 resolve
+    await Promise.resolve()
+    assert(runtime.state.tag === 'idle', 'TF2: runtime idle')
+    assert(state.get(STATE_PATH.APPROVE) === null, 'TF2: reactiveState.APPROVE = null')
+    assert(resolvedWith === true, 'TF2: Promise resolve true')
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
+    assert(history.length === 1 && history[0].tag === 'approve',
+      'TF2: SYSTEM approve entry 기록 (INV-SYS-3 보존)')
+  }
+
+  // TF3. FSM 경로 handleApproveResponse(false) → reject + resolve(false) + SYSTEM reject
+  {
+    const { state, controller, runtime } = setupFsmApprove()
+    let resolvedWith = null
+    controller.onApprove('risky').then(v => { resolvedWith = v })
+    controller.handleApproveResponse(false)
+    await Promise.resolve()
+    assert(runtime.state.tag === 'idle', 'TF3: runtime idle')
+    assert(resolvedWith === false, 'TF3: Promise resolve false')
+    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
+    assert(history[0].tag === 'reject', 'TF3: SYSTEM reject entry')
+  }
+
+  // TF4. FSM 경로 resetApprove — pending 정리 + resolve(false)
+  {
+    const { state, controller, runtime } = setupFsmApprove()
+    let resolvedWith = null
+    controller.onApprove('cleanup').then(v => { resolvedWith = v })
+    controller.resetApprove()
+    await Promise.resolve()
+    assert(runtime.state.tag === 'idle', 'TF4: runtime idle 복귀')
+    assert(state.get(STATE_PATH.APPROVE) === null, 'TF4: reactiveState null')
+    assert(resolvedWith === false, 'TF4: Promise resolve false (cancel)')
+  }
+
+  // TF5. FSM 경로 nested-approval — pending 중 재 요청은 runtime 이 explicit reject
+  {
+    const { controller, runtime } = setupFsmApprove()
+    controller.onApprove('first')
+    // 두 번째 onApprove 는 runtime 이 nested-approval explicit reject.
+    // 하지만 turnController 는 Left 결과를 무시 (promise 는 그대로 만들어짐).
+    // 이 테스트는 FSM 의 방어가 정상 동작하는지만 확인 (runtime.state 유지).
+    controller.onApprove('second')
+    assert(runtime.state.tag === 'awaitingApproval', 'TF5: runtime 여전히 awaitingApproval')
+    assert(runtime.state.description === 'first',
+      'TF5: runtime description 은 첫 번째 값 유지 (nested reject)')
   }
 
   summary()
