@@ -1,59 +1,84 @@
 import { step } from '@presence/core/core/fsm/fsm.js'
-import { turnGateFSM } from '@presence/infra/infra/fsm/turn-gate-fsm.js'
+import { turnGateFSM, cancelling } from '@presence/infra/infra/fsm/turn-gate-fsm.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { assert, assertDeepEqual, summary } from '../../../test/lib/assert.js'
 
 console.log('turnGateFSM tests')
 
 // 실제 runtime 관찰 일치는 Phase 4 swap 시점 책임.
 // 이 테스트는 FSM 의 도메인 논리만 검증한다.
+// 상태 shape 은 TurnState ADT + 내부 전용 cancelling 태그.
+
+const IDLE = TurnState.idle()
+const working = (input) => TurnState.working(input)
 
 // --- Accept paths ---
 
-// A1. idle + chat → working + turn.started
+// A1. idle + chat → working + turn.started (payload 에 turnState 포함)
 {
-  const r = step(turnGateFSM, 'idle', { type: 'chat' })
+  const r = step(turnGateFSM, IDLE, { type: 'chat', payload: { input: 'hi' } })
   assert(r.isRight(), 'A1: idle+chat accept')
-  assertDeepEqual(r.value.state, 'working', 'A1: state=working')
-  assertDeepEqual(r.value.events, [{ topic: 'turn.started' }], 'A1: turn.started')
+  assertDeepEqual(r.value.state, working('hi'), 'A1: state=working(hi)')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.started', payload: { turnState: working('hi') } }],
+    'A1: turn.started payload 에 turnState'
+  )
 }
 
-// A2. working + cancel → cancelling + cancel.requested
+// A2. working + cancel → cancelling + cancel.requested (payload: turnState + abort)
 {
-  const r = step(turnGateFSM, 'working', { type: 'cancel' })
+  const r = step(turnGateFSM, working('q'), { type: 'cancel' })
   assert(r.isRight(), 'A2: working+cancel accept')
-  assertDeepEqual(r.value.state, 'cancelling', 'A2: state=cancelling')
-  assertDeepEqual(r.value.events, [{ topic: 'cancel.requested' }], 'A2: cancel.requested')
+  assertDeepEqual(r.value.state, cancelling('q'), 'A2: state=cancelling(q)')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'cancel.requested', payload: { turnState: cancelling('q'), abort: true } }],
+    'A2: cancel.requested payload 에 turnState + abort'
+  )
 }
 
 // A3. working + complete → idle + turn.completed
 {
-  const r = step(turnGateFSM, 'working', { type: 'complete' })
+  const r = step(turnGateFSM, working('q'), { type: 'complete' })
   assert(r.isRight(), 'A3: working+complete accept')
-  assertDeepEqual(r.value.state, 'idle', 'A3: state=idle')
-  assertDeepEqual(r.value.events, [{ topic: 'turn.completed' }], 'A3: turn.completed')
+  assertDeepEqual(r.value.state, IDLE, 'A3: state=idle')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.completed', payload: { turnState: IDLE } }],
+    'A3: turn.completed payload'
+  )
 }
 
 // A4. working + failure → idle + turn.failed
 {
-  const r = step(turnGateFSM, 'working', { type: 'failure' })
+  const r = step(turnGateFSM, working('q'), { type: 'failure' })
   assert(r.isRight(), 'A4: working+failure accept')
-  assertDeepEqual(r.value.state, 'idle', 'A4: state=idle')
-  assertDeepEqual(r.value.events, [{ topic: 'turn.failed' }], 'A4: turn.failed')
+  assertDeepEqual(r.value.state, IDLE, 'A4: state=idle')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.failed', payload: { turnState: IDLE } }],
+    'A4: turn.failed payload'
+  )
 }
 
 // A5. cancelling + abort_complete → idle + turn.cancelled
 {
-  const r = step(turnGateFSM, 'cancelling', { type: 'abort_complete' })
+  const r = step(turnGateFSM, cancelling('q'), { type: 'abort_complete' })
   assert(r.isRight(), 'A5: cancelling+abort_complete accept')
-  assertDeepEqual(r.value.state, 'idle', 'A5: state=idle')
-  assertDeepEqual(r.value.events, [{ topic: 'turn.cancelled' }], 'A5: turn.cancelled')
+  assertDeepEqual(r.value.state, IDLE, 'A5: state=idle')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.cancelled', payload: { turnState: IDLE } }],
+    'A5: turn.cancelled payload'
+  )
 }
 
 // --- Explicit rejections ---
 
 // E1. working + chat → Left session-busy
 {
-  const r = step(turnGateFSM, 'working', { type: 'chat' })
+  const r = step(turnGateFSM, working('q'), { type: 'chat' })
   assert(r.isLeft(), 'E1: working+chat reject')
   assertDeepEqual(r.value.primaryReason, 'session-busy', 'E1: primary=session-busy')
   assertDeepEqual(r.value.reasons[0].kind, 'explicit', 'E1: kind=explicit')
@@ -61,7 +86,7 @@ console.log('turnGateFSM tests')
 
 // E2. cancelling + chat → Left cancelling-in-progress
 {
-  const r = step(turnGateFSM, 'cancelling', { type: 'chat' })
+  const r = step(turnGateFSM, cancelling('q'), { type: 'chat' })
   assert(r.isLeft(), 'E2: cancelling+chat reject')
   assertDeepEqual(r.value.primaryReason, 'cancelling-in-progress',
     'E2: primary=cancelling-in-progress')
@@ -70,7 +95,7 @@ console.log('turnGateFSM tests')
 
 // E3. cancelling + cancel → Left already-cancelling
 {
-  const r = step(turnGateFSM, 'cancelling', { type: 'cancel' })
+  const r = step(turnGateFSM, cancelling('q'), { type: 'cancel' })
   assert(r.isLeft(), 'E3: cancelling+cancel reject')
   assertDeepEqual(r.value.primaryReason, 'already-cancelling',
     'E3: primary=already-cancelling')
@@ -81,15 +106,15 @@ console.log('turnGateFSM tests')
 
 // N1. idle + unknown → Left unhandled
 {
-  const r = step(turnGateFSM, 'idle', { type: 'unknown' })
+  const r = step(turnGateFSM, IDLE, { type: 'unknown' })
   assert(r.isLeft(), 'N1: idle+unknown → Left')
   assertDeepEqual(r.value.primaryReason, 'unhandled', 'N1: primary=unhandled')
   assertDeepEqual(r.value.reasons[0].kind, 'no-match', 'N1: kind=no-match')
 }
 
-// N2. idle + cancel → Left unhandled (idle 에서 cancel 정의 없음)
+// N2. idle + cancel → Left unhandled
 {
-  const r = step(turnGateFSM, 'idle', { type: 'cancel' })
+  const r = step(turnGateFSM, IDLE, { type: 'cancel' })
   assert(r.isLeft(), 'N2: idle+cancel → Left')
   assertDeepEqual(r.value.primaryReason, 'unhandled', 'N2: primary=unhandled')
 }
@@ -97,7 +122,7 @@ console.log('turnGateFSM tests')
 // N3. idle + complete / failure / abort_complete 도 unhandled
 {
   for (const type of ['complete', 'failure', 'abort_complete']) {
-    const r = step(turnGateFSM, 'idle', { type })
+    const r = step(turnGateFSM, IDLE, { type })
     assert(r.isLeft() && r.value.primaryReason === 'unhandled',
       `N3: idle+${type} → unhandled`)
   }
@@ -108,7 +133,7 @@ console.log('turnGateFSM tests')
 // M1. id / initial / kind
 {
   assertDeepEqual(turnGateFSM.id, 'turnGate', 'M1: id=turnGate')
-  assertDeepEqual(turnGateFSM.initial, 'idle', 'M1: initial=idle')
+  assertDeepEqual(turnGateFSM.initial, IDLE, 'M1: initial=idle (TurnState ADT)')
   assertDeepEqual(turnGateFSM.kind, 'atomic', 'M1: kind=atomic')
 }
 
@@ -116,15 +141,19 @@ console.log('turnGateFSM tests')
 
 // C1. idle → working → cancelling → idle (취소 사이클)
 {
-  let state = 'idle'
+  let state = IDLE
   const allEvents = []
-  for (const cmd of [{ type: 'chat' }, { type: 'cancel' }, { type: 'abort_complete' }]) {
+  for (const cmd of [
+    { type: 'chat', payload: { input: 'hi' } },
+    { type: 'cancel' },
+    { type: 'abort_complete' },
+  ]) {
     const r = step(turnGateFSM, state, cmd)
-    assert(r.isRight(), `C1: ${state} + ${cmd.type} accept`)
+    assert(r.isRight(), `C1: ${state.tag} + ${cmd.type} accept`)
     state = r.value.state
     for (const ev of r.value.events) allEvents.push(ev)
   }
-  assertDeepEqual(state, 'idle', 'C1: 최종 idle 복귀')
+  assertDeepEqual(state, IDLE, 'C1: 최종 idle 복귀')
   assertDeepEqual(
     allEvents.map((e) => e.topic),
     ['turn.started', 'cancel.requested', 'turn.cancelled'],
@@ -134,15 +163,18 @@ console.log('turnGateFSM tests')
 
 // C2. idle → working → idle (정상 완료 사이클)
 {
-  let state = 'idle'
+  let state = IDLE
   const allEvents = []
-  for (const cmd of [{ type: 'chat' }, { type: 'complete' }]) {
+  for (const cmd of [
+    { type: 'chat', payload: { input: 'hi' } },
+    { type: 'complete' },
+  ]) {
     const r = step(turnGateFSM, state, cmd)
-    assert(r.isRight(), `C2: ${state} + ${cmd.type} accept`)
+    assert(r.isRight(), `C2: ${state.tag} + ${cmd.type} accept`)
     state = r.value.state
     for (const ev of r.value.events) allEvents.push(ev)
   }
-  assertDeepEqual(state, 'idle', 'C2: idle 복귀')
+  assertDeepEqual(state, IDLE, 'C2: idle 복귀')
   assertDeepEqual(
     allEvents.map((e) => e.topic),
     ['turn.started', 'turn.completed'],

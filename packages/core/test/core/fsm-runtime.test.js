@@ -2,6 +2,7 @@ import { Transition, makeFSM } from '@presence/core/core/fsm/fsm.js'
 import { makeFsmEventBus } from '@presence/core/core/fsm/event-bus.js'
 import { makeFSMRuntime, REJECTION_TOPIC } from '@presence/core/core/fsm/runtime.js'
 import { turnGateFSM } from '@presence/infra/infra/fsm/turn-gate-fsm.js'
+import { TurnState } from '@presence/core/core/policies.js'
 import { assert, assertDeepEqual, summary } from '../../../../test/lib/assert.js'
 
 console.log('FSMRuntime tests')
@@ -330,20 +331,21 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
 
 // --- turnGateFSM 통합 ---
 
-// T1. idle + chat → working + turn.started
+// T1. idle + chat → working(input) + turn.started (payload 에 turnState 포함)
 {
   const received = []
   const bus = makeFsmEventBus()
   bus.subscribe('*', (ev) => received.push(ev))
   const runtime = makeFSMRuntime({ fsm: turnGateFSM, bus, ...fixedDeps() })
 
-  const result = runtime.submit({ type: 'chat' })
+  const result = runtime.submit({ type: 'chat', payload: { input: 'hi' } })
   assert(result.isRight(), 'T1: chat accept')
-  assertDeepEqual(result.value.state, 'working', 'T1: state=working')
-  assertDeepEqual(runtime.state, 'working', 'T1: runtime.state=working')
+  assertDeepEqual(result.value.state, TurnState.working('hi'), 'T1: state=working(hi)')
+  assertDeepEqual(runtime.state, TurnState.working('hi'), 'T1: runtime.state=working(hi)')
   assert(received.length === 1, 'T1: bus 1 event')
   assertDeepEqual(received[0].topic, 'turn.started', 'T1: turn.started')
   assertDeepEqual(received[0].source, 'turnGate', 'T1: source=turnGate')
+  assertDeepEqual(received[0].payload.turnState, TurnState.working('hi'), 'T1: payload turnState')
 }
 
 // T2. working + chat → Left session-busy + fsm.rejected
@@ -353,15 +355,15 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
   bus.subscribe('*', (ev) => received.push(ev))
   const runtime = makeFSMRuntime({
     fsm: turnGateFSM,
-    initial: 'working',
+    initial: TurnState.working('q'),
     bus,
     ...fixedDeps(),
   })
 
-  const result = runtime.submit({ type: 'chat' })
+  const result = runtime.submit({ type: 'chat', payload: { input: 'later' } })
   assert(result.isLeft(), 'T2: reject')
   assertDeepEqual(result.value.primaryReason, 'session-busy', 'T2: primaryReason')
-  assertDeepEqual(runtime.state, 'working', 'T2: state 불변')
+  assertDeepEqual(runtime.state, TurnState.working('q'), 'T2: state 불변')
   assert(received.length === 1, 'T2: bus 에 rejection 1회')
   assertDeepEqual(received[0].topic, REJECTION_TOPIC, 'T2: fsm.rejected')
   assertDeepEqual(received[0].payload.primaryReason, 'session-busy', 'T2: payload primaryReason')
