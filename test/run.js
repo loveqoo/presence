@@ -55,6 +55,8 @@ const tests = [
   // delegateFSM + bridge (Phase 7)
   'packages/infra/test/delegate-fsm.test.js',
   'packages/infra/test/delegate-bridge.test.js',
+  // SessionFSM 합성 (Phase 8)
+  'packages/infra/test/session-fsm.test.js',
   // Phase 1 infra
   'packages/infra/test/logger.test.js',
   'packages/infra/test/persistence.test.js',
