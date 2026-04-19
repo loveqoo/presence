@@ -55,6 +55,10 @@ function makeFSMRuntime({
   if (!bus) throw new Error('makeFSMRuntime: `bus` required')
 
   let currentState = initial !== undefined ? initial : fsm.initial
+  // stateVersion: 수락 (accept) 시마다 새 UUID. 구독자가 stale 이벤트 감지에 사용.
+  // reject 시에는 상태 변경이 없으므로 버전도 변경하지 않는다.
+  // 초기값은 null — 첫 submit 이전. 구독자의 초기 상태 취급은 런타임 외부에서 결정.
+  let stateVersion = null
 
   const submit = (cmd) => {
     // ── Phase A — commit (atomic) ──
@@ -70,21 +74,27 @@ function makeFSMRuntime({
 
     if (result.isRight()) {
       currentState = deepFreeze(result.value.state)
+      stateVersion = idGen()
+      const version = stateVersion
       const enrichedEvents = Object.freeze(result.value.events.map((ev) => Object.freeze({
         ...ev,
         source: ev.source ?? fsm.id,
         ts: ev.ts ?? clock(),
+        stateVersion: version,
       })))
       returnValue = Either.Right(Object.freeze({
         state: currentState,
         events: enrichedEvents,
         command: enrichedCmd,
+        stateVersion: version,
       }))
       publicationTask = () => {
         for (const ev of enrichedEvents) bus.publish(ev)
       }
     } else {
+      // reject 는 state 변경 없으므로 stateVersion 도 유지. 단 rejection event 는 현재 버전 첨부.
       const rejection = result.value
+      const version = stateVersion
       returnValue = Either.Left(Object.freeze({
         ...rejection,
         command: enrichedCmd,
@@ -94,6 +104,7 @@ function makeFSMRuntime({
           topic: REJECTION_TOPIC,
           ts: clock(),
           source: fsm.id,
+          stateVersion: version,
           payload: {
             primaryReason: rejection.primaryReason,
             reasons: rejection.reasons,
@@ -111,6 +122,7 @@ function makeFSMRuntime({
 
   return {
     get state() { return currentState },
+    get stateVersion() { return stateVersion },
     get fsm() { return fsm },
     submit,
   }

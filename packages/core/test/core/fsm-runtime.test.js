@@ -367,4 +367,95 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
   assertDeepEqual(received[0].payload.primaryReason, 'session-busy', 'T2: payload primaryReason')
 }
 
+// --- stateVersion ---
+
+// SV1. 초기 stateVersion 은 null
+{
+  const fsm = makeFSM('f', 'a', [])
+  const bus = makeFsmEventBus()
+  const runtime = makeFSMRuntime({ fsm, bus })
+  assertDeepEqual(runtime.stateVersion, null, 'SV1: 초기값 null')
+}
+
+// SV2. accept 시 새 stateVersion 발급 + 이벤트에 자동 첨부 + Right.value 에 포함
+{
+  const fsm = makeFSM('f', 'a', [
+    Transition({ from: 'a', on: 'x', to: 'b', emit: [{ topic: 't' }] }),
+  ])
+  const bus = makeFsmEventBus()
+  const received = []
+  bus.subscribe('*', (ev) => received.push(ev))
+  const runtime = makeFSMRuntime({ fsm, bus, clock: () => 999, idGen: () => 'V' })
+
+  const result = runtime.submit({ type: 'x' })
+  assertDeepEqual(runtime.stateVersion, 'V', 'SV2: accept 후 stateVersion 발급')
+  assertDeepEqual(result.value.stateVersion, 'V', 'SV2: Right.value 에 stateVersion')
+  assertDeepEqual(received[0].stateVersion, 'V', 'SV2: 이벤트에 stateVersion 자동 첨부')
+}
+
+// SV3. 매 accept 마다 새 stateVersion
+{
+  const fsm = makeFSM('f', 0, [
+    Transition({ from: () => true, on: 'inc', to: (s) => s + 1, emit: [{ topic: 'inc' }] }),
+  ])
+  const bus = makeFsmEventBus()
+  let id = 0
+  const runtime = makeFSMRuntime({ fsm, bus, idGen: () => `v-${id++}` })
+
+  runtime.submit({ type: 'inc' })
+  const v1 = runtime.stateVersion
+  runtime.submit({ type: 'inc' })
+  const v2 = runtime.stateVersion
+  assert(v1 !== v2, 'SV3: 매 accept 마다 stateVersion 변경')
+}
+
+// SV4. reject 시 stateVersion 유지 (state 안 바뀌므로)
+{
+  const fsm = makeFSM('f', 'busy', [
+    Transition({ from: 'busy', on: 'chat', reject: 'no' }),
+  ])
+  const bus = makeFsmEventBus()
+  let id = 0
+  const runtime = makeFSMRuntime({ fsm, bus, idGen: () => `v-${id++}` })
+
+  const before = runtime.stateVersion  // null
+  runtime.submit({ type: 'chat' })
+  const after = runtime.stateVersion
+  assertDeepEqual(after, before, 'SV4: reject 시 stateVersion 유지')
+}
+
+// SV5. rejection event 에도 stateVersion 첨부 (현재 버전)
+{
+  const fsm = makeFSM('f', 'busy', [
+    Transition({ from: 'busy', on: 'chat', reject: 'no' }),
+  ])
+  const bus = makeFsmEventBus()
+  const received = []
+  bus.subscribe(REJECTION_TOPIC, (ev) => received.push(ev))
+  const runtime = makeFSMRuntime({ fsm, bus, idGen: () => 'V' })
+
+  runtime.submit({ type: 'chat' })
+  assertDeepEqual(received[0].stateVersion, null, 'SV5: 초기 상태에서 reject → stateVersion=null')
+}
+
+// SV6. accept 후 reject — rejection event 에 최신 accept 버전 첨부
+{
+  const fsm = makeFSM('f', 'idle', [
+    Transition({ from: 'idle', on: 'start', to: 'working', emit: [{ topic: 'started' }] }),
+    Transition({ from: 'working', on: 'start', reject: 'busy' }),
+  ])
+  const bus = makeFsmEventBus()
+  const rejections = []
+  bus.subscribe(REJECTION_TOPIC, (ev) => rejections.push(ev))
+  let id = 0
+  const runtime = makeFSMRuntime({ fsm, bus, idGen: () => `v-${id++}` })
+
+  runtime.submit({ type: 'start' })  // accept → stateVersion='v-0' (cmd.id 는 그 뒤)
+  // 실제 순서: cmd.id idGen → stateVersion idGen. cmd.id='v-0', stateVersion='v-1'
+  const accepted = runtime.stateVersion
+  runtime.submit({ type: 'start' })  // reject → stateVersion 유지
+  assertDeepEqual(runtime.stateVersion, accepted, 'SV6: reject 후에도 stateVersion 유지')
+  assertDeepEqual(rejections[0].stateVersion, accepted, 'SV6: rejection event 에 최신 accept 버전')
+}
+
 summary()
