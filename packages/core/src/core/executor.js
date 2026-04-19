@@ -5,11 +5,12 @@ import { getByPath } from '../lib/path.js'
 import { applyFinalState } from './state-commit.js'
 
 class Executor {
-  constructor({ interpret, ST, state, actors = {} }) {
+  constructor({ interpret, ST, state, actors = {}, turnGateRuntime = null }) {
     this.interpret = interpret
     this.ST = ST
     this.state = state
     this.actors = actors
+    this.turnGateRuntime = turnGateRuntime
   }
 
   async run(program, input) {

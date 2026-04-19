@@ -4,6 +4,10 @@ import { PROMPT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
 import { TurnLifecycle } from '@presence/core/core/turn-lifecycle.js'
 import { charsToTokens } from '@presence/core/lib/tokenizer.js'
+import { makeFsmEventBus } from '@presence/core/core/fsm/event-bus.js'
+import { makeFSMRuntime } from '@presence/core/core/fsm/runtime.js'
+import { turnGateFSM } from '../../fsm/turn-gate-fsm.js'
+import { makeTurnGateBridge } from '../../fsm/turn-gate-bridge.js'
 import { t } from '../../../i18n/index.js'
 import { TurnController } from './turn-controller.js'
 import { IdleMonitor } from './idle-monitor.js'
@@ -46,6 +50,26 @@ const ephemeralInits = {
     // Session 이 소유하는 단일 TurnLifecycle. planner/executor/turn-controller 가 공유.
     this.turnLifecycle = new TurnLifecycle(t)
     this.turnController = new TurnController(this.state, this.logger, () => this.actors.turnActor, this.turnLifecycle)
+  },
+
+  initFsm() {
+    // turnGateFSM runtime + bus + bridge 를 세션 수명 동안 보유.
+    // turnAbort 은 handleInput 안에서 늦게 생성되므로 bridge 는 closure 로 지연 접근.
+    this.fsmBus = makeFsmEventBus()
+    this.turnGateRuntime = makeFSMRuntime({ fsm: turnGateFSM, bus: this.fsmBus })
+    this.turnGateBridgeDispose = makeTurnGateBridge({
+      runtime: this.turnGateRuntime,
+      state: this.state,
+      bus: this.fsmBus,
+      getAbortController: () => this.turnController?.turnAbort,
+    })
+  },
+
+  shutdownFsm() {
+    if (this.turnGateBridgeDispose) {
+      this.turnGateBridgeDispose()
+      this.turnGateBridgeDispose = null
+    }
   },
 
   initPersistence() { this.persistenceActor = NOOP_PERSISTENCE_ACTOR },
@@ -101,6 +125,7 @@ const ephemeralInits = {
       ST: this.interpreter.ST,
       state: this.state,
       actors: this.actors.forAgent(this.logger),
+      turnGateRuntime: this.turnGateRuntime,
     })
   },
 

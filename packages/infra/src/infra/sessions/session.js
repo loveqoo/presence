@@ -13,6 +13,7 @@ class Session {
     this.logger = userContext.logger
     this.initState()
     this.initTurnControl()
+    this.initFsm()
     this.initPersistence(opts)
     this.restoreState()
     this.initToolRegistry(userContext)
@@ -28,6 +29,7 @@ class Session {
 
   initState() {}
   initTurnControl() {}
+  initFsm() {}
   initPersistence() {}
   restoreState() {}
   initToolRegistry() {}
@@ -50,6 +52,7 @@ class Session {
   async shutdown() {
     this.shutdownScheduler()
     this.shutdownActors()
+    this.shutdownFsm()
     this.clearTimers()
     await this.flushPersistence()
   }
@@ -65,6 +68,7 @@ class Session {
 
   shutdownScheduler() {}
   shutdownActors() {}
+  shutdownFsm() {}
   clearTimers() {}
   async flushPersistence() {}
   clearPersistence() {}

@@ -6,7 +6,7 @@ class Agent {
     const {
       resolveTools, resolveAgents, persona, responseFormatMode,
       maxRetries, maxIterations, budget, t, lifecycle,
-      interpret, ST, state, actors,
+      interpret, ST, state, actors, turnGateRuntime,
       planner, executor,
     } = opts
     // Session 이 주입한 lifecycle 을 Planner 로 forward. 누락 시 actors.turnLifecycle 에서.
@@ -15,7 +15,7 @@ class Agent {
       maxRetries, maxIterations, budget, t,
       lifecycle: lifecycle || actors?.turnLifecycle,
     })
-    this.executor = executor || new Executor({ interpret, ST, state, actors })
+    this.executor = executor || new Executor({ interpret, ST, state, actors, turnGateRuntime })
   }
 
   withTools(tools) {
