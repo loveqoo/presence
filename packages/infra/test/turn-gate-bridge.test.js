@@ -128,18 +128,19 @@ const setup = (initialTurnState = TurnState.idle()) => {
 
 // --- stale 이벤트 sync ---
 
-// S1. stale 이벤트 받으면 runtime.state 로 reconcile
+// S1. stale 이벤트 받으면 runtime.state 로 reconcile — Phase 6 에서 exact topic
+// 구독으로 변경됐으므로 turnGate 가 실제로 관리하는 topic 으로 stale 이벤트 시뮬.
 {
   const { state, bus, runtime } = setup()
   runtime.submit({ type: 'chat', payload: { input: 'hi' } })
   // 이제 runtime.state = working('hi')
   // 수동으로 reactiveState 를 엉뚱한 값으로 조작 (stale 구독자 시뮬레이션)
   state.set(STATE_PATH.TURN_STATE, TurnState.idle())
-  // 가짜 stale 이벤트 (다른 stateVersion) 를 bus 로 publish
+  // turnGate 의 실제 topic 으로 publish 하되 stateVersion 을 엉뚱한 값으로 (stale).
   bus.publish({
-    topic: 'fake.stale',
+    topic: 'turn.completed',
     ts: 0,
-    source: 'test',
+    source: 'turnGate',
     stateVersion: 'DIFFERENT-VERSION',
     payload: { turnState: TurnState.idle() },  // 이 payload 는 무시되어야 함
   })
