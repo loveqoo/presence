@@ -20,6 +20,12 @@ class TurnController {
     this.approveDescription = null
     this.interactive = false
     this.turnAbort = null
+    // turnGateRuntime 은 initFsm 에서 늦게 주입됨 (initTurnControl 이 먼저 실행되므로).
+    this.turnGateRuntime = null
+  }
+
+  setTurnGateRuntime(runtime) {
+    this.turnGateRuntime = runtime
   }
 
   // --- Approve channel ---
@@ -63,20 +69,25 @@ class TurnController {
   }
 
   handleCancel() {
-    // turnState 가 working 인 동안만 abort 신호가 의미를 갖는다.
-    // handleInput 의 finally 보다 applyFinalState(turnState=idle) 가 먼저 실행되므로,
-    // turnState 가 idle 이면 Free 프로그램이 이미 완료 → abort() 는 no-op →
-    // markLastTurnCancelledSync 경로로 진입해야 한다 (race condition 방지).
-    const turnState = this.state.get(STATE_PATH.TURN_STATE)
-    const stillWorking = turnState?.tag === 'working'
-
-    if (stillWorking && this.turnAbort && !this.turnAbort.signal.aborted) {
-      // 진행 중 턴: abort 신호만 전송. SYSTEM entry 기록은 executor.recover 에서.
-      this.turnAbort.abort()
-      this.logger.info('Turn cancelled by user')
-      return
+    // 1. runtime 있으면 FSM 로 위임 — bridge 가 turnAbort.abort() 호출.
+    if (this.turnGateRuntime) {
+      const result = this.turnGateRuntime.submit({ type: 'cancel' })
+      if (result.isRight()) {
+        this.logger.info('Turn cancelled by user')
+        return
+      }
+      // runtime 은 있지만 cancel 이 reject (idle / cancelling 상태) → 아래 경로로
+    } else {
+      // runtime 미주입 환경 (일부 단위 테스트) — legacy abort 경로
+      const turnState = this.state.get(STATE_PATH.TURN_STATE)
+      const stillWorking = turnState?.tag === 'working'
+      if (stillWorking && this.turnAbort && !this.turnAbort.signal.aborted) {
+        this.turnAbort.abort()
+        this.logger.info('Turn cancelled by user')
+        return
+      }
     }
-    // 턴 이미 완료 또는 working 아님: 가장 최근 turn entry 에 cancelled 플래그 (INV-CNC-1).
+    // 턴 이미 완료 또는 working 이 아닌 경우: 가장 최근 turn entry 에 cancelled 플래그.
     if (!this.turnLifecycle) return
     const before = this.state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
     this.turnLifecycle.markLastTurnCancelledSync(this.state)

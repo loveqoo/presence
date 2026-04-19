@@ -63,6 +63,8 @@ const ephemeralInits = {
       bus: this.fsmBus,
       getAbortController: () => this.turnController?.turnAbort,
     })
+    // 늦은 주입 — initTurnControl 이 먼저 실행되어 turnController 는 이미 존재.
+    this.turnController.setTurnGateRuntime(this.turnGateRuntime)
   },
 
   shutdownFsm() {

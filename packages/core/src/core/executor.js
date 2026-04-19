@@ -117,6 +117,10 @@ class Executor {
     this.state.set(STATE_PATH.PENDING_INPUT, null)
     this.state.set(STATE_PATH.LAST_TURN, TurnOutcome.failure(input, error, null))
     this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
+    // FSM runtime 에도 전이 알림. aborted 면 cancelling→idle, 아니면 working→idle.
+    if (this.turnGateRuntime) {
+      this.turnGateRuntime.submit({ type: aborted ? 'abort_complete' : 'failure' })
+    }
     this.persist()
   }
 }
