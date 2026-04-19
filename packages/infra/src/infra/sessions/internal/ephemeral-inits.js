@@ -50,12 +50,13 @@ const ephemeralInits = {
   },
 
   initFsm() {
-    // 단일 bus — turnGate / approve 모두 공유. 각 bridge 는 exact topic 구독으로 간섭 차단.
+    // 단일 bus — turnGate / approve / delegate 모두 공유. 각 bridge 는 exact topic 구독.
     // turnAbort 은 handleInput 안에서 늦게 생성되므로 bridge 는 closure 로 지연 접근.
     const fsm = makeSessionFsm({ state: this.state, turnController: this.turnController })
     this.fsmBus = fsm.fsmBus
     this.turnGateRuntime = fsm.turnGateRuntime
     this.approveRuntime = fsm.approveRuntime
+    this.delegateRuntime = fsm.delegateRuntime
     this.sessionFsmDispose = fsm.disposeAll
     // 늦은 주입 — initTurnControl 이 먼저 실행되어 turnController 는 이미 존재.
     this.turnController.setTurnGateRuntime(this.turnGateRuntime)

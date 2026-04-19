@@ -52,6 +52,9 @@ const tests = [
   // approveFSM + bridge (Phase 6)
   'packages/infra/test/approve-fsm.test.js',
   'packages/infra/test/approve-bridge.test.js',
+  // delegateFSM + bridge (Phase 7)
+  'packages/infra/test/delegate-fsm.test.js',
+  'packages/infra/test/delegate-bridge.test.js',
   // Phase 1 infra
   'packages/infra/test/logger.test.js',
   'packages/infra/test/persistence.test.js',

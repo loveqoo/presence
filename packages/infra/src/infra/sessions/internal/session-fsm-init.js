@@ -17,6 +17,8 @@ import { turnGateFSM } from '../../fsm/turn-gate-fsm.js'
 import { makeTurnGateBridge } from '../../fsm/turn-gate-bridge.js'
 import { approveFSM } from '../../fsm/approve-fsm.js'
 import { makeApproveBridge } from '../../fsm/approve-bridge.js'
+import { delegateFSM } from '../../fsm/delegate-fsm.js'
+import { makeDelegateBridge } from '../../fsm/delegate-bridge.js'
 
 function makeSessionFsm({ state, turnController }) {
   const fsmBus = makeFsmEventBus()
@@ -37,12 +39,20 @@ function makeSessionFsm({ state, turnController }) {
     resolvePending: (approved) => turnController?.resolveApproval(approved),
   })
 
+  const delegateRuntime = makeFSMRuntime({ fsm: delegateFSM, bus: fsmBus })
+  const delegateBridgeDispose = makeDelegateBridge({
+    runtime: delegateRuntime,
+    state,
+    bus: fsmBus,
+  })
+
   const disposeAll = () => {
     turnGateBridgeDispose()
     approveBridgeDispose()
+    delegateBridgeDispose()
   }
 
-  return { fsmBus, turnGateRuntime, approveRuntime, disposeAll }
+  return { fsmBus, turnGateRuntime, approveRuntime, delegateRuntime, disposeAll }
 }
 
 export { makeSessionFsm }
