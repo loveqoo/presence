@@ -39,6 +39,11 @@ class Executor {
     // ts 는 "이 pending 이 언제 시작되었는가" 를 기록. 이후 turn entry 의 ts 와 비교하여
     // "같은 input 의 과거 턴" vs "이번 pending 이 persisted" 를 구분 가능 (TUI dedup).
     this.state.set(STATE_PATH.PENDING_INPUT, { input, ts: Date.now() })
+    // FSM runtime 에도 전이 알림. bridge 가 state.set(TURN_STATE) 시도하지만 이미 같은
+    // 값이므로 skip. 단계 5e 에서 위의 state.set(TURN_STATE) 제거해 bridge 로 일원화.
+    if (this.turnGateRuntime) {
+      this.turnGateRuntime.submit({ type: 'chat', payload: { input } })
+    }
   }
 
   async recallMemories(input) {
