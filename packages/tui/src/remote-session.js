@@ -93,12 +93,24 @@ class RemoteSession {
   }
 
 
+  // Phase 5: HTTP 응답의 stateVersion 이 MirrorState.lastStateVersion 과 다르면
+  // 클라이언트 데이터가 뒤처진 것 → requestRefresh() 로 서버 full snapshot 재수신.
+  #reconcileIfStale(res) {
+    if (!res || !res.stateVersion) return
+    const mirror = this.#remoteState
+    if (!mirror || !mirror.lastStateVersion) return
+    if (res.stateVersion !== mirror.lastStateVersion) {
+      mirror.requestRefresh?.()
+    }
+  }
+
   #buildHandlers() {
     const apiBase = `/api/sessions/${this.#currentSessionId}`
     return {
       handleInput: async (input) => {
         try {
           const res = await this.#client.post(`${apiBase}/chat`, { input })
+          this.#reconcileIfStale(res)
           if (res.type === 'error') throw new Error(res.content)
           return res.content
         } catch (err) {
@@ -107,10 +119,14 @@ class RemoteSession {
         }
       },
       handleApproveResponse: (approved) => {
-        this.#client.post(`${apiBase}/approve`, { approved }).catch(noop)
+        this.#client.post(`${apiBase}/approve`, { approved })
+          .then((res) => this.#reconcileIfStale(res))
+          .catch(noop)
       },
       handleCancel: () => {
-        this.#client.post(`${apiBase}/cancel`).catch(noop)
+        this.#client.post(`${apiBase}/cancel`)
+          .then((res) => this.#reconcileIfStale(res))
+          .catch(noop)
       },
     }
   }

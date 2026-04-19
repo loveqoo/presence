@@ -58,6 +58,13 @@ const attachSessionMiddleware = (deps) => {
 
 // --- Session endpoints ---
 
+// Phase 5: HTTP 응답에 현재 stateVersion 을 일관되게 첨부. 클라이언트가
+// lastStateVersion 과 비교해 refresh 필요 여부 판단.
+const withVersion = (session, body) => ({
+  ...body,
+  stateVersion: session.turnGateRuntime?.stateVersion ?? null,
+})
+
 // 세션별 endpoint (chat, state, tools, agents, config, approve, cancel).
 const mountSessionEndpoints = (router, deps) => {
   const { userContext } = deps
@@ -76,14 +83,14 @@ const mountSessionEndpoints = (router, deps) => {
       if (cmd.handled) {
         // state 변경 커맨드(/clear 등) 후 persistence flush
         session.flushPersistence().catch(() => {})
-        return res.json(cmd.result)
+        return res.json(withVersion(session, cmd.result))
       }
     }
     try {
       const result = await session.handleInput(input)
-      res.json({ type: 'agent', content: result })
+      res.json(withVersion(session, { type: 'agent', content: result }))
     } catch (err) {
-      res.status(500).json({ type: 'error', content: err.message })
+      res.status(500).json(withVersion(session, { type: 'error', content: err.message }))
     }
   })
   router.get('/sessions/:sessionId/state', (req, res) => res.json(req.presenceSession.session.state.snapshot()))
@@ -99,12 +106,14 @@ const mountSessionEndpoints = (router, deps) => {
     res.json({ ...rest, llm: safeLlm })
   })
   router.post('/sessions/:sessionId/approve', (req, res) => {
-    req.presenceSession.session.handleApproveResponse(!!req.body.approved)
-    res.json({ ok: true })
+    const { session } = req.presenceSession
+    session.handleApproveResponse(!!req.body.approved)
+    res.json(withVersion(session, { ok: true }))
   })
   router.post('/sessions/:sessionId/cancel', (req, res) => {
-    req.presenceSession.session.handleCancel()
-    res.json({ ok: true })
+    const { session } = req.presenceSession
+    session.handleCancel()
+    res.json(withVersion(session, { ok: true }))
   })
 }
 
