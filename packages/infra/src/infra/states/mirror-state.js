@@ -35,7 +35,7 @@ class MirrorState extends State {
   constructor(opts = {}) {
     super()
     const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable } = opts
-    this.cache = { _reconnecting: false }
+    this.cache = { _reconnecting: false, lastStateVersion: null }
     this.wsUrl = wsUrl
     this.sessionId = sessionId
     this.getHeaders = getHeaders || (headers ? () => headers : () => undefined)
@@ -50,6 +50,16 @@ class MirrorState extends State {
 
   get(path) { return this.cache[path] }
   set() { /* no-op: 서버 REST 경유 */ }
+
+  get lastStateVersion() { return this.cache.lastStateVersion }
+
+  // Stale 감지 / HTTP reject 후 최신화 트리거. WS 재접속 없이 현재 연결에서 join 재전송 →
+  // 서버가 init 으로 full snapshot 재송신 (`ws-handler.js` 의 init 경로).
+  requestRefresh() {
+    if (!this.ws || this.ws.readyState !== 1) return false
+    this.ws.send(JSON.stringify({ type: 'join', session_id: this.sessionId }))
+    return true
+  }
 
   applyPatch(path, value) {
     const prev = this.cache[path]
@@ -92,8 +102,21 @@ class MirrorState extends State {
   handleMessage(data) {
     try {
       const msg = JSON.parse(data.toString())
-      if (msg.type === 'init') this.applySnapshot(msg.state)
-      else if (msg.type === 'state') this.applyPatch(msg.path, msg.value)
+      // session_id 가 있고 내 세션과 다르면 skip (cross-session 방어).
+      // 없는 메시지는 backward-compat 로 통과.
+      if (msg.session_id !== undefined && msg.session_id !== this.sessionId) return
+      if (msg.type === 'init') {
+        this.applySnapshot(msg.state)
+        this.cache.lastStateVersion = msg.stateVersion ?? null   // init 은 무조건 덮어씀
+      } else if (msg.type === 'state') {
+        // stale 판정: 내 lastStateVersion 보다 앞 (lex 비교) 이면 skip.
+        // TCP ordered 하에선 드물지만 재접속 직후 중복 메시지 방어.
+        const lastV = this.cache.lastStateVersion
+        const newV = msg.stateVersion ?? null
+        if (lastV && newV && newV < lastV) return
+        this.applyPatch(msg.path, msg.value)
+        if (newV) this.cache.lastStateVersion = newV
+      }
     } catch (_) {}
   }
 

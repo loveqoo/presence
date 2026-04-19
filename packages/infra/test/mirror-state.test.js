@@ -301,6 +301,150 @@ async function run() {
     await mock.close()
   }
 
+  // --- Phase 5: stateVersion + session_id 필터 + requestRefresh ---
+
+  // SV-MS1. init 메시지의 stateVersion 이 lastStateVersion 에 기록됨
+  {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'join') {
+          ws.send(JSON.stringify({
+            type: 'init', session_id: msg.session_id,
+            state: { turn: 0, turnState: { tag: 'idle' } },
+            stateVersion: 'v-100',
+          }))
+        }
+      })
+    })
+    const port = await new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
+    await delay(100)
+    assert(rs.lastStateVersion === 'v-100', 'SV-MS1: init 의 stateVersion 기록')
+    rs.disconnect()
+    await new Promise(r => { for (const ws of wss.clients) ws.terminate(); server.close(r) })
+  }
+
+  // SV-MS2. state 메시지의 stateVersion 추적 + stale 패치 skip
+  {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    const conns = []
+    wss.on('connection', (ws) => {
+      conns.push(ws)
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'join') {
+          ws.send(JSON.stringify({
+            type: 'init', session_id: msg.session_id,
+            state: { turn: 0 }, stateVersion: 'v-200',
+          }))
+        }
+      })
+    })
+    const port = await new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
+    await delay(100)
+
+    const ws = conns[0]
+    // 최신 stateVersion 전송 — apply
+    ws.send(JSON.stringify({ type: 'state', session_id: 'user-default', path: 'turn', value: 1, stateVersion: 'v-300' }))
+    await delay(30)
+    assert(rs.get('turn') === 1, 'SV-MS2: 최신 stateVersion 은 apply')
+    assert(rs.lastStateVersion === 'v-300', 'SV-MS2: lastStateVersion 갱신')
+
+    // stale stateVersion 전송 (v-200 < v-300) — skip
+    ws.send(JSON.stringify({ type: 'state', session_id: 'user-default', path: 'turn', value: 999, stateVersion: 'v-200' }))
+    await delay(30)
+    assert(rs.get('turn') === 1, 'SV-MS2: stale 패치 skip — turn 유지')
+    assert(rs.lastStateVersion === 'v-300', 'SV-MS2: lastStateVersion 유지')
+
+    rs.disconnect()
+    await new Promise(r => { for (const c of wss.clients) c.terminate(); server.close(r) })
+  }
+
+  // SV-MS3. 다른 session_id 메시지는 skip
+  {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    const conns = []
+    wss.on('connection', (ws) => {
+      conns.push(ws)
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'join') {
+          ws.send(JSON.stringify({
+            type: 'init', session_id: msg.session_id,
+            state: { turn: 0 }, stateVersion: 'v-1',
+          }))
+        }
+      })
+    })
+    const port = await new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}`, sessionId: 'my-session' })
+    await delay(100)
+
+    const ws = conns[0]
+    ws.send(JSON.stringify({
+      type: 'state', session_id: 'other-session', path: 'turn', value: 999, stateVersion: 'v-99',
+    }))
+    await delay(30)
+    assert(rs.get('turn') === 0, 'SV-MS3: 다른 session_id 패치 skip')
+
+    rs.disconnect()
+    await new Promise(r => { for (const c of wss.clients) c.terminate(); server.close(r) })
+  }
+
+  // SV-MS4. session_id 없는 메시지는 통과 (backward-compat — 기존 테스트 픽스처 지원)
+  {
+    const mock = createMockWsServer()
+    const port = await mock.start()
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
+    await delay(100)
+    const ws = mock.connections[0]
+    ws.send(JSON.stringify({ type: 'state', path: 'turn', value: 7 }))   // session_id 없음
+    await delay(30)
+    assert(rs.get('turn') === 7, 'SV-MS4: session_id 없으면 통과 (legacy)')
+    rs.disconnect()
+    await mock.close()
+  }
+
+  // SV-MS5. requestRefresh() 가 WS join 재전송 → 서버 init 재수신
+  {
+    const server = http.createServer()
+    const wss = new WebSocketServer({ server })
+    const joinMsgs = []
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        const msg = JSON.parse(data.toString())
+        if (msg.type === 'join') {
+          joinMsgs.push(msg)
+          ws.send(JSON.stringify({
+            type: 'init', session_id: msg.session_id,
+            state: { turn: joinMsgs.length - 1 },
+            stateVersion: `v-${joinMsgs.length}`,
+          }))
+        }
+      })
+    })
+    const port = await new Promise(r => server.listen(0, '127.0.0.1', () => r(server.address().port)))
+    const rs = createMirrorState({ wsUrl: `ws://127.0.0.1:${port}` })
+    await delay(100)
+    assert(joinMsgs.length === 1, 'SV-MS5 setup: 1 join')
+    assert(rs.lastStateVersion === 'v-1', 'SV-MS5 setup: 첫 init 버전')
+
+    const sent = rs.requestRefresh()
+    await delay(100)
+    assert(sent === true, 'SV-MS5: requestRefresh 성공 반환')
+    assert(joinMsgs.length === 2, 'SV-MS5: join 재전송 1회 추가')
+    assert(rs.lastStateVersion === 'v-2', 'SV-MS5: 재수신한 init 의 새 stateVersion 반영')
+
+    rs.disconnect()
+    await new Promise(r => { for (const c of wss.clients) c.terminate(); server.close(r) })
+  }
+
   summary()
 }
 
