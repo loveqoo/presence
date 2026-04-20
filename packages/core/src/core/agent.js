@@ -4,14 +4,14 @@ import { Executor } from './executor.js'
 class Agent {
   constructor(opts = {}) {
     const {
-      resolveTools, resolveAgents, persona, responseFormatMode,
+      resolveTools, resolveAgents, resolveWorkingDir, persona, responseFormatMode,
       maxRetries, maxIterations, budget, t, lifecycle,
       interpret, ST, state, actors, turnGateRuntime,
       planner, executor,
     } = opts
     // Session 이 주입한 lifecycle 을 Planner 로 forward. 누락 시 actors.turnLifecycle 에서.
     this.planner = planner || new Planner({
-      resolveTools, resolveAgents, persona, responseFormatMode,
+      resolveTools, resolveAgents, resolveWorkingDir, persona, responseFormatMode,
       maxRetries, maxIterations, budget, t,
       lifecycle: lifecycle || actors?.turnLifecycle,
     })

@@ -87,6 +87,10 @@ DELEGATE: Delegate to another agent
 - Irreversible actions (deletions, state changes)
 Read-only actions (file_read, file_list, web_fetch, mcp_search_tools) do NOT need APPROVE.`),
 
+  WORKING_DIR: (workingDir) => section('working_dir', `## Working directory
+Current working directory: ${workingDir}
+Relative paths in tool calls (file_read/file_list/file_write/shell_exec) are resolved against this directory.`),
+
   PLAN_RULES: section('plan_rules', `Rules:
 1. If you have enough information to answer, use direct_response. This is the preferred way to respond.
 2. If you need more data, return a plan WITHOUT RESPOND. Steps will execute and results will be shown to you in the next iteration.

@@ -168,10 +168,15 @@ console.log('Prompt builder tests')
     const key = id.replace(/_([a-z])/g, (_, c) => c.toUpperCase()).replace(/^./, c => c.toUpperCase()).replace('Definition', 'DEFINITION').replace('Reference', 'REFERENCE').replace('Rules', 'RULES')
     // Just check by iterating values
   })
-  const sections = Object.values(PROMPT_SECTIONS)
-  assert(sections.length === 4, 'PROMPT_SECTIONS: 4 named sections')
-  assert(sections.every(s => typeof s.id === 'string' && s.id.length > 0), 'PROMPT_SECTIONS: all have id')
-  assert(sections.every(s => typeof s.content === 'string' && s.content.length > 0), 'PROMPT_SECTIONS: all have content')
+  // WORKING_DIR 은 factory 함수 (동적 섹션) 로 추가됨. 고정 섹션만 필터.
+  const fixedSections = Object.values(PROMPT_SECTIONS).filter(s => typeof s === 'object' && s !== null)
+  assert(fixedSections.length === 4, 'PROMPT_SECTIONS: 4 fixed named sections')
+  assert(fixedSections.every(s => typeof s.id === 'string' && s.id.length > 0), 'PROMPT_SECTIONS: all have id')
+  assert(fixedSections.every(s => typeof s.content === 'string' && s.content.length > 0), 'PROMPT_SECTIONS: all have content')
+  // WORKING_DIR factory 는 호출 시 정상 섹션 생성
+  const wdSection = PROMPT_SECTIONS.WORKING_DIR('/some/dir')
+  assert(wdSection.id === 'working_dir' && wdSection.content.includes('/some/dir'),
+    'PROMPT_SECTIONS: WORKING_DIR factory 생성')
 }
 
 // 20. PROMPT_SECTIONS: known IDs
@@ -207,6 +212,27 @@ console.log('Prompt builder tests')
   })
   assert(prompt._assembly.sections.includes('custom_role'), '_assembly.sections: custom_role with persona')
   assert(!prompt._assembly.sections.includes('role_definition'), '_assembly.sections: no default role with persona')
+}
+
+// 24b. assemblePrompt: workingDir 주입 시 working_dir 섹션 포함
+{
+  const prompt = buildIterationPrompt({
+    tools: [], memories: [], input: 'test',
+    workingDir: '/project/root',
+  })
+  assert(prompt._assembly.sections.includes('working_dir'),
+    '_assembly.sections: workingDir 주입 시 섹션 포함')
+  // system prompt 내용에도 경로가 들어가야
+  const sys = prompt.messages.find(m => m.role === 'system')?.content || ''
+  assert(sys.includes('/project/root'),
+    'assemblePrompt: system prompt 에 workingDir 경로 포함')
+}
+
+// 24c. assemblePrompt: workingDir 없으면 working_dir 섹션 제외
+{
+  const prompt = buildIterationPrompt({ tools: [], memories: [], input: 'test' })
+  assert(!prompt._assembly.sections.includes('working_dir'),
+    '_assembly.sections: workingDir 미주입 시 섹션 없음')
 }
 
 // 25. flattenHistory: SYSTEM entry 배제 (INV-SYS-1)

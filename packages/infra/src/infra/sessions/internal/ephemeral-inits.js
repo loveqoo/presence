@@ -118,6 +118,7 @@ const ephemeralInits = {
     this.agent = new Agent({
       resolveTools: this.getTools,
       resolveAgents: () => userContext.agentRegistry.list(),
+      resolveWorkingDir: () => this.workingDir,
       persona: userContext.persona.get(),
       responseFormatMode: userContext.config.llm.responseFormat,
       maxRetries: userContext.config.llm.maxRetries,

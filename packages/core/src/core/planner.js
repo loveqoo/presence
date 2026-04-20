@@ -13,6 +13,7 @@ const { Free, Either, identity } = fp
 const PLANNER_DEFAULTS = Object.freeze({
   resolveTools: () => [],
   resolveAgents: () => [],
+  resolveWorkingDir: () => null,
   persona: {},
   maxRetries: 0,
   maxIterations: 10,
@@ -50,6 +51,7 @@ class Planner {
           input, source,
           tools: this.config.resolveTools(),
           agents: this.config.resolveAgents(),
+          workingDir: this.config.resolveWorkingDir(),
           memories: memories || [],
           history: history || [],
           previousPlan: null,
@@ -96,6 +98,7 @@ class Planner {
       iterationContext,
       budget: this.config.budget,
       responseFormatMode: this.config.responseFormatMode,
+      workingDir: turn.workingDir,
     })
   }
 

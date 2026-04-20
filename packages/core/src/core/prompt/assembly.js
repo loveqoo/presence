@@ -25,6 +25,7 @@ const assemblePrompt = (params) => {
     persona = {}, tools = [], agents = [], history = [],
     memories = [], input, iterationContext, budget,
     responseFormatMode = 'json_object',
+    workingDir,
   } = params
   const effectiveBudget = budget || { maxContextChars: Infinity, reservedOutputChars: 0 }
   const usable = effectiveBudget.maxContextChars - effectiveBudget.reservedOutputChars
@@ -40,6 +41,7 @@ const assemblePrompt = (params) => {
     section('tools', formatToolList(tools)),
     agentsContent ? section('agents', agentsContent) : null,
     userRulesContent ? section('user_rules', userRulesContent) : null,
+    workingDir ? PROMPT_SECTIONS.WORKING_DIR(workingDir) : null,
     PROMPT_SECTIONS.APPROVE_RULES,
     PROMPT_SECTIONS.PLAN_RULES,
   ].filter(Boolean)
@@ -100,7 +102,7 @@ const assemblePrompt = (params) => {
 }
 
 const buildIterationPrompt = (params) => {
-  const { tools = [], agents = [], memories = [], input, persona = {}, responseFormatMode = 'json_object', previousPlan = null, previousResults = null } = params
+  const { tools = [], agents = [], memories = [], input, persona = {}, responseFormatMode = 'json_object', previousPlan = null, previousResults = null, workingDir } = params
   return assemblePrompt({
     persona, tools, agents, memories,
     history: [],
@@ -109,6 +111,7 @@ const buildIterationPrompt = (params) => {
       ? { previousPlan, previousResults }
       : null,
     responseFormatMode,
+    workingDir,
   })
 }
 
