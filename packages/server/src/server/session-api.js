@@ -90,7 +90,12 @@ const mountSessionEndpoints = (router, deps) => {
       const result = await session.handleInput(input)
       res.json(withVersion(session, { type: 'agent', content: result }))
     } catch (err) {
-      res.status(500).json(withVersion(session, { type: 'error', content: err.message }))
+      // Phase 9: 에러 응답에 snapshot 동봉 — 클라이언트가 WS 왕복 없이 즉시 reconcile.
+      res.status(500).json(withVersion(session, {
+        type: 'error',
+        content: err.message,
+        snapshot: session.state.snapshot(),
+      }))
     }
   })
   router.get('/sessions/:sessionId/state', (req, res) => res.json(req.presenceSession.session.state.snapshot()))

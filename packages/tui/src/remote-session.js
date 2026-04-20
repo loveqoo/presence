@@ -93,15 +93,22 @@ class RemoteSession {
   }
 
 
-  // Phase 5: HTTP 응답의 stateVersion 이 MirrorState.lastStateVersion 과 다르면
-  // 클라이언트 데이터가 뒤처진 것 → requestRefresh() 로 서버 full snapshot 재수신.
+  // Phase 5-9: HTTP 응답의 stateVersion 이 MirrorState.lastStateVersion 과 다르면
+  // 클라이언트 데이터가 뒤처진 것 → 최신화.
+  //   - Phase 9: 응답에 snapshot 이 동봉되어 있으면 mirror 가 즉시 applySnapshot
+  //     (WS 왕복 없이 reconcile). 에러/reject 응답에서 활용.
+  //   - 없으면 fallback: requestRefresh() 로 서버 init snapshot 재수신.
   #reconcileIfStale(res) {
     if (!res || !res.stateVersion) return
     const mirror = this.#remoteState
     if (!mirror || !mirror.lastStateVersion) return
-    if (res.stateVersion !== mirror.lastStateVersion) {
-      mirror.requestRefresh?.()
+    if (res.stateVersion === mirror.lastStateVersion) return
+    if (res.snapshot) {
+      mirror.applySnapshot(res.snapshot)
+      mirror.lastStateVersion = res.stateVersion
+      return
     }
+    mirror.requestRefresh?.()
   }
 
   #buildHandlers() {
