@@ -33,16 +33,31 @@ const REJECTION_TOPIC = 'fsm.rejected'
 // stateVersion 기본 생성기 — sortable (lexicographic 순서) + monotonic (단일 프로세스 내).
 // Date.now() rollback (NTP 보정 / 테스트 주입) 방어: prevTs 보다 작은 now 가 오면 prevTs 유지.
 // 같은 ms 안의 연속 호출은 counter 로 unique. 12 자리 ts (16 진수) + 6 자리 counter.
+// INV-VER-MONOTONIC 보장 — restore(version) 호출 시 복원값의 ts/counter 를 내부 상태로 흡수하여
+// 재시작 후에도 복원값보다 큰 버전만 발급되도록 한다.
+const VERSION_PATTERN = /^([0-9a-f]{12})-([0-9a-f]{6})$/
+
 const makeDefaultVersionGen = () => {
   let prevTs = 0
   let counter = 0
-  return () => {
+  const gen = () => {
     const now = Date.now()
     const ts = now > prevTs ? now : prevTs
     if (ts === prevTs) counter++
     else { prevTs = ts; counter = 0 }
     return `${ts.toString(16).padStart(12, '0')}-${counter.toString(16).padStart(6, '0')}`
   }
+  // 복원된 version 의 ts/counter 가 현재 내부 상태보다 크면 흡수. 작거나 같으면 무시 (이미 지나감).
+  gen.restore = (version) => {
+    if (!version) return
+    const match = VERSION_PATTERN.exec(version)
+    if (!match) return
+    const restoredTs = parseInt(match[1], 16)
+    const restoredCounter = parseInt(match[2], 16)
+    if (restoredTs > prevTs) { prevTs = restoredTs; counter = restoredCounter }
+    else if (restoredTs === prevTs && restoredCounter > counter) { counter = restoredCounter }
+  }
+  return gen
 }
 
 // plain object / array 만 재귀 freeze. class instance / Map / Set 은 top-level only.
@@ -146,7 +161,11 @@ function makeFSMRuntime(opts) {
     submit,
     // Phase 10: persistence 복원 용. restoreState 단일 호출 경계에서만 사용.
     // 매 submit 마다 versionGen 으로 새로 발급되므로 통상 경로에선 외부 setter 불필요.
-    restoreStateVersion: (version) => { stateVersion = version ?? null },
+    restoreStateVersion: (version) => {
+      stateVersion = version ?? null
+      // versionGen 이 restore 를 지원하면 내부 prevTs/counter 도 맞춰준다 (INV-VER-MONOTONIC).
+      if (version && typeof versionGen.restore === 'function') versionGen.restore(version)
+    },
   }
 }
 

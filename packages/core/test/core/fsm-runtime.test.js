@@ -530,4 +530,84 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
   assertDeepEqual(runtime.stateVersion, null, 'SV10: null 로 복원')
 }
 
+// SV11. INV-VER-MONOTONIC — 재시작 시나리오에서 복원값 이후 단조증가
+//   시스템 시각이 복원값 ts 보다 이전이어도 새 version 은 복원값보다 커야 한다.
+{
+  const origDateNow = Date.now
+  try {
+    // Step 1: 첫 세션에서 버전 생성 (ts=2000, counter=0 → "0000000007d0-000000")
+    Date.now = () => 2000
+    const gen1 = makeDefaultVersionGen()
+    const persistedVersion = gen1()
+    assert(/^0000000007d0-000000$/.test(persistedVersion), 'SV11: 저장된 version format 확인')
+
+    // Step 2: 서버 재시작 시뮬레이션 — 새 runtime, 시스템 시각은 뒤로 (NTP 보정 / 프로세스 이동 시뮬)
+    Date.now = () => 1000
+    const fsm = makeFSM('f', 'a', [
+      Transition({ from: 'a', on: 'x', to: 'b', emit: [{ topic: 't' }] }),
+    ])
+    const bus = makeFsmEventBus()
+    const runtime = makeFSMRuntime({ fsm, bus })  // 기본 versionGen 사용
+
+    // Step 3: 복원 — restoreStateVersion 이 내부 prevTs 를 2000 으로 올려야 함
+    runtime.restoreStateVersion(persistedVersion)
+    assertDeepEqual(runtime.stateVersion, persistedVersion, 'SV11: stateVersion 복원됨')
+
+    // Step 4: submit → now=1000 이라도 새 version 은 복원값보다 커야 함
+    runtime.submit({ type: 'x' })
+    const newVersion = runtime.stateVersion
+    assert(newVersion > persistedVersion,
+      `SV11: 재시작 후 새 version(${newVersion}) > 복원값(${persistedVersion})`)
+    // ts 는 유지(2000), counter 만 증가(1)
+    assert(newVersion === '0000000007d0-000001',
+      `SV11: 복원된 ts 유지 + counter 증가 확인, got ${newVersion}`)
+  } finally {
+    Date.now = origDateNow
+  }
+}
+
+// SV12. INV-VER-MONOTONIC — 복원값보다 시스템 시각이 앞서면 ts 가 자연스럽게 증가
+{
+  const origDateNow = Date.now
+  try {
+    Date.now = () => 1000
+    const gen1 = makeDefaultVersionGen()
+    const persistedVersion = gen1()  // "0000000003e8-000000"
+
+    Date.now = () => 5000  // 재시작 시점엔 시각이 더 앞서감
+    const fsm = makeFSM('f', 'a', [
+      Transition({ from: 'a', on: 'x', to: 'b', emit: [{ topic: 't' }] }),
+    ])
+    const bus = makeFsmEventBus()
+    const runtime = makeFSMRuntime({ fsm, bus })
+
+    runtime.restoreStateVersion(persistedVersion)
+    runtime.submit({ type: 'x' })
+    const newVersion = runtime.stateVersion
+    assert(newVersion > persistedVersion, 'SV12: 시각 앞설 때도 단조증가')
+    assert(newVersion.startsWith('000000001388'),
+      `SV12: 새 ts=5000(0x1388) 반영, got ${newVersion}`)
+  } finally {
+    Date.now = origDateNow
+  }
+}
+
+// SV13. makeDefaultVersionGen.restore 단위 — malformed / null 무시
+{
+  const gen = makeDefaultVersionGen()
+  gen.restore(null)
+  gen.restore(undefined)
+  gen.restore('not-a-version')
+  gen.restore('')
+  // 이후 정상 동작해야 함 — 내부 상태 오염 없이
+  const origDateNow = Date.now
+  try {
+    Date.now = () => 3000
+    const v = gen()
+    assert(/^0000000+bb8-000000$/.test(v), `SV13: malformed restore 후 정상 생성, got ${v}`)
+  } finally {
+    Date.now = origDateNow
+  }
+}
+
 summary()
