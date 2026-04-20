@@ -259,6 +259,26 @@ async function run() {
       assert(!JSON.stringify(final).includes('persist-test'), 'S18: 이전 대화 내용 없음')
     }
 
+    // S21. INV-RJT-SNAPSHOT — chat 500 응답은 snapshot + stateVersion 동반
+    {
+      const errCtx = await createTestServer(() => { throw new Error('llm boom') })
+      try {
+        const res = await request(
+          errCtx.port, 'POST', `/api/sessions/${errCtx.defaultSessionId}/chat`,
+          { input: '에러 유도' }, { token: errCtx.token },
+        )
+        assert(res.status === 500, 'S21: chat error → 500')
+        assert(res.body.type === 'error', 'S21: type=error')
+        assert(typeof res.body.content === 'string' && res.body.content.length > 0,
+          'S21: content 존재')
+        assert(res.body.snapshot && typeof res.body.snapshot === 'object',
+          'S21: snapshot 동봉 (INV-RJT-SNAPSHOT)')
+        assert('turnState' in res.body.snapshot || 'turn' in res.body.snapshot,
+          'S21: snapshot 이 실제 state 구조')
+        assert('stateVersion' in res.body, 'S21: stateVersion 동봉')
+      } finally { await errCtx.shutdown() }
+    }
+
   } finally {
     await shutdown()
   }

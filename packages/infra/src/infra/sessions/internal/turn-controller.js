@@ -43,24 +43,20 @@ class TurnController {
   }
 
   // --- Approve channel ---
+  // INV-FSM-SINGLE-WRITER — 모든 경로가 approveRuntime 을 통하도록 강제.
+  // approveRuntime 미주입은 배선 버그로 간주하여 fast-fail.
 
   onApprove(description) {
     if (!this.interactive) {
       this.logger.warn(t('error.approve_rejected_bg'), { description })
       return false
     }
-    if (this.approveRuntime) {
-      // FSM 경로: runtime.submit 으로 state 전이 → bridge 가 state.set(APPROVE) 수행.
-      // Promise 는 이 곳에서 생성하고 resolve 는 bridge 가 resolveApproval() 로 전달.
-      return new Promise(resolve => {
-        this.approvalPending = { resolve, description }
-        this.approveRuntime.submit({ type: 'request_approval', payload: { description } })
-      })
+    if (!this.approveRuntime) {
+      throw new Error('TurnController.onApprove: approveRuntime not injected')
     }
-    // Legacy 경로: approveRuntime 없을 때 (단위 테스트 등).
     return new Promise(resolve => {
       this.approvalPending = { resolve, description }
-      this.state.set(STATE_PATH.APPROVE, { description })
+      this.approveRuntime.submit({ type: 'request_approval', payload: { description } })
     })
   }
 
@@ -68,7 +64,7 @@ class TurnController {
     if (!this.approvalPending) return
     const description = this.approvalPending.description || ''
 
-    // SYSTEM history entry 기록 (INV-SYS-3) — FSM 경로/레거시 공통
+    // SYSTEM history entry 기록 (INV-SYS-3)
     if (this.turnLifecycle) {
       const key = approved ? 'history.approve_notice' : 'history.reject_notice'
       this.turnLifecycle.appendSystemEntrySync(this.state, {
@@ -77,14 +73,10 @@ class TurnController {
       })
     }
 
-    if (this.approveRuntime) {
-      // FSM 경로: runtime.submit → bridge 가 resolveApproval(approved) 호출.
-      this.approveRuntime.submit({ type: approved ? 'approve' : 'reject' })
-      return
+    if (!this.approveRuntime) {
+      throw new Error('TurnController.handleApproveResponse: approveRuntime not injected')
     }
-    // Legacy 경로: 직접 resolve + state.set.
-    this.resolveApproval(approved)
-    this.state.set(STATE_PATH.APPROVE, null)
+    this.approveRuntime.submit({ type: approved ? 'approve' : 'reject' })
   }
 
   // --- Abort signal ---
@@ -127,14 +119,10 @@ class TurnController {
 
   resetApprove() {
     if (!this.approvalPending) return
-    if (this.approveRuntime) {
-      // FSM 경로: cancel_approval 전이 → bridge 가 resolveApproval(false) + state.set(APPROVE, null).
-      this.approveRuntime.submit({ type: 'cancel_approval' })
-      return
+    if (!this.approveRuntime) {
+      throw new Error('TurnController.resetApprove: approveRuntime not injected')
     }
-    // Legacy 경로
-    this.resolveApproval(false)
-    this.state.set(STATE_PATH.APPROVE, null)
+    this.approveRuntime.submit({ type: 'cancel_approval' })
   }
 
   // --- Input 처리 ---

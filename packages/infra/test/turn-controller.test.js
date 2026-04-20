@@ -130,37 +130,19 @@ async function run() {
     assert(updated[1].cancelled === undefined, 'TC5: SYSTEM entry unchanged')
   }
 
-  // TC6: approve → SYSTEM entry 기록 (INV-SYS-3)
-  // Phase 6: legacy 경로 — approveRuntime 미주입 시. approvalPending 필드로 통합.
+  // TC6/TC7 제거 — approveRuntime 미주입 legacy 경로 제거 (INV-FSM-SINGLE-WRITER).
+  // 동일 시나리오는 TF2/TF3 가 FSM 경로로 커버.
+
+  // TC-THROW: approveRuntime 미주입 시 onApprove → throw (fast-fail 배선 버그 탐지)
   {
-    const state = createMockState({ [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: [] })
+    const state = createMockState()
     const logger = createMockLogger()
     const controller = new TurnController(state, logger, noop, mkLifecycle())
     controller.interactive = true
-    controller.approvalPending = { resolve: () => {}, description: 'write_file' }
-
-    controller.handleApproveResponse(true)
-
-    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
-    assert(history.length === 1, 'TC6: approve → 1 SYSTEM entry')
-    assert(history[0].type === HISTORY_ENTRY_TYPE.SYSTEM, 'TC6: type=system')
-    assert(history[0].tag === 'approve', 'TC6: tag=approve')
-    assert(history[0].content.includes('write_file'), 'TC6: content includes description')
-  }
-
-  // TC7: reject → SYSTEM entry 기록 (INV-SYS-3)
-  {
-    const state = createMockState({ [STATE_PATH.CONTEXT_CONVERSATION_HISTORY]: [] })
-    const logger = createMockLogger()
-    const controller = new TurnController(state, logger, noop, mkLifecycle())
-    controller.interactive = true
-    controller.approvalPending = { resolve: () => {}, description: 'dangerous_op' }
-
-    controller.handleApproveResponse(false)
-
-    const history = state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY)
-    assert(history.length === 1, 'TC7: reject → 1 SYSTEM entry')
-    assert(history[0].tag === 'reject', 'TC7: tag=reject')
+    let thrown = null
+    try { controller.onApprove('any') } catch (e) { thrown = e }
+    assert(thrown && /approveRuntime not injected/.test(thrown.message),
+      'TC-THROW: runtime 미주입 시 onApprove throw')
   }
 
   // TC8: isAborted() getter

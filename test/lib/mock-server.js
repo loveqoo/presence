@@ -35,16 +35,22 @@ const createMockLLM = (handler) => {
       let parsed
       try { parsed = JSON.parse(body) } catch { parsed = {} }
       calls.push(parsed)
-      const response = await Promise.resolve(handler(parsed, calls.length))
-      const content = typeof response === 'string' ? response : JSON.stringify(response)
-      if (parsed.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
-        res.write('data: [DONE]\n\n')
-        res.end()
-      } else {
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ choices: [{ message: { content } }] }))
+      try {
+        const response = await Promise.resolve(handler(parsed, calls.length))
+        const content = typeof response === 'string' ? response : JSON.stringify(response)
+        if (parsed.stream) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`)
+          res.write('data: [DONE]\n\n')
+          res.end()
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ choices: [{ message: { content } }] }))
+        }
+      } catch (err) {
+        // handler 가 throw 하면 LLM 서버가 500 으로 응답 — 에러 경로 유도용.
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { message: err.message } }))
       }
     })
   })
