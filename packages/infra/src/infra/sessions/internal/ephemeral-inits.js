@@ -90,6 +90,7 @@ const ephemeralInits = {
       state: this.state,
       agentRegistry: userContext.agentRegistry,
       turnController: this.turnController,
+      delegateRuntime: this.delegateRuntime,
       logger: this.logger,
     })
   },
@@ -101,6 +102,7 @@ const ephemeralInits = {
       userId: this.userId,
       turnLifecycle: this.turnLifecycle,
       turnController: this.turnController,
+      delegateRuntime: this.delegateRuntime,
       dispatchTurn: (input, turnOpts) => this.runAgent(input, turnOpts),
       onScheduledJobDone: this.resolveJobDoneHandler(opts),
     })

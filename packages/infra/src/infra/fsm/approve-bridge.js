@@ -44,13 +44,16 @@ const sameApprove = (a, b) => {
   return a.description === b.description
 }
 
-function makeApproveBridge({ runtime, state, bus, resolvePending }) {
+function makeApproveBridge({ runtime, state, bus, resolvePending, childKey = null }) {
   if (!runtime) throw new Error('makeApproveBridge: `runtime` required')
   if (!state) throw new Error('makeApproveBridge: `state` required')
   if (!bus) throw new Error('makeApproveBridge: `bus` required')
   if (typeof resolvePending !== 'function') {
     throw new Error('makeApproveBridge: `resolvePending` must be a function')
   }
+
+  // sessionRuntime 에서는 runtime.state[childKey] 로 child 추출. 없으면 atomic.
+  const getChildState = () => childKey ? runtime.state?.[childKey] : runtime.state
 
   const applyProjection = (nextApproveState) => {
     const projected = projectForReactiveState(nextApproveState)
@@ -64,7 +67,7 @@ function makeApproveBridge({ runtime, state, bus, resolvePending }) {
     if (event.topic === REJECTION_TOPIC && event.source !== APPROVE_FSM_ID) return
     if (event.stateVersion !== runtime.stateVersion) {
       // stale — 현재 runtime.state 로 reconcile
-      applyProjection(runtime.state)
+      applyProjection(getChildState())
       return
     }
     if (event.payload && event.payload.approveState !== undefined) {

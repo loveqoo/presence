@@ -19,6 +19,7 @@ const sessionInterpreterR =
       agentRegistry: env.agentRegistry,
       onApprove: (desc) => env.turnController.onApprove(desc),
       getAbortSignal: () => env.turnController.getAbortSignal(),
+      delegateRuntime: env.delegateRuntime,
     }),
     prodInterpreterR,
   ).chain(prod => Reader.asks(({ state, logger }) => {

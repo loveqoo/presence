@@ -48,13 +48,17 @@ const projectForReactiveState = (turnState) => {
   return turnState
 }
 
-function makeTurnGateBridge({ runtime, state, bus, getAbortController }) {
+function makeTurnGateBridge({ runtime, state, bus, getAbortController, childKey = null }) {
   if (!runtime) throw new Error('makeTurnGateBridge: `runtime` required')
   if (!state) throw new Error('makeTurnGateBridge: `state` required')
   if (!bus) throw new Error('makeTurnGateBridge: `bus` required')
   if (typeof getAbortController !== 'function') {
     throw new Error('makeTurnGateBridge: `getAbortController` must be a function')
   }
+
+  // sessionRuntime (product) 에서는 runtime.state = {turnGate, approve, delegate}.
+  // childKey 지정 시 해당 child state 만 추출. 없으면 atomic runtime 으로 간주.
+  const getChildState = () => childKey ? runtime.state?.[childKey] : runtime.state
 
   const applyProjection = (nextTurnState) => {
     if (nextTurnState === undefined || nextTurnState === null) return
@@ -69,7 +73,7 @@ function makeTurnGateBridge({ runtime, state, bus, getAbortController }) {
     if (event.topic === REJECTION_TOPIC && event.source !== TURN_GATE_FSM_ID) return
     if (event.stateVersion !== runtime.stateVersion) {
       // stale — 현재 runtime.state 로 reconcile (구독자 데이터 최신화)
-      applyProjection(runtime.state)
+      applyProjection(getChildState())
       return
     }
     if (event.payload && event.payload.turnState !== undefined) {

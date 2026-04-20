@@ -21,10 +21,11 @@ class DelegateActor extends ActorWrapper {
   #agentRegistry
   #logger
   #a2a
+  #delegateRuntime
 
   constructor(state, eventActor, opts = {}) {
     const {
-      agentRegistry, logger, fetchFn,
+      agentRegistry, logger, fetchFn, delegateRuntime,
       pollIntervalMs = DELEGATE.POLL_INTERVAL_MS,
     } = opts
     let timer = null
@@ -85,6 +86,7 @@ class DelegateActor extends ActorWrapper {
     this.#agentRegistry = agentRegistry
     this.#logger = logger
     this.#a2a = new A2AClient({ fetchFn })
+    this.#delegateRuntime = delegateRuntime
   }
 
   // --- Public 메시지 API ---
@@ -95,7 +97,16 @@ class DelegateActor extends ActorWrapper {
   // --- 내부: Poll 결과 적용 ---
   #applyPollResults(polling, settled) {
     const R = DelegateActor.RESULT
-    settled.filter(r => r.done).forEach(r => this.#enqueueResult(r.entry, r.result))
+    const doneEntries = settled.filter(r => r.done)
+    doneEntries.forEach(r => this.#enqueueResult(r.entry, r.result))
+    // Phase 12b: 각 완료 항목당 delegateFSM runtime 에 resolve/fail 전이 알림.
+    // runtime 이 pending count 를 추적해 SessionFSM 축 일관성 유지.
+    if (this.#delegateRuntime) {
+      for (const r of doneEntries) {
+        const type = r.result && typeof r.result.isFailed === 'function' && r.result.isFailed() ? 'fail' : 'resolve'
+        this.#delegateRuntime.submit({ type })
+      }
+    }
     this.#state.set(STATE_PATH.DELEGATES_PENDING, settled.filter(r => !r.done).map(r => r.entry))
     return [R.POLLED, { ...polling, polling: false }]
   }

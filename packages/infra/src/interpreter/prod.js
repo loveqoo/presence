@@ -18,7 +18,7 @@ const ST = StateT('task')
 // 먼저 끝난 브랜치가 restore해도 나머지가 아직 실행 중이면 억제 유지.
 // depth === 0일 때만 UI side effect 허용.
 
-const createUiHelpers = (reactiveState) => {
+const createUiHelpers = (reactiveState, delegateRuntime) => {
   let depth = 0
   const isEnabled = () => depth === 0 && !!reactiveState
 
@@ -48,6 +48,8 @@ const createUiHelpers = (reactiveState) => {
       if (isEnabled()) {
         const pending = reactiveState.get('delegates.pending') || []
         reactiveState.set('delegates.pending', [...pending, entry])
+        // Phase 12b: delegateRuntime 있으면 submit 전이 알림 — FSM count 동기화.
+        delegateRuntime?.submit({ type: 'submit' })
       }
     },
   }
@@ -61,8 +63,8 @@ const createUiHelpers = (reactiveState) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal } = {}) => {
-  const ui = createUiHelpers(reactiveState)
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime } = {}) => {
+  const ui = createUiHelpers(reactiveState, delegateRuntime)
 
   let interpret
 

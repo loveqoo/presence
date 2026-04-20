@@ -26,10 +26,13 @@ const DELEGATE_TOPICS = Object.freeze([
 const REJECTION_TOPIC = 'fsm.rejected'
 const DELEGATE_FSM_ID = 'delegate'
 
-function makeDelegateBridge({ runtime, state, bus }) {
+function makeDelegateBridge({ runtime, state, bus, childKey = null }) {
   if (!runtime) throw new Error('makeDelegateBridge: `runtime` required')
   if (!state) throw new Error('makeDelegateBridge: `state` required')
   if (!bus) throw new Error('makeDelegateBridge: `bus` required')
+
+  // sessionRuntime 에서는 runtime.state[childKey] 로 child 추출. 없으면 atomic.
+  const getChildState = () => childKey ? runtime.state?.[childKey] : runtime.state
 
   // Phase 7: projection 은 현재 no-op. runtime 이 authoritative FSM state 를 보유.
   // 구조 일관성 유지 (turn-gate / approve bridge 와 동일 interface) + 장래 확장 자리.
@@ -41,7 +44,7 @@ function makeDelegateBridge({ runtime, state, bus }) {
   const handler = (event) => {
     if (event.topic === REJECTION_TOPIC && event.source !== DELEGATE_FSM_ID) return
     if (event.stateVersion !== runtime.stateVersion) {
-      applyProjection(runtime.state)
+      applyProjection(getChildState())
       return
     }
     if (event.payload && event.payload.delegateState !== undefined) {

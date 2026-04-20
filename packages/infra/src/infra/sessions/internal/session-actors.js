@@ -15,7 +15,7 @@ import { delegateActorR } from '../../actors/delegate-actor.js'
 
 class SessionActors {
   constructor(opts) {
-    const { userContext, state, logger, persistenceActor, userId, turnLifecycle, turnController, dispatchTurn, onScheduledJobDone } = opts
+    const { userContext, state, logger, persistenceActor, userId, turnLifecycle, turnController, delegateRuntime, dispatchTurn, onScheduledJobDone } = opts
     // --- Turn 라이프사이클 (Session 이 주입한 단일 인스턴스) ---
     this.turnLifecycle = turnLifecycle
     this.turnController = turnController
@@ -44,6 +44,7 @@ class SessionActors {
       state, eventActor: this.eventActor,
       agentRegistry: userContext.agentRegistry, logger,
       pollIntervalMs: userContext.config.delegatePolling.intervalMs,
+      delegateRuntime,
     })
   }
 
