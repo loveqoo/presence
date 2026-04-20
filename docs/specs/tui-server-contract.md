@@ -89,7 +89,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 **클라이언트 stale 감지 및 reject 응답 reconcile**
 
 - INV-RFS-STALE. **클라이언트 stale 감지 시 requestRefresh**: 클라이언트가 WS event 의 `stateVersion` 과 로컬 `lastStateVersion` 을 비교하여 stale 을 감지하면 `requestRefresh` 를 호출해 서버에 최신 snapshot 을 요청한다.
-- INV-RJT-SNAPSHOT. **HTTP reject 응답은 snapshot 동반**: `POST /api/sessions/:id/approve` 의 reject 응답은 `{ stateVersion, snapshot }` 을 포함한다. 클라이언트는 이를 수신하면 즉시 reconcile(로컬 상태를 snapshot 으로 교체) 한다.
+- INV-RJT-SNAPSHOT. **chat 500 에러 응답은 snapshot 동반**: `POST /api/sessions/:sessionId/chat` 엔드포인트에서 턴 실행 중 예외가 발생하면 서버는 `{ type: 'error', content, stateVersion, snapshot }` 형식으로 500 응답을 반환한다. 클라이언트(`#reconcileIfStale`)는 응답에 `snapshot` 필드가 있으면 즉시 `mirror.applySnapshot`을 호출하여 로컬 상태를 최신 서버 상태로 교체한다. approve / cancel 엔드포인트는 `stateVersion` 만 동봉하며 snapshot 을 포함하지 않는다.
 
 **abort 판별**
 
@@ -140,11 +140,11 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - INV-CNC-1 → `packages/core/test/core/history-writer.test.js` C4 (SYSTEM entry 건너뜀), C5 (이미 cancelled), C6 (all SYSTEM entries), C7 (여러 SYSTEM skip), `packages/infra/test/turn-controller.test.js` TC5 (turn-controller 경유), `packages/core/test/core/turn-lifecycle.test.js` M1 (뒤에서부터 첫 turn 탐색), M2 (이미 cancelled no-op), M3 (turn 없음 no-op)
 - INV-PND-1 → `packages/core/test/core/agent.test.js` "Executor.beginLifecycle → _pendingInput set" ({input, ts} 구조 검증), "Executor.recover: _pendingInput cleared", `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `test/e2e/tui-e2e.test.js` TE25 (pendingInput 즉시 표시 + dedup)
 - INV-TTR-1 → `packages/core/test/interpreter/prod.test.js` 18 (ExecuteTool _toolTranscript 누적), 19 (Parallel 브랜치 격리), `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `packages/tui/test/interactive.test.js` "toolTranscript: preserved across turns"
-- INV-FSM-SINGLE-WRITER → (직접 테스트 없음) ⚠️ FSM 외부 직접 set 차단 단위 테스트 없음
-- INV-FSM-R1 → (직접 테스트 없음) ⚠️ explicit reject 우선 aggregation 단위 테스트 없음
-- INV-VER-MONOTONIC → (직접 테스트 없음) ⚠️ restoreStateVersion 단조증가 보장 단위 테스트 없음
-- INV-RFS-STALE → (직접 테스트 없음) ⚠️ stale 감지 시 requestRefresh 호출 단위 테스트 없음
-- INV-RJT-SNAPSHOT → (직접 테스트 없음) ⚠️ reject 응답 snapshot reconcile 단위 테스트 없음
+- INV-FSM-SINGLE-WRITER → (직접 단위 테스트 없음) ⚠️ FSM 외부 직접 set 차단 negative 테스트 없음. 간접 커버: `packages/infra/test/turn-gate-bridge.test.js`, `approve-bridge.test.js`, `delegate-bridge.test.js` — FSM runtime 을 통한 전이만 reactiveState 로 투영되는 것을 확인하나, 외부 직접 할당 시 오류를 내는지를 고정하는 테스트는 없음
+- INV-FSM-R1 → `packages/core/test/core/fsm-product.test.js` A3, X1, X2 (explicit reject 우선 aggregation 완전 검증)
+- INV-VER-MONOTONIC → `packages/core/test/core/fsm-runtime.test.js` SV7–SV13. SV11/SV12 는 재시작 시나리오(`restoreStateVersion` 후 시스템 시각이 복원값 ts 보다 이전이어도 새 version > 복원값) 직접 검증
+- INV-RFS-STALE → `packages/infra/test/mirror-state.test.js` SV-MS1 (init stateVersion 기록), SV-MS2 (stale 패치 skip), SV-MS3 (다른 session_id skip), SV-MS5 (`requestRefresh` 동작 검증)
+- INV-RJT-SNAPSHOT → (간접 커버) ⚠️ chat 500 응답 경로는 TUI live e2e 에서 에러 복구 시나리오로 동작 확인되었으나, snapshot 동봉을 assertion 으로 고정한 단위 테스트 없음 — 단위 테스트 추가 권장
 
 ## 관련 코드
 
@@ -167,3 +167,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-18: FP-61 / KG-14 반영 — 메시지 아키텍처 재설계. 서버 conversationHistory를 TUI 메시지의 단일 진실의 원천으로 승격. history-writer pure helpers와 TurnLifecycle 재구성으로 write 규칙 단일화. I8 갱신 (SNAPSHOT_PATHS에 `_pendingInput`, `_toolTranscript` 추가). I9 갱신 (pendingInitialMessages transient 처리, 초기 마운트 배너 미표시 명시). I16 재정의 (cancel SYSTEM entry로 승격 — TUI local-only ephemeral 에서 서버 conversationHistory 기록으로 변경). INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1 신규.
 - 2026-04-18: FP-61/KG-14 커버리지 매트릭스 갱신 — INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1, I16 의 "(직접 테스트 없음) ⚠️" 를 실제 테스트 경로로 교체.
 - 2026-04-20: Phase G 반영 — INV-FSM-SINGLE-WRITER (FSM 단일 전이 경로), INV-FSM-R1 (explicit reject 우선 aggregation), INV-VER-MONOTONIC (stateVersion 단조증가), INV-RFS-STALE (stale 감지 시 requestRefresh), INV-RJT-SNAPSHOT (reject 응답 snapshot reconcile) 신규 추가. 5개 모두 테스트 미커버 ⚠️.
+- 2026-04-20: Phase G 커버리지 갱신 — INV-RJT-SNAPSHOT 문구 교정 (적용 엔드포인트를 approve → chat 500 에러 응답으로, payload shape 명시, approve/cancel 은 snapshot 미포함 명시). INV-FSM-R1/INV-VER-MONOTONIC/INV-RFS-STALE 커버리지를 실제 테스트 경로로 교체. INV-FSM-SINGLE-WRITER 는 간접 커버 브리지 테스트 명시 후 ⚠️ 유지. INV-RJT-SNAPSHOT 은 간접 커버 후 단위 테스트 추가 권장 ⚠️ 유지.
