@@ -140,11 +140,11 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - INV-CNC-1 → `packages/core/test/core/history-writer.test.js` C4 (SYSTEM entry 건너뜀), C5 (이미 cancelled), C6 (all SYSTEM entries), C7 (여러 SYSTEM skip), `packages/infra/test/turn-controller.test.js` TC5 (turn-controller 경유), `packages/core/test/core/turn-lifecycle.test.js` M1 (뒤에서부터 첫 turn 탐색), M2 (이미 cancelled no-op), M3 (turn 없음 no-op)
 - INV-PND-1 → `packages/core/test/core/agent.test.js` "Executor.beginLifecycle → _pendingInput set" ({input, ts} 구조 검증), "Executor.recover: _pendingInput cleared", `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `test/e2e/tui-e2e.test.js` TE25 (pendingInput 즉시 표시 + dedup)
 - INV-TTR-1 → `packages/core/test/interpreter/prod.test.js` 18 (ExecuteTool _toolTranscript 누적), 19 (Parallel 브랜치 격리), `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `packages/tui/test/interactive.test.js` "toolTranscript: preserved across turns"
-- INV-FSM-SINGLE-WRITER → (직접 단위 테스트 없음) ⚠️ FSM 외부 직접 set 차단 negative 테스트 없음. 간접 커버: `packages/infra/test/turn-gate-bridge.test.js`, `approve-bridge.test.js`, `delegate-bridge.test.js` — FSM runtime 을 통한 전이만 reactiveState 로 투영되는 것을 확인하나, 외부 직접 할당 시 오류를 내는지를 고정하는 테스트는 없음
+- INV-FSM-SINGLE-WRITER → `test/regression/fsm-single-writer.test.js` (정적 검사: `packages/core/src`, `packages/infra/src`, `packages/server/src`, `packages/tui/src` 전체 스캔, bridge 3파일 외 `STATE_PATH.TURN_STATE|APPROVE|DELEGATES` 직접 set 발견 시 실패), `packages/infra/test/turn-controller.test.js` TC-THROW (approveRuntime 미주입 시 onApprove/handleApproveResponse/resetApprove throw 검증)
 - INV-FSM-R1 → `packages/core/test/core/fsm-product.test.js` A3, X1, X2 (explicit reject 우선 aggregation 완전 검증)
 - INV-VER-MONOTONIC → `packages/core/test/core/fsm-runtime.test.js` SV7–SV13. SV11/SV12 는 재시작 시나리오(`restoreStateVersion` 후 시스템 시각이 복원값 ts 보다 이전이어도 새 version > 복원값) 직접 검증
 - INV-RFS-STALE → `packages/infra/test/mirror-state.test.js` SV-MS1 (init stateVersion 기록), SV-MS2 (stale 패치 skip), SV-MS3 (다른 session_id skip), SV-MS5 (`requestRefresh` 동작 검증)
-- INV-RJT-SNAPSHOT → (간접 커버) ⚠️ chat 500 응답 경로는 TUI live e2e 에서 에러 복구 시나리오로 동작 확인되었으나, snapshot 동봉을 assertion 으로 고정한 단위 테스트 없음 — 단위 테스트 추가 권장
+- INV-RJT-SNAPSHOT → `packages/server/test/server.test.js` S21 (Mock LLM handler throw → 500 응답 유도, body shape `{ type: 'error', content, stateVersion, snapshot }` assertion 고정, `snapshot.turnState|turn` 구조 및 `stateVersion` 존재 확인)
 
 ## 관련 코드
 
@@ -168,3 +168,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-18: FP-61/KG-14 커버리지 매트릭스 갱신 — INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1, I16 의 "(직접 테스트 없음) ⚠️" 를 실제 테스트 경로로 교체.
 - 2026-04-20: Phase G 반영 — INV-FSM-SINGLE-WRITER (FSM 단일 전이 경로), INV-FSM-R1 (explicit reject 우선 aggregation), INV-VER-MONOTONIC (stateVersion 단조증가), INV-RFS-STALE (stale 감지 시 requestRefresh), INV-RJT-SNAPSHOT (reject 응답 snapshot reconcile) 신규 추가. 5개 모두 테스트 미커버 ⚠️.
 - 2026-04-20: Phase G 커버리지 갱신 — INV-RJT-SNAPSHOT 문구 교정 (적용 엔드포인트를 approve → chat 500 에러 응답으로, payload shape 명시, approve/cancel 은 snapshot 미포함 명시). INV-FSM-R1/INV-VER-MONOTONIC/INV-RFS-STALE 커버리지를 실제 테스트 경로로 교체. INV-FSM-SINGLE-WRITER 는 간접 커버 브리지 테스트 명시 후 ⚠️ 유지. INV-RJT-SNAPSHOT 은 간접 커버 후 단위 테스트 추가 권장 ⚠️ 유지.
+- 2026-04-20: INV-FSM-SINGLE-WRITER 정적 검사 + turn-controller legacy 제거, INV-RJT-SNAPSHOT 단위 assertion 추가. 5 항목 모두 직접 테스트 커버.
