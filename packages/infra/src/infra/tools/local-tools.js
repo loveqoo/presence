@@ -99,10 +99,11 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['path'],
       },
-      handler: (rawArgs) => {
+      handler: (rawArgs, ctx) => {
         const { path, maxLines, tailLines } = parseArgs(FileReadArgs, rawArgs, 'file_read')
-        const resolved = resolvePath(path)
-        checkAccess(resolved)
+        // ctx.resolvePath 우선 (세션 workingDir 기준). 없으면 legacy resolvePath (호환성).
+        const resolved = ctx?.resolvePath ? ctx.resolvePath(path) : resolvePath(path)
+        if (!ctx?.resolvePath) checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path }))
         const content = readFileSync(resolved, 'utf-8')
         const lines = content.split('\n')
@@ -123,10 +124,10 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['path', 'content'],
       },
-      handler: (rawArgs) => {
+      handler: (rawArgs, ctx) => {
         const { path, content } = parseArgs(FileWriteArgs, rawArgs, 'file_write')
-        const resolved = resolvePath(path)
-        checkAccess(resolved)
+        const resolved = ctx?.resolvePath ? ctx.resolvePath(path) : resolvePath(path)
+        if (!ctx?.resolvePath) checkAccess(resolved)
         writeFileSync(resolved, content, 'utf-8')
         return `Written ${content.length} chars to ${resolved}`
       },
@@ -142,10 +143,10 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['path'],
       },
-      handler: (rawArgs) => {
+      handler: (rawArgs, ctx) => {
         const { path: dirPath } = parseArgs(FileListArgs, rawArgs, 'file_list')
-        const resolved = resolvePath(dirPath)
-        checkAccess(resolved)
+        const resolved = ctx?.resolvePath ? ctx.resolvePath(dirPath) : resolvePath(dirPath)
+        if (!ctx?.resolvePath) checkAccess(resolved)
         if (!existsSync(resolved)) throw new Error(t('error.dir_not_found', { path: dirPath }))
         const items = readdirSync(resolved).map(name => {
           try {
@@ -201,10 +202,13 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         },
         required: ['command'],
       },
-      handler: (rawArgs) => {
+      handler: (rawArgs, ctx) => {
         const { command } = parseArgs(ShellExecArgs, rawArgs, 'shell_exec')
+        // ctx.workingDir 있으면 session 기준으로 실행 (process.cwd 의존 제거).
+        const execOpts = { encoding: 'utf-8', timeout: LOCAL_TOOLS.SHELL_TIMEOUT_MS }
+        if (ctx?.workingDir) execOpts.cwd = ctx.workingDir
         try {
-          return execSync(command, { encoding: 'utf-8', timeout: LOCAL_TOOLS.SHELL_TIMEOUT_MS }).trim()
+          return execSync(command, execOpts).trim()
         } catch (e) {
           throw new Error(t('error.command_failed', { message: e.message }))
         }

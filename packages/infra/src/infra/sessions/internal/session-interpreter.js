@@ -20,6 +20,8 @@ const sessionInterpreterR =
       onApprove: (desc) => env.turnController.onApprove(desc),
       getAbortSignal: () => env.turnController.getAbortSignal(),
       delegateRuntime: env.delegateRuntime,
+      getWorkingDir: env.getWorkingDir,
+      allowedDirs: env.allowedDirs,
     }),
     prodInterpreterR,
   ).chain(prod => Reader.asks(({ state, logger }) => {
