@@ -77,6 +77,20 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - INV-SYS-2. **cancel SYSTEM entry 생성 경로**: cancel SYSTEM entry는 abort 확정 경로 (executor.recover)에서만 append된다. turn-controller.handleCancel은 abort 신호 전송과 후행 cancel 플래그만 담당한다.
 - INV-SYS-3. **approve/reject SYSTEM entry 생성 경로**: approve / reject SYSTEM entry는 turn-controller.handleApproveResponse 시점에 `turnLifecycle.appendSystemEntrySync`로 기록된다. 동일한 seq/trim 규칙 (history-writer의 makeEntry, appendAndTrim, HISTORY.MAX_CONVERSATION)을 공유.
 
+**FSM 전이 단일 경로**
+
+- INV-FSM-SINGLE-WRITER. **FSM runtime 이 유일한 전이 경로**: `turnState` / `approveState` / `delegateState` 는 FSM runtime (턴 컨트롤러, executor, delegateFSM) 을 통해서만 전이된다. 외부에서 imperative set (직접 state 할당) 하는 것은 계약 위반이다. FSM 외부에서 이 세 필드를 쓰면 상태 일관성이 깨진다.
+- INV-FSM-R1. **aggregation 시 explicit reject 우선**: approve aggregation 단계에서 explicit reject 결과가 하나라도 있으면 전체 결과는 reject로 수렴한다. no-match (approve/reject 결정 없음) 는 non-fatal — reject 로 취급하지 않는다.
+
+**stateVersion 단조증가**
+
+- INV-VER-MONOTONIC. **stateVersion 은 단조증가 sortable UUID**: `stateVersion` 은 wall-clock + 시퀀스 기반 sortable monotonic UUID 로 생성된다. 서버 재시작 후에도 `restoreStateVersion` 이 이전 값을 복원하여 단조증가를 보장한다. 클라이언트는 수신한 stateVersion 이 이전 값보다 작으면 경고한다.
+
+**클라이언트 stale 감지 및 reject 응답 reconcile**
+
+- INV-RFS-STALE. **클라이언트 stale 감지 시 requestRefresh**: 클라이언트가 WS event 의 `stateVersion` 과 로컬 `lastStateVersion` 을 비교하여 stale 을 감지하면 `requestRefresh` 를 호출해 서버에 최신 snapshot 을 요청한다.
+- INV-RJT-SNAPSHOT. **HTTP reject 응답은 snapshot 동반**: `POST /api/sessions/:id/approve` 의 reject 응답은 `{ stateVersion, snapshot }` 을 포함한다. 클라이언트는 이를 수신하면 즉시 reconcile(로컬 상태를 snapshot 으로 교체) 한다.
+
 **abort 판별**
 
 - INV-ABT-1. **executor.recover abort 판별 조건**: executor.recover의 abort 판별은 `err.name === 'AbortError' || (actors.isAborted && actors.isAborted())` (OR 조건)이다. LLM 인터프리터가 AbortError를 항상 throw하지 않을 수 있으므로 `turnController.isAborted()` getter로 보강한다. abort 확정 시 `lastTurn.tag === 'failure'` + `lastTurn.error.kind === 'aborted'`로 표시된다 (TurnOutcome 확장 없이 errorKind로 구분).
@@ -126,6 +140,11 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - INV-CNC-1 → `packages/core/test/core/history-writer.test.js` C4 (SYSTEM entry 건너뜀), C5 (이미 cancelled), C6 (all SYSTEM entries), C7 (여러 SYSTEM skip), `packages/infra/test/turn-controller.test.js` TC5 (turn-controller 경유), `packages/core/test/core/turn-lifecycle.test.js` M1 (뒤에서부터 첫 turn 탐색), M2 (이미 cancelled no-op), M3 (turn 없음 no-op)
 - INV-PND-1 → `packages/core/test/core/agent.test.js` "Executor.beginLifecycle → _pendingInput set" ({input, ts} 구조 검증), "Executor.recover: _pendingInput cleared", `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `test/e2e/tui-e2e.test.js` TE25 (pendingInput 즉시 표시 + dedup)
 - INV-TTR-1 → `packages/core/test/interpreter/prod.test.js` 18 (ExecuteTool _toolTranscript 누적), 19 (Parallel 브랜치 격리), `packages/core/test/core/apply-final-state.test.js` F14 (clearDebugState 초기화), `packages/tui/test/interactive.test.js` "toolTranscript: preserved across turns"
+- INV-FSM-SINGLE-WRITER → (직접 테스트 없음) ⚠️ FSM 외부 직접 set 차단 단위 테스트 없음
+- INV-FSM-R1 → (직접 테스트 없음) ⚠️ explicit reject 우선 aggregation 단위 테스트 없음
+- INV-VER-MONOTONIC → (직접 테스트 없음) ⚠️ restoreStateVersion 단조증가 보장 단위 테스트 없음
+- INV-RFS-STALE → (직접 테스트 없음) ⚠️ stale 감지 시 requestRefresh 호출 단위 테스트 없음
+- INV-RJT-SNAPSHOT → (직접 테스트 없음) ⚠️ reject 응답 snapshot reconcile 단위 테스트 없음
 
 ## 관련 코드
 
@@ -147,3 +166,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-12: KG-01 해소 — I5를 "재로그인 유도 미구현 Known Gap"에서 "AUTH_FAILED 수렴 경로" 불변식으로 갱신. 부트스트랩 fail-fast vs runtime markDisconnected(4001) late-binding 계약 명시. RemoteSession.markDisconnected 추가. 테스트 커버리지 I5를 packages/tui/test/remote.test.js로 교체.
 - 2026-04-18: FP-61 / KG-14 반영 — 메시지 아키텍처 재설계. 서버 conversationHistory를 TUI 메시지의 단일 진실의 원천으로 승격. history-writer pure helpers와 TurnLifecycle 재구성으로 write 규칙 단일화. I8 갱신 (SNAPSHOT_PATHS에 `_pendingInput`, `_toolTranscript` 추가). I9 갱신 (pendingInitialMessages transient 처리, 초기 마운트 배너 미표시 명시). I16 재정의 (cancel SYSTEM entry로 승격 — TUI local-only ephemeral 에서 서버 conversationHistory 기록으로 변경). INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1 신규.
 - 2026-04-18: FP-61/KG-14 커버리지 매트릭스 갱신 — INV-SYS-1/2/3, INV-ABT-1, INV-CLR-1, INV-CNC-1, INV-PND-1, INV-TTR-1, I16 의 "(직접 테스트 없음) ⚠️" 를 실제 테스트 경로로 교체.
+- 2026-04-20: Phase G 반영 — INV-FSM-SINGLE-WRITER (FSM 단일 전이 경로), INV-FSM-R1 (explicit reject 우선 aggregation), INV-VER-MONOTONIC (stateVersion 단조증가), INV-RFS-STALE (stale 감지 시 requestRefresh), INV-RJT-SNAPSHOT (reject 응답 snapshot reconcile) 신규 추가. 5개 모두 테스트 미커버 ⚠️.
