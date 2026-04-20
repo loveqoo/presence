@@ -202,13 +202,16 @@ async function run() {
       await session.shutdown()
     }
 
-    // SD6. workingDir 해결 — 명시 opts 가 우선
+    // SD6. workingDir 해결 — 명시 opts 가 우선 (persistence 없는 신규 세션)
     {
       const workDir = join(tmpDir, 'sd6-work')
       // allowedDirs 에 workDir 포함되도록 임시 확장
       const origAllowed = userContext.config.tools.allowedDirs
       userContext.config.tools.allowedDirs = [tmpDir]   // tmpDir 포함 → workDir 도 포함
-      const session = Session.create(userContext, { type: 'user', workingDir: workDir })
+      const session = Session.create(userContext, {
+        type: 'user', workingDir: workDir,
+        persistenceCwd: join(tmpDir, 'sd6'),   // 고유 persistence
+      })
       assert(session.workingDir === workDir, 'SD6: 명시 workingDir 반영')
       assert(session.pendingBackfill === false, 'SD6: 명시 시 pendingBackfill=false')
       await session.shutdown()
@@ -217,7 +220,10 @@ async function run() {
 
     // SD7. workingDir 미지정 → allowedDirs[0] fallback + pendingBackfill=true
     {
-      const session = Session.create(userContext, { type: 'user' })
+      const session = Session.create(userContext, {
+        type: 'user',
+        persistenceCwd: join(tmpDir, 'sd7'),   // 고유 persistence
+      })
       assert(session.workingDir === userContext.config.tools.allowedDirs[0],
         `SD7: fallback allowedDirs[0] (got ${session.workingDir})`)
       assert(session.pendingBackfill === true, 'SD7: pendingBackfill=true')
@@ -239,9 +245,32 @@ async function run() {
       userContext.config.tools.allowedDirs = []
       let thrown = null
       try {
-        Session.create(userContext, { type: 'user' })
+        Session.create(userContext, { type: 'user', persistenceCwd: join(tmpDir, 'sd9') })
       } catch (e) { thrown = e }
       assert(thrown && /not resolvable/.test(thrown.message), 'SD9: 빈 allowedDirs 시 throw')
+      userContext.config.tools.allowedDirs = origAllowed
+    }
+
+    // SD10. persistence 에 저장된 workingDir 이 복원 시 최우선
+    {
+      const origAllowed = userContext.config.tools.allowedDirs
+      userContext.config.tools.allowedDirs = [tmpDir]
+      const persistCwd = join(tmpDir, 'sd10')
+      const savedDir = join(tmpDir, 'sd10-work')
+
+      // 첫 번째 세션: 명시 workingDir + flush
+      const s1 = Session.create(userContext, {
+        type: 'user', workingDir: savedDir, persistenceCwd: persistCwd,
+      })
+      await s1.flushPersistence()
+      await s1.shutdown()
+
+      // 두 번째 세션: 같은 persistenceCwd, 명시 workingDir 없음 → restore 가 savedDir 복원해야
+      const s2 = Session.create(userContext, { type: 'user', persistenceCwd: persistCwd })
+      assert(s2.workingDir === savedDir,
+        `SD10: persistence workingDir 복원 (expected ${savedDir}, got ${s2.workingDir})`)
+      assert(s2.pendingBackfill === false, 'SD10: persistence 복원 시 pendingBackfill=false')
+      await s2.shutdown()
       userContext.config.tools.allowedDirs = origAllowed
     }
 

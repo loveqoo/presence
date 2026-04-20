@@ -44,6 +44,11 @@ class UserSession extends EphemeralSession {
         this.approveRuntime?.restoreStateVersion(restored._fsmVersions.approve)
         this.delegateRuntime?.restoreStateVersion(restored._fsmVersions.delegate)
       }
+      // workingDir 복원 — persistence 값이 있으면 최우선. pendingBackfill 도 복원.
+      if (typeof restored.workingDir === 'string' && restored.workingDir.length > 0) {
+        this.workingDir = restored.workingDir
+        this.pendingBackfill = restored.pendingBackfill === true
+      }
       this.logger.info(`State restored (turn: ${restored.turn || 0})`)
     } catch (err) {
       this.logger.warn('State restore failed, starting fresh', { error: err.message })
@@ -124,6 +129,7 @@ class UserSession extends EphemeralSession {
     try {
       const snap = this.state.snapshot()
       // Phase 10: FSM stateVersion 영속화 — 서버 재시작 시 version 연속성 유지용.
+      // workingDir + pendingBackfill: 세션 실행 컨텍스트 영속화.
       const withVersions = {
         ...snap,
         _fsmVersions: {
@@ -131,6 +137,8 @@ class UserSession extends EphemeralSession {
           approve: this.approveRuntime?.stateVersion ?? null,
           delegate: this.delegateRuntime?.stateVersion ?? null,
         },
+        workingDir: this.workingDir,
+        pendingBackfill: this.pendingBackfill === true,
       }
       await forkTask(this.actors.persistenceActor.flush(withVersions))
     } catch (_unused) {}

@@ -78,6 +78,47 @@ async function run() {
     assert(result._x === undefined && result._y === undefined, 'stripTransient: removes _ prefixed keys')
   }
 
+  // 5. workingDir + pendingBackfill 저장/복원 round-trip
+  {
+    const cwd = join(testDir, 'test5')
+    mkdirSync(cwd, { recursive: true })
+    const p = createPersistence({ cwd })
+    p.clear()
+
+    // UserSession.flushPersistence 처럼 workingDir 포함한 snapshot 저장
+    p.store.set(PERSISTENCE.STORE_KEY, stripTransient({
+      turn: 0,
+      turnState: { tag: 'idle' },
+      workingDir: '/some/project/root',
+      pendingBackfill: true,
+    }))
+
+    const restored = p.restore()
+    assert(restored.workingDir === '/some/project/root', 'round-trip: workingDir 복원')
+    assert(restored.pendingBackfill === true, 'round-trip: pendingBackfill 복원')
+    p.clear()
+  }
+
+  // 6. pendingBackfill=false 도 round-trip
+  {
+    const cwd = join(testDir, 'test6')
+    mkdirSync(cwd, { recursive: true })
+    const p = createPersistence({ cwd })
+    p.clear()
+
+    p.store.set(PERSISTENCE.STORE_KEY, stripTransient({
+      turn: 2,
+      turnState: { tag: 'idle' },
+      workingDir: '/confirmed/dir',
+      pendingBackfill: false,
+    }))
+
+    const restored = p.restore()
+    assert(restored.workingDir === '/confirmed/dir', 'pending false round-trip: workingDir')
+    assert(restored.pendingBackfill === false, 'pending false round-trip: pendingBackfill=false 유지')
+    p.clear()
+  }
+
   // Cleanup
   rmSync(testDir, { recursive: true, force: true })
 
