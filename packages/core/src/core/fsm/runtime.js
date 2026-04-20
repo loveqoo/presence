@@ -144,6 +144,9 @@ function makeFSMRuntime(opts) {
     get stateVersion() { return stateVersion },
     get fsm() { return fsm },
     submit,
+    // Phase 10: persistence 복원 용. restoreState 단일 호출 경계에서만 사용.
+    // 매 submit 마다 versionGen 으로 새로 발급되므로 통상 경로에선 외부 setter 불필요.
+    restoreStateVersion: (version) => { stateVersion = version ?? null },
   }
 }
 

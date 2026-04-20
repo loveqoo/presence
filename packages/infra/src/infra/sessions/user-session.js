@@ -38,6 +38,12 @@ class UserSession extends EphemeralSession {
         this.state.set(STATE_PATH.CONTEXT, { ...restored.context, conversationHistory: migrated })
         this.state.set(STATE_PATH.COMPACTION_EPOCH, (this.state.get(STATE_PATH.COMPACTION_EPOCH) || 0) + 1)
       }
+      // Phase 10: FSM stateVersion 복원 — 서버 재시작 후에도 클라이언트와 버전 연속성.
+      if (restored._fsmVersions && typeof restored._fsmVersions === 'object') {
+        this.turnGateRuntime?.restoreStateVersion(restored._fsmVersions.turnGate)
+        this.approveRuntime?.restoreStateVersion(restored._fsmVersions.approve)
+        this.delegateRuntime?.restoreStateVersion(restored._fsmVersions.delegate)
+      }
       this.logger.info(`State restored (turn: ${restored.turn || 0})`)
     } catch (err) {
       this.logger.warn('State restore failed, starting fresh', { error: err.message })
@@ -116,7 +122,17 @@ class UserSession extends EphemeralSession {
 
   async flushPersistence() {
     try {
-      await forkTask(this.actors.persistenceActor.flush(this.state.snapshot()))
+      const snap = this.state.snapshot()
+      // Phase 10: FSM stateVersion 영속화 — 서버 재시작 시 version 연속성 유지용.
+      const withVersions = {
+        ...snap,
+        _fsmVersions: {
+          turnGate: this.turnGateRuntime?.stateVersion ?? null,
+          approve: this.approveRuntime?.stateVersion ?? null,
+          delegate: this.delegateRuntime?.stateVersion ?? null,
+        },
+      }
+      await forkTask(this.actors.persistenceActor.flush(withVersions))
     } catch (_unused) {}
   }
 

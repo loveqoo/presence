@@ -499,4 +499,35 @@ const fixedDeps = (tsStart = 1000, idStart = 100) => {
   assertDeepEqual(rejections[0].stateVersion, accepted, 'SV6: rejection event 에 최신 accept 버전')
 }
 
+// SV9. restoreStateVersion — persistence 복원 경로 (Phase 10)
+{
+  const fsm = makeFSM('f', 'a', [
+    Transition({ from: 'a', on: 'x', to: 'b', emit: [{ topic: 't' }] }),
+  ])
+  const bus = makeFsmEventBus()
+  const runtime = makeFSMRuntime({ fsm, bus, versionGen: () => 'V-NEW' })
+
+  // 초기 null
+  assertDeepEqual(runtime.stateVersion, null, 'SV9: 초기 null')
+
+  // 외부 복원 (서버 재시작 시나리오)
+  runtime.restoreStateVersion('V-RESTORED')
+  assertDeepEqual(runtime.stateVersion, 'V-RESTORED', 'SV9: 복원된 버전')
+
+  // 다음 submit 은 versionGen 으로 새 버전
+  runtime.submit({ type: 'x' })
+  assertDeepEqual(runtime.stateVersion, 'V-NEW', 'SV9: submit 후 새 버전 발급')
+}
+
+// SV10. restoreStateVersion(null) — null 복원 (빈 persistence)
+{
+  const fsm = makeFSM('f', 'a', [])
+  const bus = makeFsmEventBus()
+  const runtime = makeFSMRuntime({ fsm, bus, versionGen: () => 'X' })
+
+  runtime.restoreStateVersion('v-1')  // 먼저 뭔가 복원
+  runtime.restoreStateVersion(null)   // null 복원
+  assertDeepEqual(runtime.stateVersion, null, 'SV10: null 로 복원')
+}
+
 summary()
