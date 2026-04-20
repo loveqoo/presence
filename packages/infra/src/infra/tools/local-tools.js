@@ -61,6 +61,19 @@ const normalizePath = (path, allowedDirs) => {
     || resolved
 }
 
+// --- workingDir 기준 경로 해석 (세션별) ---
+// 세션의 작업 디렉토리 기준으로 상대경로를 절대경로로 해석.
+// allowedDirs 경계를 벗어나면 throw.
+// workingDir 누락 시 throw (fallback 없음 — 호출자가 책임).
+const resolveInWorkingDir = (relPath, workingDir, allowedDirs) => {
+  if (!workingDir) throw new Error('resolveInWorkingDir: workingDir required')
+  const absolute = resolve(workingDir, relPath)
+  if (!isPathAllowed(absolute, allowedDirs)) {
+    throw new Error(t('error.access_denied', { path: relPath, dirs: allowedDirs.join(', ') || '(none)' }))
+  }
+  return absolute
+}
+
 // --- 도구 정의 ---
 
 const createLocalTools = ({ allowedDirs = [] } = {}) => {
@@ -230,4 +243,4 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
  *
  * `normalizePath(path, allowedDirs)` — Resolves and normalises a path, falling back to allowed-dir-relative resolution.
  */
-export { createLocalTools, isPathAllowed, normalizePath }
+export { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir }

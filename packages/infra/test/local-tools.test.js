@@ -1,6 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools, isPathAllowed, normalizePath } from '@presence/infra/infra/tools/local-tools.js'
+import { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir } from '@presence/infra/infra/tools/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -142,6 +142,35 @@ async function run() {
     } catch (e) {
       assert(e.message.includes('Command failed'), 'shell_exec fail: error message')
     }
+  }
+
+  // --- resolveInWorkingDir (워킹 디렉토리 기준 해석) ---
+
+  {
+    // 정상: workingDir 기준 상대경로 → 절대경로
+    const result = resolveInWorkingDir('hello.txt', testDir, [testDir])
+    assert(result === join(testDir, 'hello.txt'), 'resolveInWorkingDir: 상대경로 정상')
+  }
+
+  {
+    // workingDir 누락 → throw
+    let thrown = null
+    try { resolveInWorkingDir('x', null, [testDir]) } catch (e) { thrown = e }
+    assert(thrown && /workingDir required/.test(thrown.message), 'resolveInWorkingDir: workingDir 누락 throw')
+  }
+
+  {
+    // allowedDirs 밖 → throw
+    let thrown = null
+    try { resolveInWorkingDir('/etc/passwd', testDir, [testDir]) } catch (e) { thrown = e }
+    assert(thrown && /denied|outside|access/i.test(thrown.message), 'resolveInWorkingDir: allowedDirs 밖 throw')
+  }
+
+  {
+    // `..` 로 경계 탈출 시도 → throw
+    let thrown = null
+    try { resolveInWorkingDir('../../../etc/passwd', testDir, [testDir]) } catch (e) { thrown = e }
+    assert(thrown, 'resolveInWorkingDir: `..` 경계 탈출 throw')
   }
 
   // --- 도구 메타데이터 ---
