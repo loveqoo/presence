@@ -9,6 +9,7 @@ const LOCAL_TOOLS = Object.freeze({
   FETCH_TIMEOUT_MS: 15_000,
   TEXT_TRUNCATE_LENGTH: 10_000,
   SHELL_TIMEOUT_MS: 30_000,
+  WEB_FETCH_MIN_CONTENT: 200,   // 이보다 짧으면 의심
 })
 
 // --- 도구 인자 스키마 ---
@@ -59,6 +60,27 @@ const normalizePath = (path, allowedDirs) => {
   ]
   return candidates.find(c => isPathAllowed(c, allowedDirs) && (c === resolved || existsSync(c)))
     || resolved
+}
+
+// --- web_fetch 결과 품질 점검 (FP-62) ---
+// 사후 품질 점검 — 빈/짧은/의심스러운 응답 감지 시 경고 prefix 부착 대상으로 분류.
+// LLM 이 경고를 보고 plan 을 재구성하도록 유도 (iteration).
+const analyzeWebFetchResult = (url, text) => {
+  const trimmed = (text || '').trim()
+  if (trimmed.length === 0) return { suspicious: true, reason: 'empty_response' }
+  if (trimmed.length < LOCAL_TOOLS.WEB_FETCH_MIN_CONTENT) {
+    return { suspicious: true, reason: 'very_short_response' }
+  }
+  if (/wikipedia\.org/.test(url)) {
+    const head = trimmed.slice(0, 2000)
+    if (/may refer to:|disambiguation/i.test(head)) {
+      return { suspicious: true, reason: 'disambiguation_page' }
+    }
+    if (/Wikipedia does not have an article|Search results/i.test(head)) {
+      return { suspicious: true, reason: 'missing_article' }
+    }
+  }
+  return { suspicious: false }
 }
 
 // --- workingDir 기준 경로 해석 (세션별) ---
@@ -185,7 +207,17 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
           const res = await fetch(url, { signal: controller.signal })
           if (!res.ok) throw new Error(t('error.http_error', { status: res.status }))
           const text = await res.text()
-          return text.length > LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH ? text.slice(0, LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH) + '\n...(truncated)' : text
+          const truncated = text.length > LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH
+            ? text.slice(0, LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH) + '\n...(truncated)'
+            : text
+          // FP-62: 결과 품질 점검. 의심스러우면 LLM 에게 경고 prefix 전달.
+          const analysis = analyzeWebFetchResult(url, text)
+          if (analysis.suspicious) {
+            return `⚠ [web_fetch quality check: ${analysis.reason}] URL=${url}. ` +
+              `The fetched content may not answer the user's request. ` +
+              `Consider trying a different URL or responding directly.\n\n${truncated}`
+          }
+          return truncated
         } finally {
           clearTimeout(timeout)
         }
@@ -247,4 +279,4 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
  *
  * `normalizePath(path, allowedDirs)` — Resolves and normalises a path, falling back to allowed-dir-relative resolution.
  */
-export { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir }
+export { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir, analyzeWebFetchResult }

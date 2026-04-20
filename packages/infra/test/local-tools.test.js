@@ -1,6 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir } from '@presence/infra/infra/tools/local-tools.js'
+import { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir, analyzeWebFetchResult } from '@presence/infra/infra/tools/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -171,6 +171,60 @@ async function run() {
     let thrown = null
     try { resolveInWorkingDir('../../../etc/passwd', testDir, [testDir]) } catch (e) { thrown = e }
     assert(thrown, 'resolveInWorkingDir: `..` 경계 탈출 throw')
+  }
+
+  // --- analyzeWebFetchResult (FP-62 결과 품질 점검) ---
+
+  {
+    // 정상 응답 → not suspicious
+    const longNormal = 'a'.repeat(500)
+    assert(analyzeWebFetchResult('https://example.com', longNormal).suspicious === false,
+      'analyzeWebFetchResult: 정상 긴 응답 → not suspicious')
+  }
+
+  {
+    // 빈 응답 → suspicious empty
+    const r = analyzeWebFetchResult('https://example.com', '')
+    assert(r.suspicious === true && r.reason === 'empty_response',
+      'analyzeWebFetchResult: 빈 응답 → suspicious (empty_response)')
+  }
+
+  {
+    // whitespace 만 있는 응답 → suspicious empty (trim 후 empty)
+    const r = analyzeWebFetchResult('https://example.com', '   \n\n  ')
+    assert(r.suspicious === true && r.reason === 'empty_response',
+      'analyzeWebFetchResult: whitespace only → empty_response')
+  }
+
+  {
+    // 짧은 응답 (< WEB_FETCH_MIN_CONTENT) → suspicious short
+    const r = analyzeWebFetchResult('https://example.com', 'just 50 chars short content')
+    assert(r.suspicious === true && r.reason === 'very_short_response',
+      'analyzeWebFetchResult: 짧은 응답 → very_short_response')
+  }
+
+  {
+    // Wikipedia disambiguation 페이지 → suspicious disambiguation
+    const disambig = 'FSM may refer to: Finite-state machine... ' + 'x'.repeat(300)
+    const r = analyzeWebFetchResult('https://en.wikipedia.org/wiki/FSM', disambig)
+    assert(r.suspicious === true && r.reason === 'disambiguation_page',
+      'analyzeWebFetchResult: Wikipedia may refer to → disambiguation_page')
+  }
+
+  {
+    // Wikipedia "does not have an article" → suspicious missing
+    const missing = 'Wikipedia does not have an article with this exact name... ' + 'x'.repeat(300)
+    const r = analyzeWebFetchResult('https://en.wikipedia.org/wiki/Nonexistent', missing)
+    assert(r.suspicious === true && r.reason === 'missing_article',
+      'analyzeWebFetchResult: Wikipedia missing → missing_article')
+  }
+
+  {
+    // 일반 긴 Wikipedia 응답 → not suspicious (disambiguation/missing 패턴 없음)
+    const normalWiki = 'Finite-state machine is a computational model... ' + 'content '.repeat(100)
+    const r = analyzeWebFetchResult('https://en.wikipedia.org/wiki/Finite-state_machine', normalWiki)
+    assert(r.suspicious === false,
+      'analyzeWebFetchResult: 정상 Wikipedia 문서 → not suspicious')
   }
 
   // --- 도구 메타데이터 ---
