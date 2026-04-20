@@ -259,6 +259,28 @@ async function run() {
       assert(!JSON.stringify(final).includes('persist-test'), 'S18: 이전 대화 내용 없음')
     }
 
+    // S20b. POST /sessions with workingDir — body 전달 + 응답 effective 확인
+    {
+      const newId = `working-dir-${Date.now()}`
+      const { allowedDirs } = ctx.userContext.config.tools
+      const validWd = allowedDirs[0]
+      const res = await post('/api/sessions', { id: newId, type: 'user', workingDir: validWd })
+      assert(res.status === 201, 'S20b: POST with workingDir → 201')
+      assert(res.body.id === newId, 'S20b: id returned')
+      assert(res.body.workingDir === validWd,
+        `S20b: 응답 effective workingDir === body (got ${res.body.workingDir})`)
+      await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
+    }
+
+    // S20c. POST /sessions with workingDir 경계 밖 → 400
+    {
+      const newId = `bad-wd-${Date.now()}`
+      const res = await post('/api/sessions', { id: newId, type: 'user', workingDir: '/etc' })
+      assert(res.status === 400, 'S20c: 경계 밖 workingDir → 400')
+      assert(/outside allowedDirs/.test(res.body.error || ''),
+        `S20c: 에러 메시지 (got ${JSON.stringify(res.body)})`)
+    }
+
     // S21. INV-RJT-SNAPSHOT — chat 500 응답은 snapshot + stateVersion 동반
     {
       const errCtx = await createTestServer(() => { throw new Error('llm boom') })

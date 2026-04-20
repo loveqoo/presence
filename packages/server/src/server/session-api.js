@@ -147,7 +147,7 @@ const mountSessionsCrud = (router, deps) => {
   })
   router.post('/sessions', express.json(), async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
-    const { type = SESSION_TYPE.USER, id } = req.body || {}
+    const { type = SESSION_TYPE.USER, id, workingDir } = req.body || {}
     const validTypes = Object.values(SESSION_TYPE)
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: `Invalid session type: ${type}` })
@@ -155,8 +155,14 @@ const mountSessionsCrud = (router, deps) => {
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
     const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined
-    const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: owner || 'default', persistenceCwd })
-    res.status(201).json({ id: entry.id, type: entry.type })
+    try {
+      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: owner || 'default', persistenceCwd, workingDir })
+      // effective workingDir 을 응답에 포함 — POST 직후 클라이언트 확인용.
+      res.status(201).json({ id: entry.id, type: entry.type, workingDir: entry.session.workingDir })
+    } catch (err) {
+      // Session 생성 시 workingDir 경계 위반 등
+      res.status(400).json({ error: err.message })
+    }
   })
   router.delete('/sessions/:sessionId', async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
