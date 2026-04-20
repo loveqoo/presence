@@ -268,7 +268,29 @@ const setup = async (serverInfo) => {
   return { remoteState, lastFrame, stdin, cleanup }
 }
 
+// =============================================================================
+// Probe helpers — live-probes 테스트 전용.
+// REST 만으로 chat 한 번 돌리고 toolTranscript 에서 tool 호출 결과 추출.
+// TUI 렌더/setup 없이 빠르게 검증 가능. 임시 유저/정리는 connect() 가 보장.
+// =============================================================================
+
+// chat 호출 → toolTranscript 추출. 외부에서 assertion 수행.
+// input 앞에 /clear 를 먼저 전송해 이전 대화 맥락을 초기화.
+const probeTool = async (serverInfo, { input, toolName } = {}) => {
+  const apiBase = `/api/sessions/${serverInfo.sessionId}`
+  await httpRequest('POST', `${apiBase}/chat`, { input: '/clear' }).catch(() => {})
+  const t0 = Date.now()
+  const chatRes = await httpRequest('POST', `${apiBase}/chat`, { input })
+  const elapsed = Date.now() - t0
+  const stateRes = await httpRequest('GET', `${apiBase}/state`)
+  const toolTranscript = stateRes.body?._toolTranscript || []
+  const entries = toolName
+    ? toolTranscript.filter(e => e.tool === toolName)
+    : toolTranscript
+  return { elapsed, status: chatRes.status, response: chatRes.body, toolTranscript, entries }
+}
+
 export {
   connect, setup, delay, waitFor, waitIdle, waitTurnComplete,
-  typeInput, sendAndWait, httpRequest, LLM_TIMEOUT,
+  typeInput, sendAndWait, httpRequest, probeTool, LLM_TIMEOUT,
 }
