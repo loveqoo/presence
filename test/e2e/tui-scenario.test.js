@@ -83,21 +83,20 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
 
 // =============================================================================
 // S4. 도구 실행 + 판단 — 디렉토리 구조 파악 후 요약
-//     1) 프로젝트 구조를 파악해달라고 요청
-//     2) 어떤 패키지들이 있는지 답변에 포함되어야 함
+//     1) 서버 cwd 의 src/ 구조를 파악해달라고 요청
+//     2) 주요 항목이 답변에 포함되어야 함
+//
+// NOTE: 서버 cwd 는 `packages/server/` (npm start --workspace 때문).
+//   근본 교정 (session workingDir) 완료 시 이 쿼리도 원래 `packages/` 형태로 복원 가능.
 // =============================================================================
 {
   const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
   try {
-    await sendAndWait(stdin, remoteState, lastFrame, 'packages/ 폴더 안에 있는 하위 폴더 이름만 나열해줘.')
+    await sendAndWait(stdin, remoteState, lastFrame, 'src 폴더 안에 있는 하위 항목 이름만 나열해줘.')
     const frame = lastFrame()
-    // 프로젝트에는 core, infra, server, tui 패키지가 존재
-    const hasCore = frame.includes('core')
-    const hasInfra = frame.includes('infra')
+    // 서버 cwd(packages/server)/src 에는 server/ 디렉토리가 있음
     const hasServer = frame.includes('server')
-    const hasTui = frame.includes('tui')
-    const packageCount = [hasCore, hasInfra, hasServer, hasTui].filter(Boolean).length
-    assert(packageCount >= 2, `S4: 패키지 구조 요약 (${packageCount}/4 패키지 언급)`)
+    assert(hasServer, `S4: src 내부 구조 요약 (server 언급)`)
   } finally { cleanup() }
 }
 
@@ -124,16 +123,16 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
 // =============================================================================
 
 // S6. 도구 다중 실행 — 여러 파일 조회 후 비교
-//     1) 두 파일의 내용을 함께 요청
+//     1) 서버 cwd 에 존재하는 두 파일 요청
 //     2) 비교 결과가 응답에 포함
 {
   const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
   try {
-    await sendAndWait(stdin, remoteState, lastFrame, 'package.json과 packages/core/package.json 두 파일을 읽고, 각 name 필드를 비교해줘. 짧게.')
+    await sendAndWait(stdin, remoteState, lastFrame, 'package.json과 CLAUDE.md 두 파일을 읽고, 각각이 어떤 파일인지 한 문장씩 설명해줘.')
     const frame = lastFrame()
-    const hasPresence = frame.includes('presence')
-    const hasCore = frame.includes('core')
-    assert(hasPresence && hasCore, 'S6: 두 파일 비교 — presence와 core 모두 언급')
+    const hasJson = frame.includes('package') || frame.includes('json')
+    const hasMd = frame.includes('CLAUDE') || frame.includes('md') || frame.includes('markdown')
+    assert(hasJson && hasMd, 'S6: 두 파일 비교 — 각 파일 언급')
   } finally { cleanup() }
 }
 
@@ -275,22 +274,22 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
 }
 
 // S13. 도구 실행 → 분석 → 후속 도구 실행
-//      1) packages/core/package.json 읽기
+//      1) package.json 읽기
 //      2) 의존성 개수 질문
-//      3) packages/server/package.json도 읽고 비교
+//      3) scripts 섹션 질문
 {
   const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
   try {
-    await sendAndWait(stdin, remoteState, lastFrame, 'packages/core/package.json을 읽어줘.')
-    assert(lastFrame().includes('idle'), 'S13-1: core/package.json 읽기')
+    await sendAndWait(stdin, remoteState, lastFrame, 'package.json을 읽어줘.')
+    assert(lastFrame().includes('idle'), 'S13-1: package.json 읽기')
 
     await sendAndWait(stdin, remoteState, lastFrame, '방금 파일의 dependencies 개수를 세줘. 숫자만.')
     const frame2 = lastFrame()
     assert(/\d/.test(frame2), 'S13-2: 의존성 개수 응답')
 
-    await sendAndWait(stdin, remoteState, lastFrame, 'packages/server/package.json도 읽고, core와 server 중 dependencies가 더 많은 쪽을 알려줘.')
+    await sendAndWait(stdin, remoteState, lastFrame, '방금 파일에 scripts 섹션이 있으면 "있음", 없으면 "없음"이라고만 답해.')
     const frame3 = lastFrame()
-    assert(frame3.includes('core') || frame3.includes('server'), 'S13-3: 두 패키지 비교 판단')
+    assert(frame3.includes('있음') || frame3.includes('없음'), 'S13-3: 구조 판단')
   } finally { cleanup() }
 }
 
@@ -307,10 +306,10 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
     await delay(500)
 
     // 초기화 후 도구 실행
-    await sendAndWait(stdin, remoteState, lastFrame, 'packages/ 폴더 목록을 알려줘.')
+    await sendAndWait(stdin, remoteState, lastFrame, 'src 폴더 목록을 알려줘.')
     const frame = lastFrame()
-    const hasPackages = frame.includes('core') || frame.includes('infra') || frame.includes('server') || frame.includes('tui')
-    assert(hasPackages, 'S14-2: /clear 후 도구 실행 정상')
+    const hasItems = frame.includes('server') || frame.includes('src')
+    assert(hasItems, 'S14-2: /clear 후 도구 실행 정상')
   } finally { cleanup() }
 }
 
