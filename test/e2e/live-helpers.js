@@ -6,8 +6,12 @@
 import React from 'react'
 import { render } from 'ink-testing-library'
 import http from 'node:http'
+import { join } from 'node:path'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { App } from '@presence/tui/ui/App.js'
+import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
+import { removeUserCompletely } from '@presence/infra/infra/auth/remove-user.js'
+import { Config } from '@presence/infra/infra/config.js'
 import { initI18n } from '@presence/infra/i18n'
 
 initI18n('ko')
@@ -22,10 +26,14 @@ const cliArg = (name, fallback) => {
   return idx !== -1 && process.argv[idx + 1] ? process.argv[idx + 1] : fallback
 }
 
+const hasFlag = (name) => process.argv.includes(`--${name}`)
+
 const BASE_URL = cliArg('url', 'http://127.0.0.1:3000')
 const WS_URL = BASE_URL.replace(/^http/, 'ws')
-const USERNAME = cliArg('username', 'anthony')
-const PASSWORD = cliArg('password', 'testpass123')
+// 기존 --username/--password 는 고정 유저 지정용. 생략 시 임시 유저 자동 생성.
+const OVERRIDE_USERNAME = cliArg('username', null)
+const OVERRIDE_PASSWORD = cliArg('password', null)
+const KEEP_USER = hasFlag('keep-user')
 const LLM_TIMEOUT = 120_000
 
 // =============================================================================
@@ -112,6 +120,53 @@ const sendAndWait = async (stdin, remoteState, lastFrame, message) => {
 // 서버 접속 + 인증
 // =============================================================================
 
+// 임시 유저 생성 + 비밀번호 변경 (mustChangePassword 해제).
+// --username/--password 플래그 있으면 그걸로 로그인만 수행 (기존 동작 유지).
+const authenticate = async () => {
+  if (OVERRIDE_USERNAME && OVERRIDE_PASSWORD) {
+    const loginRes = await httpRequest('POST', '/api/auth/login', { username: OVERRIDE_USERNAME, password: OVERRIDE_PASSWORD })
+    if (!loginRes.body?.accessToken) {
+      console.error('로그인 실패:', loginRes.body?.error || loginRes.body)
+      process.exit(1)
+    }
+    accessToken = loginRes.body.accessToken
+    return { username: OVERRIDE_USERNAME, store: null }
+  }
+
+  // 임시 유저 자동 생성
+  const username = `livetest_${Date.now().toString(36)}`
+  const INITIAL_PW = 'init_password_1234'
+  const NEW_PW = 'new_password_5678'
+
+  const store = createUserStore()
+  await store.addUser(username, INITIAL_PW)
+  console.log(`[setup] 임시 테스트 유저 생성: ${username}`)
+
+  const loginRes = await httpRequest('POST', '/api/auth/login', { username, password: INITIAL_PW })
+  if (!loginRes.body?.accessToken) {
+    console.error('로그인 실패:', loginRes.body)
+    try { store.removeUser(username) } catch (_) {}
+    process.exit(1)
+  }
+  accessToken = loginRes.body.accessToken
+
+  // addUser 가 mustChangePassword=true 로 생성 → 변경 1회 수행
+  const changeRes = await httpRequest('POST', '/api/auth/change-password', { currentPassword: INITIAL_PW, newPassword: NEW_PW })
+  if (!changeRes.body?.accessToken) {
+    console.error('비밀번호 변경 실패:', changeRes.body)
+    try { store.removeUser(username) } catch (_) {}
+    process.exit(1)
+  }
+  accessToken = changeRes.body.accessToken
+
+  // 이상 종료 시에도 유저를 남기지 않음
+  process.on('exit', () => {
+    if (!KEEP_USER) try { store.removeUser(username) } catch (_) {}
+  })
+
+  return { username, store }
+}
+
 const connect = async () => {
   const instanceRes = await httpRequest('GET', '/api/instance').catch(() => null)
   if (!instanceRes || instanceRes.status !== 200) {
@@ -122,15 +177,14 @@ const connect = async () => {
 
   const authRequired = instanceRes.body?.authRequired === true
   let sessionId = 'user-default'
+  let username = null
+  let store = null
 
   if (authRequired) {
-    const loginRes = await httpRequest('POST', '/api/auth/login', { username: USERNAME, password: PASSWORD })
-    if (!loginRes.body?.accessToken) {
-      console.error('로그인 실패:', loginRes.body?.error || loginRes.body)
-      process.exit(1)
-    }
-    accessToken = loginRes.body.accessToken
-    sessionId = `${USERNAME}-default`
+    const auth = await authenticate()
+    username = auth.username
+    store = auth.store
+    sessionId = `${username}-default`
   }
 
   const apiBase = `/api/sessions/${sessionId}`
@@ -140,8 +194,23 @@ const connect = async () => {
     httpRequest('GET', `${apiBase}/config`).catch(() => ({ body: {} })),
   ])
 
+  const teardown = async () => {
+    if (KEEP_USER) {
+      if (username) console.log(`[teardown] --keep-user — 유저 ${username} 유지`)
+      return
+    }
+    if (!username || !store) return
+    try {
+      const userDir = join(Config.presenceDir(), 'users', username)
+      await removeUserCompletely({ store, memory: null, username, userDir })
+      console.log(`[teardown] 임시 유저 삭제: ${username}`)
+    } catch (err) {
+      console.error(`[teardown] 유저 삭제 실패:`, err.message)
+    }
+  }
+
   return {
-    sessionId, authRequired,
+    sessionId, authRequired, username, teardown,
     tools: Array.isArray(toolsRes.body) ? toolsRes.body : [],
     agents: Array.isArray(agentsRes.body) ? agentsRes.body : [],
     config: configRes.body || {},

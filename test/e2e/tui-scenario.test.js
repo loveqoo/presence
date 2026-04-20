@@ -475,3 +475,4 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
 }
 
 summary()
+await serverInfo.teardown()
