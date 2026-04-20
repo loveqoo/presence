@@ -5,6 +5,7 @@ import { flattenHistory, fitHistory, fitMemories, buildIterationBlock } from '@p
 import { measureMessages } from '@presence/core/lib/tokenizer.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../../../../test/lib/test-agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 
@@ -356,7 +357,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'response!' })
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('hello', { source: 'user' })
 
     const history = state.get('context.conversationHistory')
@@ -377,7 +378,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'response!' })
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('hello')
 
     const history = state.get('context.conversationHistory')
@@ -394,7 +395,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'response!' })
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('hello', { source: 'heartbeat' })
 
     const history = state.get('context.conversationHistory')
@@ -412,7 +413,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: longMessage })
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('a'.repeat(800), { source: 'user' })
 
     const history = state.get('context.conversationHistory')
@@ -438,7 +439,7 @@ async function run() {
       }
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('q1', { source: 'user' })
     await agent.run('q2', { source: 'user' })
     await agent.run('q3', { source: 'user' })
@@ -466,7 +467,7 @@ async function run() {
       }
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('first', { source: 'user' })
     await agent.run('second', { source: 'user' })
 
@@ -489,7 +490,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' })
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('test', { source: 'user' })
 
     const debug = state.get('_debug.lastTurn')
@@ -521,7 +522,7 @@ async function run() {
     })
 
     // Tight token budget — won't fit all 3 history turns
-    const agent = new Agent({
+    const agent = makeTestAgent({
       interpret, ST, state,
       budget: { maxContextChars: 920, reservedOutputChars: 0 },
     })
@@ -601,7 +602,7 @@ async function run() {
       }
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     for (let i = 0; i < 25; i++) {
       await agent.run(`q${i}`, { source: 'user' })
     }
@@ -629,7 +630,7 @@ async function run() {
       ExecuteTool: () => 'tool result'
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('do it', { source: 'user' })
 
     const history = state.get('context.conversationHistory')

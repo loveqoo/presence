@@ -2,6 +2,7 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../../../../test/lib/test-agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { TurnActor, turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
@@ -33,7 +34,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // 3개 동시 요청 — Actor가 직렬화
@@ -66,7 +67,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     const [r1, r2] = await Promise.all([
@@ -93,7 +94,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // 빠르게 5개 요청 (브라우저 탭 5개 동시 전송 시뮬레이션)
@@ -133,7 +134,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: trackingMemoryActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { memoryActor: trackingMemoryActor } })
     await agent.run('first', { source: 'user' })
     await agent.run('second', { source: 'user' })
 
@@ -168,7 +169,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: trackingActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { memoryActor: trackingActor } })
     await agent.run('test', { source: 'user' })
 
     assert(saveBeforeIdle, 'C5: save sent while turnState still working')
@@ -197,7 +198,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     const turnActor = turnActorR.run({ runTurn: (input, opts) => agent.run(input, opts) })
 
     // EventActor + 브릿지 hook 연결

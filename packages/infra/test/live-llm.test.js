@@ -11,6 +11,7 @@ import { LLMClient } from '@presence/infra/infra/llm/llm-client.js'
 import { prodInterpreterR } from '@presence/infra/interpreter/prod.js'
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../../../test/lib/test-agent.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
@@ -68,7 +69,7 @@ const runScenario = async (label, input, opts = {}) => {
     onApprove: async () => true,  // 자동 승인
   })
 
-  const agent = new Agent({
+  const agent = makeTestAgent({
     resolveTools: () => toolRegistry.list(),
     resolveAgents: () => agentRegistry.list(),
     responseFormatMode: config.llm.responseFormat,
@@ -297,7 +298,7 @@ async function run() {
       llm, toolRegistry, state, agentRegistry,
       onApprove: async () => true,
     })
-    const agent = new Agent({
+    const agent = makeTestAgent({
       resolveTools: () => toolRegistry.list(),
       resolveAgents: () => agentRegistry.list(),
       responseFormatMode: config.llm.responseFormat,

@@ -1,5 +1,6 @@
 import { PHASE, RESULT, ERROR_KIND, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../lib/test-agent.js'
 import { applyFinalState } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
@@ -135,7 +136,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
+    const agent = makeTestAgent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
     const initialState = state.snapshot()
     const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('보고서 요약해줘'))(initialState)
     applyFinalState(state, finalState)
@@ -171,7 +172,7 @@ async function run() {
       Delegate: (op) => Delegation.failed(op.target, 'Unknown agent'),
     })
 
-    const agent = new Agent({
+    const agent = makeTestAgent({
       resolveTools: () => [],
       interpret, ST, state,
     })

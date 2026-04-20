@@ -2,6 +2,7 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { PHASE, RESULT, TurnState, TurnOutcome } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../../../../test/lib/test-agent.js'
 import { applyFinalState, MANAGED_PATHS, clearDebugState } from '@presence/core/core/state-commit.js'
 import { STATE_PATH } from '@presence/core/core/policies.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
@@ -162,13 +163,13 @@ async function run() {
         secondTurnHistoryLength = (state.get('context.conversationHistory') || []).length
 
         // 2nd 턴 시작 (source 없음 — event/heartbeat 시나리오)
-        const agent2 = new Agent({ interpret, ST, state })
+        const agent2 = makeTestAgent({ interpret, ST, state })
         await agent2.run('자동 후속 질문')
       }
     })
 
     // 1st 턴 실행 (source: 'user' → history에 기록)
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('첫 질문', { source: 'user' })
 
     // 2nd 턴이 실행될 시간 확보
@@ -203,7 +204,7 @@ async function run() {
       }
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('질문')
     await new Promise(r => setTimeout(r, 100))
 
@@ -283,7 +284,7 @@ async function run() {
     })
 
     // memoryActor 없이 실행
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('test')
 
     assert(hookLastTurn !== null, 'F10: lastTurn available in idle hook (no memoryActor)')
@@ -312,7 +313,7 @@ async function run() {
       AskLLM: () => '<<<invalid>>>',
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('fail')
 
     assert(hookLastTurnTag === RESULT.FAILURE, 'F11: idle hook sees failure lastTurn')
@@ -341,7 +342,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('fail first')
     await agent.run('then succeed')
 

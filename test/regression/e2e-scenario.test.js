@@ -7,6 +7,7 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { PHASE, RESULT, ERROR_KIND, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../lib/test-agent.js'
 import { applyFinalState } from '@presence/core/core/state-commit.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
@@ -65,7 +66,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('package.json 파일 읽어줘')
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'absolute path: turnState idle')
@@ -102,7 +103,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('echo hello 실행해줘')
 
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'flat args fallback: success')
@@ -120,7 +121,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', content: '안녕하세요!' })
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('안녕')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'content field: rejected')
@@ -151,7 +152,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('파일 목록 보여줘')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'ref exceeds: rejected')
@@ -174,7 +175,7 @@ async function run() {
       }),
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('파일 목록')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'ref=0: rejected')
@@ -195,7 +196,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ maxRetries: 1, interpret, ST })
+    const agent = makeTestAgent({ maxRetries: 1, interpret, ST })
     const initialState = state.snapshot()
     const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('테스트'))(initialState)
     applyFinalState(state, finalState)
@@ -221,7 +222,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ maxRetries: 1, interpret, ST })
+    const agent = makeTestAgent({ maxRetries: 1, interpret, ST })
     const initialState = state.snapshot()
     const [, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('계속 실패'))(initialState)
     applyFinalState(state, finalState)
@@ -264,7 +265,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     const result = await agent.run('readme.txt 내용 알려줘')
 
     // 파이프라인 순서 검증
@@ -298,7 +299,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     const result = await agent.run('안녕')
 
     assert(askLLMCount === 1, 'direct_response: AskLLM called once (no formatter)')
@@ -324,7 +325,7 @@ async function run() {
       ExecuteTool: () => { toolExecuted = true; return 'should not run' },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('파일 읽어줘')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'missing required args: rejected')
@@ -350,7 +351,7 @@ async function run() {
       ExecuteTool: () => { toolExecuted = true; return 'should not run' },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('파일 읽어줘')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'null required arg: rejected')
@@ -375,7 +376,7 @@ async function run() {
       ExecuteTool: () => { toolExecuted = true; return 'should not run' },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('존재하지 않는 툴')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'unknown tool: rejected')
@@ -400,7 +401,7 @@ async function run() {
       }),
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('파일 분석해줘')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'ctx=[0]: rejected')
@@ -422,7 +423,7 @@ async function run() {
       }),
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('생각해봐')
 
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'ctx self-ref: rejected')
@@ -443,7 +444,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
 
     await agent.run('첫 번째')
     assert(state.get('lastTurn').tag === RESULT.FAILURE, 'fail-then-success: first turn failure')
@@ -471,7 +472,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ maxRetries: 1, interpret, ST })
+    const agent = makeTestAgent({ maxRetries: 1, interpret, ST })
     const initialState = state.snapshot()
     const [result, finalState] = await runFreeWithStateT(interpret, ST)(agent.planner.program('테스트'))(initialState)
     applyFinalState(state, finalState)
@@ -494,7 +495,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('프로젝트 이름이 뭐야?')
 
     assert(capturedMessages != null, 'memory context: messages captured')
@@ -523,7 +524,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('테스트')
 
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'RESPOND message: success')
@@ -557,7 +558,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ resolveTools: () => tools, interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => tools, interpret, ST, state })
     await agent.run('파일 작성해줘')
 
     assert(state.get('lastTurn').tag === RESULT.SUCCESS, 'approve flow: success')
@@ -581,7 +582,7 @@ async function run() {
       ExecuteTool: () => { throw new Error('tool crashed at runtime') },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     const result = await agent.run('크래시 유발')
 
     assert(state.get('turnState').tag === PHASE.IDLE, 'tool error: turnState idle')
@@ -603,7 +604,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ interpret, ST, state })
+    const agent = makeTestAgent({ interpret, ST, state })
     await agent.run('test')
 
     assert(capturedFormat != null, 'responseFormat: captured')
@@ -623,7 +624,7 @@ async function run() {
       },
     })
 
-    const agent = new Agent({ responseFormatMode: 'none', interpret, ST })
+    const agent = makeTestAgent({ responseFormatMode: 'none', interpret, ST })
     await runFreeWithStateT(interpret, ST)(agent.planner.program('test'))({})
 
     assert(capturedFormat === undefined, 'responseFormat none: no format sent')

@@ -1,6 +1,6 @@
 import { runFreeWithStateT } from '../lib/runner.js'
 import { forkTask, fireAndForget } from '../lib/task.js'
-import { RESULT, ERROR_KIND, TurnState, TurnOutcome, TurnError, STATE_PATH } from './policies.js'
+import { RESULT, ERROR_KIND, TurnOutcome, TurnError, STATE_PATH } from './policies.js'
 import { getByPath } from '../lib/path.js'
 import { applyFinalState } from './state-commit.js'
 
@@ -39,12 +39,8 @@ class Executor {
     // "같은 input 의 과거 턴" vs "이번 pending 이 persisted" 를 구분 가능 (TUI dedup).
     this.state.set(STATE_PATH.PENDING_INPUT, { input, ts: Date.now() })
     // TURN_STATE 는 turnGateRuntime 이 authoritative. bridge 가 state.set 수행.
-    if (this.turnGateRuntime) {
-      this.turnGateRuntime.submit({ type: 'chat', payload: { input } })
-    } else {
-      // runtime 미주입 환경 (단위 테스트 등) — legacy 직접 set 으로 fallback.
-      this.state.set(STATE_PATH.TURN_STATE, TurnState.working(input))
-    }
+    // runtime 은 production 에서 session 이 주입, 테스트에서 makeTestAgent 가 주입.
+    this.turnGateRuntime.submit({ type: 'chat', payload: { input } })
   }
 
   async recallMemories(input) {
@@ -74,14 +70,9 @@ class Executor {
     // TURN_STATE 는 runtime 이 authoritative. applyFinalState 의 MANAGED_PATHS 에서도 제외됨.
     // bridge 가 마지막에 state.set(TURN_STATE, idle) 수행 — hook 순서 계약 (lastTurn,
     // history 등 다른 path 가 이미 커밋된 뒤 idle hook 발동) 유지.
-    if (this.turnGateRuntime) {
-      const lastTurn = getByPath(finalState, 'lastTurn')
-      const type = lastTurn?.tag === RESULT.SUCCESS ? 'complete' : 'failure'
-      this.turnGateRuntime.submit({ type })
-    } else {
-      // runtime 미주입 환경 — legacy 직접 set 으로 fallback.
-      this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
-    }
+    const lastTurn = getByPath(finalState, 'lastTurn')
+    const type = lastTurn?.tag === RESULT.SUCCESS ? 'complete' : 'failure'
+    this.turnGateRuntime.submit({ type })
     this.persist()
   }
 
@@ -122,12 +113,7 @@ class Executor {
     this.state.set(STATE_PATH.LAST_TURN, TurnOutcome.failure(input, error, null))
     // TURN_STATE 는 turnGateRuntime 이 authoritative. bridge 가 마지막에 state.set 수행
     // — hook 순서 계약 (lastTurn 등이 이미 커밋된 뒤 idle hook 발동) 유지.
-    if (this.turnGateRuntime) {
-      this.turnGateRuntime.submit({ type: aborted ? 'abort_complete' : 'failure' })
-    } else {
-      // runtime 미주입 환경 — legacy 직접 set 으로 fallback.
-      this.state.set(STATE_PATH.TURN_STATE, TurnState.idle())
-    }
+    this.turnGateRuntime.submit({ type: aborted ? 'abort_complete' : 'failure' })
     this.persist()
   }
 }

@@ -8,6 +8,7 @@ import { CompactionActor, compactionActorR, SUMMARY_MARKER, summaryEntry } from 
 import { PersistenceActor, persistenceActorR } from '@presence/infra/infra/actors/persistence-actor.js'
 import { forkTask } from '@presence/core/lib/task.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../../../test/lib/test-agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -469,7 +470,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: memActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { memoryActor: memActor } })
     await agent.run('hello')
 
     assert(state.get('turn') === 1, 'integration recall: turn incremented')
@@ -503,7 +504,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'still ok' }),
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: failActor, logger: mockLogger } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { memoryActor: failActor, logger: mockLogger } })
     const result = await agent.run('test')
 
     assert(result === 'still ok', 'integration recall fail: turn completes')
@@ -535,7 +536,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'result' }),
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: mockActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { memoryActor: mockActor } })
     await agent.run('test', { source: 'user' })
 
     await delay(50)
@@ -567,7 +568,7 @@ async function run() {
       AskLLM: () => '<<<invalid json>>>',
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { memoryActor: mockActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { memoryActor: mockActor } })
     await agent.run('fail-test')
     await delay(50)
 
@@ -590,7 +591,7 @@ async function run() {
       AskLLM: () => JSON.stringify({ type: 'direct_response', message: 'ok' }),
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { persistenceActor: pActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { persistenceActor: pActor } })
     await agent.run('persist-test')
 
     await delay(80)
@@ -613,7 +614,7 @@ async function run() {
       AskLLM: () => { throw new Error('crash') },
     })
 
-    const agent = new Agent({ interpret, ST, state, actors: { persistenceActor: pActor } })
+    const agent = makeTestAgent({ interpret, ST, state, actors: { persistenceActor: pActor } })
     try {
       await agent.run('crash-test')
     } catch (_) {}

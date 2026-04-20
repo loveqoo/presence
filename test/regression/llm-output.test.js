@@ -7,6 +7,7 @@ import { initI18n } from '@presence/infra/i18n'
 initI18n('ko')
 import { PHASE, RESULT, TurnState } from '@presence/core/core/policies.js'
 import { Agent } from '@presence/core/core/agent.js'
+import { makeTestAgent } from '../lib/test-agent.js'
 import { createTestInterpreter } from '@presence/core/interpreter/test.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
@@ -32,7 +33,7 @@ async function run() {
     const { interpret, ST } = createTestInterpreter({
       AskLLM: () => typeof llmResponse === 'string' ? llmResponse : JSON.stringify(llmResponse),
     })
-    const agent = new Agent({ resolveTools: () => toolRegistry.list(), interpret, ST, state })
+    const agent = makeTestAgent({ resolveTools: () => toolRegistry.list(), interpret, ST, state })
     await agent.run('test')
     const lt = state.get('lastTurn')
     assert(state.get('turnState').tag === PHASE.IDLE, `${label}: turnState idle`)
