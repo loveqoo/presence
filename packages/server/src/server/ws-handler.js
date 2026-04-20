@@ -151,6 +151,8 @@ class WsHandler {
       session_id: sessionId,
       state: entry.session.state.snapshot(),
       stateVersion: entry.session.turnGateRuntime?.stateVersion ?? null,
+      // Effective workingDir — TUI 가 매 join 시 최신값 수신 (stale cache 회피).
+      workingDir: entry.session.workingDir,
     }))
   }
 }

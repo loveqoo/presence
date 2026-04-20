@@ -113,7 +113,10 @@ class MirrorState extends State {
 
   async handleClose(code) {
     if (this.stopped) return
-    if (code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED || code === WS_CLOSE.ORIGIN_NOT_ALLOWED) {
+    if (code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED
+      || code === WS_CLOSE.ORIGIN_NOT_ALLOWED
+      || code === WS_CLOSE.WORKING_DIR_INVALID) {
+      // 4002/4003/4004 — 재연결해도 같은 거부가 반복되므로 영구 실패로 처리.
       this.stopped = true
       if (this.onUnrecoverable) this.onUnrecoverable(code)
       return
