@@ -202,6 +202,49 @@ async function run() {
       await session.shutdown()
     }
 
+    // SD6. workingDir 해결 — 명시 opts 가 우선
+    {
+      const workDir = join(tmpDir, 'sd6-work')
+      // allowedDirs 에 workDir 포함되도록 임시 확장
+      const origAllowed = userContext.config.tools.allowedDirs
+      userContext.config.tools.allowedDirs = [tmpDir]   // tmpDir 포함 → workDir 도 포함
+      const session = Session.create(userContext, { type: 'user', workingDir: workDir })
+      assert(session.workingDir === workDir, 'SD6: 명시 workingDir 반영')
+      assert(session.pendingBackfill === false, 'SD6: 명시 시 pendingBackfill=false')
+      await session.shutdown()
+      userContext.config.tools.allowedDirs = origAllowed
+    }
+
+    // SD7. workingDir 미지정 → allowedDirs[0] fallback + pendingBackfill=true
+    {
+      const session = Session.create(userContext, { type: 'user' })
+      assert(session.workingDir === userContext.config.tools.allowedDirs[0],
+        `SD7: fallback allowedDirs[0] (got ${session.workingDir})`)
+      assert(session.pendingBackfill === true, 'SD7: pendingBackfill=true')
+      await session.shutdown()
+    }
+
+    // SD8. workingDir 이 allowedDirs 밖 → throw
+    {
+      let thrown = null
+      try {
+        Session.create(userContext, { type: 'user', workingDir: '/etc' })
+      } catch (e) { thrown = e }
+      assert(thrown && /outside allowedDirs/.test(thrown.message), 'SD8: 경계 밖 workingDir throw')
+    }
+
+    // SD9. allowedDirs 비어있으면 workingDir 결정 불가 → throw
+    {
+      const origAllowed = userContext.config.tools.allowedDirs
+      userContext.config.tools.allowedDirs = []
+      let thrown = null
+      try {
+        Session.create(userContext, { type: 'user' })
+      } catch (e) { thrown = e }
+      assert(thrown && /not resolvable/.test(thrown.message), 'SD9: 빈 allowedDirs 시 throw')
+      userContext.config.tools.allowedDirs = origAllowed
+    }
+
   } finally {
     await userContext.shutdown()
     await mockLLM.close()

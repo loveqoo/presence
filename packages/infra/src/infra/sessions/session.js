@@ -3,6 +3,28 @@
 // 직접 인스턴스화하지 않음 — Session.create() 팩토리 사용.
 // =============================================================================
 
+import { isPathAllowed } from '../tools/local-tools.js'
+
+// workingDir 결정 (생성 시점):
+// 1. opts.workingDir — POST /sessions body 또는 명시 생성
+// 2. userContext.config.tools.allowedDirs[0] — fallback. pendingBackfill 플래그 세움
+// 3. 둘 다 없으면 throw (process.cwd() fallback 없음)
+// 경계 검증: workingDir 은 반드시 allowedDirs 안쪽. 위반 시 throw.
+const resolveWorkingDir = (userContext, opts) => {
+  const allowedDirs = userContext.config.tools?.allowedDirs || []
+  if (allowedDirs.length === 0) {
+    throw new Error('Session: workingDir not resolvable (config.tools.allowedDirs is empty)')
+  }
+  const explicit = opts.workingDir
+  if (explicit) {
+    if (!isPathAllowed(explicit, allowedDirs)) {
+      throw new Error(`Session: workingDir "${explicit}" outside allowedDirs [${allowedDirs.join(', ')}]`)
+    }
+    return { workingDir: explicit, pendingBackfill: false }
+  }
+  return { workingDir: allowedDirs[0], pendingBackfill: true }
+}
+
 class Session {
 
   // --- 생성 알고리즘 ---
@@ -11,6 +33,11 @@ class Session {
     this.userContext = userContext
     this.userId = opts.userId || 'default'
     this.logger = userContext.logger
+    // workingDir: 세션 실행 컨텍스트의 기준점. tool, prompt, API 응답의 단일 진실.
+    const resolved = resolveWorkingDir(userContext, opts)
+    this.workingDir = resolved.workingDir
+    this.pendingBackfill = resolved.pendingBackfill
+    this.logger.info(`Session workingDir=${this.workingDir}${this.pendingBackfill ? ' (pending backfill)' : ''}`)
     this.initState()
     this.initTurnControl()
     this.initFsm()

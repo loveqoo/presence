@@ -19,11 +19,11 @@ const createSessionManager = (userContext, opts = {}) => {
   const sessions = new Map()  // id → { id, type, owner, session }
 
   const create = (params = {}) => {
-    const { id, type = SESSION_TYPE.USER, owner = null, userId, persistenceCwd, onScheduledJobDone, idleTimeoutMs, onIdle } = params
+    const { id, type = SESSION_TYPE.USER, owner = null, userId, persistenceCwd, workingDir, onScheduledJobDone, idleTimeoutMs, onIdle } = params
     const sessionId = id ?? `user-${randomUUID()}`
     if (sessions.has(sessionId)) return sessions.get(sessionId)
 
-    const session = Session.create(userContext, { persistenceCwd, type, userId, onScheduledJobDone, idleTimeoutMs, onIdle })
+    const session = Session.create(userContext, { persistenceCwd, workingDir, type, userId, onScheduledJobDone, idleTimeoutMs, onIdle })
     const entry = Object.freeze({ id: sessionId, type, owner, session })
     sessions.set(sessionId, entry)
     onSessionCreated?.(entry)
