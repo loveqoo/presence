@@ -1,8 +1,8 @@
 # FSM Design — Transition Algebra for Presence
 
-**Status**: Design. Phase 1 PoC 전 단계.
+**Status**: Phase 1~13 구현 완료 (2026-04-20). 실 LLM 환경 검증 통과.
 **Owner**: Presence core.
-**관련 문서**: `docs/archive/fun-fp-js-transition-algebra-commission.md` (외부 의뢰 거절 기록 — scope 판단 근거), `docs/design-philosophy.md` (북극성).
+**관련 문서**: `docs/archive/fun-fp-js-transition-algebra-commission.md` (외부 의뢰 거절 기록 — scope 판단 근거), `docs/design-philosophy.md` (북극성), `docs/completed.md#phase-g` (구현 이력).
 
 ---
 
@@ -561,6 +561,73 @@ export const sessionFSM = product({
 
 ---
 
+## 12. 구현 결과 — Phase 1~13 (2026-04-18 ~ 04-20)
+
+본 설계 문서는 원본 계획을 보존. 실제 구현에서는 다음 결정을 추가·수정했으며,
+전체 이력은 [`docs/completed.md#phase-g`](../completed.md) 참고.
+
+### 구현된 FSM
+
+- `turnGateFSM` (`packages/infra/src/infra/fsm/turn-gate-fsm.js`) — `TurnState` ADT
+  (`idle / working / cancelling`). working+abort_complete → idle 방어 경로 추가.
+- `approveFSM` — `idle / awaitingApproval(description)`. single-pending 전제.
+- `delegateFSM` — `idle / delegating({count})`. 구조 일관성 우선 (당장 실익 낮아도
+  turnGate / approve 와 동일 interface).
+- `sessionFSM = product({turnGate, approve, delegate})` — Phase 8 합성. `connection` 은
+  보류 (현재는 stateVersion 기반 refresh 로 충분).
+
+### Runtime + EventBus 실제 동작
+
+- **Commit-atomic / Publication-best-effort-isolated**: Phase A 에서 state 를 원자 커밋,
+  Phase B 에서 event publish (subscriber 하나의 실패가 다른 subscriber 를 막지 않음).
+- **stateVersion** = sortable monotonic UUID (wall-clock 기반 + 시퀀스). Clock
+  rollback 방어 (`versionGen` 분리). 모든 전이가 하나의 단조증가 버전으로 추적.
+- **Bridge 패턴** — FSM state → `reactiveState` projection. `childKey` 옵션으로
+  product state 에서 자기 축만 추출. 3 개 bridge (turn-gate / approve / delegate) 가
+  `sessionRuntime` 을 공유.
+- **Single bus + exact topic subscribe** — bridge 간 간섭 차단. wildcard 구독 금지 결정.
+
+### 외부 refresh 계약 (Phase 5)
+
+- WS broadcast 에 `stateVersion` 포함. MirrorState 가 `lastStateVersion` 보관,
+  stale 감지 시 `requestRefresh` (fetch 후 재동기화).
+- HTTP reject 응답에 `{stateVersion, snapshot}` 동봉 → 클라이언트 즉시 reconcile.
+- session_id 필터 — MirrorState 가 자기 세션 이벤트만 처리.
+
+### 영속화 (Phase 10)
+
+- 세션 snapshot 에 `_fsmVersions: { turnGate, approve, delegate }` 저장.
+- `runtime.restoreStateVersion(version)` — 재시작 시 이전 마지막 stateVersion 이후로만
+  증가하도록 보장 (재시작 후 stale client 도 정상 reconcile).
+
+### 운영 경로 통일 (Phase 11~12)
+
+- `executor.beginLifecycle / afterTurn / recover` 의 legacy (non-FSM) 경로 삭제.
+  FSM runtime 이 유일한 경로.
+- `delegate-actor` 가 `delegateRuntime.submit / resolve` 로 실제 FSM 과 연결.
+- 테스트도 `makeTestAgent` / `makeTestExecutor` helper 로 runtime 경로 통일 — test-only
+  fallback 금지.
+
+### 변경된 설계 결정
+
+- **D13 재확장**: 원안은 "Phase 1 = turnGate 만". 실제로는 Phase 6~8 에서 approve /
+  delegate / session composition 까지 완결. Phase 3 로 예정된 "추가 FSM + SessionFSM
+  합성" 이 실제로는 Phase 6~8 에서 실행됨.
+- **R1 정책 확정** (`stepProduct`): 여러 FSM 이 동시에 판단할 때 **명시적 거부가 수락을
+  이긴다**. no-match 는 non-fatal (다른 axis 의 수락 허용), explicit reject 만 aggregation
+  에서 승리.
+- **connection FSM 보류**: 현재는 MirrorState stateVersion 기반 refresh 로 충분.
+  disconnected / reconnecting 은 TUI 컴포넌트 레벨에서 처리.
+
+### 검증
+
+- 단위/통합 pass: **3130** (시작 2654 → +476 assertion).
+- 복잡도 위반 정리: Params 초과 4 파일 해소 (Phase 13a). 남은 9 위반은 의도된 구조 인정.
+- 라이브 LLM (qwen3.5-35b): `tui-live-focus.test.js` 18/18, `tui-live.test.js` 15/15.
+  FSM 경로 (pending/cancel/clear/sessions) 실 환경에서 정상 동작 확인.
+
+---
+
 ## Changelog
 
 - 2026-04-18: 초안. fun-fp-js 유지자 피드백 (scope + precision 5건) 반영. Presence 자체 구현 확정. Phase 1 scope = sessionFSM.
@@ -573,3 +640,4 @@ export const sessionFSM = product({
   - D7: 주 API = product. parallel 은 2항 alias
   - D12: empty product = identity
   - §5 INV-FSM-ORDER 불변식 격상
+- 2026-04-20: §12 구현 결과 추가 (Phase 1~13 완결, 라이브 LLM 검증 통과). D13 재확장, R1 정책 확정, connection FSM 보류 명시.

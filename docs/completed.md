@@ -412,3 +412,94 @@ e2e TE24~29), live (qwen3.5-35b) tui-live-focus 18 통과.
 - `spec-guardian` / `ux-guardian` / `user-guide-writer` — 각 영역 문서 소유권 가드
 - 문서 소유권 훅 (`check-doc-ownership.sh`) — docs/{specs,ux,guide} 를 가디언에게만 위임
 - `codex-rescue` 서브에이전트 — 디버깅/원인분석 Codex 위임
+
+---
+
+## Phase G: FSM 아키텍처 전면 구축 (2026-04-18 ~ 04-20)
+
+배경: Phase F 메시지 아키텍처 재설계(FP-61) 에서 이중 출처 문제를 pure helpers 로 막았지만,
+turnState 전이 규칙이 여전히 `turn-controller.js` / `executor.js` / `actors/*` 에 흩어짐.
+멀티 UI (TUI + WUI + A2A) 확장 시 race / 거부 규칙이 재발할 위험. **상태 전이를
+first-class value 로 표현**하는 FSM 대수를 도입해 근본 해소.
+
+설계 근거: [`docs/design/fsm.md`](design/fsm.md) (Transition Algebra 내부 설계)
+
+총 13 Phase, 35+ 커밋. 2654 → 3130 pass (+476 assertion).
+
+### G-1. 대수 정립 — Phase 1~2
+
+- **Phase 1** (Transition Algebra core): `Transition` ADT + `FSM` 타입 + `step` 순수 함수 +
+  `product` 조합자 + laws 검증 + `turnGateFSM` 최초 정의. identity/determinism/first-match/
+  rejection-stability/product-identity/associativity 법칙 테스트.
+- **Phase 2** (Runtime + EventBus): `FsmEventBus` (topic fanout, best-effort delivery) +
+  `FSMRuntime` (commit-atomic / publication-best-effort-isolated semantics) 구축. 대수는
+  순수, runtime 이 효과/병행성 담당으로 책임 분리.
+- **R1 정책 확정** (`stepProduct`): 여러 FSM 이 동시에 판단할 때 **명시적 거부가 수락을 이긴다**.
+  no-match 는 non-fatal, explicit reject 만 aggregation 에서 승리.
+
+### G-2. 실제 경로 교체 — Phase 4~5
+
+- **Phase 4** (turnGate swap, single-writer): `TurnState` ADT 전환 →
+  `turn-gate-bridge` (FSM → reactiveState projection) → `executor.beginLifecycle/afterTurn/
+  recover` 를 runtime 병행 호출 → **완전 single-writer**. `turnController` 가 더 이상
+  `turnState` 를 직접 set 하지 않음.
+- **Phase 5** (외부 refresh 계약): `versionGen` 분리 + **sortable monotonic stateVersion**
+  (clock rollback 방어) → WS broadcast 에 stateVersion 포함 → MirrorState 가 stale
+  감지 시 `requestRefresh` → HTTP 응답에 stateVersion 포함. 멀티 클라이언트가 서버를 진실의
+  원천으로 받아들이는 프로토콜 완성.
+
+### G-3. 추가 FSM + 합성 — Phase 6~8
+
+- **Phase 6** (approveFSM): `idle / awaitingApproval(description)` 2 상태 +
+  `request_approval / approve / reject / cancel_approval` 4 command. `approve-bridge` 가
+  Promise resolve preservation (기존 onApprove 계약 유지). 단일 bus + exact topic 구독으로
+  간섭 차단.
+- **Phase 7** (delegateFSM): `idle / delegating({count})` 2 상태. 당장의 실익은 낮지만
+  **구조 일관성** (turnGate / approve 와 동일 interface) 을 우선해서 도입. 이후 SessionFSM
+  합성 시 비대칭 폭발 방지.
+- **Phase 8** (SessionFSM 합성): `product({turnGate, approve, delegate})` 로 직교 축 통합.
+  단일 `sessionRuntime` 이 세 FSM 을 관리 + 단일 `stateVersion` 이 모든 전이 추적. Bridge 는
+  `childKey` 옵션으로 product state 에서 자기 축만 추출.
+
+### G-4. 운영 경로 확립 — Phase 9~12
+
+- **Phase 9** (HTTP reject 응답에 snapshot 동봉): reject 된 명령의 클라이언트가 즉시
+  reconcile 할 수 있게 `{stateVersion, snapshot}` 포함 → round-trip 감축.
+- **Phase 10** (stateVersion 영속화): 세션 snapshot 에 `_fsmVersions` 저장 +
+  `runtime.restoreStateVersion` → 재시작 연속성. Phase 4 Debt 해소.
+- **Phase 11** (executor fallback 제거): `executor.beginLifecycle/afterTurn/recover` 의
+  legacy 경로 삭제. FSM 경로가 유일. `makeTestAgent` / `makeTestExecutor` helper 도입으로
+  테스트도 runtime 경로 통일.
+- **Phase 12** (sessionRuntime 단일화 + delegate-actor 실제 연결): 세 bridge 가
+  `sessionRuntime` 공유. `delegate-actor` 가 `delegateRuntime.submit` / `resolve` 로 실제
+  FSM 과 연결 (Phase 7 의 껍데기에 내용 채움).
+
+### G-5. 정리 + 검증 — Phase 13~14
+
+- **Phase 13a** (복잡도 정리 — Params 초과 4 파일): `embedding/provider.js`,
+  `jobs/job-store.js`, `jobs/job-tools.js`, `sessions/internal/idle-monitor.js` 의
+  constructor 를 `(opts)` 단일 객체로 통일. Params 6~7 → 1.
+- **Phase 13b** (수용 가능한 구조): 남은 9 복잡도 위반 (op-handler, session, delegation,
+  scheduler-actor, auth/*, tool-registry, jobs/*) 은 재설계 수반 → **의도된 구조** 로
+  인정하고 skip.
+- **Phase 14** (라이브 LLM 검증): 임시 유저 자동 생성/삭제 패턴을 `live-helpers.js` 에
+  통합. `tui-live-focus.test.js` 18/18, `tui-live.test.js` 15/15 통과. FSM 경로
+  (pending/cancel/clear/sessions) 실 LLM 환경에서 검증.
+
+### 산출물
+
+주요 파일:
+- `packages/core/src/core/fsm/` — `fsm.js`, `runtime.js`, `event-bus.js`, `product.js`,
+  `laws.js`
+- `packages/infra/src/infra/fsm/` — `turn-gate-fsm.js`, `approve-fsm.js`,
+  `delegate-fsm.js`, `session-fsm.js`, 3 개 bridge
+- `packages/infra/src/infra/sessions/internal/session-fsm-init.js` — sessionRuntime 배선
+- `test/lib/test-agent.js` — `makeTestAgent` / `makeTestExecutor` 공용 helper
+
+설계 원칙 확립:
+- **Command-Event 분리** — Command (의도, reject 가능) vs Event (발생 사실, unicast)
+- **Commit-atomic / Publication-best-effort-isolated** — state 는 원자 커밋, event 는
+  subscriber 하나 실패가 다른 subscriber 를 막지 않음
+- **R1 aggregation** — 명시적 거부가 수락을 이긴다. no-match 는 non-fatal
+- **구조 일관성 우선** — FSM 전이 규칙이 데이터. 실익이 적어도 동일 인터페이스 유지로
+  합성 비대칭 방지
