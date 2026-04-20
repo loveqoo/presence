@@ -281,6 +281,37 @@ async function run() {
         `S20c: 에러 메시지 (got ${JSON.stringify(res.body)})`)
     }
 
+    // S20d. WS join 에 cwd 포함 → pendingBackfill=true 세션 덮어씀
+    {
+      const newId = `backfill-${Date.now()}`
+      const { allowedDirs } = ctx.userContext.config.tools
+      const createRes = await post('/api/sessions', { id: newId, type: 'user' })
+      assert(createRes.status === 201, 'S20d setup: 생성 201')
+      assert(createRes.body.workingDir === allowedDirs[0], 'S20d setup: 초기 allowedDirs[0]')
+
+      const tuiCwd = allowedDirs[0]
+      const { ws, messages } = await connectWS(port, { token, sessionId: newId, cwd: tuiCwd })
+      await waitFor(() => messages.some(m => m.type === 'init'), { timeout: 3000 })
+      const init = messages.find(m => m.type === 'init')
+      assert(init?.workingDir === tuiCwd, `S20d: init 에 TUI cwd 반영 (got ${init?.workingDir})`)
+      ws?.close()
+      await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
+    }
+
+    // S20e. WS join cwd 가 allowedDirs 밖 → close(4004)
+    {
+      // connectWS 는 open 시 resolve 하므로 close 를 별도로 기다려야 함
+      const WebSocketCtor = (await import('ws')).default
+      const ws = new WebSocketCtor(`ws://127.0.0.1:${port}`, { headers: { Authorization: `Bearer ${token}` } })
+      const closePromise = new Promise((resolve) => {
+        ws.on('close', (code) => resolve(code))
+        ws.on('open', () => ws.send(JSON.stringify({ type: 'join', session_id: sid, cwd: '/etc' })))
+        setTimeout(() => resolve('timeout'), 3000)
+      })
+      const closeCode = await closePromise
+      assert(closeCode === 4004, `S20e: allowedDirs 밖 cwd → close 4004 (got ${closeCode})`)
+    }
+
     // S21. INV-RJT-SNAPSHOT — chat 500 응답은 snapshot + stateVersion 동반
     {
       const errCtx = await createTestServer(() => { throw new Error('llm boom') })

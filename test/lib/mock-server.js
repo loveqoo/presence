@@ -173,15 +173,19 @@ const request = (port, method, path, body, { token, cookie } = {}) =>
 // WebSocket 헬퍼 (토큰 첨부)
 // ---------------------------------------------------------------------------
 
-const connectWS = (port, { token, sessionId } = {}) =>
+const connectWS = (port, { token, sessionId, cwd } = {}) =>
   new Promise((resolve, reject) => {
     const headers = token ? { Authorization: `Bearer ${token}` } : {}
     const ws = new WebSocket(`ws://127.0.0.1:${port}`, { headers })
     const messages = []
     ws.on('message', (d) => messages.push(JSON.parse(d.toString())))
     ws.on('open', () => {
-      // sessionId가 지정되면 join 메시지 전송 → init 수신
-      if (sessionId) ws.send(JSON.stringify({ type: 'join', session_id: sessionId }))
+      // sessionId가 지정되면 join 메시지 전송 → init 수신. cwd 는 옵션.
+      if (sessionId) {
+        const joinMsg = { type: 'join', session_id: sessionId }
+        if (cwd) joinMsg.cwd = cwd
+        ws.send(JSON.stringify(joinMsg))
+      }
       resolve({ ws, messages })
     })
     ws.on('error', reject)
