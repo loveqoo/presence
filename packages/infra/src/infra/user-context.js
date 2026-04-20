@@ -10,7 +10,7 @@ import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
-import { loadUserMerged } from './config-loader.js'
+import { loadUserMerged, ensureAllowedDirs } from './config-loader.js'
 import { initI18n, t } from '../i18n/index.js'
 import { createSessionManager } from './sessions/session-manager.js'
 
@@ -47,10 +47,16 @@ class UserContext {
     const userContext = new UserContext()
 
     // --- Config + logger ---
-    userContext.config = configOverride || loadUserMerged(username)
+    // configOverride 는 plain object 가능 → Config 인스턴스 보장
+    userContext.config = configOverride
+      ? (configOverride instanceof Config ? configOverride : new Config(configOverride))
+      : loadUserMerged(username)
     initI18n(userContext.config.locale)
     userContext.logger = createLogger().logger
     if (!userContext.config.llm?.apiKey) userContext.logger.warn('[config] llm.apiKey is not set — LLM calls will fail')
+
+    // --- allowedDirs migration (process.cwd() 의존 제거) ---
+    userContext.config = ensureAllowedDirs(userContext.config, { username, logger: userContext.logger })
 
     // --- Persona ---
     userContext.persona = createPersona()
@@ -68,7 +74,7 @@ class UserContext {
 
     // --- Tools (local + MCP) ---
     userContext.toolRegistry = createToolRegistry()
-    const localTools = createLocalTools({ allowedDirs: userContext.config.tools?.allowedDirs || [process.cwd()] })
+    const localTools = createLocalTools({ allowedDirs: userContext.config.tools.allowedDirs })
     for (const tool of localTools) userContext.toolRegistry.register(tool)
     const { mcpConnections } = await initMcpIntegration(userContext.config, userContext.logger, userContext.toolRegistry)
     userContext.mcpConnections = mcpConnections

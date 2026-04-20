@@ -1,9 +1,9 @@
 import { Config } from '@presence/infra/infra/config.js'
-import { fromFile, loadUserMerged } from '@presence/infra/infra/config-loader.js'
+import { fromFile, loadUserMerged, ensureAllowedDirs } from '@presence/infra/infra/config-loader.js'
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
 const DEFAULTS = Config.DEFAULTS
-import { writeFileSync, mkdirSync, rmSync } from 'fs'
+import { writeFileSync, readFileSync, mkdirSync, existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { assert, summary } from '../../../test/lib/assert.js'
@@ -114,6 +114,53 @@ async function run() {
     assert(config.maxIterations === 5, 'merge chain: server.json maxIterations preserved')
     assert(config.locale === 'en', 'merge chain: user overrides locale')
     assert(config.scheduler.enabled === true, 'merge chain: defaults still apply')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // --- ensureAllowedDirs migration (workingDir 도입) ---
+
+  const silentLogger = { info: () => {}, warn: () => {}, error: () => {} }
+
+  {
+    // allowedDirs 이미 있는 config → 변경 없음
+    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: ['/already/set'] } })
+    const result = ensureAllowedDirs(config, { username: 'test', logger: silentLogger, basePath: '/nonexistent' })
+    assert(result.tools.allowedDirs[0] === '/already/set', 'ensureAllowedDirs: 기존 값 보존')
+  }
+
+  {
+    // allowedDirs 없음 + username 없음 → 인메모리 migration (파일 쓰지 않음)
+    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: [] } })
+    const result = ensureAllowedDirs(config, { username: null, logger: silentLogger })
+    assert(result.tools.allowedDirs.length === 1, 'ensureAllowedDirs: anonymous 시 인메모리 설정')
+    assert(result.tools.allowedDirs[0] === process.cwd(), 'ensureAllowedDirs: process.cwd() 반영')
+  }
+
+  {
+    // allowedDirs 없음 + username 있음 → 파일 write + 재로드
+    const dir = makeTmpDir('migrate-allowed-dirs')
+    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: [] } })
+    const result = ensureAllowedDirs(config, { username: 'alice', logger: silentLogger, basePath: dir })
+    const configPath = join(dir, 'users', 'alice', 'config.json')
+    assert(existsSync(configPath), 'ensureAllowedDirs: 파일 생성')
+    const saved = JSON.parse(readFileSync(configPath, 'utf-8'))
+    assert(Array.isArray(saved.tools?.allowedDirs) && saved.tools.allowedDirs.length === 1,
+      'ensureAllowedDirs: 파일에 allowedDirs 저장')
+    assert(saved.tools.allowedDirs[0] === process.cwd(), 'ensureAllowedDirs: 파일에 process.cwd() 기록')
+    assert(Array.isArray(result.tools.allowedDirs) && result.tools.allowedDirs[0] === process.cwd(),
+      'ensureAllowedDirs: 재로드 후 Config 반영')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  {
+    // 기존 user config 유지 + allowedDirs 만 추가
+    const dir = makeTmpDir('migrate-preserve')
+    writeJson(dir, 'users/bob/config.json', { llm: { model: 'existing' } })
+    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: [] } })
+    ensureAllowedDirs(config, { username: 'bob', logger: silentLogger, basePath: dir })
+    const saved = JSON.parse(readFileSync(join(dir, 'users', 'bob', 'config.json'), 'utf-8'))
+    assert(saved.llm?.model === 'existing', 'ensureAllowedDirs: 기존 키 보존')
+    assert(saved.tools.allowedDirs[0] === process.cwd(), 'ensureAllowedDirs: allowedDirs 만 추가')
     rmSync(dir, { recursive: true, force: true })
   }
 

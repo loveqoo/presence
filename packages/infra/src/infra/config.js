@@ -47,6 +47,9 @@ class Config {
       maxContextChars: z.number().nullable(),
       reservedOutputChars: z.number().nullable(),
     }),
+    tools: z.object({
+      allowedDirs: z.array(z.string()).default([]),
+    }).default({ allowedDirs: [] }),
   })
 
   // --- Semigroup: 2단계 deep merge ---
@@ -103,6 +106,7 @@ class Config {
       maxContextChars: null,
       reservedOutputChars: null,
     },
+    tools: { allowedDirs: [] },
   })
 
   constructor(data) { Object.assign(this, data) }
