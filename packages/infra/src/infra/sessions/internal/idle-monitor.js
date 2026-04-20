@@ -7,7 +7,8 @@ import { PHASE, STATE_PATH } from '@presence/core/core/policies.js'
 // =============================================================================
 
 class IdleMonitor {
-  constructor(state, { eventActor, delegateActor, budgetActor, resetTrace, idleTimeoutMs, onIdle }) {
+  constructor(state, opts) {
+    const { eventActor, delegateActor, budgetActor, resetTrace, idleTimeoutMs, onIdle } = opts
     this.state = state
     this.eventActor = eventActor
     this.delegateActor = delegateActor

@@ -79,7 +79,8 @@ class JobToolFactory {
         },
         required: ['name', 'cron', 'prompt'],
       },
-      handler: ({ name, cron, prompt, max_retries: maxRetries = 3, allowed_tools: allowedTools = [] }) => {
+      handler: (args) => {
+        const { name, cron, prompt, max_retries: maxRetries = 3, allowed_tools: allowedTools = [] } = args
         if (!validateCron(cron)) return `오류: 유효하지 않은 cron 표현식: "${cron}"`
         const nextRun = calcNextRun(cron)
         const job = this.#store.createJob({ name, prompt, cron, maxRetries, allowedTools, nextRun })
@@ -118,7 +119,8 @@ class JobToolFactory {
         },
         required: ['id'],
       },
-      handler: ({ id, name, cron, prompt, enabled, max_retries: maxRetries, allowed_tools: allowedTools }) => {
+      handler: (args) => {
+        const { id, name, cron, prompt, enabled, max_retries: maxRetries, allowed_tools: allowedTools } = args
         if (!this.#store.getJob(id)) return `오류: Job을 찾을 수 없음: ${id}`
         if (cron !== undefined && !validateCron(cron)) return `오류: 유효하지 않은 cron 표현식: "${cron}"`
 

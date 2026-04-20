@@ -8,7 +8,8 @@ class EmbeddingProvider {
   #model
   #timeoutMs
 
-  constructor({ fetchFn, baseUrl, defaultBaseUrl, apiKey, model, defaultModel, timeoutMs }) {
+  constructor(opts) {
+    const { fetchFn, baseUrl, defaultBaseUrl, apiKey, model, defaultModel, timeoutMs } = opts
     this.#fetchFn = fetchFn || globalThis.fetch
     this.#apiUrl = (baseUrl || defaultBaseUrl).replace(/\/+$/, '')
     this.#apiKey = apiKey

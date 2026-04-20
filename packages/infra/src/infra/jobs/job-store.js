@@ -56,7 +56,8 @@ class JobStore {
 
   // --- Job CRUD ---
 
-  createJob({ name, prompt, cron, maxRetries = 3, allowedTools = [], nextRun = null }) {
+  createJob(opts) {
+    const { name, prompt, cron, maxRetries = 3, allowedTools = [], nextRun = null } = opts
     const now = Date.now()
     const id = randomUUID()
     this.#db.prepare(`
