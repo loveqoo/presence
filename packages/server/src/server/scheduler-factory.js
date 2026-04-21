@@ -10,8 +10,13 @@ import { fireAndForget } from '@presence/core/lib/task.js'
 const createServerScheduler = (userContext) => {
   let scheduler
   // SCHEDULED session 의 workingDir — WS join 이 없어 backfill 대상 아님.
-  // jobEvent.workingDir 있으면 사용, 없으면 user config 의 allowedDirs[0] 명시 전달
-  // (명시 전달해야 Session 생성 시 pendingBackfill=false 로 확정됨).
+  // user config 의 allowedDirs[0] 을 명시 전달해 Session 에서 pendingBackfill=false 로 확정.
+  //
+  // 의도적 단순화: job 별 workingDir 옵션은 제공하지 않는다. 이유:
+  //  - 추적 난이도: job 마다 다른 디렉토리면 사용자가 "이 job 이 어디서 실행되는지" 파악 어려움
+  //  - allowedDirs 내부의 민감 경로 지정 위험 (경계 검증은 외곽만 막음)
+  //  - capability 모델 (docs/design/platform.md §4-3) 도입 전 파편 정책 쌓지 않음
+  // 장래에 capability 가 통합되면 그 축에서 job 의 실행 환경을 표현한다.
   const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   scheduler = createSchedulerActor({
     store: userContext.jobStore,
