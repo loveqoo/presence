@@ -3,11 +3,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { UserContext } from '@presence/infra/infra/user-context.js'
-import { Session } from '@presence/infra/infra/sessions/index.js'
+import { Session as SessionModule } from '@presence/infra/infra/sessions/index.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
+
+// agentId 기본값을 자동 주입하는 테스트 helper (M1 fixture).
+const TEST_AGENT_ID = 'test/default'
+const Session = {
+  create: (uc, opts = {}) => SessionModule.create(uc, { agentId: TEST_AGENT_ID, ...opts }),
+}
 
 const createMockLLM = (handler) => {
   const calls = []
@@ -272,6 +278,42 @@ async function run() {
       assert(s2.pendingBackfill === false, 'SD10: persistence 복원 시 pendingBackfill=false')
       await s2.shutdown()
       userContext.config.tools.allowedDirs = origAllowed
+    }
+
+    // SD11. agentId 필수 — 미제공 시 throw (M1)
+    {
+      let thrown = null
+      try {
+        SessionModule.create(userContext, { type: 'user', persistenceCwd: join(tmpDir, 'sd11') })
+      } catch (e) { thrown = e }
+      assert(thrown && /agentId/.test(thrown.message), 'SD11: agentId 없으면 throw')
+    }
+
+    // SD12. agentId 형식 위반 → throw (M1)
+    {
+      const invalidIds = ['', 'no-slash', 'Anthony/default', 'a/b/c', '3bot/a', 'a--b/c', 'abc-/def']
+      for (const bad of invalidIds) {
+        let thrown = null
+        try {
+          SessionModule.create(userContext, { type: 'user', agentId: bad, persistenceCwd: join(tmpDir, `sd12-${bad || 'empty'}`) })
+        } catch (e) { thrown = e }
+        assert(thrown, `SD12: invalid agentId "${bad}" → throw`)
+      }
+    }
+
+    // SD13. agentId round-trip — 생성 시점 값이 persistence 복원보다 우선 (M1)
+    {
+      const persistCwd = join(tmpDir, 'sd13')
+      // 첫 세션: agentId=anthony/alpha 로 생성 + flush
+      const s1 = SessionModule.create(userContext, { type: 'user', agentId: 'anthony/alpha', persistenceCwd: persistCwd })
+      assert(s1.agentId === 'anthony/alpha', 'SD13: 초기 agentId 설정')
+      await s1.flushPersistence()
+      await s1.shutdown()
+
+      // 두 번째 세션: 같은 persistence + 다른 agentId 전달 — **생성 시점 값이 우선**
+      const s2 = SessionModule.create(userContext, { type: 'user', agentId: 'anthony/beta', persistenceCwd: persistCwd })
+      assert(s2.agentId === 'anthony/beta', `SD13: 생성 시점 agentId 우선 (got ${s2.agentId})`)
+      await s2.shutdown()
     }
 
   } finally {

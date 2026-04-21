@@ -49,6 +49,8 @@ class UserSession extends EphemeralSession {
         this.workingDir = restored.workingDir
         this.pendingBackfill = restored.pendingBackfill === true
       }
+      // agentId: 복원하지 않음 — 생성 시점 값이 권위 (docs/design/agent-identity-model.md §5).
+      // 기존 persisted session 에 agentId 없을 수 있어 restored.agentId 무시.
       this.logger.info(`State restored (turn: ${restored.turn || 0})`)
     } catch (err) {
       this.logger.warn('State restore failed, starting fresh', { error: err.message })
@@ -139,6 +141,7 @@ class UserSession extends EphemeralSession {
         },
         workingDir: this.workingDir,
         pendingBackfill: this.pendingBackfill === true,
+        agentId: this.agentId,
       }
       await forkTask(this.actors.persistenceActor.flush(withVersions))
     } catch (_unused) {}

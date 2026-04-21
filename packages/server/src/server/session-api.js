@@ -27,7 +27,8 @@ const findOrCreateSession = (sessionId, username, effectiveUserContext) => {
       mkdirSync(persistenceCwd, { recursive: true })
       renameSync(legacyState, join(persistenceCwd, 'state.json'))
     }
-    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username })
+    // agentId: M1 runtime hardcode. M3 에서 config.primaryAgentId 경유 (identity §12)
+    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username, agentId: `${username}/default` })
   }
 
   return entry
@@ -156,7 +157,10 @@ const mountSessionsCrud = (router, deps) => {
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
     const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined
     try {
-      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: owner || 'default', persistenceCwd, workingDir })
+      // agentId: M1 runtime hardcode. M3 이후 config.primaryAgentId / type 별 결정 로직 이관.
+      const effectiveUserId = owner || 'default'
+      const agentId = `${effectiveUserId}/default`
+      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: effectiveUserId, agentId, persistenceCwd, workingDir })
       // effective workingDir 을 응답에 포함 — POST 직후 클라이언트 확인용.
       res.status(201).json({ id: entry.id, type: entry.type, workingDir: entry.session.workingDir })
     } catch (err) {

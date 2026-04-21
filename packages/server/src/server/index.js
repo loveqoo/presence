@@ -113,13 +113,16 @@ class PresenceServer {
       },
     })
     this.#startedAt = Date.now()
-    this.#scheduler = createServerScheduler(this.#userContext)
+    this.#scheduler = createServerScheduler(this.#userContext, { username: this.#username })
 
     // 기본 세션 + 에이전트 세션
     const defaultUserId = this.#username || 'default'
+    // agentId: M1 단계 runtime hardcode `${userId}/default`.
+    // M3 에서 config.primaryAgentId 로 이관 (docs/design/agent-identity-model.md §12).
     const defaultEntry = this.#userContext.sessions.create({
       id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd,
       userId: defaultUserId,
+      agentId: `${defaultUserId}/default`,
       onScheduledJobDone: Function.prototype,
     })
     this.#defaultSession = defaultEntry.session

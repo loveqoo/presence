@@ -7,7 +7,8 @@ import { fireAndForget } from '@presence/core/lib/task.js'
 // 스케줄러 팩토리 + 에이전트 세션 등록
 // =============================================================================
 
-const createServerScheduler = (userContext) => {
+const createServerScheduler = (userContext, opts = {}) => {
+  const defaultUserId = opts.username || 'default'
   let scheduler
   // SCHEDULED session 의 workingDir — WS join 이 없어 backfill 대상 아님.
   // user config 의 allowedDirs[0] 을 명시 전달해 Session 에서 pendingBackfill=false 로 확정.
@@ -22,9 +23,13 @@ const createServerScheduler = (userContext) => {
     store: userContext.jobStore,
     onDispatch: (jobEvent) => {
       const sessionId = `scheduled-${jobEvent.runId}`
+      // agentId: M1 runtime hardcode. M7 이후 jobEvent.ownerAgentId 읽음 (identity §4.3).
+      const agentId = jobEvent.ownerAgentId || `${defaultUserId}/default`
       const entry = userContext.sessions.create({
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
+        userId: defaultUserId,
+        agentId,
         workingDir: jobEvent.workingDir || defaultWd,
         onScheduledJobDone: (event, outcome) => {
           const task = outcome.success
@@ -49,8 +54,11 @@ const registerAgentSessions = (userContext, username) => {
   const userId = username || 'default'
   const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   for (const agentDef of (userContext.config.agents || [])) {
+    // agentId: qualifying 현재 agent name. identity §3 qualified form.
+    const agentId = `${userId}/${agentDef.name}`
     const agentEntry = userContext.sessions.create({
       id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId,
+      agentId,
       workingDir: agentDef.workingDir || defaultWd,
     })
     userContext.agentRegistry.register({
