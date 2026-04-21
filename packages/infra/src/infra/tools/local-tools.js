@@ -2,6 +2,8 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from '
 import { execSync } from 'child_process'
 import { resolve, join } from 'path'
 import { z } from 'zod'
+import { JSDOM } from 'jsdom'
+import { Readability } from '@mozilla/readability'
 import { t } from '../../i18n/index.js'
 import { TOOL_SOURCE } from './tool-registry.js'
 
@@ -62,23 +64,45 @@ const normalizePath = (path, allowedDirs) => {
     || resolved
 }
 
+// --- HTML → 텍스트 변환 (FP-62) ---
+// Mozilla Readability + jsdom. Firefox Reader View 알고리즘이 본문을 지능적으로
+// 식별하여 nav/광고/boilerplate 를 자동 제거. Readability 가 article-like 페이지가
+// 아니라고 판단하면 (예: 홈페이지, 검색 결과) body 의 plain text 로 fallback.
+const htmlToText = (html, url) => {
+  if (typeof html !== 'string' || html.length === 0) return ''
+  try {
+    const dom = new JSDOM(html, { url: url || 'https://example.com' })
+    const doc = dom.window.document
+    const reader = new Readability(doc)
+    const article = reader.parse()
+    if (article && typeof article.textContent === 'string') {
+      const extracted = article.textContent.replace(/\s+/g, ' ').trim()
+      if (extracted.length > 0) return extracted
+    }
+    // Fallback: Readability 가 article 판별 실패 — body textContent 추출.
+    const body = doc.body?.textContent?.replace(/\s+/g, ' ').trim()
+    return body || ''
+  } catch (_) {
+    return ''
+  }
+}
+
+// Content-Type 이 HTML 계열이면 htmlToText 로 변환.
+const looksLikeHtml = (contentType, body) => {
+  if (/html/i.test(contentType || '')) return true
+  // Content-Type 누락 케이스 — body 첫 문자 검사
+  const head = (body || '').slice(0, 200).toLowerCase()
+  return head.includes('<!doctype html') || /<html[\s>]/.test(head)
+}
+
 // --- web_fetch 결과 품질 점검 (FP-62) ---
-// 사후 품질 점검 — 빈/짧은/의심스러운 응답 감지 시 경고 prefix 부착 대상으로 분류.
-// LLM 이 경고를 보고 plan 을 재구성하도록 유도 (iteration).
-const analyzeWebFetchResult = (url, text) => {
+// 사후 품질 점검 — 빈/짧은 본문 감지 시 경고 prefix 부착 대상으로 분류.
+// 입력은 htmlToText 를 거친 본문 텍스트. 도메인 특화 패턴 없이 범용 신호만 사용.
+const analyzeWebFetchResult = (text) => {
   const trimmed = (text || '').trim()
   if (trimmed.length === 0) return { suspicious: true, reason: 'empty_response' }
   if (trimmed.length < LOCAL_TOOLS.WEB_FETCH_MIN_CONTENT) {
     return { suspicious: true, reason: 'very_short_response' }
-  }
-  if (/wikipedia\.org/.test(url)) {
-    const head = trimmed.slice(0, 2000)
-    if (/may refer to:|disambiguation/i.test(head)) {
-      return { suspicious: true, reason: 'disambiguation_page' }
-    }
-    if (/Wikipedia does not have an article|Search results/i.test(head)) {
-      return { suspicious: true, reason: 'missing_article' }
-    }
   }
   return { suspicious: false }
 }
@@ -206,12 +230,16 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
         try {
           const res = await fetch(url, { signal: controller.signal })
           if (!res.ok) throw new Error(t('error.http_error', { status: res.status }))
-          const text = await res.text()
+          const raw = await res.text()
+          const contentType = res.headers.get('content-type') || ''
+          // FP-62: HTML 이면 본문 텍스트만 추출 (templates/nav/script 제거).
+          // Wikipedia 같은 SSR 페이지에서 truncate 가 본문 앞의 템플릿만 자르던 문제 해결.
+          const text = looksLikeHtml(contentType, raw) ? htmlToText(raw, url) : raw
           const truncated = text.length > LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH
             ? text.slice(0, LOCAL_TOOLS.TEXT_TRUNCATE_LENGTH) + '\n...(truncated)'
             : text
-          // FP-62: 결과 품질 점검. 의심스러우면 LLM 에게 경고 prefix 전달.
-          const analysis = analyzeWebFetchResult(url, text)
+          // 파싱 후 텍스트 기반으로 품질 점검 (본문 길이 / 빈 페이지 시그널).
+          const analysis = analyzeWebFetchResult(text)
           if (analysis.suspicious) {
             return `⚠ [web_fetch quality check: ${analysis.reason}] URL=${url}. ` +
               `The fetched content may not answer the user's request. ` +
@@ -279,4 +307,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
  *
  * `normalizePath(path, allowedDirs)` — Resolves and normalises a path, falling back to allowed-dir-relative resolution.
  */
-export { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir, analyzeWebFetchResult }
+export {
+  createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir,
+  analyzeWebFetchResult, htmlToText, looksLikeHtml,
+}

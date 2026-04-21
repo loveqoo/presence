@@ -10,11 +10,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@mozilla/readability": "^0.6.0",
     "@presence/core": "*",
     "bcryptjs": "^2.4.3",
     "conf": "^15.1.0",
     "croner": "^10.0.1",
     "i18next": "^25.9.0",
+    "jsdom": "^29.0.2",
     "lowdb": "^7.0.1",
     "mem0ai": "^2.4.6",
     "winston": "^3.19.0",

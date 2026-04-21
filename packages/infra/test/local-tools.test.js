@@ -1,6 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir, analyzeWebFetchResult } from '@presence/infra/infra/tools/local-tools.js'
+import { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir, analyzeWebFetchResult, htmlToText, looksLikeHtml } from '@presence/infra/infra/tools/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -173,58 +173,110 @@ async function run() {
     assert(thrown, 'resolveInWorkingDir: `..` 경계 탈출 throw')
   }
 
-  // --- analyzeWebFetchResult (FP-62 결과 품질 점검) ---
+  // --- htmlToText / looksLikeHtml (FP-62 HTML 파싱 — Readability + jsdom) ---
+
+  {
+    // script / style 은 jsdom 이 textContent 에서 자동 제외.
+    // 짧은 HTML 은 Readability 가 article 판정 실패 → body.textContent fallback.
+    const html = '<html><head><script>alert(1)</script><style>.a{}</style></head><body><p>Hello World</p></body></html>'
+    const text = htmlToText(html)
+    assert(text.includes('Hello World'), 'htmlToText: body 본문 보존')
+    assert(!text.includes('alert'), 'htmlToText: script 는 textContent 에서 제외')
+    assert(!text.includes('.a{'), 'htmlToText: style 는 textContent 에서 제외')
+  }
+
+  {
+    // HTML entity decode — jsdom 이 수백 entity 모두 처리
+    const text = htmlToText('<p>A &amp; B &lt;x&gt; &quot;y&quot; &nbsp; &#39;z&#39; &auml; &mdash;</p>')
+    assert(/A & B <x> "y".+'z'.+ä.+—/.test(text),
+      `htmlToText: entity decode (got "${text}")`)
+  }
+
+  {
+    // 공백 정리
+    const text = htmlToText('<p>A</p>   <p>B</p>\n\n<p>C</p>')
+    assert(text === 'A B C', `htmlToText: 공백 정리 (got "${text}")`)
+  }
+
+  {
+    // Readability article 판정 — 긴 본문이면 nav/footer 자동 제거.
+    // FSM Wikipedia 유사 구조: head + nav + article + footer
+    const articleBody = 'A finite-state machine is a mathematical model of computation. ' +
+      'It is an abstract machine that can be in exactly one of a finite number of states at any given time. ' +
+      'The FSM can change from one state to another in response to some inputs; ' +
+      'the change is called a transition. An FSM is defined by a list of its states, ' +
+      'initial state, and conditions for each transition. Finite-state machines are of two types: ' +
+      'deterministic (DFA) and nondeterministic (NFA). For any nondeterministic one, ' +
+      'an equivalent deterministic one can be constructed.'
+    const html = `<!DOCTYPE html><html><head><title>FSM</title></head><body>
+      <nav>Navigation menu boilerplate</nav>
+      <article><h1>Finite-state machine</h1><p>${articleBody}</p></article>
+      <footer>© Wikipedia</footer>
+    </body></html>`
+    const text = htmlToText(html, 'https://en.wikipedia.org/wiki/Finite-state_machine')
+    assert(text.includes('mathematical model of computation'),
+      'htmlToText: article 본문 추출')
+    assert(!text.includes('Navigation menu boilerplate'),
+      'htmlToText: Readability 가 nav 를 article 본문에서 배제')
+  }
+
+  {
+    // Readability 판정 실패 시 fallback — 짧은 HTML 이면 body.textContent 사용
+    const html = '<html><body>Just a very short message.</body></html>'
+    const text = htmlToText(html)
+    assert(text.includes('Just a very short message'), 'htmlToText: 짧은 페이지 fallback')
+  }
+
+  {
+    // 빈 입력 안전 처리
+    assert(htmlToText('') === '', 'htmlToText: 빈 문자열 → 빈 문자열')
+    assert(htmlToText(null) === '', 'htmlToText: null → 빈 문자열')
+    assert(htmlToText(undefined) === '', 'htmlToText: undefined → 빈 문자열')
+  }
+
+  {
+    // looksLikeHtml
+    assert(looksLikeHtml('text/html; charset=utf-8', ''), 'looksLikeHtml: content-type html')
+    assert(looksLikeHtml('', '<!DOCTYPE html><html>'), 'looksLikeHtml: doctype 감지')
+    assert(!looksLikeHtml('application/json', '{"a":1}'), 'looksLikeHtml: json 제외')
+    assert(!looksLikeHtml('text/plain', 'plain text'), 'looksLikeHtml: plain text 제외')
+  }
+
+  // --- analyzeWebFetchResult (FP-62 결과 품질 점검 — 범용 신호만) ---
 
   {
     // 정상 응답 → not suspicious
-    const longNormal = 'a'.repeat(500)
-    assert(analyzeWebFetchResult('https://example.com', longNormal).suspicious === false,
+    assert(analyzeWebFetchResult('a'.repeat(500)).suspicious === false,
       'analyzeWebFetchResult: 정상 긴 응답 → not suspicious')
   }
 
   {
     // 빈 응답 → suspicious empty
-    const r = analyzeWebFetchResult('https://example.com', '')
+    const r = analyzeWebFetchResult('')
     assert(r.suspicious === true && r.reason === 'empty_response',
       'analyzeWebFetchResult: 빈 응답 → suspicious (empty_response)')
   }
 
   {
     // whitespace 만 있는 응답 → suspicious empty (trim 후 empty)
-    const r = analyzeWebFetchResult('https://example.com', '   \n\n  ')
+    const r = analyzeWebFetchResult('   \n\n  ')
     assert(r.suspicious === true && r.reason === 'empty_response',
       'analyzeWebFetchResult: whitespace only → empty_response')
   }
 
   {
     // 짧은 응답 (< WEB_FETCH_MIN_CONTENT) → suspicious short
-    const r = analyzeWebFetchResult('https://example.com', 'just 50 chars short content')
+    const r = analyzeWebFetchResult('just 50 chars short content')
     assert(r.suspicious === true && r.reason === 'very_short_response',
       'analyzeWebFetchResult: 짧은 응답 → very_short_response')
   }
 
   {
-    // Wikipedia disambiguation 페이지 → suspicious disambiguation
-    const disambig = 'FSM may refer to: Finite-state machine... ' + 'x'.repeat(300)
-    const r = analyzeWebFetchResult('https://en.wikipedia.org/wiki/FSM', disambig)
-    assert(r.suspicious === true && r.reason === 'disambiguation_page',
-      'analyzeWebFetchResult: Wikipedia may refer to → disambiguation_page')
-  }
-
-  {
-    // Wikipedia "does not have an article" → suspicious missing
-    const missing = 'Wikipedia does not have an article with this exact name... ' + 'x'.repeat(300)
-    const r = analyzeWebFetchResult('https://en.wikipedia.org/wiki/Nonexistent', missing)
-    assert(r.suspicious === true && r.reason === 'missing_article',
-      'analyzeWebFetchResult: Wikipedia missing → missing_article')
-  }
-
-  {
-    // 일반 긴 Wikipedia 응답 → not suspicious (disambiguation/missing 패턴 없음)
-    const normalWiki = 'Finite-state machine is a computational model... ' + 'content '.repeat(100)
-    const r = analyzeWebFetchResult('https://en.wikipedia.org/wiki/Finite-state_machine', normalWiki)
-    assert(r.suspicious === false,
-      'analyzeWebFetchResult: 정상 Wikipedia 문서 → not suspicious')
+    // 도메인 특화 패턴 매칭 없음 — 일반 HTML parsing 으로 본문이 비면 empty/short 로 감지되는 것이 맞음.
+    // 정상 길이 응답은 도메인 무관하게 통과.
+    const withText = 'For other uses, see Finite-state machine (disambiguation). A finite-state machine is... ' + 'body '.repeat(100)
+    assert(analyzeWebFetchResult(withText).suspicious === false,
+      'analyzeWebFetchResult: 도메인 키워드 무관, 본문 길이만 판단')
   }
 
   // --- 도구 메타데이터 ---
