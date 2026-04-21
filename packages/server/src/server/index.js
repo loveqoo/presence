@@ -5,6 +5,9 @@ import { UserContext } from '@presence/infra/infra/user-context.js'
 import { loadServer } from '@presence/infra/infra/config-loader.js'
 import { Memory } from '@presence/infra/infra/memory.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { Config } from '@presence/infra/infra/config.js'
+import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
+import { runAdminBootstrap, deleteInitialPasswordFile, ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
 import { createServerScheduler, registerAgentSessions } from './scheduler-factory.js'
 import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
@@ -97,6 +100,23 @@ class PresenceServer {
     // KG-06: PRESENCE_DIR 변경 시 이전 경로 데이터 경고
     warnPresenceDirChange()
 
+    // Admin bootstrap — docs/design/agent-identity-model.md §7.3
+    // loadServer 직후, UserContext 생성 전. 실패 시 throw → 서버 부팅 거부.
+    const presenceDir = Config.presenceDir()
+    const bootstrapUserStore = createUserStore()
+    try {
+      const result = await runAdminBootstrap({
+        userStore: bootstrapUserStore,
+        presenceDir,
+        logger: console,
+      })
+      if (result.createdAccount) {
+        console.log(`[admin-bootstrap] Admin created. Initial password file: ${presenceDir}/admin-initial-password.txt`)
+      }
+    } catch (err) {
+      throw new Error(`Admin bootstrap failed: ${err.message}. Recovery: check ${presenceDir} write permissions or delete partial files.`)
+    }
+
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
     // 서버 레벨 Memory — 모든 유저 공유
@@ -128,8 +148,12 @@ class PresenceServer {
     this.#defaultSession = defaultEntry.session
     registerAgentSessions(this.#userContext, this.#username)
 
-    // Auth + UserContextManager
-    const auth = createAuthSetup()
+    // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제
+    const auth = createAuthSetup({
+      onPasswordChanged: (username) => {
+        if (username === ADMIN_USERNAME) deleteInitialPasswordFile(presenceDir)
+      },
+    })
     this.#authEnabled = true
     this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory })
     const getUserContextManager = () => this.#userContextManager

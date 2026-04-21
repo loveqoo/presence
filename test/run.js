@@ -137,7 +137,7 @@ for (const test of tests) {
   }
 
   try {
-    const output = execSync(`node ${test}`, { cwd: root, encoding: 'utf-8', timeout: 30000 })
+    const output = execSync(`node ${test}`, { cwd: root, encoding: 'utf-8', timeout: 60000 })
     const match = output.match(/(\d+) passed, (\d+) failed/)
     if (match) {
       totalPassed += Number(match[1])

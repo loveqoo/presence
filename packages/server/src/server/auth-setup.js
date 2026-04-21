@@ -19,14 +19,15 @@ const parseCookiesMiddleware = (req, _res, next) => {
   next()
 }
 
-const createAuthSetup = () => {
+const createAuthSetup = (opts = {}) => {
   const userStore = createUserStore()
   if (!userStore.hasUsers()) throw new Error('No users configured. Run: npm run user -- init')
 
   const tokenService = createTokenService()
 
   const publicPaths = ['/auth/login', '/auth/refresh', '/auth/logout', '/instance', '/auth/status']
-  const httpAuth = new HttpAuthService(tokenService, userStore, { publicPaths })
+  // onPasswordChanged: 비밀번호 변경 성공 시 호출 (admin-bootstrap §7.3 의 initial-password 파일 삭제 연계)
+  const httpAuth = new HttpAuthService(tokenService, userStore, { publicPaths, onPasswordChanged: opts.onPasswordChanged })
   const wsAuth = new WsAuthService(tokenService, userStore)
 
   // 인증 불필요 라우트 (login, refresh, logout, status)
