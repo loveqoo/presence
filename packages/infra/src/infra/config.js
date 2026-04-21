@@ -38,8 +38,21 @@ class Config {
     delegatePolling: z.object({ intervalMs: z.number().positive() }),
     agents: z.array(z.object({
       name: z.string(),
-      description: z.string(),
+      description: z.string().default(''),
       capabilities: z.array(z.string()).default([]),
+      // docs/design/agent-identity-model.md §6.1 — persona 는 agent 의 필드.
+      // M2/M3 에서 단계적으로 채워짐. v1 optional.
+      persona: z.object({
+        name: z.string().optional(),
+        systemPrompt: z.string().nullable().optional(),
+        rules: z.array(z.string()).default([]),
+        tools: z.array(z.string()).default([]),
+      }).optional(),
+      workingDir: z.string().optional(),
+      createdAt: z.string().optional(),
+      createdBy: z.string().optional(),
+      archived: z.boolean().default(false),
+      archivedAt: z.string().nullable().optional(),
     })).default([]),
     prompt: z.object({
       maxContextTokens: z.number().int().positive(),
