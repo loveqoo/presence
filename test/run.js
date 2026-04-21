@@ -19,6 +19,7 @@ const NETWORK_TESTS = new Set([
   'test/e2e/tui-e2e.test.js',
   'packages/server/test/server.test.js',
   'packages/server/test/auth-e2e.test.js',
+  'packages/server/test/scheduler-e2e.test.js',
 ])
 
 const tests = [
@@ -113,6 +114,7 @@ const tests = [
   // Server
   'packages/server/test/server.test.js',
   'packages/server/test/auth-e2e.test.js',
+  'packages/server/test/scheduler-e2e.test.js',
 ]
 
 const noNetwork = process.argv.includes('--no-network')

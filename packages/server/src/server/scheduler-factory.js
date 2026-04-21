@@ -9,6 +9,10 @@ import { fireAndForget } from '@presence/core/lib/task.js'
 
 const createServerScheduler = (userContext) => {
   let scheduler
+  // SCHEDULED session 의 workingDir — WS join 이 없어 backfill 대상 아님.
+  // jobEvent.workingDir 있으면 사용, 없으면 user config 의 allowedDirs[0] 명시 전달
+  // (명시 전달해야 Session 생성 시 pendingBackfill=false 로 확정됨).
+  const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   scheduler = createSchedulerActor({
     store: userContext.jobStore,
     onDispatch: (jobEvent) => {
@@ -16,6 +20,7 @@ const createServerScheduler = (userContext) => {
       const entry = userContext.sessions.create({
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
+        workingDir: jobEvent.workingDir || defaultWd,
         onScheduledJobDone: (event, outcome) => {
           const task = outcome.success
             ? scheduler.jobDone(event.runId, event.jobId, outcome.result)
@@ -33,11 +38,15 @@ const createServerScheduler = (userContext) => {
 }
 
 // 에이전트 세션 등록: config.agents 기반
+// Agent session 도 SCHEDULED 와 마찬가지로 WS join 없음 → workingDir 명시 전달로
+// pendingBackfill=false 확정. agentDef.workingDir 있으면 사용, 없으면 allowedDirs[0].
 const registerAgentSessions = (userContext, username) => {
   const userId = username || 'default'
+  const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   for (const agentDef of (userContext.config.agents || [])) {
     const agentEntry = userContext.sessions.create({
       id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId,
+      workingDir: agentDef.workingDir || defaultWd,
     })
     userContext.agentRegistry.register({
       name: agentDef.name,
