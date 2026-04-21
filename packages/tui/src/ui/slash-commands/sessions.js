@@ -1,6 +1,6 @@
 import { t } from '@presence/infra/i18n'
 
-// /sessions [list|new|switch|delete] command handler.
+// /session [list|new|switch|delete] command handler.
 
 const cmdList = (sessionId, onListSessions, addMessage) => {
   if (!onListSessions) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
@@ -40,7 +40,7 @@ const cmdDelete = (id, currentId, onDeleteSession, addMessage) => {
 }
 
 const handleSessions = (input, ctx) => {
-  const args = input.slice('/sessions'.length).trim().split(/\s+/).filter(Boolean)
+  const args = input.slice('/session'.length).trim().split(/\s+/).filter(Boolean)
   const sub = args[0] || 'list'
   const { sessionId, onListSessions, onCreateSession, onSwitchSession, onDeleteSession, addMessage } = ctx
   if (sub === 'list') return cmdList(sessionId, onListSessions, addMessage)

@@ -1567,12 +1567,12 @@ await (async () => {
   assert(help.includes('/mcp list'), 'help: /mcp list 예시')
 }
 
-// --- FP-44: /sessions list 에 name 표시 ---
+// --- FP-44: /session list 에 name 표시 ---
 
 // 82a. name 이 id 와 다르면 함께 표시
 await (async () => {
   const msgs = []
-  handleSessions('/sessions list', {
+  handleSessions('/session list', {
     sessionId: 'anthony-default',
     onListSessions: async () => [
       { id: 'anthony-default', name: 'anthony-default', type: 'user' },
@@ -1591,7 +1591,7 @@ await (async () => {
 // 82b. 목록 헤더 한글화
 await (async () => {
   const msgs = []
-  handleSessions('/sessions', {
+  handleSessions('/session', {
     sessionId: 'x',
     onListSessions: async () => [],
     addMessage: (m) => msgs.push(m),
@@ -1601,12 +1601,12 @@ await (async () => {
 }
 )()
 
-// --- FP-41: /sessions 오류 한글화 ---
+// --- FP-41: /session 오류 한글화 ---
 
-// 83. /sessions list 실패 시 "오류:" 한글
+// 83. /session list 실패 시 "오류:" 한글
 await (async () => {
   const msgs = []
-  handleSessions('/sessions list', {
+  handleSessions('/session list', {
     sessionId: 'x',
     onListSessions: async () => { throw new Error('network down') },
     addMessage: (m) => msgs.push(m),

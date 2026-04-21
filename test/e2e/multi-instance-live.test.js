@@ -342,7 +342,7 @@ async function run() {
   // ML12. /tools — 인스턴스별 도구 목록
   // =========================================================================
   for (const inst of instanceUrls) {
-    const res = await request(inst.baseUrl, 'POST', '/api/chat', { input: '/tools' }, { token: t(inst) })
+    const res = await request(inst.baseUrl, 'POST', '/api/chat', { input: '/tool list' }, { token: t(inst) })
     assert(res.status === 200, `ML12: [${inst.id}] /tools returns 200`)
     assert(res.body.type === 'system', `ML12: [${inst.id}] /tools type is system`)
     assert(res.body.content.includes('file_'), `ML12: [${inst.id}] /tools lists file tools`)

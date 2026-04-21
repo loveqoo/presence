@@ -30,11 +30,11 @@
 |--------|-----------|--------------------------|
 | `/help` | 커맨드 목록 표시 | 예 (일시 표시) |
 | `/status` | 현재 에이전트 상태 표시 | 예 (일시 표시) |
-| `/tools` | 등록된 도구 목록 표시 | 예 (일시 표시) |
-| `/todos` | 에이전트 할 일 목록 표시 | 예 (일시 표시) |
+| `/tool list` | 등록된 도구 목록 표시 | 예 (일시 표시) |
+| `/todo list` | 에이전트 할 일 목록 표시 | 예 (일시 표시) |
 | `/models` | 사용 가능한 AI 모델 조회 및 전환 | 아니오 (영구 변경) |
 | `/memory` | 저장된 기억 관리 | 예 (조회), 아니오 (삭제) |
-| `/sessions` | 세션 목록 조회 및 관리 | 아니오 (영구 변경) |
+| `/session` | 세션 목록 조회 및 관리 | 아니오 (영구 변경) |
 | `/statusline` | 화면 아래 상태바 항목 추가/제거 | 아니오 (영구 변경) |
 | `/mcp` | MCP 서버 조회 및 활성화/비활성화 | 아니오 |
 | `/clear` | 대화 이력 초기화 | 아니오 (영구 변경) |
@@ -87,20 +87,20 @@ status: idle | turn: 5 | mem: 12 | last: plan
 
 ---
 
-### `/tools` — 도구 목록 확인
+### `/tool list` — 도구 목록 확인
 
 ```
-/tools
+/tool list
 ```
 
 에이전트가 현재 사용할 수 있는 도구 이름 목록을 표시합니다.
 
 ---
 
-### `/todos` — 할 일 목록 확인
+### `/todo list` — 할 일 목록 확인
 
 ```
-/todos
+/todo list
 ```
 
 에이전트가 현재 작업 중인 할 일 목록을 표시합니다. 항목이 없으면 `(none)` 이 표시됩니다.
@@ -270,7 +270,7 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 
 ---
 
-## 4. `/sessions` — 세션 관리
+## 4. `/session` — 세션 관리
 
 **세션**이란 하나의 독립된 대화 공간입니다. 여러 세션을 만들어 주제별로 대화를 분리할 수 있습니다. 각 세션의 대화 이력은 서로 섞이지 않습니다.
 
@@ -278,17 +278,16 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 
 | 입력 | 동작 |
 |------|------|
-| `/sessions` 또는 `/sessions list` | 세션 목록 표시 |
-| `/sessions new` | 이름 없이 새 세션 생성 |
-| `/sessions new 이름` | 이름을 지정하여 새 세션 생성 |
-| `/sessions switch <id>` | 다른 세션으로 전환 |
-| `/sessions delete <id>` | 세션 삭제 |
+| `/session list` | 세션 목록 표시 |
+| `/session new` | 이름 없이 새 세션 생성 |
+| `/session new 이름` | 이름을 지정하여 새 세션 생성 |
+| `/session switch <id>` | 다른 세션으로 전환 |
+| `/session delete <id>` | 세션 삭제 |
 
-### `/sessions list` (목록 보기)
+### `/session list` (목록 보기)
 
 ```
-/sessions
-/sessions list
+/session list
 ```
 
 **표시 예시:**
@@ -304,25 +303,25 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 - `[user]`는 일반 대화 세션을 의미합니다.
 - 세션 ID는 서버에서 자동 부여한 고유 식별자입니다.
 
-### `/sessions new` (새 세션 만들기)
+### `/session new` (새 세션 만들기)
 
 ```
-/sessions new
-/sessions new work
+/session new
+/session new work
 ```
 
 새 세션을 만들고 생성된 세션 ID를 화면에 표시합니다.
 
-`/sessions new work` 처럼 이름을 붙이면, 그 이름이 그대로 **세션 ID**가 됩니다. presence에는 별도의 "표시 이름" 개념이 없으며, `/sessions new` 에서 입력한 값이 ID이자 이름입니다. 이후 `/sessions switch work`, `/sessions delete work` 처럼 그대로 사용합니다.
+`/session new work` 처럼 이름을 붙이면, 그 이름이 그대로 **세션 ID**가 됩니다. presence에는 별도의 "표시 이름" 개념이 없으며, `/session new` 에서 입력한 값이 ID이자 이름입니다. 이후 `/session switch work`, `/session delete work` 처럼 그대로 사용합니다.
 
 **기준 폴더는 자동으로 기억됩니다.** 세션을 만들면 TUI를 실행한 폴더가 그 세션의 기준 폴더로 자동 저장됩니다. 에이전트가 파일을 읽거나 쓸 때 이 폴더를 기준으로 동작합니다. 별도로 지정할 필요가 없습니다.
 
-> **새 세션으로 자동 이동하지 않습니다.** 새 세션을 만든 뒤 그 세션을 사용하려면 `/sessions switch <id>` 로 직접 이동해야 합니다.
+> **새 세션으로 자동 이동하지 않습니다.** 새 세션을 만든 뒤 그 세션을 사용하려면 `/session switch <id>` 로 직접 이동해야 합니다.
 
-### `/sessions switch` (세션 전환)
+### `/session switch` (세션 전환)
 
 ```
-/sessions switch def456
+/session switch def456
 ```
 
 다른 세션으로 전환합니다. "세션 전환 중..." 메시지가 표시된 후, 전환이 완료되면 새 세션의 대화 창에 아래와 같은 시스템 메시지가 한 줄 나타납니다.
@@ -335,10 +334,10 @@ presence는 대화 중 중요한 내용을 자동으로 기억합니다. `/memor
 
 각 세션은 만들어질 때 기준 폴더가 이미 정해져 있습니다. 세션을 전환하면 에이전트가 사용하는 기준 폴더도 함께 바뀝니다.
 
-### `/sessions delete` (세션 삭제)
+### `/session delete` (세션 삭제)
 
 ```
-/sessions delete def456
+/session delete def456
 ```
 
 세션과 그 안의 대화 이력을 영구 삭제합니다.
@@ -479,7 +478,7 @@ MCP servers:
 - `↑` — 더 이전에 입력한 내용으로 이동
 - `↓` — 더 최근에 입력한 내용으로 이동
 
-자주 쓰는 커맨드(예: `/memory list`, `/sessions list`)를 반복해서 사용할 때 편리합니다.
+자주 쓰는 커맨드(예: `/memory list`, `/session list`)를 반복해서 사용할 때 편리합니다.
 
 ---
 
@@ -502,7 +501,7 @@ MCP servers:
 |-------------|--------------|
 | `/mem` | `/memory` |
 | `/model` | `/models` |
-| `/session` | `/sessions` |
+| `/sessions` | `/session list` |
 
 ---
 

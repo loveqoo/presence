@@ -108,7 +108,7 @@ async function run() {
     })
     await repl.handleInput('/help')
     assert(outputs[0].includes('/status'), '/help: lists /status')
-    assert(outputs[0].includes('/tools'), '/help: lists /tools')
+    assert(outputs[0].includes('/tool list'), '/help: lists /tool list')
     assert(outputs[0].includes('/quit'), '/help: lists /quit')
   }
 
@@ -123,7 +123,7 @@ async function run() {
       state: mockState(),
       toolRegistry: toolReg,
     })
-    await repl.handleInput('/tools')
+    await repl.handleInput('/tool list')
     assert(outputs[0].includes('file_read'), '/tools: shows tool name')
     assert(outputs[0].includes('Read files'), '/tools: shows description')
   }
@@ -154,7 +154,7 @@ async function run() {
       onOutput: (r) => outputs.push(r),
       state,
     })
-    await repl.handleInput('/todos')
+    await repl.handleInput('/todo list')
     assert(outputs[0].includes('PR #42'), '/todos: shows title')
     assert(outputs[0].includes('○'), '/todos: shows not done marker')
   }

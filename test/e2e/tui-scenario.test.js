@@ -218,7 +218,7 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
     assert(lastFrame().includes('HELLO-MIX'), 'S10-2: 슬래시 커맨드 후 일반 대화')
 
     // /tools
-    await typeInput(stdin, '/tools')
+    await typeInput(stdin, '/tool list')
     await waitFor(() => lastFrame().includes('file_'), { timeout: 5000 })
     assert(lastFrame().includes('file_'), 'S10-3: /tools 동작')
 
@@ -470,9 +470,9 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
     assert(lastFrame().includes('SESSION-A-MARKER'), 'S20-1: 세션 A 마커 설정')
 
     // 세션 목록 확인
-    await typeInput(stdin, '/sessions')
+    await typeInput(stdin, '/session')
     await waitFor(() => lastFrame().includes('default'), { timeout: 5000 })
-    assert(true, 'S20-2: /sessions 목록 표시')
+    assert(true, 'S20-2: /session 목록 표시')
   } finally { cleanup() }
 }
 

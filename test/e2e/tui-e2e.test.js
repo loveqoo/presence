@@ -18,7 +18,7 @@
  *  TE11. /mcp list — MCP 서버 목록
  *  TE12. /memory — 메모리 요약
  *  TE13. /todos — TODO 목록
- *  TE14. /sessions — 세션 목록
+ *  TE14. /session — 세션 목록
  *  TE15. /models — 모델 목록
  *  TE16. 빈 입력 → 전송 안됨
  *  TE17. 공백 입력 → 전송 안됨
@@ -27,7 +27,7 @@
  *  TE20. iteration — RESPOND 없는 plan → re-plan
  *  TE21. 존재하지 않는 도구 실행 → 에러 표시
  *  TE22. 트랜스크립트 — Ctrl+T 열기 + 4개 탭 전환 + ESC 닫기
- *  TE23. POST /sessions invalid type → 400 (KG-03)
+ *  TE23. POST /session invalid type → 400 (KG-03)
  */
 
 import React from 'react'
@@ -347,7 +347,7 @@ async function run() {
 
     try {
       await delay(100)
-      await typeInput(stdin, '/tools')
+      await typeInput(stdin, '/tool list')
 
       await waitFor(() => lastFrame().includes('file_'), { timeout: 3000 })
       assert(lastFrame().includes('file_'), 'TE10: /tools에 도구 목록 표시')
@@ -410,7 +410,7 @@ async function run() {
 
     try {
       await delay(100)
-      await typeInput(stdin, '/todos')
+      await typeInput(stdin, '/todo list')
 
       await waitFor(() => lastFrame().includes('todos'), { timeout: 3000 })
       assert(lastFrame().includes('todos'), 'TE13: /todos 결과 표시')
@@ -420,7 +420,7 @@ async function run() {
   }
 
   // =========================================================================
-  // TE14. /sessions — remote 모드에서 onListSessions=null이므로 미사용 메시지
+  // TE14. /session — remote 모드에서 onListSessions=null이므로 미사용 메시지
   // =========================================================================
   {
     const { lastFrame, stdin, cleanup } = await setupTuiE2E(
@@ -429,7 +429,7 @@ async function run() {
 
     try {
       await delay(100)
-      await typeInput(stdin, '/sessions')
+      await typeInput(stdin, '/session')
 
       await waitFor(
         () => lastFrame().includes('세션') || lastFrame().includes('session'),
@@ -437,7 +437,7 @@ async function run() {
       )
       assert(
         lastFrame().includes('세션') || lastFrame().includes('session'),
-        'TE14: /sessions 결과 표시'
+        'TE14: /session 결과 표시'
       )
     } finally {
       await cleanup()
@@ -710,7 +710,7 @@ async function run() {
   }
 
   // =========================================================================
-  // TE23. POST /sessions invalid type → 400 (KG-03)
+  // TE23. POST /session invalid type → 400 (KG-03)
   // =========================================================================
   {
     const ctx = await createTestServer(

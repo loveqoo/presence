@@ -7,10 +7,10 @@ import { STATE_PATH } from './policies.js'
 const COMMANDS = Object.freeze({
   '/help':   'Show available commands',
   '/status': 'Show agent status',
-  '/tools':  'List registered tools',
+  '/tool list':  'List registered tools',
   '/agents': 'List registered agents',
   '/memory': 'Show recent memories',
-  '/todos':  'Show TODO list',
+  '/todo list':  'Show TODO list',
   '/events': 'Show event queue and dead letters',
   '/mcp':    'MCP server management: list / enable <id> / disable <id>',
   '/quit':   'Exit the agent',
@@ -38,7 +38,9 @@ const cmdStatus = (repl) => {
   repl.emit(lines.join('\n'))
 }
 
-const cmdTools = (repl) => {
+const cmdTools = (repl, input) => {
+  const sub = input.trim().split(/\s+/).slice(1)[0]
+  if (sub && sub !== 'list') { repl.emit('Usage: /tool list'); return }
   const tools = repl.toolRegistry ? repl.toolRegistry.list() : []
   if (tools.length === 0) { repl.emit(repl.t('repl.no_tools')); return }
   const lines = tools.map(tool => `  ${tool.name.padEnd(20)} ${tool.description || ''}`)
@@ -60,7 +62,9 @@ const cmdMemory = async (repl) => {
   repl.emit(`Recent memories (${nodes.length}):\n${lines.join('\n')}`)
 }
 
-const cmdTodos = (repl) => {
+const cmdTodos = (repl, input) => {
+  const sub = input.trim().split(/\s+/).slice(1)[0]
+  if (sub && sub !== 'list') { repl.emit('Usage: /todo list'); return }
   const todos = repl.state.get(STATE_PATH.TODOS) || []
   if (todos.length === 0) { repl.emit(repl.t('repl.no_todos')); return }
   const lines = todos.map(todo => `  ${todo.done ? '✓' : '○'} [${todo.type}] ${todo.title}`)
@@ -107,8 +111,8 @@ const cmdMcp = (repl, input) => {
 
 // 커맨드 → 핸들러 디스패치 테이블
 const DISPATCH = Object.freeze({
-  '/help': cmdHelp, '/status': cmdStatus, '/tools': cmdTools,
-  '/agents': cmdAgents, '/memory': cmdMemory, '/todos': cmdTodos,
+  '/help': cmdHelp, '/status': cmdStatus, '/tool': cmdTools,
+  '/agents': cmdAgents, '/memory': cmdMemory, '/todo': cmdTodos,
   '/events': cmdEvents, '/mcp': cmdMcp,
 })
 

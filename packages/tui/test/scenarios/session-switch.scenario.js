@@ -22,7 +22,7 @@ export default {
     {
       label: '세션 목록 조회',
       action: async (ctx) => {
-        await ctx.type('/sessions list')
+        await ctx.type('/session list')
         await ctx.press('enter')
         await ctx.wait(150)
       },
@@ -30,7 +30,7 @@ export default {
     {
       label: '새 세션 work 생성',
       action: async (ctx) => {
-        await ctx.type('/sessions new work')
+        await ctx.type('/session new work')
         await ctx.press('enter')
         await ctx.wait(150)
       },
@@ -38,7 +38,7 @@ export default {
     {
       label: '세션 work로 전환 요청',
       action: async (ctx) => {
-        await ctx.type('/sessions switch work')
+        await ctx.type('/session switch work')
         await ctx.press('enter')
         await ctx.wait(250)
       },

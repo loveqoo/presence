@@ -43,7 +43,9 @@ const SLASH_COMMANDS = {
     }
   },
 
-  tools: (_args, { tools }) => {
+  tool: (args, { tools }) => {
+    const sub = args[0] || 'list'
+    if (sub !== 'list') return { type: 'system', content: 'Usage: /tool list' }
     return { type: 'system', content: tools.map(tool => tool.name).join(', ') || '(none)' }
   },
 

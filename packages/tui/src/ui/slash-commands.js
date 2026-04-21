@@ -106,12 +106,24 @@ const handleStatus = (_input, ctx) => {
   })
 }
 
-const handleToolsList = (_input, ctx) => {
+// `/tool list` 만 지원. 잘못된 서브커맨드는 안내 표시.
+const handleToolList = (input, ctx) => {
+  const sub = input.slice('/tool'.length).trim().split(/\s+/).filter(Boolean)[0]
+  if (sub && sub !== 'list') {
+    ctx.addMessage({ role: 'system', content: `Usage: /tool list`, transient: true })
+    return
+  }
   const list = ctx.tools.map(tool => tool.name).join(', ') || '(none)'
   ctx.addMessage({ role: 'system', content: `tools: ${list}`, transient: true })
 }
 
-const handleTodos = (_input, ctx) => {
+// `/todo list` 만 지원.
+const handleTodoList = (input, ctx) => {
+  const sub = input.slice('/todo'.length).trim().split(/\s+/).filter(Boolean)[0]
+  if (sub && sub !== 'list') {
+    ctx.addMessage({ role: 'system', content: `Usage: /todo list`, transient: true })
+    return
+  }
   const list = ctx.agentState.todos.length > 0
     ? ctx.agentState.todos.map(x => `• ${x.title || x.type}`).join('\n')
     : '(none)'
@@ -171,11 +183,11 @@ const commandMap = new Map([
   ['/mcp',        handleMcp],
   ['/report',     handleReport],
   ['/status',     handleStatus],
-  ['/tools',      handleToolsList],
+  ['/tool',       handleToolList],
   ['/memory',     handleMemory],
   ['/models',     handleModels],
-  ['/todos',      handleTodos],
-  ['/sessions',   handleSessions],
+  ['/todo',       handleTodoList],
+  ['/session',    handleSessions],
   ['/statusline', handleStatusline],
   ['/copy',       handleCopy],
 ])

@@ -1,18 +1,18 @@
 /**
- * TUI /sessions 슬래시 커맨드 테스트
+ * TUI /session 슬래시 커맨드 테스트
  *
  * ink-testing-library + mock callbacks로 세션 관리 커맨드를 검증합니다.
  * 실제 서버 불필요 (네트워크 없음).
  *
- * SC1.  /sessions        → onListSessions 호출, 목록 표시
- * SC2.  /sessions        → 현재 세션에 ● 마커 + (현재) 표시
- * SC3.  /sessions new <id>  → onCreateSession('id') 호출
- * SC4.  /sessions new       → onCreateSession(null) 호출 (ID 자동 생성)
- * SC5.  /sessions switch <id> → onSwitchSession('id') 호출
- * SC6.  /sessions switch     → usage 힌트 출력
- * SC7.  /sessions delete <other-id> → onDeleteSession('other-id') 호출
- * SC8.  /sessions delete <current>  → 현재 세션 삭제 거부 메시지
- * SC9.  /sessions delete             → usage 힌트 출력
+ * SC1.  /session        → onListSessions 호출, 목록 표시
+ * SC2.  /session        → 현재 세션에 ● 마커 + (현재) 표시
+ * SC3.  /session new <id>  → onCreateSession('id') 호출
+ * SC4.  /session new       → onCreateSession(null) 호출 (ID 자동 생성)
+ * SC5.  /session switch <id> → onSwitchSession('id') 호출
+ * SC6.  /session switch     → usage 힌트 출력
+ * SC7.  /session delete <other-id> → onDeleteSession('other-id') 호출
+ * SC8.  /session delete <current>  → 현재 세션 삭제 거부 메시지
+ * SC9.  /session delete             → usage 힌트 출력
  * SC10. 콜백 없음         → not_available 메시지
  */
 
@@ -72,7 +72,7 @@ const MOCK_SESSIONS = [
 ]
 
 // ---------------------------------------------------------------------------
-// SC1. /sessions → onListSessions 호출, 세션 목록 표시
+// SC1. /session → onListSessions 호출, 세션 목록 표시
 // ---------------------------------------------------------------------------
 {
   let listCalled = false
@@ -84,7 +84,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions')
+    await typeInput(stdin, '/session')
     await waitFor(() => lastFrame().includes('user-abc'))
     assert(listCalled, 'SC1: onListSessions 호출됨')
     assert(lastFrame().includes('user-default'), 'SC1: user-default 표시')
@@ -94,7 +94,7 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
-// SC2. /sessions → 현재 세션(●) 및 (현재) 마커
+// SC2. /session → 현재 세션(●) 및 (현재) 마커
 // ---------------------------------------------------------------------------
 {
   const state = makeState()
@@ -105,7 +105,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions')
+    await typeInput(stdin, '/session')
     await waitFor(() => lastFrame().includes('현재'))
     const frame = lastFrame()
     // 현재 세션 줄에 ● 마커
@@ -118,7 +118,7 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
-// SC3. /sessions new myid → onCreateSession('myid') 호출
+// SC3. /session new myid → onCreateSession('myid') 호출
 // ---------------------------------------------------------------------------
 {
   let createArg = undefined
@@ -130,14 +130,14 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions new myid')
+    await typeInput(stdin, '/session new myid')
     await waitFor(() => lastFrame().includes('myid') || lastFrame().includes('생성됨'))
     assert(createArg === 'myid', `SC3: onCreateSession('myid') 호출됨 (got: ${createArg})`)
   } finally { unmount() }
 }
 
 // ---------------------------------------------------------------------------
-// SC4. /sessions new (인자 없음) → onCreateSession(null) 호출
+// SC4. /session new (인자 없음) → onCreateSession(null) 호출
 // ---------------------------------------------------------------------------
 {
   let createArg = 'sentinel'
@@ -149,14 +149,14 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions new')
+    await typeInput(stdin, '/session new')
     await waitFor(() => lastFrame().includes('생성됨') || createArg !== 'sentinel')
     assert(createArg === null, `SC4: onCreateSession(null) 호출됨 (got: ${JSON.stringify(createArg)})`)
   } finally { unmount() }
 }
 
 // ---------------------------------------------------------------------------
-// SC5. /sessions switch target-id → onSwitchSession('target-id') 호출
+// SC5. /session switch target-id → onSwitchSession('target-id') 호출
 // ---------------------------------------------------------------------------
 {
   let switchArg = undefined
@@ -168,7 +168,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions switch target-id')
+    await typeInput(stdin, '/session switch target-id')
     await waitFor(() => lastFrame().includes('전환 중'))
     assert(switchArg === 'target-id', `SC5: onSwitchSession('target-id') 호출됨 (got: ${switchArg})`)
     assert(lastFrame().includes('target-id'), 'SC5: 전환 메시지에 세션 ID 포함')
@@ -176,7 +176,7 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
-// SC6. /sessions switch (ID 없음) → usage 힌트
+// SC6. /session switch (ID 없음) → usage 힌트
 // ---------------------------------------------------------------------------
 {
   let switchCalled = false
@@ -188,7 +188,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions switch')
+    await typeInput(stdin, '/session switch')
     await waitFor(() => lastFrame().includes('switch'))
     assert(!switchCalled, 'SC6: ID 없으면 onSwitchSession 호출 안됨')
     assert(lastFrame().includes('switch'), 'SC6: usage 힌트에 switch 포함')
@@ -196,7 +196,7 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
-// SC7. /sessions delete other-id → onDeleteSession('other-id') 호출
+// SC7. /session delete other-id → onDeleteSession('other-id') 호출
 // ---------------------------------------------------------------------------
 {
   let deleteArg = undefined
@@ -208,14 +208,14 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions delete other-id')
+    await typeInput(stdin, '/session delete other-id')
     await waitFor(() => lastFrame().includes('삭제됨') || deleteArg !== undefined)
     assert(deleteArg === 'other-id', `SC7: onDeleteSession('other-id') 호출됨 (got: ${deleteArg})`)
   } finally { unmount() }
 }
 
 // ---------------------------------------------------------------------------
-// SC8. /sessions delete <현재 세션> → 삭제 거부
+// SC8. /session delete <현재 세션> → 삭제 거부
 // ---------------------------------------------------------------------------
 {
   let deleteCalled = false
@@ -227,7 +227,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions delete user-default')
+    await typeInput(stdin, '/session delete user-default')
     await waitFor(() => lastFrame().includes('현재 세션'))
     assert(!deleteCalled, 'SC8: 현재 세션 삭제 시 onDeleteSession 호출 안됨')
     assert(lastFrame().includes('현재 세션'), 'SC8: 거부 메시지 표시')
@@ -235,7 +235,7 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
-// SC9. /sessions delete (ID 없음) → usage 힌트
+// SC9. /session delete (ID 없음) → usage 힌트
 // ---------------------------------------------------------------------------
 {
   let deleteCalled = false
@@ -247,7 +247,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions delete')
+    await typeInput(stdin, '/session delete')
     await waitFor(() => lastFrame().includes('delete'))
     assert(!deleteCalled, 'SC9: ID 없으면 onDeleteSession 호출 안됨')
     assert(lastFrame().includes('delete'), 'SC9: usage 힌트에 delete 포함')
@@ -266,7 +266,7 @@ const MOCK_SESSIONS = [
     tools: [], agents: [], initialMessages: [],
   }))
   try {
-    await typeInput(stdin, '/sessions')
+    await typeInput(stdin, '/session')
     await waitFor(() => lastFrame().includes('사용할 수 없'))
     assert(lastFrame().includes('사용할 수 없'), 'SC10: 콜백 없으면 not_available 표시')
   } finally { unmount() }

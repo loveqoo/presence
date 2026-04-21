@@ -93,7 +93,7 @@ console.log(`TUI live e2e (세션: ${sessionId}, 모델: ${config.llm?.model || 
 {
   const { lastFrame, stdin, cleanup } = await setup(serverInfo)
   try {
-    await typeInput(stdin, '/tools')
+    await typeInput(stdin, '/tool list')
     await waitFor(() => lastFrame().includes('file_'), { timeout: 5000 })
     assert(lastFrame().includes('file_'), 'TL5: /tools 도구 목록')
   } finally { cleanup() }
@@ -142,7 +142,7 @@ console.log(`TUI live e2e (세션: ${sessionId}, 모델: ${config.llm?.model || 
 {
   const { lastFrame, stdin, cleanup } = await setup(serverInfo)
   try {
-    await typeInput(stdin, '/sessions')
+    await typeInput(stdin, '/session')
     await waitFor(() => lastFrame().includes(sessionId), { timeout: 5000 })
     assert(lastFrame().includes(sessionId), 'TL8: /sessions에 현재 세션 표시')
   } finally { cleanup() }
@@ -153,7 +153,7 @@ console.log(`TUI live e2e (세션: ${sessionId}, 모델: ${config.llm?.model || 
   const testSessionId = `live-test-${Date.now()}`
   const { lastFrame, stdin, cleanup } = await setup(serverInfo)
   try {
-    await typeInput(stdin, `/sessions new ${testSessionId}`)
+    await typeInput(stdin, `/session new ${testSessionId}`)
     await waitFor(
       () => lastFrame().includes('생성됨') || lastFrame().includes(testSessionId),
       { timeout: 5000 },
