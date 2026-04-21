@@ -32,6 +32,26 @@ const copyToClipboard = async (text) => {
   }
 }
 
+// MCP 목록 포맷 (Phase 22 Step C, ux-guardian 권장: 그룹화)
+// 공용/개인 혼재 시에만 섹션 헤더 — 한쪽만 있거나 origin 미태깅이면 기존 포맷.
+const formatMcpList = (groups) => {
+  const fmtLine = (s) => `  ${s.enabled ? '●' : '○'} ${s.group}  ${s.serverName}  (${s.toolCount} tools)`
+  const server = groups.filter(s => s.origin === 'server')
+  const user = groups.filter(s => s.origin === 'user')
+  const other = groups.filter(s => s.origin !== 'server' && s.origin !== 'user')
+  if (server.length === 0 || user.length === 0) {
+    // 한쪽만 있거나 origin 없음 — 평평하게
+    return groups.map(s => fmtLine(s).trimStart()).join('\n')
+  }
+  const parts = []
+  parts.push('[공용]')
+  for (const s of server) parts.push(fmtLine(s))
+  parts.push('[개인]')
+  for (const s of user) parts.push(fmtLine(s))
+  for (const s of other) parts.push(fmtLine(s).trimStart())
+  return parts.join('\n')
+}
+
 const handleMcp = (input, ctx) => {
   const { toolRegistry, addMessage, onInput } = ctx
   // remote 모드: toolRegistry가 null이면 서버로 전달
@@ -48,8 +68,7 @@ const handleMcp = (input, ctx) => {
   const args = input.trim().split(/\s+/).slice(1)
   const sub = args[0] || 'list'
   if (sub === 'list') {
-    const lines = groups.map(s => `${s.enabled ? '●' : '○'} ${s.group}  ${s.serverName}  (${s.toolCount} tools)`)
-    addMessage({ role: 'system', content: `${t('mcp_cmd.header')}\n${lines.join('\n')}` })
+    addMessage({ role: 'system', content: `${t('mcp_cmd.header')}\n${formatMcpList(groups)}` })
     return
   }
   if (sub === 'enable' || sub === 'disable') {
@@ -220,4 +239,4 @@ const dispatchSlashCommand = async (input, ctx) => {
   return false
 }
 
-export { dispatchSlashCommand }
+export { dispatchSlashCommand, formatMcpList }

@@ -10,8 +10,19 @@ const SLASH_COMMANDS = {
     if (groups.length === 0) return { type: 'system', content: 'No MCP servers configured.' }
     const sub = args[0] || 'list'
     if (sub === 'list') {
-      const lines = groups.map(group => `${group.enabled ? '●' : '○'} ${group.group}  ${group.serverName}  (${group.toolCount} tools)`)
-      return { type: 'system', content: `MCP servers:\n${lines.join('\n')}` }
+      // Phase 22 Step C — 공용/개인 그룹화 (ux-guardian 권장)
+      const fmt = (g) => `  ${g.enabled ? '●' : '○'} ${g.group}  ${g.serverName}  (${g.toolCount} tools)`
+      const server = groups.filter(g => g.origin === 'server')
+      const user = groups.filter(g => g.origin === 'user')
+      const other = groups.filter(g => g.origin !== 'server' && g.origin !== 'user')
+      let body
+      if (server.length === 0 || user.length === 0) {
+        body = groups.map(g => fmt(g).trimStart()).join('\n')
+      } else {
+        const parts = ['[공용]', ...server.map(fmt), '[개인]', ...user.map(fmt), ...other.map(g => fmt(g).trimStart())]
+        body = parts.join('\n')
+      }
+      return { type: 'system', content: `MCP servers:\n${body}` }
     }
     if (sub === 'enable' || sub === 'disable') {
       const group = args[1]

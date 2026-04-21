@@ -84,6 +84,7 @@ const tests = [
   'packages/tui/test/remote.test.js',
   'packages/tui/test/interactive.test.js',
   'packages/tui/test/session-commands.test.js',
+  'packages/tui/test/mcp-list-format.test.js',
   // History compaction
   'packages/core/test/core/compaction.test.js',
   // Phase 2
