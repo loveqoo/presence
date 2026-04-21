@@ -503,3 +503,95 @@ first-class value 로 표현**하는 FSM 대수를 도입해 근본 해소.
 - **R1 aggregation** — 명시적 거부가 수락을 이긴다. no-match 는 non-fatal
 - **구조 일관성 우선** — FSM 전이 규칙이 데이터. 실익이 적어도 동일 인터페이스 유지로
   합성 비대칭 방지
+
+---
+
+## Phase H: 세션별 workingDir 근본 교정 + 웹 도구 품질 개선 (2026-04-21)
+
+배경: Phase 20 전까지 서버는 `process.cwd()` 에 의존해 도구 상대경로를 해석했다.
+`npm start --workspace=@presence/server` 로 띄운 서버는 cwd 가 `packages/server/` 이
+되어 사용자가 기대하는 프로젝트 루트와 어긋났다 (`tui-scenario.test.js` S4 LLM timeout
+근본 원인). 동시에 `web_fetch` 가 HTML 을 raw 로 반환해 LLM 에게 template boilerplate
+만 전달하던 FP-62 도 드러났다.
+
+설계 문서: [`docs/design/fsm.md`](design/fsm.md) 의 후속으로 workingDir 계약이
+`docs/specs/tui-server-contract.md` 에 추가됨.
+
+총 13 단계 + FP-62/63/64 후속. 회귀 3158 → 3203 pass.
+
+### H-1. Phase 20 — 세션별 workingDir 도입
+
+1. **Config migration** — user config 에 `tools.allowedDirs` 가 없으면 서버 최초
+   부팅 시 `process.cwd()` 를 1회 저장. 이후 `process.cwd()` 는 세션 의미 결정에
+   사용하지 않음
+2. **해결 체인** — POST body.workingDir → `allowedDirs[0]` (fallback + pendingBackfill=true)
+   → 결정 실패 시 명시적 에러
+3. **경계 검증** — workingDir 은 반드시 `allowedDirs` 안쪽. 위반 시 HTTP 400 (POST)
+   또는 WS close `4004 WORKING_DIR_INVALID`
+4. **WS init payload** — `workingDir` 필드 포함. TUI 가 매 join 시 effective 값 수신
+5. **Persistence** — `workingDir` + `pendingBackfill` 를 state.json 에 저장
+6. **pendingBackfill 흐름** — 자동 생성 `{user}-default` 세션은 첫 WS join 시 TUI cwd 로
+   덮어씀 + 플래그 해제. 이후 기존 값 우선
+7. **Tool handler context 확장** — `(args, { workingDir, resolvePath, ... })` subset 주입.
+   `resolveInWorkingDir` 순수 함수로 세션 기준 절대경로 해석
+8. **Prompt WORKING_DIR 섹션** — system prompt 에 "Current working directory: {dir}"
+   힌트. LLM 이 상대경로를 올바르게 조립
+9. **TUI 연동** — `MirrorState` 가 `process.cwd()` 를 WS join + POST /sessions body 에
+   동봉
+
+### H-2. FP-62 — web_fetch HTML 본문 추출
+
+- 초기 시도: regex 기반 tag strip + Wikipedia 전용 키워드 감지 (may refer to 등).
+  사용자 피드백으로 "도메인 특화 금지" 원칙 확립 → 전용 분기 전부 제거
+- 최종: `@mozilla/readability` + `jsdom` 도입. Firefox Reader View 알고리즘이 article
+  본문만 추출, nav/ad/boilerplate 자동 제거. article 판정 실패 시 `body.textContent`
+  fallback
+- `analyzeWebFetchResult` 는 범용 신호 (empty / very_short) 만 사용
+
+### H-3. FP-63/FP-64 — Phase 20 UX 감사 후속
+
+- **FP-63** (high resolved): `App.js disconnectedReason` 분기에 `WS_CLOSE.WORKING_DIR_INVALID`
+  (4004) 케이스 추가. 배너 원인 ("현재 폴더가 서버의 허용 범위를 벗어났습니다") + 조치
+  ("허용된 폴더로 이동한 뒤 TUI 를 다시 실행하세요") 문구 분기. 기존 4001/4002/4003
+  하드코드도 `WS_CLOSE.*` 상수 참조로 정리
+- **FP-64** (medium resolved): `POST /sessions` 400 응답에 `code` 필드 추가
+  (WORKING_DIR_OUT_OF_BOUNDS / WORKING_DIR_NOT_RESOLVABLE / SESSION_CREATE_FAILED).
+  TUI cmdNew 가 code 기반 `sessions_cmd.error.*` 한국어 메시지 표시
+
+### H-4. 슬래시 커맨드 복수형 → 단수형 전환
+
+CLI 자원명 관례 (`git branch`, `docker container`) 에 맞춰 breaking change:
+
+| 이전 | 이후 |
+|---|---|
+| `/tools` | `/tool list` |
+| `/todos` | `/todo list` |
+| `/sessions` | `/session list` |
+| `/sessions new/switch/delete` | `/session new/switch/delete` |
+
+REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 (개인 프로젝트
+단계). REPL / TUI / 서버 slash 디스패치 / i18n / 가이드 / 테스트 일괄 갱신.
+
+### H-5. 라이브 검증 인프라
+
+- `live-helpers.js` 에 `probeTool(serverInfo, { input, toolName })` helper 추가 —
+  connect + chat + toolTranscript 추출 캡슐화
+- `test/e2e/live-probes/` 디렉토리 + README + `fp-62-web-fetch-quality.test.js` —
+  티켓별 재현 시나리오를 상시 tracked 로 보관
+- 라이브 LLM (qwen3.6-35b) 으로 FP-62 재현 → 경고 prefix + Readability 본문 추출 →
+  LLM 이 1회 호출로 답변 완료 (6.9s) 확인
+
+### 관련 스펙 / 불변식 추가
+
+`docs/specs/tui-server-contract.md`:
+- INV-FSM-SINGLE-WRITER, INV-FSM-R1, INV-VER-MONOTONIC, INV-RFS-STALE, INV-RJT-SNAPSHOT
+  (Phase G 후속) + 실제 테스트 커버리지 명시
+- workingDir 해결 체인 / pendingBackfill / WS init payload / POST 응답 shape / WS close
+  4004 계약화
+
+`docs/specs/data-persistence.md`, `session.md` — workingDir 영속화 / 해결 체인 반영.
+
+### 주요 의존성 추가
+
+- `@mozilla/readability` ^0.6.0 (infra)
+- `jsdom` ^29.0.2 (infra)
