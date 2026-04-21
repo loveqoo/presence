@@ -30,6 +30,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - I2. **서버 전역 경로**: `Config.resolveDir()` 경유. 기본값 `~/.presence/` (`Config.presenceDir()` 반환값). `PRESENCE_DIR` 환경변수 또는 `basePath` 옵션으로 override 가능.
 - I3. **세션 persistence 경로**: `Config.resolveDir()/users/{username}/sessions/{sessionId}/state.json` — 기본값 `~/.presence/users/{username}/sessions/{sessionId}/state.json`. `Conf` 라이브러리 사용 (`{ cwd, configName: 'state' }`).
 - I4. **transient 필드 미저장**: `_` 접두사 키(`_streaming`, `_debug`, `_toolResults`, `_approve`, `_budgetWarning`, `_compactionEpoch`)는 디스크에 저장하지 않는다. `stripTransient()`가 snapshot에서 제거.
+- I12. **workingDir/pendingBackfill 영속화**: `workingDir`과 `pendingBackfill`은 `_` 접두사가 없는 세션 실행 컨텍스트 필드이며 state.json에 저장된다. `UserSession.flushPersistence()`는 `stripTransient(snapshot)`에 이 두 필드를 추가해 저장한다. 복원 시 `workingDir`이 있으면 생성자 결정값을 덮어쓴다. `workingDir` 없이 복원된 경우(레거시 state.json) `pendingBackfill=true`로 처리한다.
 - I5. **PersistenceActor 경유 저장**: 세션 상태의 디스크 저장은 PersistenceActor를 통해서만. debounce `PERSISTENCE.DEBOUNCE_MS`(현재 500ms, `packages/core/src/core/policies.js` 정의) 적용. Actor 내부에서 `this.#store.set(PERSISTENCE.STORE_KEY, stripTransient(snapshot))` 실행 (`persistence-actor.js:49`, `PERSISTENCE`는 `@presence/core/core/policies.js` 상수 객체).
 - I6. **restore → fresh start on error**: `persistence.restore()` 중 오류 발생 시 로거 warn 후 fresh state로 시작. 저장된 상태가 손상된 경우 자동 복구 불가능하지만 서버는 계속 동작.
 - I7. **legacy id 마이그레이션**: `conversationHistory` 항목 중 `id`가 없는 레거시 항목에 자동으로 id 부여. `migrateHistoryIds()` 사용.
@@ -54,6 +55,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 
 - I4 → `packages/infra/test/persistence.test.js` (stripTransient)
 - I5 → `packages/infra/test/persistence.test.js` (PersistenceActor debounce)
+- I12 → `packages/infra/test/persistence.test.js` 5/6 (workingDir + pendingBackfill round-trip), `packages/infra/test/session.test.js` SD10 (복원 후 workingDir 최우선)
 - I6 → `packages/infra/test/session.test.js` (restore 실패 fresh start)
 - I7 → `packages/infra/test/persistence.test.js` (migrateHistoryIds)
 - I8 → `packages/infra/test/session.test.js` (EphemeralSession no-op persistence)

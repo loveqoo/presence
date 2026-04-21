@@ -203,10 +203,60 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 
 ---
 
+## Phase 20 영향 감사 (2026-04-20)
+
+감사 범위: Phase 20 (세션별 workingDir 도입) 이후 TUI 진입/연결/셸 영역 UX 영향.
+
+### 기존 FP 영향 없음
+
+- FP-16 ~ FP-28 전체 resolved 상태 유지 확인. Phase 20은 WS join 메시지 + POST /sessions body에 `cwd` 추가, 서버 측 allowedDirs 검증, init 응답에 `workingDir` 포함 등이 핵심 변경이다. 이 변경들은 기존 해소된 FP의 경로(서버 URL 결정, 인증 흐름, WS 재연결 표시 등)를 건드리지 않는다.
+
+### 신규 마찰 포인트
+
+### FP-63 WS close 4004 시 "서버 연결이 끊겼습니다" 기본 문구 노출 [심각도: high] — **open**
+
+**시나리오**: 사용자가 allowedDirs에 포함되지 않은 디렉토리에서 TUI를 실행한다. WS join 단계에서 서버가 `close(4004, 'cwd outside allowedDirs')`를 전송하고, MirrorState가 이를 영구 실패로 처리해 `onUnrecoverable(4004)`를 호출한다. App.js가 disconnected 배너를 표시한다.
+
+**현재 동작**: `App.js`의 `disconnectedReason` 분기 (`4001/4002/4003/else`)에서 4004는 else로 떨어져 `"서버 연결이 끊겼습니다 (close 4004)."`가 표시된다. 하단에는 `"TUI 를 재시작하세요 (Ctrl+C)."`만 노출된다.
+
+관련 코드: `packages/tui/src/ui/App.js:129-133` (disconnectedReason 분기), `packages/infra/src/infra/states/mirror-state.js:123-128` (4004 영구 실패 처리).
+
+**마찰 포인트**: 사용자는 왜 끊겼는지, 무엇을 고쳐야 하는지 전혀 알 수 없다. "close 4004"는 내부 코드다. 실제 원인(실행 디렉토리가 허용 범위 밖)과 조치(allowedDirs에 디렉토리 추가 또는 허용된 디렉토리에서 TUI 재실행)를 알려줘야 한다.
+
+**제안**: `disconnectedReason` 분기에 4004를 추가해 아래와 같은 경험을 제공해야 한다:
+```
+⚠ 작업 디렉토리 접근이 거부되었습니다 (close 4004).
+현재 디렉토리가 허용된 경로 밖입니다.
+~/.presence/config.json 의 tools.allowedDirs 를 확인하거나, 허용된 디렉토리에서 TUI 를 다시 실행하세요.
+TUI 를 재시작하세요 (Ctrl+C).
+```
+
+**근거**: FP-16(서버 연결 실패)과 동일한 원칙 — 코드가 아닌 원인과 조치를 표시한다. 4004는 영구 실패이며 재연결이 없으므로, 사용자가 이 화면에서 취할 수 있는 행동(조치→Ctrl+C→재실행)을 즉시 안내해야 한다.
+
+### FP-64 `/sessions new` workingDir 거부 시 영어 서버 에러 노출 [심각도: medium] — **open**
+
+**시나리오**: 사용자가 `/sessions new myproject`를 입력한다. TUI는 `POST /api/sessions { id: '...', type: 'user', workingDir: process.cwd() }`를 전송한다. workingDir이 allowedDirs 밖이면 서버가 `400 { error: 'cwd outside allowedDirs' }` 또는 세션 생성 예외 메시지를 반환한다.
+
+**현재 동작**: `sessions.js:23`에서 `catch(e) → addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }) })`. 결과: `"오류: cwd outside allowedDirs"` 또는 영어 예외 메시지가 그대로 채팅창에 노출된다.
+
+관련 코드: `packages/tui/src/ui/slash-commands/sessions.js:21-24` (cmdNew), `packages/server/src/server/session-api.js:162-165` (400 에러 반환).
+
+**마찰 포인트**: 오류 메시지가 영어 내부 표현이다. 사용자는 "cwd outside allowedDirs"가 무엇을 의미하는지, 어디를 고쳐야 하는지 알 수 없다. ko.json의 `tools.access_denied` 키에 이미 한글 안내가 있으나 이 경로에서는 사용되지 않는다.
+
+**제안**: `cmdNew` 에러 핸들러에서 서버 응답 에러 메시지를 분기 처리하거나, 서버가 일관된 에러 코드(예: `{ error: '...', code: 'WORKING_DIR_INVALID' }`)를 반환해 TUI가 `tools.access_denied`에 해당하는 한글 안내로 치환해야 한다. 경험:
+```
+오류: 현재 디렉토리가 허용된 경로 밖입니다.
+~/.presence/config.json 의 tools.allowedDirs 를 확인하세요.
+```
+
+**근거**: 같은 allowedDirs 위반이지만 FP-63(WS 경로)과 FP-64(REST 경로) 두 곳에서 동일한 마찰이 발생한다. 이미 `tools.access_denied` i18n 키에 한글 안내가 존재하므로 코드 경로를 연결하는 것으로 해소 가능하다.
+
+---
+
 ## 심각도별 요약
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
-| **high** | 0 | 2 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵) |
-| **medium** | 0 | 6 | resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내) |
+| **high** | 1 | 2 | open: FP-63(4004 close 원인 미표시) / resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵) |
+| **medium** | 1 | 6 | open: FP-64(/sessions new 400 영어 에러) / resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내) |
 | **low** | 0 | 5 | resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |
