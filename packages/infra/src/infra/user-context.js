@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { createToolRegistry } from './tools/tool-registry.js'
 import { createLocalTools } from './tools/local-tools.js'
 import { initMcpIntegration } from './tools/mcp-tools.js'
@@ -11,6 +10,7 @@ import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
 import { loadUserMerged, ensureAllowedDirs } from './config-loader.js'
+import { ensureUserDefaultAgent } from './user-migration.js'
 import { initI18n, t } from '../i18n/index.js'
 import { createSessionManager } from './sessions/session-manager.js'
 
@@ -19,8 +19,6 @@ import { createSessionManager } from './sessions/session-manager.js'
 // 수명: 서버가 이 유저를 제공하는 동안 1개.
 // 포함: 유저 공용 인프라(llm, memory, mcp, tools, jobStore 등) + sessions(SessionManager).
 // =============================================================================
-
-const defaultUserDataPath = () => join(Config.presenceDir(), 'users', 'default')
 
 const buildEmbedder = (config) => {
   const embedApiKey = config.embed.apiKey
@@ -58,6 +56,15 @@ class UserContext {
     // --- allowedDirs migration (process.cwd() 의존 제거) ---
     userContext.config = ensureAllowedDirs(userContext.config, { username, logger: userContext.logger })
 
+    // --- M3+M4: primaryAgentId + default agent 보충 ---
+    // admin 은 admin-bootstrap 이 처리. 비-admin user 만 여기서 lazy migration.
+    if (username) {
+      const { config: migratedConfig } = ensureUserDefaultAgent(userContext.config, {
+        username, logger: userContext.logger,
+      })
+      userContext.config = migratedConfig
+    }
+
     // --- Persona ---
     userContext.persona = createPersona()
     userContext.personaConfig = userContext.persona.get()
@@ -67,7 +74,7 @@ class UserContext {
     userContext.logger.info(userContext.memory ? 'Memory: mem0 enabled' : 'Memory: disabled')
 
     // --- User data path (jobStore, userDataStore) ---
-    userContext.userDataPath = username ? Config.userDataPath(username) : defaultUserDataPath()
+    userContext.userDataPath = Config.userDataPath(username || 'default')
 
     // --- Embedder ---
     userContext.embedder = buildEmbedder(userContext.config)
