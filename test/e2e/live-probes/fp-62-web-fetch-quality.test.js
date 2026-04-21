@@ -2,12 +2,13 @@
  * FP-62 재현 probe — web_fetch 결과 품질 점검.
  *
  * 사용자가 "fsm에 대한 정의를 위키에서 찾아주시겠어요?" 를 묻으면 LLM 이
- * hallucination URL 로 Wikipedia 조회 → 비정상 HTML 반환.
- * 구현된 analyzeWebFetchResult 는 빈/짧은/disambiguation/missing 패턴 감지.
- * 라이브에서 실제 어떤 시그널이 관찰되는지 기록하고 향후 감지 로직 보강에 활용.
+ * hallucination URL 로 Wikipedia 조회. Wikipedia 는 URL 을 정규화해서 정상
+ * article HTML 을 반환하지만 템플릿 boilerplate 가 앞쪽에 있어 10KB truncate
+ * 경계에서 실제 본문이 잘리는 문제가 있었다.
  *
- * 상태: open (2026-04-21 재현 확인). 감지 로직이 이 hallucination 케이스를
- * 놓치는 것을 확인 — HTML 파싱 기반 판단 필요.
+ * 상태: resolved (2026-04-21). htmlToText 를 Mozilla Readability + jsdom
+ * 으로 교체하여 article 본문만 추출. LLM 이 1회 호출로 답변 완료.
+ * 이 probe 는 회귀 검증용으로 유지.
  */
 import { connect, probeTool } from '../live-helpers.js'
 import { assert, summary } from '../../lib/assert.js'
