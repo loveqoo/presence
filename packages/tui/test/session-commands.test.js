@@ -156,6 +156,32 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
+// SC4b. FP-64: /session new 가 서버 400 응답을 받으면 code 기반 한국어 메시지 표시
+// ---------------------------------------------------------------------------
+{
+  const state = makeState()
+  const { lastFrame, stdin, unmount } = render(h(App, {
+    state,
+    sessionId: 'user-default',
+    // 서버가 400 응답을 resolve 로 돌려준 것처럼 { error, code } 반환
+    onCreateSession: async () => ({
+      error: 'Session: workingDir "/etc" outside allowedDirs [/Users/x]',
+      code: 'WORKING_DIR_OUT_OF_BOUNDS',
+    }),
+    tools: [], agents: [], initialMessages: [],
+  }))
+  try {
+    await typeInput(stdin, '/session new oops')
+    await waitFor(() => lastFrame().includes('허용 범위를 벗어났습니다'), { timeout: 2000 })
+    const frame = lastFrame()
+    assert(frame.includes('허용 범위를 벗어났습니다'),
+      'SC4b: FP-64 한국어 에러 메시지')
+    assert(!frame.includes('outside allowedDirs'),
+      'SC4b: 영어 원문이 노출되지 않음')
+  } finally { unmount() }
+}
+
+// ---------------------------------------------------------------------------
 // SC5. /session switch target-id → onSwitchSession('target-id') 호출
 // ---------------------------------------------------------------------------
 {

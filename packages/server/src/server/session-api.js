@@ -160,8 +160,13 @@ const mountSessionsCrud = (router, deps) => {
       // effective workingDir 을 응답에 포함 — POST 직후 클라이언트 확인용.
       res.status(201).json({ id: entry.id, type: entry.type, workingDir: entry.session.workingDir })
     } catch (err) {
-      // Session 생성 시 workingDir 경계 위반 등
-      res.status(400).json({ error: err.message })
+      // Session 생성 실패 분류 — 클라이언트가 code 로 i18n 메시지 선택 (FP-64).
+      const code = /outside allowedDirs/.test(err.message)
+        ? 'WORKING_DIR_OUT_OF_BOUNDS'
+        : /not resolvable/.test(err.message)
+          ? 'WORKING_DIR_NOT_RESOLVABLE'
+          : 'SESSION_CREATE_FAILED'
+      res.status(400).json({ error: err.message, code })
     }
   })
   router.delete('/sessions/:sessionId', async (req, res) => {

@@ -225,23 +225,26 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 
 **원래 현상**: `App.js`의 `disconnectedReason` 분기 (`4001/4002/4003/else`)에서 4004는 else로 떨어져 `"서버 연결이 끊겼습니다 (close 4004)."`가 표시되었다. 사용자는 실행 디렉토리 문제임을 알 수 없었고, "TUI 를 재시작하세요" 안내만으로는 조치 방향을 알 수 없었다.
 
-### FP-64 `/sessions new` workingDir 거부 시 영어 서버 에러 노출 [심각도: medium] — **open**
+### FP-64 `/sessions new` workingDir 거부 시 영어 서버 에러 노출 [심각도: medium] — **resolved (2026-04-21)**
 
-**시나리오**: 사용자가 `/sessions new myproject`를 입력한다. TUI는 `POST /api/sessions { id: '...', type: 'user', workingDir: process.cwd() }`를 전송한다. workingDir이 allowedDirs 밖이면 서버가 `400 { error: 'cwd outside allowedDirs' }` 또는 세션 생성 예외 메시지를 반환한다.
+**해소 확인**
+서버 `session-api.js`의 POST /sessions catch에서 에러 메시지 패턴을 분류해 `code` 필드를 함께 반환하도록 변경되었다:
+- `/outside allowedDirs/` → `WORKING_DIR_OUT_OF_BOUNDS`
+- `/not resolvable/` → `WORKING_DIR_NOT_RESOLVABLE`
+- 그 외 → `SESSION_CREATE_FAILED`
+- 응답: `{ error, code }` 400
 
-**현재 동작**: `sessions.js:23`에서 `catch(e) → addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }) })`. 결과: `"오류: cwd outside allowedDirs"` 또는 영어 예외 메시지가 그대로 채팅창에 노출된다.
+TUI `slash-commands/sessions.js`의 `cmdNew`가 응답의 `code`를 읽어 `sessions_cmd.error.*` i18n 키로 한국어 메시지를 표시한다. `code`가 없는 경우 기존 영문 메시지로 폴백한다.
+
+i18n `ko.json`에 `sessions_cmd.error.working_dir_out_of_bounds` / `working_dir_not_resolvable` 한국어 문구가 추가되었다.
+
+테스트: `server.test.js` S20c (code 필드 assertion), `session-commands.test.js` SC4b (UI 한국어 메시지 + 영어 원문 미노출).
+
+**원래 현상**: `sessions.js:23`에서 `catch(e) → addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }) })`. 결과: `"오류: cwd outside allowedDirs"` 또는 영어 예외 메시지가 그대로 채팅창에 노출되었다.
 
 관련 코드: `packages/tui/src/ui/slash-commands/sessions.js:21-24` (cmdNew), `packages/server/src/server/session-api.js:162-165` (400 에러 반환).
 
-**마찰 포인트**: 오류 메시지가 영어 내부 표현이다. 사용자는 "cwd outside allowedDirs"가 무엇을 의미하는지, 어디를 고쳐야 하는지 알 수 없다. ko.json의 `tools.access_denied` 키에 이미 한글 안내가 있으나 이 경로에서는 사용되지 않는다.
-
-**제안**: `cmdNew` 에러 핸들러에서 서버 응답 에러 메시지를 분기 처리하거나, 서버가 일관된 에러 코드(예: `{ error: '...', code: 'WORKING_DIR_INVALID' }`)를 반환해 TUI가 `tools.access_denied`에 해당하는 한글 안내로 치환해야 한다. 경험:
-```
-오류: 현재 디렉토리가 허용된 경로 밖입니다.
-~/.presence/config.json 의 tools.allowedDirs 를 확인하세요.
-```
-
-**근거**: 같은 allowedDirs 위반이지만 FP-63(WS 경로)과 FP-64(REST 경로) 두 곳에서 동일한 마찰이 발생한다. 이미 `tools.access_denied` i18n 키에 한글 안내가 존재하므로 코드 경로를 연결하는 것으로 해소 가능하다.
+**원래 제안**: `cmdNew` 에러 핸들러에서 서버 응답 에러 메시지를 분기 처리하거나, 서버가 일관된 에러 코드(예: `{ error: '...', code: 'WORKING_DIR_INVALID' }`)를 반환해 TUI가 한글 안내로 치환해야 한다.
 
 ---
 
@@ -250,5 +253,5 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 3 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵), FP-63(4004 close 원인 미표시) |
-| **medium** | 1 | 6 | open: FP-64(/sessions new 400 영어 에러) / resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내) |
+| **medium** | 0 | 7 | resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내), FP-64(/sessions new 400 영어 에러) |
 | **low** | 0 | 5 | resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |

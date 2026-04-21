@@ -16,9 +16,22 @@ const cmdList = (sessionId, onListSessions, addMessage) => {
   }).catch(e => addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }), tag: 'error' }))
 }
 
+// FP-64: 서버 400 응답의 code 필드 기반으로 i18n 메시지 선택. code 없으면 원문 표시.
+const formatCreateError = (resp) => {
+  const msg = resp?.error || ''
+  const code = resp?.code
+  if (code === 'WORKING_DIR_OUT_OF_BOUNDS') return t('sessions_cmd.error.working_dir_out_of_bounds')
+  if (code === 'WORKING_DIR_NOT_RESOLVABLE') return t('sessions_cmd.error.working_dir_not_resolvable')
+  return t('slash_cmd.error', { message: msg })
+}
+
 const cmdNew = (name, onCreateSession, addMessage) => {
   if (!onCreateSession) { addMessage({ role: 'system', content: t('sessions_cmd.not_available') }); return }
   onCreateSession(name || null).then(s => {
+    if (s?.error) {
+      addMessage({ role: 'system', content: formatCreateError(s), tag: 'error' })
+      return
+    }
     addMessage({ role: 'system', content: t('sessions_cmd.created', { id: s.id }) })
   }).catch(e => addMessage({ role: 'system', content: t('slash_cmd.error', { message: e.message }), tag: 'error' }))
 }

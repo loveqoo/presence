@@ -272,13 +272,15 @@ async function run() {
       await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
     }
 
-    // S20c. POST /sessions with workingDir 경계 밖 → 400
+    // S20c. POST /sessions with workingDir 경계 밖 → 400 + code (FP-64)
     {
       const newId = `bad-wd-${Date.now()}`
       const res = await post('/api/sessions', { id: newId, type: 'user', workingDir: '/etc' })
       assert(res.status === 400, 'S20c: 경계 밖 workingDir → 400')
       assert(/outside allowedDirs/.test(res.body.error || ''),
         `S20c: 에러 메시지 (got ${JSON.stringify(res.body)})`)
+      assert(res.body.code === 'WORKING_DIR_OUT_OF_BOUNDS',
+        `S20c: code 필드 (got ${res.body.code})`)
     }
 
     // S20d. WS join 에 cwd 포함 → pendingBackfill=true 세션 덮어씀
