@@ -27,6 +27,11 @@ const SLASH_COMMANDS = {
     if (sub === 'enable' || sub === 'disable') {
       const group = args[1]
       if (!group) return { type: 'system', content: `Usage: /mcp ${sub} <id>` }
+      // Phase 22 Step D — 공용(server origin) MCP 는 user 관리 action 차단
+      const target = groups.find(g => g.group === group)
+      if (target && target.origin === 'server') {
+        return { type: 'system', content: `${group} is a public MCP (managed by admin — cannot be changed by users)` }
+      }
       const ok = sub === 'enable' ? toolRegistry.enableGroup(group) : toolRegistry.disableGroup(group)
       return { type: 'system', content: ok ? `${group} ${sub}d.` : `Unknown MCP id: ${group}` }
     }

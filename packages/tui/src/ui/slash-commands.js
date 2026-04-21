@@ -74,6 +74,12 @@ const handleMcp = (input, ctx) => {
   if (sub === 'enable' || sub === 'disable') {
     const group = args[1]
     if (!group) { addMessage({ role: 'system', content: t('mcp_cmd.usage_sub', { sub }) }); return }
+    // Phase 22 Step D — 공용(server origin) MCP 는 user 관리 action 차단
+    const target = groups.find(g => g.group === group)
+    if (target && target.origin === 'server') {
+      addMessage({ role: 'system', content: t('mcp_cmd.public_readonly', { group }) })
+      return
+    }
     const ok = sub === 'enable' ? toolRegistry.enableGroup(group) : toolRegistry.disableGroup(group)
     const key = ok ? (sub === 'enable' ? 'mcp_cmd.enabled' : 'mcp_cmd.disabled') : 'mcp_cmd.unknown_id'
     addMessage({ role: 'system', content: t(key, { group }) })

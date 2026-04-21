@@ -272,6 +272,7 @@
     "enabled": "{{group}} 활성화됨",
     "disabled": "{{group}} 비활성화됨",
     "unknown_id": "알 수 없는 MCP ID: {{group}}",
+    "public_readonly": "{{group}} 은 공용 MCP 입니다 — 관리자만 변경할 수 있습니다",
     "usage_sub": "사용법: /mcp {{sub}} <id>  (예: mcp0)",
     "usage": "사용법: /mcp [list | enable <id> | disable <id>]"
   },
