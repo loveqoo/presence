@@ -18,8 +18,8 @@ const connectMcpServers = async (config, logger, toolRegistry) => {
       const conn = await connectMCPServer(server)
       const prefix = `mcp${mcpIdx++}`
 
-      // 그룹 등록
-      toolRegistry.registerGroup({ group: prefix, serverName: server.serverName })
+      // 그룹 등록 — origin: Phase 22 MCP 경계. config-loader 가 태깅한 값 그대로 전달
+      toolRegistry.registerGroup({ group: prefix, serverName: server.serverName, origin: server.origin })
 
       // MCP 도구 개별 등록 (promptVisible: false — LLM 프롬프트에 직접 노출하지 않음)
       for (const tool of conn.tools) {

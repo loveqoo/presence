@@ -36,8 +36,9 @@ class ToolRegistry {
     this.#tools.set(entry.name, entry)
   }
 
-  registerGroup({ group, serverName }) {
-    this.#groups.set(group, { group, serverName })
+  // origin: 'server' | 'user' — MCP 경계 (Phase 22). 없으면 undefined 유지.
+  registerGroup({ group, serverName, origin }) {
+    this.#groups.set(group, { group, serverName, origin })
   }
 
   // --- 조회 ---
@@ -115,11 +116,12 @@ class ToolRegistry {
 
   // 그룹 목록 (등록 순서 유지)
   groups() {
-    return [...this.#groups.values()].map(({ group, serverName }) => {
+    return [...this.#groups.values()].map(({ group, serverName, origin }) => {
       const tools = [...this.#tools.values()].filter(t => t.group === group)
       return {
         group,
         serverName,
+        origin,
         enabled: tools.length > 0 && tools.every(t => t.enabled),
         toolCount: tools.length,
       }

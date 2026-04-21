@@ -63,14 +63,30 @@ const loadUserR = Reader.asks(({ basePath, username }) => {
   return fromFile(join(dir, 'users', username, 'config.json'))
 })
 
+// MCP merge 정책 (Phase 22 Step A/B):
+// - server.json 의 MCP 는 공용. user config 의 MCP 는 개인
+// - 공용 우선 dedupe: 같은 serverName 이 양쪽에 있으면 공용만 유지 (관리자 정의 보안/credential 보호)
+// - 각 엔트리에 origin: 'server' | 'user' 태깅해 이후 단계 (표시, credential 보호) 에 활용
+const mergeMcpLists = (serverLayer, userLayer) => {
+  const serverMcps = ((Maybe.isJust(serverLayer) ? serverLayer.value.mcp : null) || [])
+    .map(entry => ({ ...entry, origin: 'server' }))
+  const userMcps = ((Maybe.isJust(userLayer) ? userLayer.value.mcp : null) || [])
+    .map(entry => ({ ...entry, origin: 'user' }))
+  const serverNames = new Set(serverMcps.map(e => e.serverName))
+  // 공용에 이미 같은 이름이 있으면 user 항목 무시
+  const filteredUserMcps = userMcps.filter(e => !serverNames.has(e.serverName))
+  return [...serverMcps, ...filteredUserMcps]
+}
+
 // DEFAULTS → server.json → users/{username}/config.json
+// mcp 는 Config.SG 의 array replace 정책과 별개로 mergeMcpLists 로 후처리.
 const loadUserMergedR = Reader.asks(({ basePath, username }) => {
   if (!username) throw new Error('username is required for loadUserMerged')
   const dir = Config.resolveDir(basePath)
-  return loadAndMerge([
-    fromFile(join(dir, 'server.json')),
-    fromFile(join(dir, 'users', username, 'config.json')),
-  ])
+  const serverLayer = fromFile(join(dir, 'server.json'))
+  const userLayer = fromFile(join(dir, 'users', username, 'config.json'))
+  const merged = loadAndMerge([serverLayer, userLayer])
+  return new Config({ ...merged, mcp: mergeMcpLists(serverLayer, userLayer) })
 })
 
 // resolved server config 위에 유저 config를 병합.
@@ -78,8 +94,10 @@ const mergeUserOverR = Reader.asks(({ serverConfig, username, basePath }) => {
   if (!username) throw new Error('username is required for mergeUserOver')
   const dir = Config.resolveDir(basePath)
   const base = serverConfig instanceof Config ? serverConfig : new Config(serverConfig)
+  const serverLayer = Maybe.Just(base)
   const userLayer = fromFile(join(dir, 'users', username, 'config.json'))
-  return loadAndMerge([Maybe.Just(base), userLayer])
+  const merged = loadAndMerge([serverLayer, userLayer])
+  return new Config({ ...merged, mcp: mergeMcpLists(serverLayer, userLayer) })
 })
 
 // --- 브릿지 ---
