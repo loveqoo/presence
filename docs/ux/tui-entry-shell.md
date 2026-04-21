@@ -213,25 +213,17 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 
 ### 신규 마찰 포인트
 
-### FP-63 WS close 4004 시 "서버 연결이 끊겼습니다" 기본 문구 노출 [심각도: high] — **open**
+### FP-63 WS close 4004 시 "서버 연결이 끊겼습니다" 기본 문구 노출 [심각도: high] — **resolved (2026-04-21)**
 
-**시나리오**: 사용자가 allowedDirs에 포함되지 않은 디렉토리에서 TUI를 실행한다. WS join 단계에서 서버가 `close(4004, 'cwd outside allowedDirs')`를 전송하고, MirrorState가 이를 영구 실패로 처리해 `onUnrecoverable(4004)`를 호출한다. App.js가 disconnected 배너를 표시한다.
+**해소 확인**
+`App.js`의 `disconnectedReason` 분기에 `WS_CLOSE.WORKING_DIR_INVALID`(4004) 케이스가 추가되었다. 기존 분기도 하드코드 숫자(4001/4002/4003) 대신 `WS_CLOSE.*` 상수로 정리되었다.
 
-**현재 동작**: `App.js`의 `disconnectedReason` 분기 (`4001/4002/4003/else`)에서 4004는 else로 떨어져 `"서버 연결이 끊겼습니다 (close 4004)."`가 표시된다. 하단에는 `"TUI 를 재시작하세요 (Ctrl+C)."`만 노출된다.
+- 원인 문구: `"현재 폴더가 서버의 허용 범위를 벗어났습니다"`
+- 조치 문구: `"허용된 폴더로 이동한 뒤 TUI 를 다시 실행하세요 (Ctrl+C)."` (기존 공통 "재시작" 문구 대신 폴더 이동 안내로 교체)
 
-관련 코드: `packages/tui/src/ui/App.js:129-133` (disconnectedReason 분기), `packages/infra/src/infra/states/mirror-state.js:123-128` (4004 영구 실패 처리).
+테스트: `packages/tui/test/app.test.js` 62-3 (신규 3개).
 
-**마찰 포인트**: 사용자는 왜 끊겼는지, 무엇을 고쳐야 하는지 전혀 알 수 없다. "close 4004"는 내부 코드다. 실제 원인(실행 디렉토리가 허용 범위 밖)과 조치(allowedDirs에 디렉토리 추가 또는 허용된 디렉토리에서 TUI 재실행)를 알려줘야 한다.
-
-**제안**: `disconnectedReason` 분기에 4004를 추가해 아래와 같은 경험을 제공해야 한다:
-```
-⚠ 작업 디렉토리 접근이 거부되었습니다 (close 4004).
-현재 디렉토리가 허용된 경로 밖입니다.
-~/.presence/config.json 의 tools.allowedDirs 를 확인하거나, 허용된 디렉토리에서 TUI 를 다시 실행하세요.
-TUI 를 재시작하세요 (Ctrl+C).
-```
-
-**근거**: FP-16(서버 연결 실패)과 동일한 원칙 — 코드가 아닌 원인과 조치를 표시한다. 4004는 영구 실패이며 재연결이 없으므로, 사용자가 이 화면에서 취할 수 있는 행동(조치→Ctrl+C→재실행)을 즉시 안내해야 한다.
+**원래 현상**: `App.js`의 `disconnectedReason` 분기 (`4001/4002/4003/else`)에서 4004는 else로 떨어져 `"서버 연결이 끊겼습니다 (close 4004)."`가 표시되었다. 사용자는 실행 디렉토리 문제임을 알 수 없었고, "TUI 를 재시작하세요" 안내만으로는 조치 방향을 알 수 없었다.
 
 ### FP-64 `/sessions new` workingDir 거부 시 영어 서버 에러 노출 [심각도: medium] — **open**
 
@@ -257,6 +249,6 @@ TUI 를 재시작하세요 (Ctrl+C).
 
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
-| **high** | 1 | 2 | open: FP-63(4004 close 원인 미표시) / resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵) |
+| **high** | 0 | 3 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵), FP-63(4004 close 원인 미표시) |
 | **medium** | 1 | 6 | open: FP-64(/sessions new 400 영어 에러) / resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내) |
 | **low** | 0 | 5 | resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |
