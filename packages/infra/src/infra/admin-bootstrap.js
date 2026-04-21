@@ -13,8 +13,8 @@ const { Reader } = fp
 //
 // State 0: admin 계정 존재? (userStore.findUser('admin'))
 //   └─ NO → 랜덤 비밀번호 + userStore.addUser + admin-initial-password.txt (0600)
-// State 1: admin config.json 에 'manager' agent 등록?
-//   └─ NO → admin-persona.json 번들 로드 + config.json 작성
+// State 1: admin config.json 에 'manager' agent + primaryAgentId 등록?
+//   └─ NO → admin-persona.json 번들 로드 + config.json 작성 (primaryAgentId='admin/manager')
 // State 2: agent-policies.json 존재?
 //   └─ NO → 기본 정책 (maxAgentsPerUser: 5) 작성
 // =============================================================================
@@ -82,22 +82,26 @@ const ensureAdminManagerAgentR = Reader.asks(({ presenceDir, logger }) => () => 
   }
   if (!Array.isArray(config.agents)) config.agents = []
   const hasManager = config.agents.some(a => a.name === ADMIN_AGENT_NAME)
-  if (hasManager) {
-    logger?.info('[admin-bootstrap] State 1 skipped — admin/manager agent registered')
+  const hasPrimary = config.primaryAgentId === ADMIN_AGENT_ID
+  if (hasManager && hasPrimary) {
+    logger?.info('[admin-bootstrap] State 1 skipped — admin/manager agent + primaryAgentId registered')
     return { registeredAgent: false }
   }
-  const persona = loadAdminPersona()
-  config.agents.push({
-    name: ADMIN_AGENT_NAME,
-    description: 'presence 관리자 에이전트 — 서버 전역 정책 및 user agent 심사',
-    capabilities: [],
-    persona,
-    createdAt: new Date().toISOString(),
-    createdBy: 'admin-bootstrap',
-    archived: false,
-  })
+  if (!hasManager) {
+    const persona = loadAdminPersona()
+    config.agents.push({
+      name: ADMIN_AGENT_NAME,
+      description: 'presence 관리자 에이전트 — 서버 전역 정책 및 user agent 심사',
+      capabilities: [],
+      persona,
+      createdAt: new Date().toISOString(),
+      createdBy: 'admin-bootstrap',
+      archived: false,
+    })
+  }
+  config.primaryAgentId = ADMIN_AGENT_ID
   atomicWriteJson(configPath, config)
-  logger?.info(`[admin-bootstrap] admin/manager agent registered at ${configPath}`)
+  logger?.info(`[admin-bootstrap] admin/manager agent + primaryAgentId registered at ${configPath}`)
   return { registeredAgent: true }
 })
 

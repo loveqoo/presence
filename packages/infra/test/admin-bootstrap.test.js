@@ -49,6 +49,7 @@ async function run() {
     assert(typeof config.agents[0].persona === 'object', 'AB1: agent has persona')
     assert(typeof config.agents[0].persona.systemPrompt === 'string', 'AB1: persona has systemPrompt')
     assert(config.agents[0].archived === false, 'AB1: agent not archived')
+    assert(config.primaryAgentId === ADMIN_AGENT_ID, 'AB1: primaryAgentId = admin/manager')
 
     const policiesFile = join(dir, 'users', ADMIN_USERNAME, 'agent-policies.json')
     assert(existsSync(policiesFile), 'AB1: agent-policies.json exists')
@@ -118,6 +119,34 @@ async function run() {
     assert(config.agents.length === 2, 'AB4: 기존 legacy + 신규 manager 모두 존재')
     assert(config.agents.some(a => a.name === 'legacy'), 'AB4: legacy agent 유지')
     assert(config.agents.some(a => a.name === ADMIN_AGENT_NAME), 'AB4: manager agent 추가')
+    assert(config.primaryAgentId === ADMIN_AGENT_ID, 'AB4: primaryAgentId 추가')
+
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AB4b. 부분 완료 — manager 있지만 primaryAgentId 누락 → primaryAgentId 만 보충
+  {
+    const dir = createTmpDir()
+    const userStore = createUserStore({ basePath: dir })
+    await userStore.addUser(ADMIN_USERNAME, 'manual-password-123')
+    const adminDir = join(dir, 'users', ADMIN_USERNAME)
+    mkdirSync(adminDir, { recursive: true })
+    writeFileSync(join(adminDir, 'config.json'), JSON.stringify({
+      agents: [{
+        name: ADMIN_AGENT_NAME,
+        description: 'manager',
+        capabilities: [],
+        persona: { systemPrompt: 'admin', rules: [], tools: [] },
+        archived: false,
+      }],
+    }))
+
+    const result = await runAdminBootstrap({ userStore, presenceDir: dir, logger: silentLogger })
+    assert(result.registeredAgent === true, 'AB4b: primaryAgentId 누락 상태 → registeredAgent=true')
+
+    const config = JSON.parse(readFileSync(join(adminDir, 'config.json'), 'utf-8'))
+    assert(config.agents.length === 1, 'AB4b: 기존 manager agent 중복 push 없음')
+    assert(config.primaryAgentId === ADMIN_AGENT_ID, 'AB4b: primaryAgentId 보충됨')
 
     rmSync(dir, { recursive: true, force: true })
   }
