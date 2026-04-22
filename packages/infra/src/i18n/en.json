@@ -1,6 +1,6 @@
 {
   "error": {
-    "access_denied": "Access denied: {{path}} is outside allowed directories [{{dirs}}]. Add the directory to tools.allowedDirs in ~/.presence/config.json",
+    "access_denied": "Access denied: {{path}} is outside the workspace. The agent can only access files within {{workspace}}. Move the file into the workspace or request a path inside it.",
     "file_not_found": "File not found: {{path}}",
     "dir_not_found": "Directory not found: {{path}}",
     "arg_required": "{{tool}}: {{arg}} is required",

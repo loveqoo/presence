@@ -106,7 +106,7 @@ const resolveInWorkingDir = (relPath, workingDir) => {
   if (!workingDir) throw new Error('resolveInWorkingDir: workingDir required')
   const absolute = resolve(workingDir, relPath)
   if (!isWithinWorkspace(absolute, workingDir)) {
-    throw new Error(t('error.access_denied', { path: relPath, dirs: workingDir }))
+    throw new Error(t('error.access_denied', { path: relPath, workspace: workingDir }))
   }
   return absolute
 }
