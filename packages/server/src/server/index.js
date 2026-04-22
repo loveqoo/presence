@@ -97,6 +97,11 @@ class PresenceServer {
     const { persistenceCwd } = opts
     const config = configOverride || loadServer()
 
+    // docs §11.1 — a2a.enabled=true 일 때 publicUrl 필수. 없으면 부팅 거부.
+    if (config.a2a?.enabled && !config.a2a?.publicUrl) {
+      throw new Error('config.a2a.enabled=true requires publicUrl (docs/design/agent-identity-model.md §11.1)')
+    }
+
     // KG-06: PRESENCE_DIR 변경 시 이전 경로 데이터 경고
     warnPresenceDirChange()
 

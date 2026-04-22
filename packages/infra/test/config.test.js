@@ -236,6 +236,26 @@ async function run() {
     assert(DEFAULTS.llm.timeoutMs === 120_000, 'DEFAULTS: timeoutMs is 120000')
     assert(DEFAULTS.embed.dimensions === 256, 'DEFAULTS: embed dimensions')
     assert(Array.isArray(DEFAULTS.mcp), 'DEFAULTS: mcp is array')
+    // docs §11.1 — a2a 기본값은 disabled. publicUrl null.
+    assert(DEFAULTS.a2a.enabled === false, 'DEFAULTS: a2a.enabled=false')
+    assert(DEFAULTS.a2a.publicUrl === null, 'DEFAULTS: a2a.publicUrl=null')
+  }
+
+  // --- a2a schema parsing ---
+
+  {
+    const parsed1 = Config.Schema.parse({
+      ...DEFAULTS,
+      a2a: { enabled: true, publicUrl: 'https://home.example' },
+    })
+    assert(parsed1.a2a.enabled === true, 'a2a parse: enabled=true')
+    assert(parsed1.a2a.publicUrl === 'https://home.example', 'a2a parse: publicUrl round-trip')
+
+    // a2a 생략 시 기본값 주입
+    const { a2a: _omit, ...withoutA2a } = DEFAULTS
+    const parsed2 = Config.Schema.parse(withoutA2a)
+    assert(parsed2.a2a.enabled === false, 'a2a parse: omit → default enabled=false')
+    assert(parsed2.a2a.publicUrl === null, 'a2a parse: omit → default publicUrl=null')
   }
 
   summary()

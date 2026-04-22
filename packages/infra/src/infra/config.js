@@ -63,6 +63,13 @@ class Config {
     tools: z.object({
       allowedDirs: z.array(z.string()).default([]),
     }).default({ allowedDirs: [] }),
+    // docs/design/agent-identity-model.md §11.1 — A2A 활성화 플래그.
+    // enabled=false (기본): /a2a 라우트 미등록 / self card 미생성 / publicUrl 불요.
+    // enabled=true:  publicUrl 필수. self card URL = publicUrl + '/a2a/' + agentId.
+    a2a: z.object({
+      enabled: z.boolean().default(false),
+      publicUrl: z.string().nullable().default(null),
+    }).default({ enabled: false, publicUrl: null }),
   })
 
   // --- Semigroup: 2단계 deep merge ---
@@ -120,6 +127,7 @@ class Config {
       reservedOutputChars: null,
     },
     tools: { allowedDirs: [] },
+    a2a: { enabled: false, publicUrl: null },
   })
 
   constructor(data) { Object.assign(this, data) }
