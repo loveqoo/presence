@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { createUserStore } from './user-store.js'
 import { ensureSecret } from './token.js'
@@ -7,6 +8,14 @@ import { removeUserCompletely } from './remove-user.js'
 import { Config } from '../config.js'
 import { loadUserMerged } from '../config-loader.js'
 import { Memory } from '../memory.js'
+import {
+  STATUS as GV_STATUS,
+  submitUserAgent,
+  approveUserAgent,
+  denyUserAgent,
+  listPending,
+  loadAgentPolicies,
+} from '../authz/agent-governance.js'
 
 // =============================================================================
 // Auth CLI: 사용자 관리 도구
@@ -42,14 +51,17 @@ const promptLine = (prompt) => new Promise((resolve) => {
 const parseArgs = () => {
   const args = process.argv.slice(2)
   const command = args[0]
+  // `agent <action>` 2-단계 subcommand 지원. 나머지는 기존 동작 유지.
+  const action = command === 'agent' ? args[1] : null
+  const flagStart = command === 'agent' ? 2 : 1
   const flags = {}
-  for (let i = 1; i < args.length; i++) {
+  for (let i = flagStart; i < args.length; i++) {
     if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
       flags[args[i].slice(2)] = args[i + 1]
       i++
     }
   }
-  return { command, ...flags }
+  return { command, action, ...flags }
 }
 
 const requireFlag = (flags, name) => {
@@ -149,10 +161,128 @@ const cmdPasswd = async ({ username }) => {
   console.log(`Password changed for '${username}'. All existing sessions invalidated.`)
 }
 
+// --- Agent subcommands ---
+
+const loadPersonaFromFile = (filePath) => {
+  if (!filePath) return null
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf-8'))
+  } catch (err) {
+    console.error(`Failed to read persona file: ${err.message}`)
+    process.exit(1)
+  }
+}
+
+const defaultPersona = () => ({
+  name: 'Presence',
+  systemPrompt: null,
+  rules: [],
+  tools: [],
+})
+
+async function cmdAgentAdd(params) {
+  const presenceDir = Config.presenceDir()
+  const persona = params.personaPath ? loadPersonaFromFile(params.personaPath) : defaultPersona()
+  const result = submitUserAgent({
+    requester: params.requester, agentName: params.name, persona,
+    basePath: presenceDir, presenceDir,
+  })
+  switch (result.status) {
+    case GV_STATUS.APPROVED:
+      console.log(`Agent '${params.requester}/${params.name}' auto-approved. ${result.detail || ''}`)
+      return
+    case GV_STATUS.PENDING:
+      console.log(`Agent '${params.requester}/${params.name}' pending admin review.`)
+      console.log(`  reqId: ${result.reqId}`)
+      console.log(`  Admin can approve:  npm run user -- agent approve --id ${result.reqId}`)
+      return
+    case GV_STATUS.ALREADY_EXISTS:
+      console.error(`Agent '${params.requester}/${params.name}' already exists.`)
+      process.exit(1)
+      return
+  }
+}
+
+function cmdAgentReview() {
+  const presenceDir = Config.presenceDir()
+  const pending = listPending(presenceDir)
+  if (pending.length === 0) {
+    console.log('No pending agent requests.')
+    return
+  }
+  const policies = loadAgentPolicies(presenceDir)
+  console.log(`Pending requests (${pending.length}):`)
+  console.log(`  policy: maxAgentsPerUser=${policies.maxAgentsPerUser}, autoApproveUnderQuota=${policies.autoApproveUnderQuota}`)
+  for (const req of pending) {
+    console.log('')
+    console.log(`  [${req.id}]`)
+    console.log(`    requester: ${req.requester}`)
+    console.log(`    agentName: ${req.agentName}`)
+    console.log(`    submitted: ${req.submittedAt}`)
+    console.log(`    reason:    ${req.reason} (current ${req.currentCount}/${req.maxAgentsPerUser})`)
+  }
+  console.log('')
+  console.log('Approve: npm run user -- agent approve --id <reqId>')
+  console.log('Deny:    npm run user -- agent deny --id <reqId> --reason "<text>"')
+}
+
+function cmdAgentApprove(params) {
+  const presenceDir = Config.presenceDir()
+  const result = approveUserAgent(params.id, { presenceDir, basePath: presenceDir })
+  switch (result.status) {
+    case GV_STATUS.APPROVED:
+      console.log(`Request ${params.id} approved.`)
+      return
+    case GV_STATUS.ALREADY_APPLIED:
+      console.log(`Request ${params.id} already applied (idempotent replay, file cleaned).`)
+      return
+    case GV_STATUS.NOT_FOUND:
+      console.error(`Request ${params.id} not found in pending.`)
+      process.exit(1)
+      return
+  }
+}
+
+function cmdAgentDeny(params) {
+  const presenceDir = Config.presenceDir()
+  const reason = params.reason || 'denied by admin'
+  const result = denyUserAgent(params.id, reason, { presenceDir })
+  switch (result.status) {
+    case GV_STATUS.REJECTED:
+      console.log(`Request ${params.id} denied. Reason: ${reason}`)
+      return
+    case GV_STATUS.NOT_FOUND:
+      console.error(`Request ${params.id} not found in pending.`)
+      process.exit(1)
+      return
+  }
+}
+
+const dispatchAgent = (action, flags) => {
+  switch (action) {
+    case 'add':
+      return cmdAgentAdd({
+        requester: requireFlag(flags, 'requester'),
+        name: requireFlag(flags, 'name'),
+        personaPath: flags.persona,
+      })
+    case 'review':
+      return cmdAgentReview()
+    case 'approve':
+      return cmdAgentApprove({ id: requireFlag(flags, 'id') })
+    case 'deny':
+      return cmdAgentDeny({ id: requireFlag(flags, 'id'), reason: flags.reason })
+    default:
+      console.error(`Unknown agent action: ${action}`)
+      console.error('Actions: add, review, approve, deny')
+      process.exit(1)
+  }
+}
+
 // --- Main ---
 
 const main = async () => {
-  const { command, ...flags } = parseArgs()
+  const { command, action, ...flags } = parseArgs()
 
   if (!command) {
     console.log('Usage:')
@@ -161,6 +291,12 @@ const main = async () => {
     console.log('  npm run user -- remove --username <name>')
     console.log('  npm run user -- list')
     console.log('  npm run user -- passwd --username <name>')
+    console.log('')
+    console.log('Agent governance:')
+    console.log('  npm run user -- agent add --requester <user> --name <agent> [--persona <path>]')
+    console.log('  npm run user -- agent review')
+    console.log('  npm run user -- agent approve --id <reqId>')
+    console.log('  npm run user -- agent deny --id <reqId> --reason "<text>"')
     process.exit(0)
   }
 
@@ -175,6 +311,12 @@ const main = async () => {
       return cmdList()
     case 'passwd':
       return cmdPasswd({ username: requireFlag(flags, 'username') })
+    case 'agent':
+      if (!action) {
+        console.error('agent: action required (add / review / approve / deny)')
+        process.exit(1)
+      }
+      return dispatchAgent(action, flags)
     default:
       console.error(`Unknown command: ${command}`)
       process.exit(1)
