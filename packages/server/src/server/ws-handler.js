@@ -1,7 +1,8 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { AUTH_ERROR } from '@presence/infra/infra/auth/policy.js'
 import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
-import { WS_CLOSE, WATCHED_PATHS } from './constants.js'
+import { WS_CLOSE } from '@presence/core/core/policies.js'
+import { WATCHED_PATHS } from './constants.js'
 import { findOrCreateSession } from './session-api.js'
 
 const { Either, Reader } = fp

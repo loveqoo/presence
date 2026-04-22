@@ -47,8 +47,8 @@ const createUiHelpers = (reactiveState, delegateRuntime) => {
   const delegateUi = {
     addPending: (entry) => {
       if (isEnabled()) {
-        const pending = reactiveState.get('delegates.pending') || []
-        reactiveState.set('delegates.pending', [...pending, entry])
+        const pending = reactiveState.get(STATE_PATH.DELEGATES_PENDING) || []
+        reactiveState.set(STATE_PATH.DELEGATES_PENDING, [...pending, entry])
         // Phase 12b: delegateRuntime 있으면 submit 전이 알림 — FSM count 동기화.
         delegateRuntime?.submit({ type: 'submit' })
       }
