@@ -4,15 +4,7 @@
 // =============================================================================
 
 import { isPathAllowed } from '../tools/local-tools.js'
-
-// agentId 검증 — docs/design/agent-identity-model.md §3 의 validateAgentId 임시 구현.
-// M5 에서 core/agent-id.js 로 이관 예정.
-const AGENT_ID_REGEX = /^[a-z][a-z0-9-]{0,61}[a-z0-9]\/[a-z][a-z0-9-]{0,61}[a-z0-9]$|^[a-z]\/[a-z]$|^[a-z][a-z0-9-]{0,61}[a-z0-9]\/[a-z]$|^[a-z]\/[a-z][a-z0-9-]{0,61}[a-z0-9]$/
-const validateAgentId = (id) => {
-  if (typeof id !== 'string' || id.length === 0) throw new Error(`Session: agentId required (got ${typeof id})`)
-  if (!AGENT_ID_REGEX.test(id)) throw new Error(`Session: invalid agentId "${id}" — expected {username}/{agentName}, kebab-case`)
-  if (id.includes('--')) throw new Error(`Session: agentId "${id}" contains consecutive hyphens`)
-}
+import { assertValidAgentId } from '@presence/core/core/agent-id.js'
 
 // workingDir 결정 (생성 시점):
 // 1. opts.workingDir — POST /sessions body 또는 명시 생성
@@ -43,7 +35,10 @@ class Session {
     this.userId = opts.userId || 'default'
     // agentId: 세션 소속 agent 식별자 ({username}/{agentName}). 생성 후 불변.
     // docs/design/agent-identity-model.md §5.1. 호출처가 반드시 제공.
-    validateAgentId(opts.agentId)
+    if (typeof opts.agentId !== 'string' || opts.agentId.length === 0) {
+      throw new Error(`Session: agentId required (got ${typeof opts.agentId})`)
+    }
+    assertValidAgentId(opts.agentId)
     this.agentId = opts.agentId
     this.logger = userContext.logger
     // workingDir: 세션 실행 컨텍스트의 기준점. tool, prompt, API 응답의 단일 진실.

@@ -27,6 +27,7 @@ const tests = [
   'test/workspace/smoke.test.js',
   'packages/core/test/core/make-op.test.js',
   'packages/core/test/core/op.test.js',
+  'packages/core/test/core/agent-id.test.js',
   'packages/infra/test/state.test.js',
   'packages/infra/test/hook.test.js',
   'packages/infra/test/origin-state.test.js',
