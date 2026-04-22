@@ -130,12 +130,9 @@ const App = (props) => {
     ? disconnected.code === WS_CLOSE.AUTH_FAILED ? '세션이 만료되었습니다'
     : disconnected.code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED ? '비밀번호 변경이 필요합니다'
     : disconnected.code === WS_CLOSE.ORIGIN_NOT_ALLOWED ? '접근이 거부되었습니다'
-    : disconnected.code === WS_CLOSE.WORKING_DIR_INVALID ? '현재 폴더가 서버의 허용 범위를 벗어났습니다'
     : '서버 연결이 끊겼습니다'
     : null
-  const disconnectedAction = disconnected?.code === WS_CLOSE.WORKING_DIR_INVALID
-    ? '허용된 폴더로 이동한 뒤 TUI 를 다시 실행하세요 (Ctrl+C).'
-    : 'TUI 를 재시작하세요 (Ctrl+C).'
+  const disconnectedAction = 'TUI 를 재시작하세요 (Ctrl+C).'
   const disconnectedBanner = disconnected
     ? h(Box, { paddingX: 1, borderStyle: 'double', borderColor: 'red', flexDirection: 'column' },
         h(Text, { color: 'red', bold: true }, `⚠ ${disconnectedReason} (close ${disconnected.code}).`),

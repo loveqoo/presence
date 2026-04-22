@@ -64,11 +64,11 @@ const createUiHelpers = (reactiveState, delegateRuntime) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, allowedDirs, currentUserId } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, currentUserId } = {}) => {
   const ui = createUiHelpers(reactiveState, delegateRuntime)
-  // Tool handler 가 받을 resolvePath — 호출 시점의 workingDir 로 해석.
-  const resolvePath = (getWorkingDir && allowedDirs)
-    ? (relPath) => resolveInWorkingDir(relPath, getWorkingDir(), allowedDirs)
+  // Tool handler 가 받을 resolvePath — 호출 시점의 workingDir 기준 해석 + 경계 검증.
+  const resolvePath = getWorkingDir
+    ? (relPath) => resolveInWorkingDir(relPath, getWorkingDir())
     : undefined
 
   let interpret

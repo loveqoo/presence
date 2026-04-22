@@ -11,15 +11,6 @@ import { fireAndForget } from '@presence/core/lib/task.js'
 const createServerScheduler = (userContext, opts = {}) => {
   const defaultUserId = opts.username || 'default'
   let scheduler
-  // SCHEDULED session 의 workingDir — WS join 이 없어 backfill 대상 아님.
-  // user config 의 allowedDirs[0] 을 명시 전달해 Session 에서 pendingBackfill=false 로 확정.
-  //
-  // 의도적 단순화: job 별 workingDir 옵션은 제공하지 않는다. 이유:
-  //  - 추적 난이도: job 마다 다른 디렉토리면 사용자가 "이 job 이 어디서 실행되는지" 파악 어려움
-  //  - allowedDirs 내부의 민감 경로 지정 위험 (경계 검증은 외곽만 막음)
-  //  - capability 모델 (docs/design/platform.md §4-3) 도입 전 파편 정책 쌓지 않음
-  // 장래에 capability 가 통합되면 그 축에서 job 의 실행 환경을 표현한다.
-  const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   scheduler = createSchedulerActor({
     store: userContext.jobStore,
     onDispatch: (jobEvent) => {
@@ -41,12 +32,12 @@ const createServerScheduler = (userContext, opts = {}) => {
         return
       }
 
+      // workingDir 은 Session 이 userId 에서 자동 결정 (`~/.presence/users/{userId}/`).
       const entry = userContext.sessions.create({
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
         userId,
         agentId,
-        workingDir: jobEvent.workingDir || defaultWd,
         onScheduledJobDone: (event, outcome) => {
           const task = outcome.success
             ? scheduler.jobDone(event.runId, event.jobId, outcome.result)
@@ -63,19 +54,15 @@ const createServerScheduler = (userContext, opts = {}) => {
   return scheduler
 }
 
-// 에이전트 세션 등록: config.agents 기반
-// Agent session 도 SCHEDULED 와 마찬가지로 WS join 없음 → workingDir 명시 전달로
-// pendingBackfill=false 확정. agentDef.workingDir 있으면 사용, 없으면 allowedDirs[0].
+// 에이전트 세션 등록: config.agents 기반.
+// workingDir 은 userId 기반 자동 결정 — 별도 명시 불필요.
 const registerAgentSessions = (userContext, username) => {
   const userId = username || 'default'
-  const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   for (const agentDef of (userContext.config.agents || [])) {
     // agentId: qualifying 현재 agent name. identity §3 qualified form.
     const agentId = `${userId}/${agentDef.name}`
     const agentEntry = userContext.sessions.create({
-      id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId,
-      agentId,
-      workingDir: agentDef.workingDir || defaultWd,
+      id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId, agentId,
     })
     userContext.agentRegistry.register({
       agentId,

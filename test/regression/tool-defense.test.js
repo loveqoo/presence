@@ -5,7 +5,7 @@
  */
 import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools } from '@presence/infra/infra/tools/local-tools.js'
+import { createLocalTools, resolveInWorkingDir } from '@presence/infra/infra/tools/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -18,8 +18,10 @@ async function run() {
   mkdirSync(testDir, { recursive: true })
   writeFileSync(join(testDir, 'test.txt'), 'hello')
 
-  const tools = createLocalTools({ allowedDirs: [testDir] })
+  const tools = createLocalTools()
   const byName = Object.fromEntries(tools.map(t => [t.name, t]))
+  // 세션 context 시뮬 — tool handler 의 ctx.resolvePath 로 경계 검증 (docs/specs/agent-identity.md).
+  const ctx = { resolvePath: (p) => resolveInWorkingDir(p, testDir), workingDir: testDir }
 
   const expectThrow = async (label, fn) => {
     try {
@@ -32,43 +34,42 @@ async function run() {
 
   // === file_read 방어 ===
 
-  await expectThrow('file_read(undefined)', () => byName.file_read.handler(undefined))
-  await expectThrow('file_read(null)', () => byName.file_read.handler(null))
-  await expectThrow('file_read({})', () => byName.file_read.handler({}))
-  await expectThrow('file_read({path: 123})', () => byName.file_read.handler({ path: 123 }))
-  await expectThrow('file_read({path: ""})', () => byName.file_read.handler({ path: '' }))
-  await expectThrow('file_read nonexistent', () => byName.file_read.handler({ path: join(testDir, 'nope.txt') }))
+  await expectThrow('file_read(undefined)', () => byName.file_read.handler(undefined, ctx))
+  await expectThrow('file_read(null)', () => byName.file_read.handler(null, ctx))
+  await expectThrow('file_read({})', () => byName.file_read.handler({}, ctx))
+  await expectThrow('file_read({path: 123})', () => byName.file_read.handler({ path: 123 }, ctx))
+  await expectThrow('file_read({path: ""})', () => byName.file_read.handler({ path: '' }, ctx))
+  await expectThrow('file_read nonexistent', () => byName.file_read.handler({ path: 'nope.txt' }, ctx))
 
   // 정상 케이스
   {
-    const result = byName.file_read.handler({ path: join(testDir, 'test.txt') })
+    const result = byName.file_read.handler({ path: 'test.txt' }, ctx)
     assert(result === 'hello', 'file_read valid: returns content')
   }
 
   // === file_write 방어 ===
 
-  await expectThrow('file_write(undefined)', () => byName.file_write.handler(undefined))
-  await expectThrow('file_write({})', () => byName.file_write.handler({}))
-  await expectThrow('file_write({path only})', () => byName.file_write.handler({ path: join(testDir, 'x.txt') }))
-  await expectThrow('file_write({content only})', () => byName.file_write.handler({ content: 'hi' }))
-  await expectThrow('file_write outside allowed', () => byName.file_write.handler({ path: '/etc/x', content: 'x' }))
+  await expectThrow('file_write(undefined)', () => byName.file_write.handler(undefined, ctx))
+  await expectThrow('file_write({})', () => byName.file_write.handler({}, ctx))
+  await expectThrow('file_write({path only})', () => byName.file_write.handler({ path: 'x.txt' }, ctx))
+  await expectThrow('file_write({content only})', () => byName.file_write.handler({ content: 'hi' }, ctx))
+  await expectThrow('file_write outside workspace', () => byName.file_write.handler({ path: '/etc/x', content: 'x' }, ctx))
 
   // 빈 문자열 content는 허용 (파일 비우기)
   {
-    const emptyPath = join(testDir, 'empty.txt')
-    const result = byName.file_write.handler({ path: emptyPath, content: '' })
+    const result = byName.file_write.handler({ path: 'empty.txt', content: '' }, ctx)
     assert(result.includes('0 chars'), 'file_write empty content: allowed')
   }
 
   // === file_list 방어 ===
 
-  await expectThrow('file_list(undefined)', () => byName.file_list.handler(undefined))
-  await expectThrow('file_list({})', () => byName.file_list.handler({}))
-  await expectThrow('file_list nonexistent', () => byName.file_list.handler({ path: join(testDir, 'nope') }))
-  await expectThrow('file_list outside', () => byName.file_list.handler({ path: '/etc' }))
+  await expectThrow('file_list(undefined)', () => byName.file_list.handler(undefined, ctx))
+  await expectThrow('file_list({})', () => byName.file_list.handler({}, ctx))
+  await expectThrow('file_list nonexistent', () => byName.file_list.handler({ path: 'nope' }, ctx))
+  await expectThrow('file_list outside', () => byName.file_list.handler({ path: '/etc' }, ctx))
 
   {
-    const result = byName.file_list.handler({ path: testDir })
+    const result = byName.file_list.handler({ path: '.' }, ctx)
     assert(result.includes('test.txt'), 'file_list valid: lists files')
   }
 
@@ -81,13 +82,13 @@ async function run() {
 
   // === shell_exec 방어 ===
 
-  await expectThrow('shell_exec(undefined)', () => byName.shell_exec.handler(undefined))
-  await expectThrow('shell_exec({})', () => byName.shell_exec.handler({}))
-  await expectThrow('shell_exec({command: ""})', () => byName.shell_exec.handler({ command: '' }))
-  await expectThrow('shell_exec bad command', () => byName.shell_exec.handler({ command: 'nonexistent_command_xyz' }))
+  await expectThrow('shell_exec(undefined)', () => byName.shell_exec.handler(undefined, ctx))
+  await expectThrow('shell_exec({})', () => byName.shell_exec.handler({}, ctx))
+  await expectThrow('shell_exec({command: ""})', () => byName.shell_exec.handler({ command: '' }, ctx))
+  await expectThrow('shell_exec bad command', () => byName.shell_exec.handler({ command: 'nonexistent_command_xyz' }, ctx))
 
   {
-    const result = byName.shell_exec.handler({ command: 'echo ok' })
+    const result = byName.shell_exec.handler({ command: 'echo ok' }, ctx)
     assert(result === 'ok', 'shell_exec valid: returns stdout')
   }
 
@@ -105,8 +106,8 @@ async function run() {
 
   // === 경로 트래버설 방어 ===
 
-  await expectThrow('path traversal ../', () => byName.file_read.handler({ path: join(testDir, '../../../etc/passwd') }))
-  await expectThrow('path traversal encoded', () => byName.file_read.handler({ path: testDir + '/%2e%2e/etc/passwd' }))
+  await expectThrow('path traversal ../', () => byName.file_read.handler({ path: '../../../etc/passwd' }, ctx))
+  await expectThrow('path traversal encoded', () => byName.file_read.handler({ path: '%2e%2e/etc/passwd' }, ctx))
 
   rmSync(testDir, { recursive: true, force: true })
 

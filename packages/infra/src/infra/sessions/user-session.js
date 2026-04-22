@@ -44,12 +44,8 @@ class UserSession extends EphemeralSession {
         this.approveRuntime?.restoreStateVersion(restored._fsmVersions.approve)
         this.delegateRuntime?.restoreStateVersion(restored._fsmVersions.delegate)
       }
-      // workingDir 복원 — persistence 값이 있으면 최우선. pendingBackfill 도 복원.
-      if (typeof restored.workingDir === 'string' && restored.workingDir.length > 0) {
-        this.workingDir = restored.workingDir
-        this.pendingBackfill = restored.pendingBackfill === true
-      }
-      // agentId: 복원하지 않음 — 생성 시점 값이 권위 (docs/design/agent-identity-model.md §5).
+      // workingDir / agentId 는 복원하지 않음 — 생성 시점 값이 권위.
+      // workingDir 은 userId 로 자동 결정. agentId 는 호출처가 명시.
       // 기존 persisted session 에 agentId 없을 수 있어 restored.agentId 무시.
       this.logger.info(`State restored (turn: ${restored.turn || 0})`)
     } catch (err) {
@@ -138,7 +134,7 @@ class UserSession extends EphemeralSession {
     try {
       const snap = this.state.snapshot()
       // Phase 10: FSM stateVersion 영속화 — 서버 재시작 시 version 연속성 유지용.
-      // workingDir + pendingBackfill: 세션 실행 컨텍스트 영속화.
+      // workingDir 은 저장하지 않음 (생성 시 userId 에서 결정).
       const withVersions = {
         ...snap,
         _fsmVersions: {
@@ -146,8 +142,6 @@ class UserSession extends EphemeralSession {
           approve: this.approveRuntime?.stateVersion ?? null,
           delegate: this.delegateRuntime?.stateVersion ?? null,
         },
-        workingDir: this.workingDir,
-        pendingBackfill: this.pendingBackfill === true,
         agentId: this.agentId,
       }
       await forkTask(this.actors.persistenceActor.flush(withVersions))

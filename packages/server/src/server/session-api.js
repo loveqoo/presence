@@ -164,7 +164,7 @@ const mountSessionsCrud = (router, deps) => {
   })
   router.post('/sessions', express.json(), async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
-    const { type = SESSION_TYPE.USER, id, workingDir } = req.body || {}
+    const { type = SESSION_TYPE.USER, id } = req.body || {}
     const validTypes = Object.values(SESSION_TYPE)
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: `Invalid session type: ${type}` })
@@ -187,17 +187,11 @@ const mountSessionsCrud = (router, deps) => {
         }
       }
 
-      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: effectiveUserId, agentId, persistenceCwd, workingDir })
-      // effective workingDir 을 응답에 포함 — POST 직후 클라이언트 확인용.
+      // workingDir 은 userId 에서 자동 결정 (Session 내부).
+      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: effectiveUserId, agentId, persistenceCwd })
       res.status(201).json({ id: entry.id, type: entry.type, workingDir: entry.session.workingDir })
     } catch (err) {
-      // Session 생성 실패 분류 — 클라이언트가 code 로 i18n 메시지 선택 (FP-64).
-      const code = /outside allowedDirs/.test(err.message)
-        ? 'WORKING_DIR_OUT_OF_BOUNDS'
-        : /not resolvable/.test(err.message)
-          ? 'WORKING_DIR_NOT_RESOLVABLE'
-          : 'SESSION_CREATE_FAILED'
-      res.status(400).json({ error: err.message, code })
+      res.status(400).json({ error: err.message, code: 'SESSION_CREATE_FAILED' })
     }
   })
   router.delete('/sessions/:sessionId', async (req, res) => {

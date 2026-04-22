@@ -21,7 +21,6 @@ const sessionInterpreterR =
       getAbortSignal: () => env.turnController.getAbortSignal(),
       delegateRuntime: env.delegateRuntime,
       getWorkingDir: env.getWorkingDir,
-      allowedDirs: env.allowedDirs,
       currentUserId: env.currentUserId,
     }),
     prodInterpreterR,

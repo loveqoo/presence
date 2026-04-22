@@ -35,7 +35,6 @@ const buildBaseConfig = (llmPort, overrides) => ({
   delegatePolling: { intervalMs: 60000 },
   agents: [],
   prompt: { maxContextTokens: 8000, reservedOutputTokens: 1000, maxContextChars: null, reservedOutputChars: null },
-  tools: { allowedDirs: ['/tmp'] },
   ...overrides,
 })
 

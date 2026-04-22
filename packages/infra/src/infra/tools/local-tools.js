@@ -38,30 +38,22 @@ const parseArgs = (schema, args, toolName) => {
 }
 
 // --- 경로 검증 (순수) ---
-
-const isPathAllowed = (path, allowedDirs) => {
-  if (allowedDirs.length === 0) return true
+// docs/specs/agent-identity.md — workingDir (= 유저 workspace) 경계 lexical prefix 매칭.
+// Symlink realpath 해석은 하지 않음 (의도적). 유저가 workspace 안에 symlink 를 만들어
+// 외부 접근하는 것은 OS-level 권한 영역이며, 별도 보안 강화는 follow-up.
+const isWithinWorkspace = (path, workingDir) => {
+  if (!workingDir) return false
   const resolved = resolve(path)
-  return allowedDirs.some(dir => {
-    const resolvedDir = resolve(dir)
-    return resolved === resolvedDir || resolved.startsWith(resolvedDir + '/')
-  })
+  const base = resolve(workingDir)
+  return resolved === base || resolved.startsWith(base + '/')
 }
 
 // --- 경로 정규화 ---
-// 후보 경로를 순서대로 시도, 첫 번째 유효한 것을 사용.
-
-const normalizePath = (path, allowedDirs) => {
-  const resolved = resolve(path)
-  const candidates = [
-    resolved,
-    // 잘못된 절대경로 → 허용 디렉토리 기준 상대 재해석
-    ...(allowedDirs.length > 0 && path.startsWith('/')
-      ? [resolve(allowedDirs[0], path.replace(/^\/+/, ''))]
-      : []),
-  ]
-  return candidates.find(c => isPathAllowed(c, allowedDirs) && (c === resolved || existsSync(c)))
-    || resolved
+// 상대경로 → workingDir 기준 절대경로. 경계 밖이면 workingDir 로 fallback.
+const normalizePath = (path, workingDir) => {
+  if (!workingDir) return resolve(path)
+  const resolved = resolve(workingDir, path)
+  return isWithinWorkspace(resolved, workingDir) ? resolved : workingDir
 }
 
 // --- HTML → 텍스트 변환 (FP-62) ---
@@ -108,30 +100,24 @@ const analyzeWebFetchResult = (text) => {
 }
 
 // --- workingDir 기준 경로 해석 (세션별) ---
-// 세션의 작업 디렉토리 기준으로 상대경로를 절대경로로 해석.
-// allowedDirs 경계를 벗어나면 throw.
+// 세션의 작업 디렉토리 기준으로 상대경로를 절대경로로 해석. 경계 밖이면 throw.
 // workingDir 누락 시 throw (fallback 없음 — 호출자가 책임).
-const resolveInWorkingDir = (relPath, workingDir, allowedDirs) => {
+const resolveInWorkingDir = (relPath, workingDir) => {
   if (!workingDir) throw new Error('resolveInWorkingDir: workingDir required')
   const absolute = resolve(workingDir, relPath)
-  if (!isPathAllowed(absolute, allowedDirs)) {
-    throw new Error(t('error.access_denied', { path: relPath, dirs: allowedDirs.join(', ') || '(none)' }))
+  if (!isWithinWorkspace(absolute, workingDir)) {
+    throw new Error(t('error.access_denied', { path: relPath, dirs: workingDir }))
   }
   return absolute
 }
 
 // --- 도구 정의 ---
+// 세션 context 의 ctx.resolvePath 가 workingDir 경계 검증 유일 창구.
+// ctx 없이 호출하면 path 가 그대로 해석됨 (legacy/테스트 경로).
+const resolveWithCtx = (rawPath, ctx) =>
+  ctx?.resolvePath ? ctx.resolvePath(rawPath) : resolve(rawPath)
 
-const createLocalTools = ({ allowedDirs = [] } = {}) => {
-  const resolvePath = (path) => normalizePath(path, allowedDirs)
-
-  const checkAccess = (path) => {
-    if (!isPathAllowed(path, allowedDirs)) {
-      const dirs = allowedDirs.length > 0 ? allowedDirs.join(', ') : '(none)'
-      throw new Error(t('error.access_denied', { path, dirs }))
-    }
-  }
-
+const createLocalTools = () => {
   return [
     {
       name: 'file_read', source: TOOL_SOURCE.LOCAL, promptVisible: true,
@@ -148,8 +134,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
       handler: (rawArgs, ctx) => {
         const { path, maxLines, tailLines } = parseArgs(FileReadArgs, rawArgs, 'file_read')
         // ctx.resolvePath 우선 (세션 workingDir 기준). 없으면 legacy resolvePath (호환성).
-        const resolved = ctx?.resolvePath ? ctx.resolvePath(path) : resolvePath(path)
-        if (!ctx?.resolvePath) checkAccess(resolved)
+        const resolved = resolveWithCtx(path, ctx)
         if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path }))
         const content = readFileSync(resolved, 'utf-8')
         const lines = content.split('\n')
@@ -172,8 +157,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
       },
       handler: (rawArgs, ctx) => {
         const { path, content } = parseArgs(FileWriteArgs, rawArgs, 'file_write')
-        const resolved = ctx?.resolvePath ? ctx.resolvePath(path) : resolvePath(path)
-        if (!ctx?.resolvePath) checkAccess(resolved)
+        const resolved = resolveWithCtx(path, ctx)
         writeFileSync(resolved, content, 'utf-8')
         return `Written ${content.length} chars to ${resolved}`
       },
@@ -191,8 +175,7 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
       },
       handler: (rawArgs, ctx) => {
         const { path: dirPath } = parseArgs(FileListArgs, rawArgs, 'file_list')
-        const resolved = ctx?.resolvePath ? ctx.resolvePath(dirPath) : resolvePath(dirPath)
-        if (!ctx?.resolvePath) checkAccess(resolved)
+        const resolved = resolveWithCtx(dirPath, ctx)
         if (!existsSync(resolved)) throw new Error(t('error.dir_not_found', { path: dirPath }))
         const items = readdirSync(resolved).map(name => {
           try {
@@ -300,14 +283,13 @@ const createLocalTools = ({ allowedDirs = [] } = {}) => {
 }
 
 /**
- * `createLocalTools` — Creates built-in local tools: file_read, file_write, file_list, web_fetch, shell_exec, calculate.
- * @see createLocalTools
+ * `createLocalTools` — Creates built-in local tools (file_read/write/list, web_fetch, shell_exec, calculate).
  *
- * `isPathAllowed(path, allowedDirs)` — Returns true if the resolved path is within one of the allowed directories.
+ * `isWithinWorkspace(path, workingDir)` — Lexical prefix 검증. workingDir 안쪽이면 true.
  *
- * `normalizePath(path, allowedDirs)` — Resolves and normalises a path, falling back to allowed-dir-relative resolution.
+ * `resolveInWorkingDir(relPath, workingDir)` — 상대경로 → 절대경로. 경계 밖이면 throw.
  */
 export {
-  createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir,
+  createLocalTools, isWithinWorkspace, normalizePath, resolveInWorkingDir,
   analyzeWebFetchResult, htmlToText, looksLikeHtml,
 }

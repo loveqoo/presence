@@ -92,10 +92,8 @@ const ephemeralInits = {
       turnController: this.turnController,
       delegateRuntime: this.delegateRuntime,
       logger: this.logger,
-      // workingDir / allowedDirs 를 tool handler context 로 전달.
-      // getter — WS join backfill 로 값이 바뀌어도 다음 tool 호출 시 최신값 반영.
+      // workingDir 을 tool handler context 로 전달. userId 에서 확정되므로 런타임 불변.
       getWorkingDir: () => this.workingDir,
-      allowedDirs: userContext.config.tools.allowedDirs,
       // currentUserId — Delegate target resolver (§3.6) 가 short-name qualify 에 사용.
       currentUserId: this.userId,
     })

@@ -1,6 +1,5 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { AUTH_ERROR } from '@presence/infra/infra/auth/policy.js'
-import { isPathAllowed } from '@presence/infra/infra/tools/local-tools.js'
 import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
 import { WS_CLOSE, WATCHED_PATHS } from './constants.js'
 import { findOrCreateSession } from './session-api.js'
@@ -129,7 +128,7 @@ class WsHandler {
     return authenticated
   }
 
-  // join 메시지 처리: 유저별/글로벌 컨텍스트에서 세션 검색 + workingDir backfill + init 응답.
+  // join 메시지 처리: 유저별/글로벌 컨텍스트에서 세션 검색 + init 응답.
   async #handleJoin(ws, msg, wsUsername) {
     const sessionId = msg.session_id
 
@@ -165,27 +164,12 @@ class WsHandler {
       }
     }
 
-    // workingDir backfill — pendingBackfill=true 인 세션만 TUI cwd 수용.
-    // TUI cwd 가 allowedDirs 밖이면 WS close(4004) 로 영구 실패 전달.
-    if (typeof msg.cwd === 'string' && msg.cwd.length > 0) {
-      const allowedDirs = effectiveCtx.config.tools?.allowedDirs || []
-      if (!isPathAllowed(msg.cwd, allowedDirs) || allowedDirs.length === 0) {
-        ws.close(WS_CLOSE.WORKING_DIR_INVALID, 'cwd outside allowedDirs')
-        return
-      }
-      if (entry.session.pendingBackfill === true) {
-        entry.session.workingDir = msg.cwd
-        entry.session.pendingBackfill = false
-        entry.session.flushPersistence?.().catch(() => {})
-      }
-    }
-
     ws.send(JSON.stringify({
       type: 'init',
       session_id: sessionId,
       state: entry.session.state.snapshot(),
       stateVersion: entry.session.turnGateRuntime?.stateVersion ?? null,
-      // Effective workingDir — TUI 가 매 join 시 최신값 수신 (stale cache 회피).
+      // workingDir 은 userId 기반 자동 결정 — 세션 생명 동안 불변.
       workingDir: entry.session.workingDir,
     }))
   }

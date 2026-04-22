@@ -9,7 +9,7 @@ import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
-import { loadUserMerged, ensureAllowedDirs } from './config-loader.js'
+import { loadUserMerged } from './config-loader.js'
 import { ensureUserDefaultAgent } from './user-migration.js'
 import { initI18n, t } from '../i18n/index.js'
 import { createSessionManager } from './sessions/session-manager.js'
@@ -53,9 +53,6 @@ class UserContext {
     userContext.logger = createLogger().logger
     if (!userContext.config.llm?.apiKey) userContext.logger.warn('[config] llm.apiKey is not set — LLM calls will fail')
 
-    // --- allowedDirs migration (process.cwd() 의존 제거) ---
-    userContext.config = ensureAllowedDirs(userContext.config, { username, logger: userContext.logger })
-
     // --- M3+M4: primaryAgentId + default agent 보충 ---
     // admin 은 admin-bootstrap 이 처리. 비-admin user 만 여기서 lazy migration.
     if (username) {
@@ -83,8 +80,10 @@ class UserContext {
     userContext.embedder = buildEmbedder(userContext.config)
 
     // --- Tools (local + MCP) ---
+    // local tool 은 세션 context (ctx.resolvePath) 로 workingDir 경계 검증.
+    // UserContext 레벨에서 allowedDirs 주입 없음 (session 경유가 유일 진실).
     userContext.toolRegistry = createToolRegistry()
-    const localTools = createLocalTools({ allowedDirs: userContext.config.tools.allowedDirs })
+    const localTools = createLocalTools()
     for (const tool of localTools) userContext.toolRegistry.register(tool)
     const { mcpConnections } = await initMcpIntegration(userContext.config, userContext.logger, userContext.toolRegistry)
     userContext.mcpConnections = mcpConnections
