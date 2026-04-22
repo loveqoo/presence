@@ -1,0 +1,133 @@
+import { canAccessAgent, INTENT, REASON } from '@presence/infra/infra/authz/agent-access.js'
+import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
+import { assert, summary } from '../../../test/lib/assert.js'
+
+console.log('canAccessAgent tests')
+
+// AA1. 본인 agent, new-session → allow
+{
+  const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.NEW_SESSION })
+  assert(r.allow === true, 'AA1: own agent allowed')
+}
+
+// AA2. admin → admin/manager allow
+{
+  const r = canAccessAgent({ jwtSub: 'admin', agentId: 'admin/manager', intent: INTENT.NEW_SESSION })
+  assert(r.allow === true, 'AA2: admin/manager by admin')
+}
+
+// AA3. non-admin → admin/manager deny 'admin-only'
+{
+  const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'admin/manager', intent: INTENT.DELEGATE })
+  assert(r.allow === false, 'AA3: non-admin → admin/manager denied')
+  assert(r.reason === REASON.ADMIN_ONLY, 'AA3: reason=admin-only')
+}
+
+// AA4. user A → user B agent deny 'not-owner'
+{
+  const r = canAccessAgent({ jwtSub: 'alice', agentId: 'bob/daily', intent: INTENT.NEW_SESSION })
+  assert(r.allow === false, 'AA4: cross-user denied')
+  assert(r.reason === REASON.NOT_OWNER, 'AA4: reason=not-owner')
+}
+
+// AA5. archived + new-session → deny 'archived'
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.NEW_SESSION, registry: reg,
+  })
+  assert(r.allow === false, 'AA5: archived + new-session denied')
+  assert(r.reason === REASON.ARCHIVED, 'AA5: reason=archived')
+}
+
+// AA6. archived + continue-session → allow (graceful retire §5.4)
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.CONTINUE_SESSION, registry: reg,
+  })
+  assert(r.allow === true, 'AA6: archived + continue-session allowed')
+}
+
+// AA7. archived + delegate → deny
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.DELEGATE, registry: reg,
+  })
+  assert(r.allow === false, 'AA7: archived + delegate denied')
+  assert(r.reason === REASON.ARCHIVED, 'AA7: reason=archived')
+}
+
+// AA8. non-archived agent + registry → allow
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/default', type: 'local', archived: false })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.NEW_SESSION, registry: reg,
+  })
+  assert(r.allow === true, 'AA8: non-archived allowed')
+}
+
+// AA9. agent 등록 없는 registry (unknown agent) — archived check 는 skip, ownership 만
+{
+  const reg = createAgentRegistry()
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/ghost', intent: INTENT.NEW_SESSION, registry: reg,
+  })
+  // archived 판정 불가 → allow (session 생성은 이후 단계에서 막힐 수 있음)
+  assert(r.allow === true, 'AA9: 미등록 agent → ownership 통과 (archived skip)')
+}
+
+// AA10. registry 없이도 ownership 판정 가능
+{
+  const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.DELEGATE })
+  assert(r.allow === true, 'AA10: registry 없이도 ownership allow')
+}
+
+// AA11. jwtSub 누락 → missing-principal
+{
+  const r = canAccessAgent({ agentId: 'anthony/default', intent: INTENT.DELEGATE })
+  assert(r.allow === false, 'AA11: jwtSub 누락 → deny')
+  assert(r.reason === REASON.MISSING_PRINCIPAL, 'AA11: reason=missing-principal')
+}
+
+// AA12. agentId 누락 → invalid-agent-id
+{
+  const r = canAccessAgent({ jwtSub: 'anthony', intent: INTENT.DELEGATE })
+  assert(r.allow === false, 'AA12: agentId 누락 → deny')
+  assert(r.reason === REASON.INVALID_AGENT_ID, 'AA12: reason=invalid-agent-id')
+}
+
+// AA13. agentId 에 slash 없음 → invalid-agent-id
+{
+  const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'default', intent: INTENT.DELEGATE })
+  assert(r.allow === false, 'AA13: slash 없음 → deny')
+  assert(r.reason === REASON.INVALID_AGENT_ID, 'AA13: reason=invalid-agent-id')
+}
+
+// AA14. 잘못된 intent → invalid-intent
+{
+  const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent: 'random-intent' })
+  assert(r.allow === false, 'AA14: invalid intent → deny')
+  assert(r.reason === REASON.INVALID_INTENT, 'AA14: reason=invalid-intent')
+}
+
+// AA15. admin 이 본인 user agent (admin/personal) → allow
+{
+  const r = canAccessAgent({ jwtSub: 'admin', agentId: 'admin/personal', intent: INTENT.NEW_SESSION })
+  assert(r.allow === true, 'AA15: admin can access own admin/* agents')
+}
+
+// AA16. 4 intent 모두 허용
+{
+  for (const intent of [INTENT.NEW_SESSION, INTENT.CONTINUE_SESSION, INTENT.DELEGATE, INTENT.SCHEDULED_RUN]) {
+    const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent })
+    assert(r.allow === true, `AA16: intent=${intent} allowed`)
+  }
+}
+
+summary()

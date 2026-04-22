@@ -28,6 +28,7 @@ const createAgentRegistry = () => {
         run: spec.run,
         endpoint: spec.endpoint,
         agentCard: spec.agentCard,
+        archived: spec.archived === true,
       })
     },
     get: (agentId) => Maybe.fromNullable(agents.get(agentId)),

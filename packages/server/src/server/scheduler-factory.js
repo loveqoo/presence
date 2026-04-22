@@ -67,6 +67,7 @@ const registerAgentSessions = (userContext, username) => {
       capabilities: agentDef.capabilities || [],
       type: DelegationMode.LOCAL,
       run: (task) => agentEntry.session.handleInput(task),
+      archived: agentDef.archived === true,
     })
     fireAndForget(agentEntry.session.delegateActor.start())
   }
