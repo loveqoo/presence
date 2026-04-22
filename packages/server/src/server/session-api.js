@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
 import { handleSlashCommand } from './slash-commands.js'
 
 // =============================================================================
@@ -51,6 +52,21 @@ const attachSessionMiddleware = (deps) => {
     if (authEnabled && username && entry.owner !== null && entry.owner !== username) {
       return res.status(403).json({ error: 'Access denied: session belongs to another user' })
     }
+
+    // docs §9.4 진입점 #1 — continue-session intent 로 canAccessAgent 호출.
+    // 인증 활성화 + username 있을 때만 강제. 레거시 anonymous 테스트는 skip.
+    if (authEnabled && username) {
+      const access = canAccessAgent({
+        jwtSub: username,
+        agentId: entry.session.agentId,
+        intent: INTENT.CONTINUE_SESSION,
+        registry: effectiveUserContext.agentRegistry,
+      })
+      if (!access.allow) {
+        return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })
+      }
+    }
+
     req.presenceSession = entry
     req.presenceUserContext = effectiveUserContext
     next()
@@ -160,6 +176,17 @@ const mountSessionsCrud = (router, deps) => {
       // agentId: M1 runtime hardcode. M3 이후 config.primaryAgentId / type 별 결정 로직 이관.
       const effectiveUserId = owner || 'default'
       const agentId = `${effectiveUserId}/default`
+
+      // docs §9.4 진입점 #1 — new-session intent. 인증 활성화 시에만 강제.
+      if (deps.authEnabled && owner) {
+        const access = canAccessAgent({
+          jwtSub: owner, agentId, intent: INTENT.NEW_SESSION, registry: ctx.agentRegistry,
+        })
+        if (!access.allow) {
+          return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })
+        }
+      }
+
       const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: effectiveUserId, agentId, persistenceCwd, workingDir })
       // effective workingDir 을 응답에 포함 — POST 직후 클라이언트 확인용.
       res.status(201).json({ id: entry.id, type: entry.type, workingDir: entry.session.workingDir })
