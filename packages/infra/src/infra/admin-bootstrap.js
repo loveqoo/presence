@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, chmodSync, unlinkSync } from 'fs'
+import { readFileSync, existsSync, unlinkSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { randomBytes } from 'crypto'
 import { fileURLToPath } from 'url'
 import fp from '@presence/core/lib/fun-fp.js'
+import { atomicWriteJson, atomicWriteText } from './fs-utils.js'
 
 const { Reader } = fp
 
@@ -36,24 +37,6 @@ const loadAdminPersona = () => {
   return JSON.parse(readFileSync(personaPath, 'utf-8'))
 }
 
-// --- Atomic write — tmp 에 쓰고 rename. 중간 crash 시 orphan tmp 만 남음 ---
-
-const atomicWriteJson = (filePath, data, { mode } = {}) => {
-  mkdirSync(dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
-  if (mode !== undefined) chmodSync(tmp, mode)
-  renameSync(tmp, filePath)
-}
-
-const atomicWriteText = (filePath, text, { mode } = {}) => {
-  mkdirSync(dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
-  writeFileSync(tmp, text, 'utf-8')
-  if (mode !== undefined) chmodSync(tmp, mode)
-  renameSync(tmp, filePath)
-}
-
 // --- State 0: admin 계정 ---
 
 const ensureAdminAccountR = Reader.asks(({ userStore, presenceDir, logger }) => async () => {
@@ -73,34 +56,37 @@ const ensureAdminAccountR = Reader.asks(({ userStore, presenceDir, logger }) => 
 
 // --- State 1: admin/manager agent config ---
 
+const readExistingConfig = (path) => {
+  if (!existsSync(path)) return {}
+  try { return JSON.parse(readFileSync(path, 'utf-8')) } catch (_) { return {} }
+}
+
+const buildManagerAgent = () => ({
+  name: ADMIN_AGENT_NAME,
+  description: 'presence 관리자 에이전트 — 서버 전역 정책 및 user agent 심사',
+  capabilities: [],
+  persona: loadAdminPersona(),
+  createdAt: new Date().toISOString(),
+  createdBy: 'admin-bootstrap',
+  archived: false,
+})
+
 const ensureAdminManagerAgentR = Reader.asks(({ presenceDir, logger }) => () => {
-  const adminDir = join(presenceDir, 'users', ADMIN_USERNAME)
-  const configPath = join(adminDir, 'config.json')
-  let config = {}
-  if (existsSync(configPath)) {
-    try { config = JSON.parse(readFileSync(configPath, 'utf-8')) } catch (_) { config = {} }
-  }
-  if (!Array.isArray(config.agents)) config.agents = []
-  const hasManager = config.agents.some(a => a.name === ADMIN_AGENT_NAME)
-  const hasPrimary = config.primaryAgentId === ADMIN_AGENT_ID
+  const configPath = join(presenceDir, 'users', ADMIN_USERNAME, 'config.json')
+  const existing = readExistingConfig(configPath)
+  const existingAgents = Array.isArray(existing.agents) ? existing.agents : []
+  const hasManager = existingAgents.some(a => a.name === ADMIN_AGENT_NAME)
+  const hasPrimary = existing.primaryAgentId === ADMIN_AGENT_ID
+
   if (hasManager && hasPrimary) {
     logger?.info('[admin-bootstrap] State 1 skipped — admin/manager agent + primaryAgentId registered')
     return { registeredAgent: false }
   }
-  if (!hasManager) {
-    const persona = loadAdminPersona()
-    config.agents.push({
-      name: ADMIN_AGENT_NAME,
-      description: 'presence 관리자 에이전트 — 서버 전역 정책 및 user agent 심사',
-      capabilities: [],
-      persona,
-      createdAt: new Date().toISOString(),
-      createdBy: 'admin-bootstrap',
-      archived: false,
-    })
-  }
-  config.primaryAgentId = ADMIN_AGENT_ID
-  atomicWriteJson(configPath, config)
+
+  // 불변 조립 — 기존 config 변이하지 않고 새 객체 구성.
+  const nextAgents = hasManager ? existingAgents : [...existingAgents, buildManagerAgent()]
+  const nextConfig = { ...existing, agents: nextAgents, primaryAgentId: ADMIN_AGENT_ID }
+  atomicWriteJson(configPath, nextConfig)
   logger?.info(`[admin-bootstrap] admin/manager agent + primaryAgentId registered at ${configPath}`)
   return { registeredAgent: true }
 })

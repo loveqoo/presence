@@ -5,9 +5,10 @@ import { runAdminBootstrap } from '@presence/infra/infra/admin-bootstrap.js'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import {
   STATUS,
-  loadAgentPolicies,
-  getActiveAgentCount,
-  submitUserAgent,
+  PENDING_REASON,
+  loadAgentPolicies, loadAgentPoliciesR,
+  getActiveAgentCount, getActiveAgentCountR,
+  submitUserAgent, submitUserAgentR,
   approveUserAgent,
   denyUserAgent,
   listPending, listApproved, listRejected,
@@ -123,7 +124,7 @@ async function run() {
 
     const pending = listPending(dir)
     assert(pending.length === 1 && pending[0].id === result.reqId, 'GV5: pending 파일 1개')
-    assert(pending[0].reason === 'quota-exceeded', 'GV5: reason=quota-exceeded')
+    assert(pending[0].reason === PENDING_REASON.QUOTA_EXCEEDED, 'GV5: reason=quota-exceeded')
 
     // config 변경 없음
     const config = readUserConfig(dir, 'carol')
@@ -144,7 +145,7 @@ async function run() {
     })
     assert(result.status === STATUS.PENDING, 'GV6: auto-approve off → pending even under quota')
     const pending = listPending(dir)
-    assert(pending[0].reason === 'manual-review', 'GV6: reason=manual-review')
+    assert(pending[0].reason === PENDING_REASON.MANUAL_REVIEW, 'GV6: reason=manual-review')
     rmSync(dir, { recursive: true, force: true })
   }
 
@@ -295,6 +296,43 @@ async function run() {
     const userDir = join(dir, 'users', 'kate')
     const tmp = readdirSync(userDir).filter(f => f.includes('.tmp-'))
     assert(tmp.length === 0, `GV14: 루트 tmp 없음 (${tmp.join(',')})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV15. Reader 브릿지 동치 — loadAgentPolicies, getActiveAgentCount, submitUserAgent
+  //        (test.md#브릿지동치 — deepStrictEqual 로 두 경로 결과 일치 검증)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+
+    // 1) loadAgentPolicies vs loadAgentPoliciesR
+    const polBridge = loadAgentPolicies(dir)
+    const polReader = loadAgentPoliciesR.run({ presenceDir: dir })()
+    assert(JSON.stringify(polBridge) === JSON.stringify(polReader), 'GV15: loadAgentPolicies 브릿지 === Reader')
+
+    // 2) getActiveAgentCount vs getActiveAgentCountR
+    writeUserConfig(dir, 'leo', { agents: [{ name: 'a', archived: false }, { name: 'b', archived: true }] })
+    const countBridge = getActiveAgentCount('leo', { basePath: dir })
+    const countReader = getActiveAgentCountR.run({ username: 'leo', basePath: dir })()
+    assert(countBridge === countReader, `GV15: getActiveAgentCount 브릿지 === Reader (${countBridge} === ${countReader})`)
+
+    // 3) submitUserAgentR 가 동일 deps 로 호출 시 브릿지와 동일 결과
+    //    (파일 변이가 있으므로 deps 마다 새 tmpDir 에서 병렬 측정 — 상태 독립 확인)
+    const dir1 = createTmpDir(); await initAdminBootstrap(dir1)
+    const dir2 = createTmpDir(); await initAdminBootstrap(dir2)
+    writeUserConfig(dir1, 'mia', { agents: [] })
+    writeUserConfig(dir2, 'mia', { agents: [] })
+    const resBridge = submitUserAgent({
+      requester: 'mia', agentName: 'via-bridge', persona: samplePersona,
+      basePath: dir1, presenceDir: dir1,
+    })
+    const resReader = submitUserAgentR.run({
+      requester: 'mia', agentName: 'via-bridge', persona: samplePersona,
+      basePath: dir2, presenceDir: dir2,
+    })()
+    assert(resBridge.status === resReader.status, `GV15: submitUserAgent 브릿지.status === Reader.status (${resBridge.status})`)
+    rmSync(dir1, { recursive: true, force: true })
+    rmSync(dir2, { recursive: true, force: true })
     rmSync(dir, { recursive: true, force: true })
   }
 

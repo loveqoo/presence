@@ -225,16 +225,24 @@ function run() {
     assert(uc.getPrimaryPersona().systemPrompt === 'admin prompt', 'UC5: admin persona')
   }
 
-  // UM8. 레거시 브릿지 ↔ Reader 동치
+  // UM8. 레거시 브릿지 ↔ Reader 동치 — test.md#브릿지동치 (deepStrictEqual)
+  //        파일 변이가 있으므로 dir1/dir2 두 개 독립 측정 후 결과 shape 비교.
   {
-    const deps = { config: dummyConfig, username: 'frank', basePath: createTmpDir(), logger: silentLogger }
-    const viaBridge = ensureUserDefaultAgent(deps.config, {
-      username: deps.username, basePath: deps.basePath, logger: deps.logger,
+    const dir1 = createTmpDir()
+    const dir2 = createTmpDir()
+    const viaBridge = ensureUserDefaultAgent(dummyConfig, {
+      username: 'frank', basePath: dir1, logger: silentLogger,
     })
-    // 재실행은 idempotent → 두 번째 호출은 migrated=false
-    const viaReader = ensureUserDefaultAgentR.run(deps)()
-    assert(viaBridge.migrated === true && viaReader.migrated === false, 'UM8: 브릿지는 첫 실행 migrated=true, Reader 재실행은 false (idempotent)')
-    rmSync(deps.basePath, { recursive: true, force: true })
+    const viaReader = ensureUserDefaultAgentR.run({
+      config: dummyConfig, username: 'frank', basePath: dir2, logger: silentLogger,
+    })()
+    // config 필드는 `loadUserMerged` 결과이므로 직접 비교 불가 (파일 경로 다름).
+    // 이번 호출이 관찰 가능한 부분: status, migrated, primaryAgentId 가 동일해야 함.
+    const stripConfig = ({ config: _cfg, ...rest }) => rest
+    assert(JSON.stringify(stripConfig(viaBridge)) === JSON.stringify(stripConfig(viaReader)),
+      'UM8: 브릿지 결과 === Reader 결과 (config 제외 동치)')
+    rmSync(dir1, { recursive: true, force: true })
+    rmSync(dir2, { recursive: true, force: true })
   }
 
   summary()

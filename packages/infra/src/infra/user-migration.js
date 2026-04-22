@@ -1,9 +1,10 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs'
-import { join, dirname } from 'path'
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 import fp from '@presence/core/lib/fun-fp.js'
 import { Config } from './config.js'
 import { loadUserMerged } from './config-loader.js'
 import { ADMIN_USERNAME } from './admin-bootstrap.js'
+import { atomicWriteJson } from './fs-utils.js'
 
 const { Reader } = fp
 
@@ -29,15 +30,6 @@ const DEFAULT_AGENT_PERSONA = Object.freeze({
   rules: [],
   tools: [],
 })
-
-// --- Atomic write ---
-
-const atomicWriteJson = (filePath, data) => {
-  mkdirSync(dirname(filePath), { recursive: true })
-  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
-  renameSync(tmp, filePath)
-}
 
 const readExistingConfig = (configPath) => {
   if (!existsSync(configPath)) return {}
@@ -65,19 +57,19 @@ const ensureUserDefaultAgentR = Reader.asks(({ config, username, basePath, logge
 
   const primaryId = `${username}/${DEFAULT_AGENT_NAME}`
   const configPath = join(Config.resolveDir(basePath), 'users', username, 'config.json')
-  const fileConfig = readExistingConfig(configPath)
-  if (!Array.isArray(fileConfig.agents)) fileConfig.agents = []
-  const hasDefault = fileConfig.agents.some(a => a.name === DEFAULT_AGENT_NAME)
-  const hasPrimary = fileConfig.primaryAgentId === primaryId
+  const existing = readExistingConfig(configPath)
+  const existingAgents = Array.isArray(existing.agents) ? existing.agents : []
+  const hasDefault = existingAgents.some(a => a.name === DEFAULT_AGENT_NAME)
+  const hasPrimary = existing.primaryAgentId === primaryId
 
   if (hasDefault && hasPrimary) {
     return { config, migrated: false, reason: 'already' }
   }
 
-  if (!hasDefault) fileConfig.agents.push(buildDefaultAgent(username))
-  fileConfig.primaryAgentId = primaryId
-
-  atomicWriteJson(configPath, fileConfig)
+  // 불변 조립 — 기존 config 변이하지 않고 새 객체 구성.
+  const nextAgents = hasDefault ? existingAgents : [...existingAgents, buildDefaultAgent(username)]
+  const nextConfig = { ...existing, agents: nextAgents, primaryAgentId: primaryId }
+  atomicWriteJson(configPath, nextConfig)
   logger?.info(`[user-migration] ${username}: primaryAgentId=${primaryId}${!hasDefault ? ' + default agent seeded' : ''}`)
 
   // 변경된 파일을 다시 merge 하여 반환 (ensureAllowedDirs 패턴과 일치)

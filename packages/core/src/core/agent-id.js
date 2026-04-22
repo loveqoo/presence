@@ -29,13 +29,13 @@ const validateAgentId = (id) => {
   if (typeof id !== 'string') return Either.Left('agentId must be string')
   const parts = id.split('/')
   if (parts.length !== 2) return Either.Left('must be {username}/{agentName}')
-  const [u, a] = parts
-  return Either.chain(_u =>
-         Either.chain(_a =>
-         Either.Right(`${_u}/${_a}`), validateAgentNamePart(a)), validateAgentNamePart(u))
+  const [rawUsername, rawAgentName] = parts
+  return Either.chain(validUsername =>
+         Either.chain(validAgentName =>
+         Either.Right(`${validUsername}/${validAgentName}`), validateAgentNamePart(rawAgentName)), validateAgentNamePart(rawUsername))
 }
 
-const isReservedUsername = (u) => RESERVED_USERNAMES.includes(u)
+const isReservedUsername = (username) => RESERVED_USERNAMES.includes(username)
 
 // 호환 — session.js 내 동등 정규식 교체 용도.
 // validateAgentId 는 Either 반환이지만, legacy 검증은 throw 패턴.

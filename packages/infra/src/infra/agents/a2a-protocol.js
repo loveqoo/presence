@@ -14,6 +14,19 @@ import { Delegation, DelegationMode } from './delegation.js'
 
 // --- JSON-RPC 2.0 envelope ---
 
+// JSON-RPC 에러 코드 — 표준 (-326xx) + presence 특화 (-320xx).
+// 표준: https://www.jsonrpc.org/specification#error_object
+const JsonRpcErrorCode = Object.freeze({
+  // 표준
+  PARSE_ERROR: -32700,
+  INVALID_REQUEST: -32600,
+  METHOD_NOT_FOUND: -32601,
+  INVALID_PARAMS: -32602,
+  // Presence A2A 전용 (server-defined 범위 -32000 ~ -32099)
+  AUTH_MISSING: -32000,
+  ACCESS_DENIED: -32001,
+})
+
 const JsonRpc = {
   request: (method, params) => ({
     jsonrpc: '2.0',
@@ -23,10 +36,10 @@ const JsonRpc = {
   }),
 
   // 응답 해석: HTTP response body 문자열을 JSON-RPC로 파싱.
-  // 파싱 실패 시 parse error (-32700)로 가장한 response 반환.
+  // 파싱 실패 시 parse error로 가장한 response 반환.
   parseResponse: async (res) => {
     try { return await res.json() }
-    catch (e) { return { error: { code: -32700, message: `Invalid JSON response: ${e.message}` } } }
+    catch (e) { return { error: { code: JsonRpcErrorCode.PARSE_ERROR, message: `Invalid JSON response: ${e.message}` } } }
   },
 }
 
@@ -105,4 +118,4 @@ const A2ATask = {
   },
 }
 
-export { JsonRpc, Method, TaskState, Message, Part, Artifact, A2ATask }
+export { JsonRpc, JsonRpcErrorCode, Method, TaskState, Message, Part, Artifact, A2ATask }

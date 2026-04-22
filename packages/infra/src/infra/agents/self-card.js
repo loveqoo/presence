@@ -1,5 +1,6 @@
 import { validateAgentId } from '@presence/core/core/agent-id.js'
 import fp from '@presence/core/lib/fun-fp.js'
+import { DelegationMode } from './delegation.js'
 
 const { Either } = fp
 
@@ -55,7 +56,7 @@ const isCardEligible = (entry) => {
   if (entry.archived) return false
   // remote agent 는 자신의 publicUrl 이 아닌 외부 서버의 agent → self card 대상 아님.
   // 명시적 필드가 없으면 local 간주.
-  if (entry.type && entry.type !== 'local') return false
+  if (entry.type && entry.type !== DelegationMode.LOCAL) return false
   return true
 }
 

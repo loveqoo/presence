@@ -1,8 +1,12 @@
 import express from 'express'
 import { randomUUID } from 'node:crypto'
+import fp from '@presence/core/lib/fun-fp.js'
 import { buildSelfCard, buildSelfCardsFromRegistry } from '@presence/infra/infra/agents/self-card.js'
 import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
-import { Method, TaskState, Artifact } from '@presence/infra/infra/agents/a2a-protocol.js'
+import { Method, TaskState, JsonRpcErrorCode } from '@presence/infra/infra/agents/a2a-protocol.js'
+import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
+
+const { Reader } = fp
 
 // =============================================================================
 // /a2a 라우터 — docs/design/agent-identity-model.md §11
@@ -64,18 +68,10 @@ const agentIdFromParams = (req) => {
   return `${userId}/${agentName}`
 }
 
-const createA2aRouter = (opts) => {
-  const { userContext, config } = opts
-  const router = express.Router()
-  const publicUrl = config.a2a?.publicUrl
+const isLocalRunnable = (entry) =>
+  entry.type === DelegationMode.LOCAL && typeof entry.run === 'function'
 
-  if (!config.a2a?.enabled) {
-    throw new Error('createA2aRouter: invoked while a2a.enabled=false')
-  }
-  if (!publicUrl) {
-    throw new Error('createA2aRouter: publicUrl required')
-  }
-
+const mountDiscoveryRoutes = (router, userContext, publicUrl) => {
   // GET /a2a/.well-known/agents — 로컬 agent 카드 목록
   router.get('/.well-known/agents', (_req, res) => {
     const cards = buildSelfCardsFromRegistry(userContext.agentRegistry, publicUrl)
@@ -93,7 +89,7 @@ const createA2aRouter = (opts) => {
     }
     const entry = maybeEntry.value
     if (entry.archived) return res.status(410).json({ error: `agent archived: ${agentId}` })
-    if (entry.type && entry.type !== 'local') {
+    if (entry.type && entry.type !== DelegationMode.LOCAL) {
       return res.status(404).json({ error: `agent not local: ${agentId}` })
     }
 
@@ -109,57 +105,84 @@ const createA2aRouter = (opts) => {
       res.status(500).json({ error: err.message })
     }
   })
+}
 
+const dispatchRpcMethod = async (entry, body, id, res) => {
+  const { method, params } = body || {}
+  if (method === Method.SEND) {
+    const taskId = params?.id || randomUUID()
+    const taskText = extractTaskText(params)
+    try {
+      const output = await entry.run(taskText)
+      return res.json(jsonRpcResult(id, completedTaskResult(taskId, output)))
+    } catch (err) {
+      return res.json(jsonRpcResult(id, failedTaskResult(taskId, err.message || String(err))))
+    }
+  }
+
+  if (method === Method.GET) {
+    // 로컬 sync agent 는 run() 즉시 완료 — task state 를 저장하지 않음.
+    // 미래에 async agent 도입 시 별도 task store 추가 예정.
+    return res.status(501).json(jsonRpcError(id, JsonRpcErrorCode.METHOD_NOT_FOUND,
+      `${Method.GET} not supported for local sync agents`))
+  }
+
+  return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.METHOD_NOT_FOUND,
+    `method not found: ${method || '(missing)'}`))
+}
+
+const mountInvokeRoute = (router, userContext) => {
   // POST /a2a/:userId/:agentName — JSON-RPC 2.0 entry point
   // stub 인증 (X-Presence-Caller) → canAccessAgent (DELEGATE) → dispatch
   router.post('/:userId/:agentName', express.json(), async (req, res) => {
     const id = req.body?.id ?? null
     const agentId = agentIdFromParams(req)
-    if (!agentId) return res.status(400).json(jsonRpcError(id, -32602, 'invalid agent path'))
+    if (!agentId) return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS, 'invalid agent path'))
 
     const caller = parseCaller(req)
     if (!caller) {
-      return res.status(401).json(jsonRpcError(id, -32000, `missing ${A2A_CALLER_HEADER} header (stub auth pending authz phase)`))
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_MISSING,
+        `missing ${A2A_CALLER_HEADER} header (stub auth pending authz phase)`))
     }
 
     const access = canAccessAgent({
       jwtSub: caller, agentId, intent: INTENT.DELEGATE, registry: userContext.agentRegistry,
     })
     if (!access.allow) {
-      return res.status(403).json(jsonRpcError(id, -32001, `access denied: ${access.reason}`))
+      return res.status(403).json(jsonRpcError(id, JsonRpcErrorCode.ACCESS_DENIED, `access denied: ${access.reason}`))
     }
 
     const maybeEntry = userContext.agentRegistry.get(agentId)
     if (!maybeEntry || !maybeEntry.isJust || !maybeEntry.isJust()) {
-      return res.status(404).json(jsonRpcError(id, -32602, `agent not found: ${agentId}`))
+      return res.status(404).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS, `agent not found: ${agentId}`))
     }
     const entry = maybeEntry.value
-    if (entry.type !== 'local' || typeof entry.run !== 'function') {
-      return res.status(400).json(jsonRpcError(id, -32602, `agent not invokable (type=${entry.type})`))
+    if (!isLocalRunnable(entry)) {
+      return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS,
+        `agent not invokable (type=${entry.type})`))
     }
 
-    const { method, params } = req.body || {}
-    if (method === Method.SEND) {
-      const taskId = params?.id || randomUUID()
-      const taskText = extractTaskText(params)
-      try {
-        const output = await entry.run(taskText)
-        return res.json(jsonRpcResult(id, completedTaskResult(taskId, output)))
-      } catch (err) {
-        return res.json(jsonRpcResult(id, failedTaskResult(taskId, err.message || String(err))))
-      }
-    }
-
-    if (method === Method.GET) {
-      // 로컬 sync agent 는 run() 즉시 완료 — task state 를 저장하지 않음.
-      // 미래에 async agent 도입 시 별도 task store 추가 예정.
-      return res.status(501).json(jsonRpcError(id, -32601, `${Method.GET} not supported for local sync agents`))
-    }
-
-    return res.status(400).json(jsonRpcError(id, -32601, `method not found: ${method || '(missing)'}`))
+    return dispatchRpcMethod(entry, req.body, id, res)
   })
-
-  return router
 }
 
-export { createA2aRouter }
+const a2aRouterR = Reader.asks(({ userContext, config }) => {
+  const router = express.Router()
+  const publicUrl = config.a2a?.publicUrl
+
+  if (!config.a2a?.enabled) {
+    throw new Error('createA2aRouter: invoked while a2a.enabled=false')
+  }
+  if (!publicUrl) {
+    throw new Error('createA2aRouter: publicUrl required')
+  }
+
+  mountDiscoveryRoutes(router, userContext, publicUrl)
+  mountInvokeRoute(router, userContext)
+  return router
+})
+
+// 레거시 브릿지 — 단일 라인 위임 (fp-monad.md 허용 패턴)
+const createA2aRouter = (opts) => a2aRouterR.run(opts)
+
+export { createA2aRouter, a2aRouterR }
