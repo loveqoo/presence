@@ -1,6 +1,7 @@
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { createSchedulerActor } from '@presence/infra/infra/actors/scheduler-actor.js'
+import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 
 // =============================================================================
@@ -27,6 +28,19 @@ const createServerScheduler = (userContext, opts = {}) => {
       // legacy row (owner null) 는 scheduler-actor 가 null 로 전파 → fallback 으로 막음.
       const agentId = jobEvent.ownerAgentId || `${defaultUserId}/default`
       const userId = jobEvent.ownerUserId || defaultUserId
+
+      // docs §9.4 진입점 #4 — scheduled-run intent 로 canAccessAgent.
+      // jwtSub=owner (agent 소유자 본인이 자기 agent 를 실행 → ownership 트리비얼),
+      // 실효 게이트는 archived 체크 (§5.4 — archived agent 는 새 scheduled run 차단).
+      const access = canAccessAgent({
+        jwtSub: userId, agentId, intent: INTENT.SCHEDULED_RUN, registry: userContext.agentRegistry,
+      })
+      if (!access.allow) {
+        userContext.logger?.warn?.(`Scheduler: dispatch denied for ${agentId} (${access.reason}) — job ${jobEvent.jobId} skipped`)
+        fireAndForget(scheduler.jobFail(jobEvent.runId, jobEvent.jobId, jobEvent.attempt ?? 1, `access-denied: ${access.reason}`))
+        return
+      }
+
       const entry = userContext.sessions.create({
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
