@@ -20,6 +20,7 @@ const makeInterpreter = (agentRegistry) => prodInterpreterR.run({
   toolRegistry: createToolRegistry(),
   reactiveState: createOriginState({}),
   agentRegistry,
+  currentUserId: 'test',
 })
 
 async function run() {
@@ -31,7 +32,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'echo',
+      agentId: 'test/echo',
       description: 'Echo agent',
       type: 'local',
       run: async (task) => `echoed: ${task}`,
@@ -52,7 +53,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'broken',
+      agentId: 'test/broken',
       type: 'local',
       run: async () => { throw new Error('agent crashed') },
     })
@@ -86,7 +87,7 @@ async function run() {
   // ==========================================================================
   {
     const reg = createAgentRegistry()
-    reg.register({ name: 'norun', type: 'local', description: 'no run fn' })
+    reg.register({ agentId: 'test/norun', type: 'local', description: 'no run fn' })
     // run 미지정
 
     const { interpret, ST } = makeInterpreter(reg)
@@ -104,6 +105,7 @@ async function run() {
       llm: mockLLM(),
       toolRegistry: createToolRegistry(),
       reactiveState: createOriginState({}),
+      currentUserId: 'test',
       // agentRegistry 미전달
     })
     const [result] = await runProg(interpret, ST)(delegate('anyone', 'task'))
@@ -118,7 +120,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'summarizer',
+      agentId: 'test/summarizer',
       type: 'local',
       run: async (task) => `요약: ${task}`,
     })
@@ -138,7 +140,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'sync',
+      agentId: 'test/sync',
       type: 'local',
       run: (task) => Promise.resolve(`sync: ${task}`),
     })
@@ -156,7 +158,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'remote-worker',
+      agentId: 'test/remote-worker',
       type: 'remote',
       endpoint: 'http://remote.agent/a2a',
     })
@@ -187,6 +189,7 @@ async function run() {
       reactiveState: createOriginState({}),
       agentRegistry: reg,
       fetchFn: mockFetch,
+      currentUserId: 'test',
     })
 
     const [result] = await runProg(interpret, ST)(delegate('remote-worker', '원격 작업'))
@@ -204,12 +207,12 @@ async function run() {
     const reg = createAgentRegistry()
     const calls = []
     reg.register({
-      name: 'step1',
+      agentId: 'test/step1',
       type: 'local',
       run: async (task) => { calls.push('step1:' + task); return 'result1' },
     })
     reg.register({
-      name: 'step2',
+      agentId: 'test/step2',
       type: 'local',
       run: async (task) => { calls.push('step2:' + task); return 'result2' },
     })
@@ -233,7 +236,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'anything',
+      agentId: 'test/anything',
       type: 'local',
       run: async (task) => `got: "${task}"`,
     })
@@ -243,6 +246,48 @@ async function run() {
 
     assert(result.status === 'completed', '10: empty task → completed')
     assert(result.output === 'got: ""', '10: empty task forwarded to run')
+  }
+
+  // ==========================================================================
+  // 11. canAccessAgent 거부 — 다른 user 의 qualified agent 에 delegate 시도
+  //     (§9.4 진입점 #5)
+  // ==========================================================================
+  {
+    const reg = createAgentRegistry()
+    // 다른 user (bob) 의 agent 를 registry 에 등록
+    reg.register({
+      agentId: 'bob/private',
+      type: 'local',
+      run: async () => 'secret',
+    })
+
+    const { interpret, ST } = makeInterpreter(reg)
+    // currentUserId='test' 인데 bob/private 에 접근
+    const [result] = await runProg(interpret, ST)(delegate('bob/private', 'intrude'))
+
+    assert(result.status === 'failed', '11: cross-user delegate 거부')
+    assert(result.error.includes('Access denied'), '11: error 에 Access denied')
+    assert(result.error.includes('not-owner'), '11: reason=not-owner')
+  }
+
+  // ==========================================================================
+  // 12. canAccessAgent 거부 — archived agent (new delegate 차단, §5.4)
+  // ==========================================================================
+  {
+    const reg = createAgentRegistry()
+    reg.register({
+      agentId: 'test/retired',
+      type: 'local',
+      archived: true,
+      run: async (task) => `old: ${task}`,
+    })
+
+    const { interpret, ST } = makeInterpreter(reg)
+    const [result] = await runProg(interpret, ST)(delegate('retired', 'task'))
+
+    assert(result.status === 'failed', '12: archived agent delegate 거부')
+    assert(result.error.includes('Access denied'), '12: error 에 Access denied')
+    assert(result.error.includes('archived'), '12: reason=archived')
   }
 
   summary()

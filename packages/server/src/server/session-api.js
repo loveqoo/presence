@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
 import { handleSlashCommand } from './slash-commands.js'
 
 // =============================================================================
@@ -27,7 +28,8 @@ const findOrCreateSession = (sessionId, username, effectiveUserContext) => {
       mkdirSync(persistenceCwd, { recursive: true })
       renameSync(legacyState, join(persistenceCwd, 'state.json'))
     }
-    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username })
+    // agentId: M1 runtime hardcode. M3 에서 config.primaryAgentId 경유 (identity §12)
+    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username, agentId: `${username}/default` })
   }
 
   return entry
@@ -50,6 +52,21 @@ const attachSessionMiddleware = (deps) => {
     if (authEnabled && username && entry.owner !== null && entry.owner !== username) {
       return res.status(403).json({ error: 'Access denied: session belongs to another user' })
     }
+
+    // docs §9.4 진입점 #1 — continue-session intent 로 canAccessAgent 호출.
+    // 인증 활성화 + username 있을 때만 강제. 레거시 anonymous 테스트는 skip.
+    if (authEnabled && username) {
+      const access = canAccessAgent({
+        jwtSub: username,
+        agentId: entry.session.agentId,
+        intent: INTENT.CONTINUE_SESSION,
+        registry: effectiveUserContext.agentRegistry,
+      })
+      if (!access.allow) {
+        return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })
+      }
+    }
+
     req.presenceSession = entry
     req.presenceUserContext = effectiveUserContext
     next()
@@ -147,7 +164,7 @@ const mountSessionsCrud = (router, deps) => {
   })
   router.post('/sessions', express.json(), async (req, res) => {
     const ctx = await resolveUserContext(req, deps)
-    const { type = SESSION_TYPE.USER, id, workingDir } = req.body || {}
+    const { type = SESSION_TYPE.USER, id } = req.body || {}
     const validTypes = Object.values(SESSION_TYPE)
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: `Invalid session type: ${type}` })
@@ -156,17 +173,25 @@ const mountSessionsCrud = (router, deps) => {
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
     const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined
     try {
-      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: owner || 'default', persistenceCwd, workingDir })
-      // effective workingDir 을 응답에 포함 — POST 직후 클라이언트 확인용.
+      // agentId: M1 runtime hardcode. M3 이후 config.primaryAgentId / type 별 결정 로직 이관.
+      const effectiveUserId = owner || 'default'
+      const agentId = `${effectiveUserId}/default`
+
+      // docs §9.4 진입점 #1 — new-session intent. 인증 활성화 시에만 강제.
+      if (deps.authEnabled && owner) {
+        const access = canAccessAgent({
+          jwtSub: owner, agentId, intent: INTENT.NEW_SESSION, registry: ctx.agentRegistry,
+        })
+        if (!access.allow) {
+          return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })
+        }
+      }
+
+      // workingDir 은 userId 에서 자동 결정 (Session 내부).
+      const entry = ctx.sessions.create({ id: sessionId, type, owner, userId: effectiveUserId, agentId, persistenceCwd })
       res.status(201).json({ id: entry.id, type: entry.type, workingDir: entry.session.workingDir })
     } catch (err) {
-      // Session 생성 실패 분류 — 클라이언트가 code 로 i18n 메시지 선택 (FP-64).
-      const code = /outside allowedDirs/.test(err.message)
-        ? 'WORKING_DIR_OUT_OF_BOUNDS'
-        : /not resolvable/.test(err.message)
-          ? 'WORKING_DIR_NOT_RESOLVABLE'
-          : 'SESSION_CREATE_FAILED'
-      res.status(400).json({ error: err.message, code })
+      res.status(400).json({ error: err.message, code: 'SESSION_CREATE_FAILED' })
     }
   })
   router.delete('/sessions/:sessionId', async (req, res) => {

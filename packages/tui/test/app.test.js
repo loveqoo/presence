@@ -967,15 +967,8 @@ const mountApp = async (props) => {
   assert(frame.includes('서버 연결이 끊겼습니다'), 'App disconnected generic: 서버 연결 끊김')
 }
 
-// 62-3. FP-63: WS close 4004 (WORKING_DIR_INVALID) 는 원인·조치를 모두 안내
-{
-  const frame = await mountApp({ state: baseState(), disconnected: { code: 4004, at: Date.now() } })
-  assert(frame.includes('허용 범위를 벗어났습니다'),
-    'App disconnected 4004: workingDir 경계 위반 원인 표시 (FP-63)')
-  assert(frame.includes('4004'), 'App disconnected 4004: close code shown')
-  assert(frame.includes('허용된 폴더로 이동'),
-    'App disconnected 4004: 조치 안내 (재시작 문구 대신 폴더 이동 안내)')
-}
+// 62-3. 제거됨 — WS close 4004 (WORKING_DIR_INVALID) 전체 경로 폐기.
+//        workingDir 은 서버가 userId 에서 자동 결정 (docs/specs/agent-identity.md I-WD).
 
 // 63. App without disconnected prop does NOT show banner
 {

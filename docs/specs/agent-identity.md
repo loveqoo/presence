@@ -1,0 +1,121 @@
+# Agent Identity 정책
+
+## 목적
+
+presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical form, session-agent 결합 불변식, agent 실행 진입점 제어, governance(quota + 승인), soft-delete 정책을 보장한다. 세부 A2A JWT / Cedar 정책은 `docs/design/a2a-authorization.md` 에 위임.
+
+**설계 토대**: `docs/design/agent-identity-model.md` v5.
+
+---
+
+## 불변식 (Invariants)
+
+- I1. **AgentId canonical form**: `{username}/{agentName}`. slash 정확히 1개. 각 part는 kebab-case (소문자 시작, 끝은 소문자/숫자, 연속 하이픈 금지, 언더바 금지, 숫자 시작 금지), 길이 1~63. 단일 검증 함수 `validateAgentId` (`packages/core/src/core/agent-id.js`) 가 유일 진실. 모든 진입점이 이 함수를 공유.
+
+- I2. **Reserved username `admin`**: `RESERVED_USERNAMES = ['admin']`. `admin/*` agent는 JWT sub='admin' 인 호출자만 접근 가능. `isReservedUsername(u)` 함수로 판별.
+
+- I3. **모든 세션에 agentId 필수**: `Session` 생성자가 `opts.agentId`를 강제 검증. 부재 또는 빈 문자열이면 throw. 생성 후 불변. 세션 persistence 복원 시 agentId는 재persist 하지 않는다 — 생성 시점 값이 권위.
+
+- I4. **5 진입점 모두 `canAccessAgent` 의무 호출**: 모든 agent 실행 이전에 `canAccessAgent({ jwtSub, agentId, intent, registry? })` 호출. `allow=false` 시 즉시 거부. 진입점:
+  1. HTTP `/api/sessions/*` — `session-api.js` (NEW_SESSION 또는 CONTINUE_SESSION)
+  2. HTTP `/a2a/*` — `a2a-router.js` (DELEGATE)
+  3. WebSocket session join — `ws-handler.js` (CONTINUE_SESSION)
+  4. Scheduler job run — `scheduler-factory.js` (SCHEDULED_RUN)
+  5. `Op.Delegate` — `packages/infra/src/interpreter/delegate.js` (DELEGATE)
+
+- I5. **Archived agent soft-delete**: `archived: true` 마킹. `canAccessAgent`가 `intent !== 'continue-session'`인 경우 거부. `continue-session`(기존 세션 계속 실행)은 허용. `admin/manager`는 archive 불가 (서버 불변식). v1에서 hard delete 없음.
+
+- I6. **Admin bootstrap 상태기계**: 서버 부팅 시 3단계 idempotent 상태기계 실행. 실패 시 서버 부팅 거부.
+  - State 0: admin 계정 없으면 생성 + 초기 비밀번호 파일 (`admin-initial-password.txt`, 0600)
+  - State 1: admin config의 `admin/manager` agent + `primaryAgentId` 없으면 등록
+  - State 2: `agent-policies.json` 없으면 기본값 작성 (`maxAgentsPerUser: 5`, `autoApproveUnderQuota: true`)
+
+- I7. **Governance quota**: non-admin user가 agent 추가 시 `agent-policies.json`의 `maxAgentsPerUser` 기준 체크. quota 내 + `autoApproveUnderQuota=true`이면 자동 승인. 초과 시 `pending/` 파일 작성. active count는 `config.agents.filter(!archived).length`로 매번 재계산 — 캐시 없음.
+
+- I8. **Admin quota 면제**: `role === 'admin'`이면 quota 체크 스킵. 단, 환경변수 `PRESENCE_ADMIN_AGENT_HARD_LIMIT` (기본 50) 하드 상한 존재.
+
+- I9. **Governance 파일 원자성**: user config append, pending→approved/rejected 이동 모두 atomic (tmp + rename). approve 재실행 시 config 선확인(idempotent replay) — config에 이미 있으면 파일만 정리.
+
+- I10. **Op.Delegate qualifier 파싱**: `resolveDelegateTarget(target, { currentUserId })`. slash 없음 → `{currentUserId}/{target}`으로 qualify. slash 1개 → 절대 agentId. slash 2개 이상 → Left(에러). reserved username 자체를 agentName으로 사용 시 Left(에러). Parser → Resolver → Authz 순서 강제.
+
+- I11. **A2A 비활성 기본**: `config.a2a.enabled` 기본 `false`. false이면 `/a2a/*` 라우트 미등록, self card 미생성. `true`이면 `publicUrl` 필수 — 없으면 라우터 생성 실패.
+
+- I12. **M1 단계 agentId hardcode**: 현재(M1) 모든 USER 타입 세션은 `{username}/default`로 hardcode. M3 이후 `config.primaryAgentId` 경유로 이관 예정.
+
+- I-WD. **workingDir = Config.userDataPath(userId) 고정**: 모든 세션의 `workingDir`은 생성 시 `Config.userDataPath(userId)`로 자동 결정된다. 외부 입력(`opts.workingDir`, TUI `cwd`, `POST /sessions` body `workingDir`)은 무시된다. 런타임 변경 불가. 세션 유형(USER/SCHEDULED/AGENT)과 무관하게 동일 규칙이 적용된다. `workingDir`은 persistence에 저장하지 않으며 복원 시에도 `userId` 기반으로 재계산한다. tool 경계 검증(`isWithinWorkspace`), `shell_exec` cwd, system prompt `WORKING_DIR` 섹션의 유일 기준점.
+
+---
+
+## 경계 조건 (Edge Cases)
+
+- E1. `validateAgentId(null | undefined | 123)` → Left (타입 가드)
+- E2. `validateAgentId('anthony/abc-')` → Left (끝 하이픈)
+- E3. `validateAgentId('anthony/a--b')` → Left (연속 하이픈)
+- E4. `validateAgentId('Anthony/default')` → Left (대문자)
+- E5. `validateAgentId('a/b/c')` → Left (slash 2개)
+- E6. non-admin 유저가 `admin/manager`에 접근 → `canAccessAgent` `allow=false`, `reason=admin-only`
+- E7. archived agent에 `new-session` intent → `allow=false`, `reason=archived`
+- E8. archived agent에 `continue-session` intent → `allow=true` (graceful retire §5.4)
+- E9. registry에 미등록 agentId → archived 판정 불가, ownership check만 수행 → 통과 (세션 생성 이후 단계에서 막힐 수 있음)
+- E10. `resolveDelegateTarget('admin', { currentUserId: 'anthony' })` → Left (reserved name을 agentName으로 사용 거부)
+- E11. `resolveDelegateTarget('summarizer', {})` (currentUserId 없음) → Left (qualify 불가)
+- E12. `canAccessAgent` `intent` 파라미터가 INTENT enum 외 값 → `allow=false`, `reason=invalid-intent`
+- E13. admin bootstrap State 0 실패(디스크 쓰기 실패 등) → throw → 서버 부팅 거부
+- E14. admin bootstrap State 1: admin config.json이 손상되어 파싱 불가 → 빈 config로 fallback 후 덮어씀
+- E15. `submitUserAgent` 동일 agentName(non-archived) 재시도 → `ALREADY_EXISTS` 반환
+- E16. `a2a.enabled=true`이고 `publicUrl=null`이면 `createA2aRouter` 호출 시 throw (라우터 미생성)
+- E17. admin singleton session: `canAccessAgent({ agentId: 'admin/manager', intent: 'new-session' })` 호출 시 기존 active session 확인 — 있으면 deny. (설계 §9.3.5, v1 미구현 — KG-15 참조)
+
+---
+
+## Known Gaps
+
+- **KG-15**: Admin singleton session 강제 미구현. 설계 §9.3.5에서 concurrent approve race 차단을 위해 admin 계정 단일 session 강제를 요구하나, `canAccessAgent`에 기존 session 확인 로직이 없다. 동시 approve race는 idempotent replay (I9)로 crash recovery에는 대응되나 concurrent race는 미차단. v2 대상.
+- **KG-16**: M3 미완료. `config.primaryAgentId` 적용 없이 `{username}/default` hardcode (I12). M3 완료 전까지 `primaryAgentId` 변경 CLI 동작이 세션 생성에 반영되지 않는다.
+- **KG-17**: `canAccessAgent` 진입점 #2 (a2a-router) 의 A2A JWT 인증 미완성. 현재 `X-Presence-Caller` 헤더 stub 사용. 실제 JWT 서명 검증은 authz phase (P23-5) 구현 후 연결 예정.
+- **KG-18**: 5진입점 enforcement 테스트가 정적 grep 수준 (text 존재 여부). 실제 `canAccessAgent` 반환값을 무시하는 코드가 추가되어도 테스트가 통과할 수 있다. 동적 spy 테스트로 강화 필요.
+
+---
+
+## 테스트 커버리지
+
+- I1 → `packages/core/test/core/agent-id.test.js` (전체 §3.2 표 커버)
+- I2 → `packages/infra/test/agent-access.test.js` AA2/AA3/AA15
+- I3 → `packages/infra/src/infra/sessions/session.js` 생성자 throw (직접 단위 테스트 없음) ⚠️
+- I4 → `test/regression/agent-access-enforcement.test.js` (5진입점 정적 grep)
+- I5 → `packages/infra/test/agent-access.test.js` AA5/AA6/AA7/AA7b
+- I6 → `packages/infra/test/agent-governance.test.js` (runAdminBootstrap 통합)
+- I7 → `packages/infra/test/agent-governance.test.js` GV4/GV5/GV6
+- I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
+- I10 → (resolveDelegateTarget 직접 단위 테스트 없음) ⚠️
+- I11 → (a2a.enabled=false 라우트 미등록 테스트 없음) ⚠️
+- I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
+- E6 → `packages/infra/test/agent-access.test.js` AA3
+- E7/E8 → `packages/infra/test/agent-access.test.js` AA5/AA6
+- E12 → `packages/infra/test/agent-access.test.js` AA14
+- E15 → `packages/infra/test/agent-governance.test.js` GV7
+
+---
+
+## 관련 코드
+
+- `packages/core/src/core/agent-id.js` — validateAgentId, validateAgentNamePart, isReservedUsername, assertValidAgentId, RESERVED_USERNAMES
+- `packages/infra/src/infra/authz/agent-access.js` — canAccessAgent, INTENT, REASON
+- `packages/infra/src/infra/authz/agent-governance.js` — submitUserAgent, approveUserAgent, denyUserAgent, loadAgentPolicies, getActiveAgentCount
+- `packages/infra/src/infra/admin-bootstrap.js` — runAdminBootstrap, 3단계 상태기계, deleteInitialPasswordFile
+- `packages/infra/src/infra/agents/resolve-delegate-target.js` — resolveDelegateTarget
+- `packages/infra/src/infra/agents/agent-registry.js` — createAgentRegistry
+- `packages/infra/src/infra/sessions/session.js` — Session 생성자 (agentId 필수 검증)
+- `packages/server/src/server/session-api.js` — 진입점 #1 (NEW_SESSION/CONTINUE_SESSION)
+- `packages/server/src/server/a2a-router.js` — 진입점 #2 (DELEGATE, stub auth)
+- `packages/server/src/server/ws-handler.js` — 진입점 #3 (CONTINUE_SESSION)
+- `packages/server/src/server/scheduler-factory.js` — 진입점 #4 (SCHEDULED_RUN)
+- `packages/infra/src/interpreter/delegate.js` — 진입점 #5 (DELEGATE)
+- `packages/infra/src/infra/jobs/job-store.js` — JobStore schema v1 (owner_user_id + owner_agent_id)
+
+---
+
+## 변경 이력
+
+- 2026-04-22: 초기 작성 — feature/agent-identity-model 브랜치 23커밋 검증 후 작성. KG-15~18 등록.
+- 2026-04-23: I-WD 추가 — W1(cb6c59a) workingDir 단일 규칙 리팩토링 반영. `workingDir = Config.userDataPath(userId)` 고정, 외부 입력 무시, persistence 미저장 규칙. 테스트 커버리지 I-WD 추가.

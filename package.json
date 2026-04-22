@@ -15,6 +15,12 @@
     "scenarios:mock": "node packages/tui/test/scenarios/index.js",
     "start": "npm run start --workspace=@presence/server",
     "start:cli": "npm run start --workspace=@presence/tui",
+    "tui": "npm run start --workspace=@presence/tui",
+    "server:start": "scripts/server.sh start",
+    "server:stop": "scripts/server.sh stop",
+    "server:status": "scripts/server.sh status",
+    "server:restart": "scripts/server.sh restart",
+    "server:logs": "scripts/server.sh logs",
     "user": "node packages/infra/src/infra/auth/cli.js",
     "complexity": "node scripts/complexity.js",
     "complexity:check": "node scripts/complexity.js --check"

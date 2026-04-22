@@ -77,7 +77,7 @@ class RemoteSession {
     const mirror = createMirrorState({
       wsUrl: this.#wsUrl,
       sessionId,
-      cwd: this.#cwd,   // 서버에 TUI 실행 디렉토리 전달 → workingDir backfill
+      // cwd 전송은 제거됨 — workingDir 은 서버가 userId 에서 자동 결정 (agent-identity.md I-WD).
       getHeaders: () => this.#authState?.accessToken
         ? { 'Authorization': `Bearer ${this.#authState.accessToken}` }
         : undefined,

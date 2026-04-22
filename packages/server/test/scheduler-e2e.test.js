@@ -43,6 +43,8 @@ async function run() {
         cron: '0 0 1 1 *',   // 실제 다음 실행은 먼 미래
         maxRetries: 0,
         nextRun: 1,           // 과거 → polling 이 즉시 due
+        ownerUserId: 'default',
+        ownerAgentId: 'default/default',
       })
 
       // scheduler polling (200ms) + turn 실행 + DB update 대기
@@ -69,10 +71,10 @@ async function run() {
       assert(after === before, `SE2: cron 미래 설정 시 추가 실행 없음 (before=${before}, after=${after})`)
     }
 
-    // SE3. SCHEDULED session 의 workingDir 이 allowedDirs[0] 로 명시 결정, pendingBackfill=false
-    //      (WS join 이 없으므로 backfill 대상 아님 — 생성 시점에 확정되어야)
+    // SE3. SCHEDULED session 의 workingDir 이 userId 에서 자동 결정
+    //      (docs/specs/agent-identity.md I-WD — userDataPath 고정).
     {
-      // 새 job 을 만들어 session 생성 시점을 포착
+      const { Config } = await import('@presence/infra/infra/config.js')
       const store = userContext.jobStore
       const job = store.createJob({
         name: 'wd-check',
@@ -80,6 +82,8 @@ async function run() {
         cron: '0 0 1 1 *',
         maxRetries: 0,
         nextRun: 1,
+        ownerUserId: 'default',
+        ownerAgentId: 'default/default',
       })
       let capturedSession = null
       const origCreate = userContext.sessions.create.bind(userContext.sessions)
@@ -90,11 +94,9 @@ async function run() {
       }
       await waitFor(() => capturedSession !== null, { timeout: 3000 })
       userContext.sessions.create = origCreate
-      const expectedWd = userContext.config.tools.allowedDirs[0]
+      const expectedWd = Config.userDataPath('default')
       assert(capturedSession.workingDir === expectedWd,
-        `SE3: SCHEDULED.workingDir === allowedDirs[0] (got ${capturedSession.workingDir})`)
-      assert(capturedSession.pendingBackfill === false,
-        `SE3: SCHEDULED.pendingBackfill=false (got ${capturedSession.pendingBackfill})`)
+        `SE3: SCHEDULED.workingDir === userDataPath('default') (got ${capturedSession.workingDir})`)
       // 실행이 완료될 때까지 대기해 리소스 정리 실패 회피
       await waitFor(() => store.getRunHistory(job.id, 10).some(r => r.status === 'success'),
         { timeout: 5000 })

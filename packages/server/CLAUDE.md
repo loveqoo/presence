@@ -54,12 +54,16 @@ npm run user -- list                      # 사용자 목록
 ### 유저 데이터 격리
 
 ```
-~/.presence/data/{username}/
+~/.presence/users/{username}/
 ├── config.json       ← LLM, locale, persona 등
 ├── memory.json       ← MemoryGraph
 ├── mem0_history.db   ← mem0 SQLite
 ├── jobs.db           ← 스케줄러 JobStore
-└── persistence/      ← 세션 영속화
+├── sessions/         ← 세션 영속화 (session state.json)
+├── agent-policies.json (admin 만) ← user agent quota
+├── pending/          ← 승인 대기 (admin 만)
+├── approved/         ← 승인 완료 (admin 만)
+└── rejected/         ← 거부 (admin 만)
 ```
 
 다른 머신 이동: 유저 폴더 통째로 복사.

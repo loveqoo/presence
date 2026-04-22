@@ -44,11 +44,9 @@ class UserSession extends EphemeralSession {
         this.approveRuntime?.restoreStateVersion(restored._fsmVersions.approve)
         this.delegateRuntime?.restoreStateVersion(restored._fsmVersions.delegate)
       }
-      // workingDir 복원 — persistence 값이 있으면 최우선. pendingBackfill 도 복원.
-      if (typeof restored.workingDir === 'string' && restored.workingDir.length > 0) {
-        this.workingDir = restored.workingDir
-        this.pendingBackfill = restored.pendingBackfill === true
-      }
+      // workingDir / agentId 는 복원하지 않음 — 생성 시점 값이 권위.
+      // workingDir 은 userId 로 자동 결정. agentId 는 호출처가 명시.
+      // 기존 persisted session 에 agentId 없을 수 있어 restored.agentId 무시.
       this.logger.info(`State restored (turn: ${restored.turn || 0})`)
     } catch (err) {
       this.logger.warn('State restore failed, starting fresh', { error: err.message })
@@ -84,7 +82,12 @@ class UserSession extends EphemeralSession {
   // --- Tools: job/todo 툴 등록 ---
 
   initTools(userContext) {
-    const jobTools = createJobTools({ store: userContext.jobStore, eventActor: this.actors.eventActor })
+    // docs §4.3 — job tool 이 생성하는 job 은 현재 session 의 agent 소속.
+    // Session.agentId 는 이미 qualified ({userId}/{agentName}) — ownerAgentId 로 그대로 사용.
+    const jobTools = createJobTools({
+      store: userContext.jobStore, eventActor: this.actors.eventActor,
+      ownerUserId: this.userId, ownerAgentId: this.agentId,
+    })
     for (const tool of jobTools) userContext.toolRegistry.register(tool)
 
     userContext.toolRegistry.register({
@@ -110,6 +113,8 @@ class UserSession extends EphemeralSession {
           cron,
           maxRetries: 1,
           nextRun: calcNextRun(cron),
+          ownerUserId: this.userId,
+          ownerAgentId: this.agentId,
         })
       }
     }
@@ -129,7 +134,7 @@ class UserSession extends EphemeralSession {
     try {
       const snap = this.state.snapshot()
       // Phase 10: FSM stateVersion 영속화 — 서버 재시작 시 version 연속성 유지용.
-      // workingDir + pendingBackfill: 세션 실행 컨텍스트 영속화.
+      // workingDir 은 저장하지 않음 (생성 시 userId 에서 결정).
       const withVersions = {
         ...snap,
         _fsmVersions: {
@@ -137,8 +142,7 @@ class UserSession extends EphemeralSession {
           approve: this.approveRuntime?.stateVersion ?? null,
           delegate: this.delegateRuntime?.stateVersion ?? null,
         },
-        workingDir: this.workingDir,
-        pendingBackfill: this.pendingBackfill === true,
+        agentId: this.agentId,
       }
       await forkTask(this.actors.persistenceActor.flush(withVersions))
     } catch (_unused) {}

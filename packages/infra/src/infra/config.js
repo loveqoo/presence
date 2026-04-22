@@ -38,8 +38,21 @@ class Config {
     delegatePolling: z.object({ intervalMs: z.number().positive() }),
     agents: z.array(z.object({
       name: z.string(),
-      description: z.string(),
+      description: z.string().default(''),
       capabilities: z.array(z.string()).default([]),
+      // docs/design/agent-identity-model.md §6.1 — persona 는 agent 의 필드.
+      // M2/M3 에서 단계적으로 채워짐. v1 optional.
+      persona: z.object({
+        name: z.string().optional(),
+        systemPrompt: z.string().nullable().optional(),
+        rules: z.array(z.string()).default([]),
+        tools: z.array(z.string()).default([]),
+      }).optional(),
+      workingDir: z.string().optional(),
+      createdAt: z.string().optional(),
+      createdBy: z.string().optional(),
+      archived: z.boolean().default(false),
+      archivedAt: z.string().nullable().optional(),
     })).default([]),
     prompt: z.object({
       maxContextTokens: z.number().int().positive(),
@@ -47,9 +60,13 @@ class Config {
       maxContextChars: z.number().nullable(),
       reservedOutputChars: z.number().nullable(),
     }),
-    tools: z.object({
-      allowedDirs: z.array(z.string()).default([]),
-    }).default({ allowedDirs: [] }),
+    // docs/design/agent-identity-model.md §11.1 — A2A 활성화 플래그.
+    // enabled=false (기본): /a2a 라우트 미등록 / self card 미생성 / publicUrl 불요.
+    // enabled=true:  publicUrl 필수. self card URL = publicUrl + '/a2a/' + agentId.
+    a2a: z.object({
+      enabled: z.boolean().default(false),
+      publicUrl: z.string().nullable().default(null),
+    }).default({ enabled: false, publicUrl: null }),
   })
 
   // --- Semigroup: 2단계 deep merge ---
@@ -106,7 +123,7 @@ class Config {
       maxContextChars: null,
       reservedOutputChars: null,
     },
-    tools: { allowedDirs: [] },
+    a2a: { enabled: false, publicUrl: null },
   })
 
   constructor(data) { Object.assign(this, data) }

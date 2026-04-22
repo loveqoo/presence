@@ -62,62 +62,81 @@ async function run() {
   // AgentRegistry
   // ===========================================
 
-  // register + get
+  // register + get (qualified agentId)
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'reviewer',
+      agentId: 'test/reviewer',
       description: 'Code reviewer',
       capabilities: ['review'],
       type: 'local',
       run: async (task) => `reviewed: ${task}`,
     })
 
-    const maybeEntry = reg.get('reviewer')
+    const maybeEntry = reg.get('test/reviewer')
     assert(maybeEntry.isJust(), 'register+get: Just')
-    assert(maybeEntry.value.name === 'reviewer', 'register+get: name')
+    assert(maybeEntry.value.agentId === 'test/reviewer', 'register+get: agentId')
+    assert(maybeEntry.value.name === 'reviewer', 'register+get: name (short) = reviewer')
     assert(maybeEntry.value.description === 'Code reviewer', 'register+get: description')
     assert(maybeEntry.value.type === 'local', 'register+get: type')
     assert(typeof maybeEntry.value.run === 'function', 'register+get: run is function')
   }
 
-  // get unknown → null
+  // get unknown → Nothing
   {
     const reg = createAgentRegistry()
-    assert(reg.get('nonexistent').isNothing(), 'get unknown: Nothing')
+    assert(reg.get('test/nonexistent').isNothing(), 'get unknown: Nothing')
+  }
+
+  // register without agentId → throw
+  {
+    const reg = createAgentRegistry()
+    let thrown = null
+    try { reg.register({ description: 'no agentId' }) } catch (e) { thrown = e }
+    assert(thrown && /agentId required/.test(thrown.message), 'register: agentId 누락 throw')
+  }
+
+  // register with invalid agentId → throw
+  {
+    const reg = createAgentRegistry()
+    let thrown = null
+    try { reg.register({ agentId: 'Invalid/agent', description: 'x' }) } catch (e) { thrown = e }
+    assert(thrown && /invalid agentId/.test(thrown.message), 'register: invalid agentId throw')
   }
 
   // list
   {
     const reg = createAgentRegistry()
-    reg.register({ name: 'a', description: 'Agent A' })
-    reg.register({ name: 'b', description: 'Agent B' })
+    reg.register({ agentId: 'test/a', description: 'Agent A' })
+    reg.register({ agentId: 'test/b', description: 'Agent B' })
 
     const all = reg.list()
     assert(all.length === 2, 'list: 2 agents')
-    assert(all.some(a => a.name === 'a'), 'list: includes a')
-    assert(all.some(a => a.name === 'b'), 'list: includes b')
+    assert(all.some(a => a.agentId === 'test/a'), 'list: includes test/a')
+    assert(all.some(a => a.agentId === 'test/b'), 'list: includes test/b')
+    assert(all.every(a => typeof a.name === 'string'), 'list: entries have name')
   }
 
   // has
   {
     const reg = createAgentRegistry()
-    reg.register({ name: 'x', description: '' })
-    assert(reg.has('x'), 'has: registered → true')
-    assert(!reg.has('y'), 'has: not registered → false')
+    reg.register({ agentId: 'test/x', description: '' })
+    assert(reg.has('test/x'), 'has: registered → true')
+    assert(!reg.has('test/y'), 'has: not registered → false')
+    assert(!reg.has('x'), 'has: short name → false (qualified only)')
   }
 
   // register remote agent
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'remote-helper',
+      agentId: 'test/remote-helper',
       description: 'Remote agent',
       type: 'remote',
       endpoint: 'https://example.com/a2a',
     })
 
-    const entry = reg.get('remote-helper').value
+    const entry = reg.get('test/remote-helper').value
     assert(entry.type === 'remote', 'remote agent: type')
     assert(entry.endpoint === 'https://example.com/a2a', 'remote agent: endpoint')
     assert(entry.run === undefined, 'remote agent: no run function')
@@ -127,12 +146,12 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'echo',
+      agentId: 'test/echo',
       description: 'Echo agent',
       run: async (task) => `echo: ${task}`,
     })
 
-    const result = await reg.get('echo').value.run('hello')
+    const result = await reg.get('test/echo').value.run('hello')
     assert(result === 'echo: hello', 'local run: returns result')
   }
 

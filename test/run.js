@@ -20,6 +20,9 @@ const NETWORK_TESTS = new Set([
   'packages/server/test/server.test.js',
   'packages/server/test/auth-e2e.test.js',
   'packages/server/test/scheduler-e2e.test.js',
+  'packages/server/test/a2a-boot-guard.test.js',
+  'packages/server/test/a2a-discovery.test.js',
+  'packages/server/test/a2a-invoke.test.js',
 ])
 
 const tests = [
@@ -27,6 +30,7 @@ const tests = [
   'test/workspace/smoke.test.js',
   'packages/core/test/core/make-op.test.js',
   'packages/core/test/core/op.test.js',
+  'packages/core/test/core/agent-id.test.js',
   'packages/infra/test/state.test.js',
   'packages/infra/test/hook.test.js',
   'packages/infra/test/origin-state.test.js',
@@ -67,6 +71,11 @@ const tests = [
   'packages/infra/test/actors.test.js',
   'packages/infra/test/turn-controller.test.js',
   'packages/infra/test/agent-registry.test.js',
+  'packages/infra/test/resolve-delegate-target.test.js',
+  'packages/infra/test/agent-access.test.js',
+  'packages/infra/test/agent-governance.test.js',
+  'packages/infra/test/agent-cli.test.js',
+  'packages/infra/test/self-card.test.js',
   'packages/infra/test/a2a-client.test.js',
   'packages/infra/test/events.test.js',
   'packages/infra/test/scheduler.test.js',
@@ -78,6 +87,8 @@ const tests = [
   'packages/infra/test/auth-remove-user.test.js',
   'packages/infra/test/auth-token.test.js',
   'packages/infra/test/auth-provider.test.js',
+  'packages/infra/test/admin-bootstrap.test.js',
+  'packages/infra/test/user-migration.test.js',
   'packages/infra/test/persona.test.js',
   'packages/infra/test/memory.test.js',
   'packages/tui/test/app.test.js',
@@ -102,6 +113,7 @@ const tests = [
   'test/regression/e2e-scenario.test.js',
   // Spec invariant static checks
   'test/regression/fsm-single-writer.test.js',
+  'test/regression/agent-access-enforcement.test.js',
   // applyFinalState ordering + turn chaining
   'packages/core/test/core/apply-final-state.test.js',
   // Turn concurrency
@@ -116,6 +128,9 @@ const tests = [
   'packages/server/test/server.test.js',
   'packages/server/test/auth-e2e.test.js',
   'packages/server/test/scheduler-e2e.test.js',
+  'packages/server/test/a2a-boot-guard.test.js',
+  'packages/server/test/a2a-discovery.test.js',
+  'packages/server/test/a2a-invoke.test.js',
 ]
 
 const noNetwork = process.argv.includes('--no-network')
@@ -136,7 +151,7 @@ for (const test of tests) {
   }
 
   try {
-    const output = execSync(`node ${test}`, { cwd: root, encoding: 'utf-8', timeout: 30000 })
+    const output = execSync(`node ${test}`, { cwd: root, encoding: 'utf-8', timeout: 60000 })
     const match = output.match(/(\d+) passed, (\d+) failed/)
     if (match) {
       totalPassed += Number(match[1])

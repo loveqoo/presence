@@ -47,8 +47,8 @@ const createUiHelpers = (reactiveState, delegateRuntime) => {
   const delegateUi = {
     addPending: (entry) => {
       if (isEnabled()) {
-        const pending = reactiveState.get('delegates.pending') || []
-        reactiveState.set('delegates.pending', [...pending, entry])
+        const pending = reactiveState.get(STATE_PATH.DELEGATES_PENDING) || []
+        reactiveState.set(STATE_PATH.DELEGATES_PENDING, [...pending, entry])
         // Phase 12b: delegateRuntime 있으면 submit 전이 알림 — FSM count 동기화.
         delegateRuntime?.submit({ type: 'submit' })
       }
@@ -64,11 +64,11 @@ const createUiHelpers = (reactiveState, delegateRuntime) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, allowedDirs } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, currentUserId } = {}) => {
   const ui = createUiHelpers(reactiveState, delegateRuntime)
-  // Tool handler 가 받을 resolvePath — 호출 시점의 workingDir 로 해석.
-  const resolvePath = (getWorkingDir && allowedDirs)
-    ? (relPath) => resolveInWorkingDir(relPath, getWorkingDir(), allowedDirs)
+  // Tool handler 가 받을 resolvePath — 호출 시점의 workingDir 기준 해석 + 경계 검증.
+  const resolvePath = getWorkingDir
+    ? (relPath) => resolveInWorkingDir(relPath, getWorkingDir())
     : undefined
 
   let interpret
@@ -87,7 +87,7 @@ const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reacti
     stateInterpreterR.run({ ST }),
     llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
     toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi, getWorkingDir, resolvePath }),
-    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn }),
+    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId }),
     approvalInterpreterR.run({ ST, onApprove }),
     controlInterpreterR.run({ ST }),
     parallelInterpreterR.run({ ST, runProgram }),

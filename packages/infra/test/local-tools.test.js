@@ -1,6 +1,6 @@
 import { initI18n } from '@presence/infra/i18n'
 initI18n('en')
-import { createLocalTools, isPathAllowed, normalizePath, resolveInWorkingDir, analyzeWebFetchResult, htmlToText, looksLikeHtml } from '@presence/infra/infra/tools/local-tools.js'
+import { createLocalTools, isWithinWorkspace, normalizePath, resolveInWorkingDir, analyzeWebFetchResult, htmlToText, looksLikeHtml } from '@presence/infra/infra/tools/local-tools.js'
 import { writeFileSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -15,42 +15,46 @@ async function run() {
   mkdirSync(join(testDir, 'subdir'))
   writeFileSync(join(testDir, 'subdir', 'nested.txt'), 'Nested')
 
-  const tools = createLocalTools({ allowedDirs: [testDir] })
+  const tools = createLocalTools()
   const byName = Object.fromEntries(tools.map(t => [t.name, t]))
 
-  // --- isPathAllowed (순수) ---
+  // --- isWithinWorkspace (lexical prefix 매칭) ---
 
-  assert(isPathAllowed('/any/path', []) === true, 'isPathAllowed: empty dirs → always allowed')
-  assert(isPathAllowed(join(testDir, 'hello.txt'), [testDir]) === true, 'isPathAllowed: inside allowed')
-  assert(isPathAllowed('/etc/passwd', [testDir]) === false, 'isPathAllowed: outside denied')
-  assert(isPathAllowed(testDir + '-evil/secret.txt', [testDir]) === false, 'isPathAllowed: sibling-prefix denied')
-  assert(isPathAllowed(testDir, [testDir]) === true, 'isPathAllowed: exact dir match')
+  assert(isWithinWorkspace(join(testDir, 'hello.txt'), testDir) === true, 'isWithinWorkspace: inside → true')
+  assert(isWithinWorkspace('/etc/passwd', testDir) === false, 'isWithinWorkspace: outside → false')
+  assert(isWithinWorkspace(testDir + '-evil/secret.txt', testDir) === false, 'isWithinWorkspace: sibling prefix → false')
+  assert(isWithinWorkspace(testDir, testDir) === true, 'isWithinWorkspace: exact match → true')
+  assert(isWithinWorkspace('/any', null) === false, 'isWithinWorkspace: null workingDir → false')
 
   // --- normalizePath ---
   {
-    // 이미 허용 내부 절대경로 → 그대로
-    const n1 = normalizePath(join(testDir, 'hello.txt'), [testDir])
-    assert(n1 === join(testDir, 'hello.txt'), 'normalizePath correct absolute: kept as-is')
+    // 이미 workspace 내부 절대경로 → 그대로
+    const n1 = normalizePath(join(testDir, 'hello.txt'), testDir)
+    assert(n1 === join(testDir, 'hello.txt'), 'normalizePath absolute inside: kept')
 
-    // /hello.txt (잘못된 절대) + 실제 존재 → 허용 디렉토리 기준 재해석
-    const n2 = normalizePath('/hello.txt', [testDir])
-    assert(n2 === join(testDir, 'hello.txt'), 'normalizePath wrong absolute + exists: reinterpreted')
+    // 상대경로 → workingDir 기준
+    const n2 = normalizePath('hello.txt', testDir)
+    assert(n2 === join(testDir, 'hello.txt'), 'normalizePath relative: resolved against workingDir')
 
-    // /etc/passwd (잘못된 절대) + 허용 내 미존재 → 재해석 안 됨
-    const n3 = normalizePath('/etc/passwd', [testDir])
-    assert(n3 === '/etc/passwd', 'normalizePath system path: not reinterpreted')
+    // workspace 밖 절대경로 → workingDir 로 fallback
+    const n3 = normalizePath('/etc/passwd', testDir)
+    assert(n3 === testDir, 'normalizePath outside absolute: fallback to workingDir')
   }
+
+  // --- 세션 context (ctx.resolvePath) 를 주입해서 경계 검증 테스트 ---
+  // 세션이 없는 legacy 호출은 경계 검증 없음 (test.md 계약 → ctx.resolvePath 유일).
+  const sessionCtx = { resolvePath: (p) => resolveInWorkingDir(p, testDir) }
 
   // --- file_read ---
 
   {
-    const result = byName.file_read.handler({ path: join(testDir, 'hello.txt') })
-    assert(result === 'Hello World', 'file_read: reads content')
+    const result = byName.file_read.handler({ path: 'hello.txt' }, sessionCtx)
+    assert(result === 'Hello World', 'file_read: reads content (ctx)')
   }
 
   {
     try {
-      byName.file_read.handler({ path: join(testDir, 'nonexistent.txt') })
+      byName.file_read.handler({ path: 'nonexistent.txt' }, sessionCtx)
       assert(false, 'file_read missing: should throw')
     } catch (e) {
       assert(e.message.includes('not found'), 'file_read missing: error message')
@@ -59,10 +63,10 @@ async function run() {
 
   {
     try {
-      byName.file_read.handler({ path: '/etc/passwd' })
+      byName.file_read.handler({ path: '/etc/passwd' }, sessionCtx)
       assert(false, 'file_read denied: should throw')
     } catch (e) {
-      assert(e.message.includes('Access denied'), 'file_read denied: error message')
+      assert(e.message.includes('Access denied') || e.message.includes('access'), 'file_read denied: error message')
     }
   }
 
@@ -70,14 +74,14 @@ async function run() {
   {
     const multiline = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n')
     writeFileSync(join(testDir, 'multi.txt'), multiline)
-    const full = byName.file_read.handler({ path: join(testDir, 'multi.txt') })
+    const full = byName.file_read.handler({ path: 'multi.txt' }, sessionCtx)
     assert(full.split('\n').length === 20, 'file_read: full file has 20 lines')
-    const first5 = byName.file_read.handler({ path: join(testDir, 'multi.txt'), maxLines: 5 })
+    const first5 = byName.file_read.handler({ path: 'multi.txt', maxLines: 5 }, sessionCtx)
     assert(first5.split('\n').length === 5, 'file_read maxLines: returns 5 lines')
     assert(first5.startsWith('line 1\n'), 'file_read maxLines: starts from line 1')
-    const noLimit = byName.file_read.handler({ path: join(testDir, 'multi.txt'), maxLines: 0 })
+    const noLimit = byName.file_read.handler({ path: 'multi.txt', maxLines: 0 }, sessionCtx)
     assert(noLimit.split('\n').length === 20, 'file_read maxLines 0: returns all')
-    const last3 = byName.file_read.handler({ path: join(testDir, 'multi.txt'), tailLines: 3 })
+    const last3 = byName.file_read.handler({ path: 'multi.txt', tailLines: 3 }, sessionCtx)
     assert(last3.split('\n').length === 3, 'file_read tailLines: returns 3 lines')
     assert(last3.endsWith('line 20'), 'file_read tailLines: ends with last line')
     assert(last3.startsWith('line 18'), 'file_read tailLines: starts from correct offset')
@@ -86,26 +90,26 @@ async function run() {
   // --- file_write ---
 
   {
-    const result = byName.file_write.handler({ path: join(testDir, 'output.txt'), content: 'Written!' })
+    const result = byName.file_write.handler({ path: 'output.txt', content: 'Written!' }, sessionCtx)
     assert(result.includes('Written'), 'file_write: success message')
 
-    const readBack = byName.file_read.handler({ path: join(testDir, 'output.txt') })
+    const readBack = byName.file_read.handler({ path: 'output.txt' }, sessionCtx)
     assert(readBack === 'Written!', 'file_write: content persisted')
   }
 
   {
     try {
-      byName.file_write.handler({ path: '/tmp/not-allowed/file.txt', content: 'x' })
+      byName.file_write.handler({ path: '/tmp/not-allowed/file.txt', content: 'x' }, sessionCtx)
       assert(false, 'file_write denied: should throw')
     } catch (e) {
-      assert(e.message.includes('Access denied'), 'file_write denied: error message')
+      assert(e.message.includes('Access denied') || e.message.includes('access'), 'file_write denied: error message')
     }
   }
 
   // --- file_list ---
 
   {
-    const result = byName.file_list.handler({ path: testDir })
+    const result = byName.file_list.handler({ path: '.' }, sessionCtx)
     assert(result.includes('hello.txt'), 'file_list: includes file')
     assert(result.includes('subdir/'), 'file_list: marks directories with trailing /')
     assert(result.includes('├──') || result.includes('└──'), 'file_list: tree connectors')
@@ -113,7 +117,7 @@ async function run() {
 
   {
     try {
-      byName.file_list.handler({ path: join(testDir, 'nonexistent') })
+      byName.file_list.handler({ path: 'nonexistent' }, sessionCtx)
       assert(false, 'file_list missing: should throw')
     } catch (e) {
       assert(e.message.includes('not found'), 'file_list missing: error message')
@@ -148,28 +152,28 @@ async function run() {
 
   {
     // 정상: workingDir 기준 상대경로 → 절대경로
-    const result = resolveInWorkingDir('hello.txt', testDir, [testDir])
+    const result = resolveInWorkingDir('hello.txt', testDir)
     assert(result === join(testDir, 'hello.txt'), 'resolveInWorkingDir: 상대경로 정상')
   }
 
   {
     // workingDir 누락 → throw
     let thrown = null
-    try { resolveInWorkingDir('x', null, [testDir]) } catch (e) { thrown = e }
+    try { resolveInWorkingDir('x', null) } catch (e) { thrown = e }
     assert(thrown && /workingDir required/.test(thrown.message), 'resolveInWorkingDir: workingDir 누락 throw')
   }
 
   {
-    // allowedDirs 밖 → throw
+    // workspace 밖 절대경로 → throw
     let thrown = null
-    try { resolveInWorkingDir('/etc/passwd', testDir, [testDir]) } catch (e) { thrown = e }
-    assert(thrown && /denied|outside|access/i.test(thrown.message), 'resolveInWorkingDir: allowedDirs 밖 throw')
+    try { resolveInWorkingDir('/etc/passwd', testDir) } catch (e) { thrown = e }
+    assert(thrown && /denied|outside|access/i.test(thrown.message), 'resolveInWorkingDir: 경계 밖 throw')
   }
 
   {
     // `..` 로 경계 탈출 시도 → throw
     let thrown = null
-    try { resolveInWorkingDir('../../../etc/passwd', testDir, [testDir]) } catch (e) { thrown = e }
+    try { resolveInWorkingDir('../../../etc/passwd', testDir) } catch (e) { thrown = e }
     assert(thrown, 'resolveInWorkingDir: `..` 경계 탈출 throw')
   }
 

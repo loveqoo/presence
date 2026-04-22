@@ -1,26 +1,43 @@
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { createSchedulerActor } from '@presence/infra/infra/actors/scheduler-actor.js'
+import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 
 // =============================================================================
 // 스케줄러 팩토리 + 에이전트 세션 등록
 // =============================================================================
 
-const createServerScheduler = (userContext) => {
+const createServerScheduler = (userContext, opts = {}) => {
+  const defaultUserId = opts.username || 'default'
   let scheduler
-  // SCHEDULED session 의 workingDir — WS join 이 없어 backfill 대상 아님.
-  // jobEvent.workingDir 있으면 사용, 없으면 user config 의 allowedDirs[0] 명시 전달
-  // (명시 전달해야 Session 생성 시 pendingBackfill=false 로 확정됨).
-  const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   scheduler = createSchedulerActor({
     store: userContext.jobStore,
     onDispatch: (jobEvent) => {
       const sessionId = `scheduled-${jobEvent.runId}`
+      // docs §4.3 — job 생성 시 owner 가 확정되어 있으므로 event 에서 직접 사용.
+      // legacy row (owner null) 는 scheduler-actor 가 null 로 전파 → fallback 으로 막음.
+      const agentId = jobEvent.ownerAgentId || `${defaultUserId}/default`
+      const userId = jobEvent.ownerUserId || defaultUserId
+
+      // docs §9.4 진입점 #4 — scheduled-run intent 로 canAccessAgent.
+      // jwtSub=owner (agent 소유자 본인이 자기 agent 를 실행 → ownership 트리비얼),
+      // 실효 게이트는 archived 체크 (§5.4 — archived agent 는 새 scheduled run 차단).
+      const access = canAccessAgent({
+        jwtSub: userId, agentId, intent: INTENT.SCHEDULED_RUN, registry: userContext.agentRegistry,
+      })
+      if (!access.allow) {
+        userContext.logger?.warn?.(`Scheduler: dispatch denied for ${agentId} (${access.reason}) — job ${jobEvent.jobId} skipped`)
+        fireAndForget(scheduler.jobFail(jobEvent.runId, jobEvent.jobId, jobEvent.attempt ?? 1, `access-denied: ${access.reason}`))
+        return
+      }
+
+      // workingDir 은 Session 이 userId 에서 자동 결정 (`~/.presence/users/{userId}/`).
       const entry = userContext.sessions.create({
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
-        workingDir: jobEvent.workingDir || defaultWd,
+        userId,
+        agentId,
         onScheduledJobDone: (event, outcome) => {
           const task = outcome.success
             ? scheduler.jobDone(event.runId, event.jobId, outcome.result)
@@ -37,23 +54,23 @@ const createServerScheduler = (userContext) => {
   return scheduler
 }
 
-// 에이전트 세션 등록: config.agents 기반
-// Agent session 도 SCHEDULED 와 마찬가지로 WS join 없음 → workingDir 명시 전달로
-// pendingBackfill=false 확정. agentDef.workingDir 있으면 사용, 없으면 allowedDirs[0].
+// 에이전트 세션 등록: config.agents 기반.
+// workingDir 은 userId 기반 자동 결정 — 별도 명시 불필요.
 const registerAgentSessions = (userContext, username) => {
   const userId = username || 'default'
-  const defaultWd = userContext.config.tools?.allowedDirs?.[0]
   for (const agentDef of (userContext.config.agents || [])) {
+    // agentId: qualifying 현재 agent name. identity §3 qualified form.
+    const agentId = `${userId}/${agentDef.name}`
     const agentEntry = userContext.sessions.create({
-      id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId,
-      workingDir: agentDef.workingDir || defaultWd,
+      id: `agent-${agentDef.name}`, type: SESSION_TYPE.AGENT, userId, agentId,
     })
     userContext.agentRegistry.register({
-      name: agentDef.name,
+      agentId,
       description: agentDef.description,
       capabilities: agentDef.capabilities || [],
       type: DelegationMode.LOCAL,
       run: (task) => agentEntry.session.handleInput(task),
+      archived: agentDef.archived === true,
     })
     fireAndForget(agentEntry.session.delegateActor.start())
   }

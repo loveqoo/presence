@@ -53,4 +53,4 @@ const createPersonaR = Reader.asks(({ projectName = 'presence', cwd } = {}) => {
 // 레거시 브릿지
 const createPersona = (opts = {}) => createPersonaR.run(opts)
 
-export { Persona, createPersonaR, createPersona }
+export { Persona, createPersonaR, createPersona, DEFAULT_PERSONA }

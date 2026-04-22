@@ -26,12 +26,11 @@ const noop = Function.prototype
 class MirrorState extends State {
   constructor(opts = {}) {
     super()
-    const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable, cwd } = opts
+    const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable } = opts
     this.cache = { _reconnecting: false }
     this.lastStateVersion = null   // Phase 5: WS init/state 메시지로 갱신. 클라이언트 stale 감지용.
     this.wsUrl = wsUrl
     this.sessionId = sessionId
-    this.cwd = cwd ?? null   // Session workingDir backfill 용 (D8). null 이면 join 메시지에서 제외.
     const staticHeaders = headers
     this.getHeaders = getHeaders || (staticHeaders ? () => staticHeaders : noop)
     this.onAuthFailed = onAuthFailed
@@ -40,20 +39,15 @@ class MirrorState extends State {
     this.reconnectTimer = null
     this.connectAttempt = 0
     this.stopped = false
-    // Stale 감지 / HTTP reject 후 최신화 트리거. WS 재접속 없이 현재 연결에서 join 재전송 →
-    // 서버가 init 으로 full snapshot 재송신.
-    this.requestRefresh = () => {
-      if (!this.ws || this.ws.readyState !== 1) return false
-      this.ws.send(JSON.stringify(this.#joinMessage()))
-      return true
-    }
     this.connect()
   }
 
-  #joinMessage() {
-    const msg = { type: 'join', session_id: this.sessionId }
-    if (this.cwd) msg.cwd = this.cwd
-    return msg
+  // Stale 감지 / HTTP reject 후 최신화 트리거. WS 재접속 없이 현재 연결에서 join 재전송 →
+  // 서버가 init 으로 full snapshot 재송신.
+  requestRefresh() {
+    if (!this.ws || this.ws.readyState !== 1) return false
+    this.ws.send(JSON.stringify({ type: 'join', session_id: this.sessionId }))
+    return true
   }
 
   get(path) { return this.cache[path] }
@@ -90,7 +84,7 @@ class MirrorState extends State {
     this.ws.on('open', () => {
       this.connectAttempt = 0
       this.setReconnecting(false)
-      this.ws.send(JSON.stringify(this.#joinMessage()))
+      this.ws.send(JSON.stringify({ type: 'join', session_id: this.sessionId }))
     })
     this.ws.on('message', this.handleMessage.bind(this))
     this.ws.on('close', this.handleClose.bind(this))
@@ -121,9 +115,8 @@ class MirrorState extends State {
   async handleClose(code) {
     if (this.stopped) return
     if (code === WS_CLOSE.PASSWORD_CHANGE_REQUIRED
-      || code === WS_CLOSE.ORIGIN_NOT_ALLOWED
-      || code === WS_CLOSE.WORKING_DIR_INVALID) {
-      // 4002/4003/4004 — 재연결해도 같은 거부가 반복되므로 영구 실패로 처리.
+      || code === WS_CLOSE.ORIGIN_NOT_ALLOWED) {
+      // 4002/4003 — 재연결해도 같은 거부가 반복되므로 영구 실패로 처리.
       this.stopped = true
       if (this.onUnrecoverable) this.onUnrecoverable(code)
       return

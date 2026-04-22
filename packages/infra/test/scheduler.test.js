@@ -65,22 +65,89 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: '테스트', prompt: '안녕', cron: '* * * * *', nextRun: Date.now() + 60000 })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: '테스트', prompt: '안녕', cron: '* * * * *', nextRun: Date.now() + 60000 })
     const got = store.getJob(job.id)
     assert(got.name === '테스트', 'S1: name')
     assert(got.prompt === '안녕', 'S1: prompt')
     assert(got.cron === '* * * * *', 'S1: cron')
     assert(got.enabled === true, 'S1: enabled default true')
     assert(got.maxRetries === 3, 'S1: maxRetries default 3')
+    assert(got.ownerUserId === 'test', 'S1: ownerUserId round-trip')
+    assert(got.ownerAgentId === 'test/default', 'S1: ownerAgentId round-trip')
     store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // S1b. createJob 은 owner 필수
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    let thrown = null
+    try { store.createJob({ name: 'x', prompt: 'p', cron: '* * * * *' }) } catch (e) { thrown = e }
+    assert(thrown && /owner.*required/i.test(thrown.message), 'S1b: owner 누락 → throw')
+    thrown = null
+    try { store.createJob({ ownerUserId: 'u', name: 'x', prompt: 'p', cron: '* * * * *' }) } catch (e) { thrown = e }
+    assert(thrown && /owner.*required/i.test(thrown.message), 'S1b: ownerAgentId 단독 누락 → throw')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // S1c. schema migration — v0 (legacy) DB 로부터 v1 로 upgrade
+  {
+    const dir = makeTmpDir()
+    const dbPath = join(dir, 'legacy.db')
+    // Manually create legacy schema (no owner columns, user_version = 0)
+    const { default: BetterSqlite } = await import('better-sqlite3')
+    const legacy = new BetterSqlite(dbPath)
+    legacy.exec(`
+      CREATE TABLE jobs (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, prompt TEXT NOT NULL, cron TEXT NOT NULL,
+        enabled INTEGER DEFAULT 1, max_retries INTEGER DEFAULT 3, allowed_tools TEXT DEFAULT '[]',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, next_run INTEGER
+      );
+    `)
+    const now = Date.now()
+    legacy.prepare(`INSERT INTO jobs (id, name, prompt, cron, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+      .run('legacy-1', 'old-job', 'old prompt', '* * * * *', now, now)
+    legacy.close()
+
+    // Reopen via JobStore → migration triggered
+    const store = createJobStore(dbPath)
+    const cols = (await import('better-sqlite3')).default
+    const db = new cols(dbPath, { readonly: true })
+    const colNames = db.prepare("PRAGMA table_info(jobs)").all().map(c => c.name)
+    assert(colNames.includes('owner_user_id'), 'S1c: owner_user_id 컬럼 추가됨')
+    assert(colNames.includes('owner_agent_id'), 'S1c: owner_agent_id 컬럼 추가됨')
+    const version = db.pragma('user_version', { simple: true })
+    assert(version === 1, `S1c: user_version=1 (got ${version})`)
+    db.close()
+
+    // Legacy row 는 owner null (backfill 대상)
+    const legacyJob = store.getJob('legacy-1')
+    assert(legacyJob.ownerUserId === null, 'S1c: legacy row ownerUserId = null')
+    assert(legacyJob.ownerAgentId === null, 'S1c: legacy row ownerAgentId = null')
+
+    // 신규 job 은 owner 필수로 동작 — migration 후에도 newDB 동작 유지
+    const fresh = store.createJob({
+      ownerUserId: 'bob', ownerAgentId: 'bob/default',
+      name: 'post-mig', prompt: 'p', cron: '* * * * *',
+    })
+    assert(fresh.ownerUserId === 'bob', 'S1c: 신규 job owner 유지')
+
+    // 재개방 시 migration 재적용 안됨 (idempotent)
+    store.close()
+    const store2 = createJobStore(dbPath)
+    const db2 = new cols(dbPath, { readonly: true })
+    assert(db2.pragma('user_version', { simple: true }) === 1, 'S1c: 재개방 시에도 v1 유지')
+    db2.close()
+    store2.close()
+    rmSync(dir, { recursive: true, force: true })
   }
 
   // S2. listJobs
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    store.createJob({ name: 'a', prompt: 'p1', cron: '0 9 * * *' })
-    store.createJob({ name: 'b', prompt: 'p2', cron: '0 18 * * *' })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'a', prompt: 'p1', cron: '0 9 * * *' })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'b', prompt: 'p2', cron: '0 18 * * *' })
     const jobs = store.listJobs()
     assert(jobs.length === 2, 'S2: two jobs')
     assert(jobs[0].name === 'a', 'S2: first job')
@@ -91,7 +158,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: '원본', prompt: 'old', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: '원본', prompt: 'old', cron: '* * * * *' })
     const updated = store.updateJob(job.id, { name: '수정됨', prompt: 'new' })
     assert(updated.name === '수정됨', 'S3: name updated')
     assert(updated.prompt === 'new', 'S3: prompt updated')
@@ -102,7 +169,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'del', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'del', prompt: 'p', cron: '* * * * *' })
     store.startRun(job.id, 1)
     store.deleteJob(job.id)
     assert(store.getJob(job.id) === null, 'S4: job deleted')
@@ -116,8 +183,8 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     const past = Date.now() - 1000
     const future = Date.now() + 60000
-    store.createJob({ name: 'due', prompt: 'p', cron: '* * * * *', nextRun: past })
-    store.createJob({ name: 'future', prompt: 'p', cron: '* * * * *', nextRun: future })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'due', prompt: 'p', cron: '* * * * *', nextRun: past })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'future', prompt: 'p', cron: '* * * * *', nextRun: future })
     const due = store.getDueJobs()
     assert(due.length === 1, 'S5: only due job returned')
     assert(due[0].name === 'due', 'S5: correct job')
@@ -128,7 +195,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
     store.finishRun(runId, { status: 'success', result: 'done' })
     const history = store.getRunHistory(job.id)
@@ -143,7 +210,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
     store.finishRun(runId, { status: 'failure', error: 'timeout' })
     const history = store.getRunHistory(job.id)
@@ -156,7 +223,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     // 52개 run 생성 (max 50)
     for (let i = 0; i < 52; i++) {
       const runId = store.startRun(job.id, 1)
@@ -171,7 +238,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     // expire_at를 과거로 직접 삽입하기 위해 startRun 후 DB 수정은 어려우므로
     // cleanupExpired 는 expire_at < now()를 삭제 — 새로 생성된 건 미래이므로 삭제 안 됨
     store.startRun(job.id, 1)
@@ -214,7 +281,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    store.createJob({ name: 'due-job', prompt: '실행', cron: '* * * * *', nextRun: Date.now() - 1000 })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'due-job', prompt: '실행', cron: '* * * * *', nextRun: Date.now() - 1000 })
     const mockActor = createMockEventActor()
     const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
@@ -229,7 +296,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    store.createJob({ name: 'future', prompt: 'p', cron: '* * * * *', nextRun: Date.now() + 60000 })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'future', prompt: 'p', cron: '* * * * *', nextRun: Date.now() + 60000 })
     const mockActor = createMockEventActor()
     const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
@@ -242,7 +309,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
     const actor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
@@ -257,7 +324,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 3 })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 3 })
     const runId = store.startRun(job.id, 1)
     const mockActor = createMockEventActor()
     const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
@@ -276,7 +343,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 3 })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 3 })
     const runId = store.startRun(job.id, 3)
     const actor = createSchedulerActor({ store, onDispatch: () => {}, pollIntervalMs: 10_000 })
 
@@ -290,7 +357,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000 })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000 })
     store.updateJob(job.id, { enabled: 0 })
     const mockActor = createMockEventActor()
     const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
@@ -304,7 +371,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000 })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000 })
     const mockActor = createMockEventActor()
     const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
@@ -337,7 +404,7 @@ async function run() {
     const store = createJobStore(join(dir, 'jobs.db'))
     // expire_at을 과거로 직접 DB에 삽입
     const db = new (await import('better-sqlite3')).default(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
     // expire_at을 1ms(과거)로 강제 설정
     db.prepare('UPDATE job_runs SET expire_at = ? WHERE id = ?').run(1, runId)
@@ -373,7 +440,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: '리포트', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: '리포트', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
 
     const state = createOriginState({
@@ -415,7 +482,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 1 })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', maxRetries: 1 })
     const runId = store.startRun(job.id, 1)
 
     const state = createOriginState({
@@ -462,7 +529,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const scheduleTool = tools.find(t => t.name === 'schedule_job')
 
     const result = scheduleTool.handler({ name: '일일 리포트', cron: '0 9 * * *', prompt: '오늘 현황 정리' })
@@ -476,7 +543,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const scheduleTool = tools.find(t => t.name === 'schedule_job')
 
     const result = scheduleTool.handler({ name: '잘못됨', cron: 'bad-cron', prompt: 'p' })
@@ -489,7 +556,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const listTool = tools.find(t => t.name === 'list_jobs')
 
     const result = listTool.handler({})
@@ -501,8 +568,8 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    store.createJob({ name: '점검', prompt: 'p', cron: '* * * * *' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: '점검', prompt: 'p', cron: '* * * * *' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const listTool = tools.find(t => t.name === 'list_jobs')
 
     const result = listTool.handler({})
@@ -514,8 +581,8 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: '원본', prompt: 'old', cron: '* * * * *' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: '원본', prompt: 'old', cron: '* * * * *' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const updateTool = tools.find(t => t.name === 'update_job')
 
     const result = updateTool.handler({ id: job.id, name: '수정', prompt: '새 프롬프트' })
@@ -528,7 +595,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const updateTool = tools.find(t => t.name === 'update_job')
 
     const result = updateTool.handler({ id: 'nonexistent', name: '수정' })
@@ -540,8 +607,8 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const updateTool = tools.find(t => t.name === 'update_job')
 
     updateTool.handler({ id: job.id, enabled: false })
@@ -553,8 +620,8 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const deleteTool = tools.find(t => t.name === 'delete_job')
 
     const result = deleteTool.handler({ id: job.id })
@@ -567,7 +634,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const deleteTool = tools.find(t => t.name === 'delete_job')
 
     const result = deleteTool.handler({ id: 'ghost' })
@@ -579,10 +646,10 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
     const runId = store.startRun(job.id, 1)
     store.finishRun(runId, { status: 'success', result: 'ok' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const historyTool = tools.find(t => t.name === 'job_history')
 
     const result = historyTool.handler({ id: job.id })
@@ -594,8 +661,8 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const historyTool = tools.find(t => t.name === 'job_history')
 
     const result = historyTool.handler({ id: job.id })
@@ -607,9 +674,9 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: '즉시 실행 테스트', cron: '* * * * *' })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: '즉시 실행 테스트', cron: '* * * * *' })
     const mockActor = createMockEventActor()
-    const tools = createJobTools({ store, eventActor: mockActor })
+    const tools = createJobTools({ store, eventActor: mockActor, ownerUserId: 'test', ownerAgentId: 'test/default' })
     const runNowTool = tools.find(t => t.name === 'run_job_now')
 
     const result = runNowTool.handler({ id: job.id })
@@ -628,7 +695,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const runNowTool = tools.find(t => t.name === 'run_job_now')
 
     const result = runNowTool.handler({ id: 'ghost' })
@@ -644,7 +711,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const scheduleTool = tools.find(t => t.name === 'schedule_job')
 
     scheduleTool.handler({ name: '제한된 Job', cron: '* * * * *', prompt: 'p', allowed_tools: ['read_file', '^search'] })
@@ -659,8 +726,8 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *' })
-    const tools = createJobTools({ store, eventActor: createMockEventActor() })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: 'test', ownerAgentId: 'test/default' })
     const updateTool = tools.find(t => t.name === 'update_job')
 
     updateTool.handler({ id: job.id, allowed_tools: ['bash'] })
@@ -674,7 +741,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', allowedTools: [] })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', allowedTools: [] })
     assert(job.allowedTools.length === 0, 'T16: empty allowedTools = no restriction')
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
@@ -683,7 +750,7 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000, allowedTools: ['read_file'] })
+    store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', nextRun: Date.now() - 1000, allowedTools: ['read_file'] })
     const mockActor = createMockEventActor()
     const actor = createSchedulerActor({ store, onDispatch: mockActor.onDispatch, pollIntervalMs: 10_000 })
 
@@ -698,9 +765,9 @@ async function run() {
   {
     const dir = makeTmpDir()
     const store = createJobStore(join(dir, 'jobs.db'))
-    const job = store.createJob({ name: 'j', prompt: 'p', cron: '* * * * *', allowedTools: ['bash', 'read'] })
+    const job = store.createJob({ ownerUserId: 'test', ownerAgentId: 'test/default', name: 'j', prompt: 'p', cron: '* * * * *', allowedTools: ['bash', 'read'] })
     const mockActor = createMockEventActor()
-    const tools = createJobTools({ store, eventActor: mockActor })
+    const tools = createJobTools({ store, eventActor: mockActor, ownerUserId: 'test', ownerAgentId: 'test/default' })
     const runNowTool = tools.find(t => t.name === 'run_job_now')
 
     runNowTool.handler({ id: job.id })

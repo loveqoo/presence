@@ -5,11 +5,15 @@ import { UserContext } from '@presence/infra/infra/user-context.js'
 import { loadServer } from '@presence/infra/infra/config-loader.js'
 import { Memory } from '@presence/infra/infra/memory.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { Config } from '@presence/infra/infra/config.js'
+import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
+import { runAdminBootstrap, deleteInitialPasswordFile, ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
 import { createServerScheduler, registerAgentSessions } from './scheduler-factory.js'
 import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
 import { createAuthSetup } from './auth-setup.js'
 import { createSessionRouter } from './session-api.js'
+import { createA2aRouter } from './a2a-router.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 import { corsMiddleware, mountStaticWebUi, logStartupSummaryR, warnPresenceDirChange, closeAsync, listenAsync } from './server-utils.js'
 
@@ -64,7 +68,7 @@ class PresenceServer {
       agents: this.#defaultSession.agents,
       config: this.#userContext.config,
       logger: this.#userContext.logger,
-      personaConfig: this.#userContext.personaConfig,
+      personaConfig: this.#userContext.getPrimaryPersona(),
       memory: this.#userContext.memory,
       llm: this.#userContext.llm,
       toolRegistry: this.#userContext.toolRegistry,
@@ -94,8 +98,30 @@ class PresenceServer {
     const { persistenceCwd } = opts
     const config = configOverride || loadServer()
 
+    // docs §11.1 — a2a.enabled=true 일 때 publicUrl 필수. 없으면 부팅 거부.
+    if (config.a2a?.enabled && !config.a2a?.publicUrl) {
+      throw new Error('config.a2a.enabled=true requires publicUrl (docs/design/agent-identity-model.md §11.1)')
+    }
+
     // KG-06: PRESENCE_DIR 변경 시 이전 경로 데이터 경고
     warnPresenceDirChange()
+
+    // Admin bootstrap — docs/design/agent-identity-model.md §7.3
+    // loadServer 직후, UserContext 생성 전. 실패 시 throw → 서버 부팅 거부.
+    const presenceDir = Config.presenceDir()
+    const bootstrapUserStore = createUserStore()
+    try {
+      const result = await runAdminBootstrap({
+        userStore: bootstrapUserStore,
+        presenceDir,
+        logger: console,
+      })
+      if (result.createdAccount) {
+        console.log(`[admin-bootstrap] Admin created. Initial password file: ${presenceDir}/admin-initial-password.txt`)
+      }
+    } catch (err) {
+      throw new Error(`Admin bootstrap failed: ${err.message}. Recovery: check ${presenceDir} write permissions or delete partial files.`)
+    }
 
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
@@ -113,20 +139,27 @@ class PresenceServer {
       },
     })
     this.#startedAt = Date.now()
-    this.#scheduler = createServerScheduler(this.#userContext)
+    this.#scheduler = createServerScheduler(this.#userContext, { username: this.#username })
 
     // 기본 세션 + 에이전트 세션
     const defaultUserId = this.#username || 'default'
+    // agentId: M1 단계 runtime hardcode `${userId}/default`.
+    // M3 에서 config.primaryAgentId 로 이관 (docs/design/agent-identity-model.md §12).
     const defaultEntry = this.#userContext.sessions.create({
       id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd,
       userId: defaultUserId,
+      agentId: `${defaultUserId}/default`,
       onScheduledJobDone: Function.prototype,
     })
     this.#defaultSession = defaultEntry.session
     registerAgentSessions(this.#userContext, this.#username)
 
-    // Auth + UserContextManager
-    const auth = createAuthSetup()
+    // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제
+    const auth = createAuthSetup({
+      onPasswordChanged: (username) => {
+        if (username === ADMIN_USERNAME) deleteInitialPasswordFile(presenceDir)
+      },
+    })
     this.#authEnabled = true
     this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory })
     const getUserContextManager = () => this.#userContextManager
@@ -188,7 +221,15 @@ class PresenceServer {
     app.use('/api', createSessionRouter({
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
     }))
-    // 8. Static web UI (catch-all — 반드시 마지막)
+    // 8. /a2a — docs/design/agent-identity-model.md §11. enabled=true 에서만 마운트.
+    // JSON-RPC 메시지 처리 + A2A JWT 는 authz phase — 현재 discovery 엔드포인트만.
+    if (this.#userContext.config.a2a?.enabled) {
+      app.use('/a2a', createA2aRouter({
+        userContext: this.#userContext,
+        config: this.#userContext.config,
+      }))
+    }
+    // 9. Static web UI (catch-all — 반드시 마지막)
     mountStaticWebUi(this.#expressApp)
   }
 

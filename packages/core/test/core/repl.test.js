@@ -132,7 +132,7 @@ async function run() {
   {
     const outputs = []
     const agentReg = createAgentRegistry()
-    agentReg.register({ name: 'summarizer', description: 'Summarize text', type: 'local' })
+    agentReg.register({ agentId: 'test/summarizer', description: 'Summarize text', type: 'local' })
     const repl = new Repl({
       agent: mockAgent('x'),
       onOutput: (r) => outputs.push(r),

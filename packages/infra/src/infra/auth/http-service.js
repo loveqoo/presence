@@ -47,12 +47,18 @@ const httpStatus = (authError) => {
 class HttpAuthService extends AuthService {
   #rateLimiter
   #publicPaths
+  #onPasswordChanged
 
   constructor(tokenService, userStore, opts = {}) {
     super(tokenService, userStore)
     this.#rateLimiter = createRateLimiter()
     this.#publicPaths = opts.publicPaths || []
+    // 비밀번호 변경 성공 시 호출되는 콜백 (username 전달).
+    // admin-initial-password.txt 삭제 트리거 등에 활용 (docs/design/agent-identity-model.md §7.3)
+    this.#onPasswordChanged = opts.onPasswordChanged || null
   }
+
+  get onPasswordChanged() { return this.#onPasswordChanged }
 
   // --- virtual 구현 ---
 
@@ -185,6 +191,11 @@ class HttpAuthService extends AuthService {
             error => res.status(httpStatus(error)).json({ error: error.message }),
             tokens => {
               this.#setRefreshCookie(res, tokens.refreshToken)
+              // 비밀번호 변경 성공 콜백 — initial-password 파일 삭제 등 side-effect.
+              // 실패해도 응답에는 영향 없음 (best-effort).
+              if (this.#onPasswordChanged) {
+                try { this.#onPasswordChanged(tokens.user.username) } catch (_) {}
+              }
               res.json({
                 accessToken: tokens.accessToken,
                 refreshToken: tokens.refreshToken,

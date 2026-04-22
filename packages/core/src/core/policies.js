@@ -87,13 +87,11 @@ export const WS_RECONNECT = Object.freeze({
   BACKOFF_MAX_MS: 15_000,
 })
 
-// WebSocket close 코드 (wire format)
-// 4001~4003 은 기존 auth/origin 경로. 4004 는 세션 workingDir 경계 위반 (재연결 안 함).
+// WebSocket close 코드 (wire format). 4001~4003 auth/origin 경로.
 export const WS_CLOSE = Object.freeze({
   AUTH_FAILED: 4001,
   PASSWORD_CHANGE_REQUIRED: 4002,
   ORIGIN_NOT_ALLOWED: 4003,
-  WORKING_DIR_INVALID: 4004,
 })
 
 export const STATE_PATH = Object.freeze({

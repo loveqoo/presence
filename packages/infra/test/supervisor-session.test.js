@@ -3,11 +3,17 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { UserContext } from '@presence/infra/infra/user-context.js'
-import { Session } from '@presence/infra/infra/sessions/index.js'
+import { Session as SessionModule } from '@presence/infra/infra/sessions/index.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
+
+// agentId 기본값 주입 (M1 fixture)
+const TEST_AGENT_ID = 'test/default'
+const Session = {
+  create: (uc, opts = {}) => SessionModule.create(uc, { agentId: TEST_AGENT_ID, ...opts }),
+}
 
 const createMockLLM = (handler) => {
   const server = http.createServer((req, res) => {
@@ -178,13 +184,13 @@ async function run() {
       try {
         const agentSession = Session.create(freshCtx, { type: SESSION_TYPE.AGENT })
         freshCtx.agentRegistry.register({
-          name: 'test-agent-sa7',
+          agentId: 'test/test-agent-sa7',
           description: '테스트용',
           type: 'local',
           run: (task) => agentSession.handleInput(task),
         })
 
-        const entry = freshCtx.agentRegistry.get('test-agent-sa7')
+        const entry = freshCtx.agentRegistry.get('test/test-agent-sa7')
         assert(entry.isJust(), 'SA7: agent registered in registry')
         const delegateResult = await entry.value.run('위임 작업')
         assert(delegateResult === '응답', 'SA7: agent handleInput called via run()')

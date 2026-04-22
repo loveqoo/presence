@@ -248,6 +248,24 @@ i18n `ko.json`에 `sessions_cmd.error.working_dir_out_of_bounds` / `working_dir_
 
 ---
 
+## feature/agent-identity-model 브랜치 UX 감사 (2026-04-23)
+
+감사 범위: `feature/agent-identity-model` 브랜치 진입/연결/셸 영역. 서버 관리 스크립트 추가(`npm run server:start/stop/status/restart/logs`) 및 기존 WS close 처리 퇴행 여부 점검.
+
+### 기존 FP 퇴행 없음
+
+FP-16~FP-28, FP-63, FP-64 전체 resolved 상태 유지 확인. `feature/agent-identity-model` 브랜치의 주요 변경(Session.agentId 강제 검증, workingDir W1 고정, WS_CLOSE 4004 분기)은 진입/연결/셸 흐름(main.js, remote.js, App.js의 인증·재연결 경로)을 건드리지 않는다.
+
+### 관찰: POST /sessions body에 workingDir 잔존
+
+`remote-session.js:166`에서 `onCreateSession`이 `/api/sessions`에 `workingDir: this.#cwd`를 포함한 body를 전송한다. 서버 `Session.create`는 외부 입력 `opts.workingDir`를 무시하고 W1 규칙(`resolveWorkspace(userId)`)으로 재결정한다. 기능상 무해하지만, 코드에 "cwd 전송은 제거됨" 주석(remote-session.js:80)과 실제 `onCreateSession` 구현(line 166)이 불일치한다. 유저에게는 영향 없음.
+
+### 관찰: 서버 관리 스크립트 진입 경로 미노출
+
+`npm run server:start/stop/status/restart/logs` 스크립트가 추가되었다(`scripts/server.sh`, `package.json`). 서버를 백그라운드 데몬으로 관리할 수 있는 유일한 표준 경로이나, 현재 사용자 가이드(`docs/guide/`)나 CLAUDE.md에서 안내하지 않는다. 유저는 이 진입점의 존재를 알기 어렵다. UX 관찰로 기록하며 별도 FP로 등록하지 않음 — 유저 가이드 업데이트가 해결 경로이므로 `user-guide-writer` 에이전트 소관.
+
+---
+
 ## 심각도별 요약
 
 | 심각도 | open | resolved | 항목 |

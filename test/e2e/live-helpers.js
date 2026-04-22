@@ -134,7 +134,9 @@ const authenticate = async () => {
   }
 
   // 임시 유저 자동 생성
-  const username = `livetest_${Date.now().toString(36)}`
+  // username 은 agent-id agentName part 규칙 (kebab-case, 언더바 금지) 준수.
+  // docs/specs/agent-identity.md I1 — agentId 의 username 부분도 같은 제약.
+  const username = `livetest-${Date.now().toString(36)}`
   const INITIAL_PW = 'init_password_1234'
   const NEW_PW = 'new_password_5678'
 

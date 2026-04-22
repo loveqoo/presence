@@ -25,7 +25,7 @@ mkdirSync(testDir, { recursive: true })
 writeFileSync(join(testDir, 'package.json'), '{"name":"test"}')
 writeFileSync(join(testDir, 'readme.txt'), 'hello world')
 
-const localTools = createLocalTools({ allowedDirs: [testDir] })
+const localTools = createLocalTools()
 const toolRegistry = createToolRegistry()
 for (const t of localTools) toolRegistry.register(t)
 const tools = toolRegistry.list()

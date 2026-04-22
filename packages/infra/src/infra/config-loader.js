@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
-import { join, dirname } from 'path'
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 import fp from '@presence/core/lib/fun-fp.js'
 import { Config } from './config.js'
 
@@ -106,36 +106,8 @@ const loadServer = (opts = {}) => loadServerR.run({ basePath: opts.basePath })
 const loadUserMerged = (username, opts = {}) => loadUserMergedR.run({ basePath: opts.basePath, username })
 const mergeUserOver = (serverConfig, username, opts = {}) => mergeUserOverR.run({ serverConfig, username, basePath: opts.basePath })
 
-// --- allowedDirs migration ---
-// user config 파일에 allowedDirs 가 없으면 process.cwd() 를 1회 저장하고 재로드.
-// username 없으면 파일 쓰지 않고 인메모리 Config 만 반환.
-const ensureAllowedDirs = (config, { username, logger, basePath }) => {
-  const existing = config.tools?.allowedDirs
-  if (Array.isArray(existing) && existing.length > 0) return config
-
-  const cwd = process.cwd()
-  if (!username) {
-    logger.warn(`[migration] allowedDirs inferred (no username): [${cwd}]`)
-    return Config.merge(config, new Config({ tools: { allowedDirs: [cwd] } }))
-  }
-
-  const configPath = join(Config.resolveDir(basePath), 'users', username, 'config.json')
-  const existingFile = existsSync(configPath)
-    ? (() => { try { return JSON.parse(readFileSync(configPath, 'utf-8')) } catch { return {} } })()
-    : {}
-  const merged = {
-    ...existingFile,
-    tools: { ...(existingFile.tools || {}), allowedDirs: [cwd] },
-  }
-  mkdirSync(dirname(configPath), { recursive: true })
-  writeFileSync(configPath, JSON.stringify(merged, null, 2))
-  logger.info(`[migration] allowedDirs saved for ${username}: [${cwd}]`)
-  return loadUserMerged(username, { basePath })
-}
-
 export {
   fromFile, loadAndMerge,
   loadServerR, loadUserR, loadUserMergedR, mergeUserOverR,
   loadServer, loadUserMerged, mergeUserOver,
-  ensureAllowedDirs,
 }

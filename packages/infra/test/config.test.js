@@ -1,5 +1,5 @@
 import { Config } from '@presence/infra/infra/config.js'
-import { fromFile, loadUserMerged, ensureAllowedDirs } from '@presence/infra/infra/config-loader.js'
+import { fromFile, loadUserMerged } from '@presence/infra/infra/config-loader.js'
 import fp from '@presence/core/lib/fun-fp.js'
 const { Maybe } = fp
 const DEFAULTS = Config.DEFAULTS
@@ -117,53 +117,6 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // --- ensureAllowedDirs migration (workingDir 도입) ---
-
-  const silentLogger = { info: () => {}, warn: () => {}, error: () => {} }
-
-  {
-    // allowedDirs 이미 있는 config → 변경 없음
-    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: ['/already/set'] } })
-    const result = ensureAllowedDirs(config, { username: 'test', logger: silentLogger, basePath: '/nonexistent' })
-    assert(result.tools.allowedDirs[0] === '/already/set', 'ensureAllowedDirs: 기존 값 보존')
-  }
-
-  {
-    // allowedDirs 없음 + username 없음 → 인메모리 migration (파일 쓰지 않음)
-    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: [] } })
-    const result = ensureAllowedDirs(config, { username: null, logger: silentLogger })
-    assert(result.tools.allowedDirs.length === 1, 'ensureAllowedDirs: anonymous 시 인메모리 설정')
-    assert(result.tools.allowedDirs[0] === process.cwd(), 'ensureAllowedDirs: process.cwd() 반영')
-  }
-
-  {
-    // allowedDirs 없음 + username 있음 → 파일 write + 재로드
-    const dir = makeTmpDir('migrate-allowed-dirs')
-    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: [] } })
-    const result = ensureAllowedDirs(config, { username: 'alice', logger: silentLogger, basePath: dir })
-    const configPath = join(dir, 'users', 'alice', 'config.json')
-    assert(existsSync(configPath), 'ensureAllowedDirs: 파일 생성')
-    const saved = JSON.parse(readFileSync(configPath, 'utf-8'))
-    assert(Array.isArray(saved.tools?.allowedDirs) && saved.tools.allowedDirs.length === 1,
-      'ensureAllowedDirs: 파일에 allowedDirs 저장')
-    assert(saved.tools.allowedDirs[0] === process.cwd(), 'ensureAllowedDirs: 파일에 process.cwd() 기록')
-    assert(Array.isArray(result.tools.allowedDirs) && result.tools.allowedDirs[0] === process.cwd(),
-      'ensureAllowedDirs: 재로드 후 Config 반영')
-    rmSync(dir, { recursive: true, force: true })
-  }
-
-  {
-    // 기존 user config 유지 + allowedDirs 만 추가
-    const dir = makeTmpDir('migrate-preserve')
-    writeJson(dir, 'users/bob/config.json', { llm: { model: 'existing' } })
-    const config = new Config({ ...DEFAULTS, tools: { allowedDirs: [] } })
-    ensureAllowedDirs(config, { username: 'bob', logger: silentLogger, basePath: dir })
-    const saved = JSON.parse(readFileSync(join(dir, 'users', 'bob', 'config.json'), 'utf-8'))
-    assert(saved.llm?.model === 'existing', 'ensureAllowedDirs: 기존 키 보존')
-    assert(saved.tools.allowedDirs[0] === process.cwd(), 'ensureAllowedDirs: allowedDirs 만 추가')
-    rmSync(dir, { recursive: true, force: true })
-  }
-
   // --- MCP merge (Phase 22 Step A+B) ---
 
   {
@@ -236,6 +189,26 @@ async function run() {
     assert(DEFAULTS.llm.timeoutMs === 120_000, 'DEFAULTS: timeoutMs is 120000')
     assert(DEFAULTS.embed.dimensions === 256, 'DEFAULTS: embed dimensions')
     assert(Array.isArray(DEFAULTS.mcp), 'DEFAULTS: mcp is array')
+    // docs §11.1 — a2a 기본값은 disabled. publicUrl null.
+    assert(DEFAULTS.a2a.enabled === false, 'DEFAULTS: a2a.enabled=false')
+    assert(DEFAULTS.a2a.publicUrl === null, 'DEFAULTS: a2a.publicUrl=null')
+  }
+
+  // --- a2a schema parsing ---
+
+  {
+    const parsed1 = Config.Schema.parse({
+      ...DEFAULTS,
+      a2a: { enabled: true, publicUrl: 'https://home.example' },
+    })
+    assert(parsed1.a2a.enabled === true, 'a2a parse: enabled=true')
+    assert(parsed1.a2a.publicUrl === 'https://home.example', 'a2a parse: publicUrl round-trip')
+
+    // a2a 생략 시 기본값 주입
+    const { a2a: _omit, ...withoutA2a } = DEFAULTS
+    const parsed2 = Config.Schema.parse(withoutA2a)
+    assert(parsed2.a2a.enabled === false, 'a2a parse: omit → default enabled=false')
+    assert(parsed2.a2a.publicUrl === null, 'a2a parse: omit → default publicUrl=null')
   }
 
   summary()

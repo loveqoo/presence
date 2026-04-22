@@ -11,18 +11,24 @@ const { Reader } = fp
 // SQLite 기반 Job 정의 + 실행 이력 저장소.
 // better-sqlite3 (동기 API) — Actor 큐 내에서 호출하므로 동기 OK.
 
+// Schema version — PRAGMA user_version 으로 관리 (docs/design/agent-identity-model.md §12.1 M7)
+// v0 = legacy (owner 필드 없음), v1 = owner_user_id + owner_agent_id 추가.
+const SCHEMA_VERSION = 1
+
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS jobs (
-    id            TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    prompt        TEXT NOT NULL,
-    cron          TEXT NOT NULL,
-    enabled       INTEGER DEFAULT 1,
-    max_retries   INTEGER DEFAULT 3,
-    allowed_tools TEXT DEFAULT '[]',
-    created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL,
-    next_run      INTEGER
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    prompt         TEXT NOT NULL,
+    cron           TEXT NOT NULL,
+    enabled        INTEGER DEFAULT 1,
+    max_retries    INTEGER DEFAULT 3,
+    allowed_tools  TEXT DEFAULT '[]',
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL,
+    next_run       INTEGER,
+    owner_user_id  TEXT,
+    owner_agent_id TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_jobs_next_run ON jobs(next_run) WHERE enabled = 1;
 
@@ -40,7 +46,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_job_runs_job_id ON job_runs(job_id);
 `
 
-const UPDATABLE_FIELDS = ['name', 'prompt', 'cron', 'enabled', 'max_retries', 'allowed_tools', 'next_run']
+const UPDATABLE_FIELDS = ['name', 'prompt', 'cron', 'enabled', 'max_retries', 'allowed_tools', 'next_run', 'owner_user_id', 'owner_agent_id']
 
 class JobStore {
   #db
@@ -51,19 +57,48 @@ class JobStore {
     this.#db = new Database(dbPath)
     this.#db.pragma('journal_mode = WAL')
     this.#db.pragma('foreign_keys = ON')
-    this.#db.exec(SCHEMA)
+    this.#migrate()
+  }
+
+  // PRAGMA user_version 기반 idempotent schema migration.
+  //   v0 → v1: owner_user_id + owner_agent_id 컬럼 추가. 기존 row 는 null 유지 (legacy).
+  //
+  // Legacy row (owner=null) 는 scheduler-factory 가 'default' fallback 으로 처리한다.
+  // 신규 job 은 createJob 에서 owner 필수 → null 유입 금지.
+  #migrate() {
+    const current = this.#db.pragma('user_version', { simple: true })
+
+    if (current === 0) {
+      // 새 DB 또는 legacy. 먼저 SCHEMA 실행 — 새 DB 는 즉시 완성.
+      this.#db.exec(SCHEMA)
+      // legacy 에는 jobs 가 이미 있으나 CREATE TABLE IF NOT EXISTS 는 skip.
+      // owner 컬럼이 없으면 ALTER TABLE 로 추가.
+      const cols = this.#db.prepare("PRAGMA table_info(jobs)").all().map(c => c.name)
+      if (!cols.includes('owner_user_id')) {
+        this.#db.exec('ALTER TABLE jobs ADD COLUMN owner_user_id TEXT')
+      }
+      if (!cols.includes('owner_agent_id')) {
+        this.#db.exec('ALTER TABLE jobs ADD COLUMN owner_agent_id TEXT')
+      }
+      this.#db.exec('CREATE INDEX IF NOT EXISTS idx_jobs_owner_user ON jobs(owner_user_id)')
+      this.#db.pragma(`user_version = ${SCHEMA_VERSION}`)
+    }
+    // 추가 버전은 이곳에 if (current === N) { ... } 로 append.
   }
 
   // --- Job CRUD ---
 
   createJob(opts) {
-    const { name, prompt, cron, maxRetries = 3, allowedTools = [], nextRun = null } = opts
+    const { name, prompt, cron, maxRetries = 3, allowedTools = [], nextRun = null, ownerUserId, ownerAgentId } = opts
+    if (!ownerUserId || !ownerAgentId) {
+      throw new Error('createJob: ownerUserId + ownerAgentId required (docs §4.3)')
+    }
     const now = Date.now()
     const id = randomUUID()
     this.#db.prepare(`
-      INSERT INTO jobs (id, name, prompt, cron, enabled, max_retries, allowed_tools, created_at, updated_at, next_run)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
-    `).run(id, name, prompt, cron, maxRetries, JSON.stringify(allowedTools), now, now, nextRun)
+      INSERT INTO jobs (id, name, prompt, cron, enabled, max_retries, allowed_tools, created_at, updated_at, next_run, owner_user_id, owner_agent_id)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, name, prompt, cron, maxRetries, JSON.stringify(allowedTools), now, now, nextRun, ownerUserId, ownerAgentId)
     return this.getJob(id)
   }
 
@@ -169,6 +204,8 @@ class JobStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       nextRun: row.next_run,
+      ownerUserId: row.owner_user_id || null,
+      ownerAgentId: row.owner_agent_id || null,
     }
   }
 

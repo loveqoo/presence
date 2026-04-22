@@ -19,11 +19,12 @@ const createSessionManager = (userContext, opts = {}) => {
   const sessions = new Map()  // id → { id, type, owner, session }
 
   const create = (params = {}) => {
-    const { id, type = SESSION_TYPE.USER, owner = null, userId, persistenceCwd, workingDir, onScheduledJobDone, idleTimeoutMs, onIdle } = params
+    const { id, type = SESSION_TYPE.USER, owner = null, userId, agentId, persistenceCwd, workingDir, onScheduledJobDone, idleTimeoutMs, onIdle } = params
     const sessionId = id ?? `user-${randomUUID()}`
     if (sessions.has(sessionId)) return sessions.get(sessionId)
 
-    const session = Session.create(userContext, { persistenceCwd, workingDir, type, userId, onScheduledJobDone, idleTimeoutMs, onIdle })
+    // agentId 필수 — docs/design/agent-identity-model.md §5.1. Session constructor 가 검증 throw.
+    const session = Session.create(userContext, { persistenceCwd, workingDir, type, userId, agentId, onScheduledJobDone, idleTimeoutMs, onIdle })
     const entry = Object.freeze({ id: sessionId, type, owner, session })
     sessions.set(sessionId, entry)
     onSessionCreated?.(entry)

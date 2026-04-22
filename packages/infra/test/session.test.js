@@ -3,11 +3,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { UserContext } from '@presence/infra/infra/user-context.js'
-import { Session } from '@presence/infra/infra/sessions/index.js'
+import { Session as SessionModule } from '@presence/infra/infra/sessions/index.js'
 import { TurnState } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
+
+// agentId 기본값을 자동 주입하는 테스트 helper (M1 fixture).
+const TEST_AGENT_ID = 'test/default'
+const Session = {
+  create: (uc, opts = {}) => SessionModule.create(uc, { agentId: TEST_AGENT_ID, ...opts }),
+}
 
 const createMockLLM = (handler) => {
   const calls = []
@@ -202,76 +208,56 @@ async function run() {
       await session.shutdown()
     }
 
-    // SD6. workingDir 해결 — 명시 opts 가 우선 (persistence 없는 신규 세션)
+    // SD6. workingDir = Config.userDataPath(userId) 고정 (agent-identity.md I-WD).
+    //      opts.workingDir 은 무시됨. pendingBackfill 개념 없음.
     {
-      const workDir = join(tmpDir, 'sd6-work')
-      // allowedDirs 에 workDir 포함되도록 임시 확장
-      const origAllowed = userContext.config.tools.allowedDirs
-      userContext.config.tools.allowedDirs = [tmpDir]   // tmpDir 포함 → workDir 도 포함
-      const session = Session.create(userContext, {
-        type: 'user', workingDir: workDir,
-        persistenceCwd: join(tmpDir, 'sd6'),   // 고유 persistence
-      })
-      assert(session.workingDir === workDir, 'SD6: 명시 workingDir 반영')
-      assert(session.pendingBackfill === false, 'SD6: 명시 시 pendingBackfill=false')
-      await session.shutdown()
-      userContext.config.tools.allowedDirs = origAllowed
-    }
-
-    // SD7. workingDir 미지정 → allowedDirs[0] fallback + pendingBackfill=true
-    {
+      const { Config } = await import('@presence/infra/infra/config.js')
+      const userId = 'sd6user'
       const session = Session.create(userContext, {
         type: 'user',
-        persistenceCwd: join(tmpDir, 'sd7'),   // 고유 persistence
+        userId,
+        workingDir: '/ignored-by-design',    // 무시되어야 함
+        persistenceCwd: join(tmpDir, 'sd6'),
       })
-      assert(session.workingDir === userContext.config.tools.allowedDirs[0],
-        `SD7: fallback allowedDirs[0] (got ${session.workingDir})`)
-      assert(session.pendingBackfill === true, 'SD7: pendingBackfill=true')
+      assert(session.workingDir === Config.userDataPath(userId), 'SD6: workingDir = userDataPath')
+      assert(session.pendingBackfill === undefined, 'SD6: pendingBackfill 필드 제거됨')
       await session.shutdown()
     }
 
-    // SD8. workingDir 이 allowedDirs 밖 → throw
+    // SD11. agentId 필수 — 미제공 시 throw (M1)
     {
       let thrown = null
       try {
-        Session.create(userContext, { type: 'user', workingDir: '/etc' })
+        SessionModule.create(userContext, { type: 'user', persistenceCwd: join(tmpDir, 'sd11') })
       } catch (e) { thrown = e }
-      assert(thrown && /outside allowedDirs/.test(thrown.message), 'SD8: 경계 밖 workingDir throw')
+      assert(thrown && /agentId/.test(thrown.message), 'SD11: agentId 없으면 throw')
     }
 
-    // SD9. allowedDirs 비어있으면 workingDir 결정 불가 → throw
+    // SD12. agentId 형식 위반 → throw (M1)
     {
-      const origAllowed = userContext.config.tools.allowedDirs
-      userContext.config.tools.allowedDirs = []
-      let thrown = null
-      try {
-        Session.create(userContext, { type: 'user', persistenceCwd: join(tmpDir, 'sd9') })
-      } catch (e) { thrown = e }
-      assert(thrown && /not resolvable/.test(thrown.message), 'SD9: 빈 allowedDirs 시 throw')
-      userContext.config.tools.allowedDirs = origAllowed
+      const invalidIds = ['', 'no-slash', 'Anthony/default', 'a/b/c', '3bot/a', 'a--b/c', 'abc-/def']
+      for (const bad of invalidIds) {
+        let thrown = null
+        try {
+          SessionModule.create(userContext, { type: 'user', agentId: bad, persistenceCwd: join(tmpDir, `sd12-${bad || 'empty'}`) })
+        } catch (e) { thrown = e }
+        assert(thrown, `SD12: invalid agentId "${bad}" → throw`)
+      }
     }
 
-    // SD10. persistence 에 저장된 workingDir 이 복원 시 최우선
+    // SD13. agentId round-trip — 생성 시점 값이 persistence 복원보다 우선 (M1)
     {
-      const origAllowed = userContext.config.tools.allowedDirs
-      userContext.config.tools.allowedDirs = [tmpDir]
-      const persistCwd = join(tmpDir, 'sd10')
-      const savedDir = join(tmpDir, 'sd10-work')
-
-      // 첫 번째 세션: 명시 workingDir + flush
-      const s1 = Session.create(userContext, {
-        type: 'user', workingDir: savedDir, persistenceCwd: persistCwd,
-      })
+      const persistCwd = join(tmpDir, 'sd13')
+      // 첫 세션: agentId=anthony/alpha 로 생성 + flush
+      const s1 = SessionModule.create(userContext, { type: 'user', agentId: 'anthony/alpha', persistenceCwd: persistCwd })
+      assert(s1.agentId === 'anthony/alpha', 'SD13: 초기 agentId 설정')
       await s1.flushPersistence()
       await s1.shutdown()
 
-      // 두 번째 세션: 같은 persistenceCwd, 명시 workingDir 없음 → restore 가 savedDir 복원해야
-      const s2 = Session.create(userContext, { type: 'user', persistenceCwd: persistCwd })
-      assert(s2.workingDir === savedDir,
-        `SD10: persistence workingDir 복원 (expected ${savedDir}, got ${s2.workingDir})`)
-      assert(s2.pendingBackfill === false, 'SD10: persistence 복원 시 pendingBackfill=false')
+      // 두 번째 세션: 같은 persistence + 다른 agentId 전달 — **생성 시점 값이 우선**
+      const s2 = SessionModule.create(userContext, { type: 'user', agentId: 'anthony/beta', persistenceCwd: persistCwd })
+      assert(s2.agentId === 'anthony/beta', `SD13: 생성 시점 agentId 우선 (got ${s2.agentId})`)
       await s2.shutdown()
-      userContext.config.tools.allowedDirs = origAllowed
     }
 
   } finally {

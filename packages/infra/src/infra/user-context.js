@@ -1,8 +1,7 @@
-import { join } from 'node:path'
 import { createToolRegistry } from './tools/tool-registry.js'
 import { createLocalTools } from './tools/local-tools.js'
 import { initMcpIntegration } from './tools/mcp-tools.js'
-import { createPersona } from './persona.js'
+import { createPersona, DEFAULT_PERSONA } from './persona.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm/llm-client.js'
 import { createAgentRegistry, registerSummarizer } from './agents/agent-registry.js'
@@ -10,7 +9,8 @@ import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
-import { loadUserMerged, ensureAllowedDirs } from './config-loader.js'
+import { loadUserMerged } from './config-loader.js'
+import { ensureUserDefaultAgent } from './user-migration.js'
 import { initI18n, t } from '../i18n/index.js'
 import { createSessionManager } from './sessions/session-manager.js'
 
@@ -19,8 +19,6 @@ import { createSessionManager } from './sessions/session-manager.js'
 // 수명: 서버가 이 유저를 제공하는 동안 1개.
 // 포함: 유저 공용 인프라(llm, memory, mcp, tools, jobStore 등) + sessions(SessionManager).
 // =============================================================================
-
-const defaultUserDataPath = () => join(Config.presenceDir(), 'users', 'default')
 
 const buildEmbedder = (config) => {
   const embedApiKey = config.embed.apiKey
@@ -55,26 +53,37 @@ class UserContext {
     userContext.logger = createLogger().logger
     if (!userContext.config.llm?.apiKey) userContext.logger.warn('[config] llm.apiKey is not set — LLM calls will fail')
 
-    // --- allowedDirs migration (process.cwd() 의존 제거) ---
-    userContext.config = ensureAllowedDirs(userContext.config, { username, logger: userContext.logger })
+    // --- M3+M4: primaryAgentId + default agent 보충 ---
+    // admin 은 admin-bootstrap 이 처리. 비-admin user 만 여기서 lazy migration.
+    if (username) {
+      const { config: migratedConfig } = ensureUserDefaultAgent(userContext.config, {
+        username, logger: userContext.logger,
+      })
+      userContext.config = migratedConfig
+    }
 
     // --- Persona ---
+    // docs/design/agent-identity-model.md §6.1 — persona 는 agent 의 필드.
+    // 런타임 소비처(ephemeral-inits, server API)는 getPrimaryPersona() 사용.
+    // userContext.persona (global Conf) 는 legacy 테스트 호환용으로만 유지.
     userContext.persona = createPersona()
-    userContext.personaConfig = userContext.persona.get()
+    userContext.personaConfig = userContext.getPrimaryPersona()
 
     // --- Memory (외부 주입) ---
     userContext.memory = opts.memory ?? null
     userContext.logger.info(userContext.memory ? 'Memory: mem0 enabled' : 'Memory: disabled')
 
     // --- User data path (jobStore, userDataStore) ---
-    userContext.userDataPath = username ? Config.userDataPath(username) : defaultUserDataPath()
+    userContext.userDataPath = Config.userDataPath(username || 'default')
 
     // --- Embedder ---
     userContext.embedder = buildEmbedder(userContext.config)
 
     // --- Tools (local + MCP) ---
+    // local tool 은 세션 context (ctx.resolvePath) 로 workingDir 경계 검증.
+    // UserContext 레벨에서 allowedDirs 주입 없음 (session 경유가 유일 진실).
     userContext.toolRegistry = createToolRegistry()
-    const localTools = createLocalTools({ allowedDirs: userContext.config.tools.allowedDirs })
+    const localTools = createLocalTools()
     for (const tool of localTools) userContext.toolRegistry.register(tool)
     const { mcpConnections } = await initMcpIntegration(userContext.config, userContext.logger, userContext.toolRegistry)
     userContext.mcpConnections = mcpConnections
@@ -87,7 +96,7 @@ class UserContext {
       timeoutMs: userContext.config.llm.timeoutMs,
     })
     userContext.agentRegistry = createAgentRegistry()
-    registerSummarizer(userContext.agentRegistry, userContext.llm)
+    registerSummarizer(userContext.agentRegistry, userContext.llm, { userId: username || 'default' })
 
     // --- Job Store + User Data Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))
@@ -97,6 +106,23 @@ class UserContext {
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
 
     return userContext
+  }
+
+  // primaryAgentId 가 가리키는 agent 반환 (없으면 null).
+  // Agent ID 는 `{username}/{agentName}` — agentName 만 파싱해서 config.agents 에서 찾음.
+  getPrimaryAgent() {
+    const primaryId = this.config.primaryAgentId
+    if (!primaryId || typeof primaryId !== 'string') return null
+    const agentName = primaryId.split('/')[1]
+    if (!agentName) return null
+    const agents = Array.isArray(this.config.agents) ? this.config.agents : []
+    return agents.find(a => a.name === agentName) || null
+  }
+
+  // primary agent 의 persona 반환. 없거나 persona 비어있으면 DEFAULT_PERSONA.
+  getPrimaryPersona() {
+    const agent = this.getPrimaryAgent()
+    return { ...DEFAULT_PERSONA, ...(agent?.persona || {}) }
   }
 
   // 세션 → 인프라 순서로 정리.
