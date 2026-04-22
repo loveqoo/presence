@@ -70,6 +70,7 @@ const tests = [
   'packages/infra/test/agent-registry.test.js',
   'packages/infra/test/resolve-delegate-target.test.js',
   'packages/infra/test/agent-access.test.js',
+  'packages/infra/test/agent-governance.test.js',
   'packages/infra/test/a2a-client.test.js',
   'packages/infra/test/events.test.js',
   'packages/infra/test/scheduler.test.js',
