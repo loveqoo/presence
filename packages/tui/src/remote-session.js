@@ -20,7 +20,6 @@ class RemoteSession {
   #client
   #config
   #agents
-  #cwd
   #gitBranch
   #currentSessionId
   #remoteState
@@ -37,7 +36,6 @@ class RemoteSession {
     this.#client = opts.client
     this.#config = opts.config
     this.#agents = opts.agents
-    this.#cwd = opts.cwd
     this.#gitBranch = opts.gitBranch
     this.#currentTools = opts.initialTools
     this.#tryRefresh = opts.tryRefresh
@@ -152,7 +150,6 @@ class RemoteSession {
       agentName: this.#config.persona?.name || 'Presence',
       tools: this.#currentTools,
       agents: this.#agents,
-      cwd: this.#cwd,
       gitBranch: this.#gitBranch,
       model: this.#config.llm?.model || '',
       config: this.#config,

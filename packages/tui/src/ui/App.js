@@ -19,7 +19,7 @@ const App = (props) => {
   const {
     state, onInput, onApprove, onCancel,
     agentName = 'Presence', tools = [], agents = [],
-    initialMessages = [], cwd = '', gitBranch = '',
+    initialMessages = [], gitBranch = '',
     model: initialModel = '', config = null, memory = null,
     llm = null, toolRegistry = null, sessionId = 'user-default',
     onListSessions = null, onCreateSession = null,
@@ -175,7 +175,7 @@ const App = (props) => {
       status: agentState.status, turn: agentState.turn,
       memoryCount: agentState.memoryCount, agentName,
       activity: statusActivity, toolCount: tools.length,
-      cwd, gitBranch, model: currentModel,
+      workspace: state?.workingDir || '', gitBranch, model: currentModel,
       budgetPct, visibleItems: statusItems,
       sessionId, errorHint,
       reconnecting: agentState.reconnecting && !disconnected,

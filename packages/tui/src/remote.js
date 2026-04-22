@@ -33,16 +33,15 @@ async function runRemote(baseUrl, opts = {}) {
 
   initI18n(config.locale || 'ko')
 
-  const cwd = process.cwd()
   let gitBranch = ''
   try {
     const { execSync } = await import('child_process')
-    gitBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
+    gitBranch = execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim()
   } catch (_) {}
 
   const session = new RemoteSession({
     wsUrl, authState, username, client,
-    config, agents, cwd, gitBranch, initialTools, tryRefresh,
+    config, agents, gitBranch, initialTools, tryRefresh,
   })
 
   authFailedHolder.handler = function markDisconnected() { session.markDisconnected(WS_CLOSE.AUTH_FAILED) }

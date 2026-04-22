@@ -64,13 +64,13 @@ async function run() {
     unmount()
   }
 
-  // default visibleItems (status, dir, branch)
+  // default visibleItems (status, dir=workspace, branch)
   {
     const { lastFrame, unmount } = render(
-      h(StatusBar, { status: 'idle', cwd: '/home/user/project', gitBranch: 'main' })
+      h(StatusBar, { status: 'idle', workspace: '/home/user/presence/users/anthony', gitBranch: 'main' })
     )
     const frame = lastFrame()
-    assert(frame.includes('project'), 'StatusBar defaults: shows dir basename')
+    assert(frame.includes('ws: anthony'), 'StatusBar defaults: shows workspace basename')
     assert(frame.includes('branch: main'), 'StatusBar defaults: shows branch')
     assert(!frame.includes('turn:'), 'StatusBar defaults: turn not shown by default')
     unmount()

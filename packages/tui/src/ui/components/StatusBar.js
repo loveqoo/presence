@@ -14,6 +14,8 @@ const ALL_ITEM_KEYS = ['status', ...TOGGLEABLE_ITEMS]
 const budgetColor = (pct) => pct >= 95 ? 'red' : pct >= 80 ? 'yellow' : 'green'
 
 // 단일 item을 segment value로 변환. null이면 표시 안 함.
+// 'dir' 은 에이전트의 워크스페이스 (W1: Config.userDataPath(userId)) 를 표시.
+// TUI 프로세스 cwd 가 아니라는 점이 핵심 — docs/ux FP-66 해소.
 const buildSegment = (item, ctx) => {
   switch (item) {
     case 'session': return ctx.sessionId ? `session: ${ctx.sessionId}` : null
@@ -21,7 +23,7 @@ const buildSegment = (item, ctx) => {
     case 'mem':    return `mem: ${ctx.memoryCount}`
     case 'tools':  return `tools: ${ctx.toolCount}`
     case 'budget': return ctx.budgetPct != null ? { type: 'budget', pct: ctx.budgetPct } : null
-    case 'dir':    return ctx.dirName || null
+    case 'dir':    return ctx.workspaceName ? `ws: ${ctx.workspaceName}` : null
     case 'branch': return ctx.gitBranch ? `branch: ${ctx.gitBranch}` : null
     case 'model':  return ctx.model || null
     default:       return null  // 'status' 및 미지의 item
@@ -60,7 +62,7 @@ const buildIndicator = (ctx) => {
 const StatusBar = (props) => {
   const {
     status = 'idle', turn = 0, memoryCount = 0, activity = null,
-    toolCount = 0, cwd = '', gitBranch = '', model = '',
+    toolCount = 0, workspace = '', gitBranch = '', model = '',
     budgetPct = null, visibleItems = null,
     sessionId = '', errorHint = null, reconnecting = false,
   } = props
@@ -73,7 +75,7 @@ const StatusBar = (props) => {
 
   const segments = buildSegments(items, {
     turn, memoryCount, toolCount, budgetPct,
-    dirName: cwd ? basename(cwd) : '',
+    workspaceName: workspace ? basename(workspace) : '',
     gitBranch, model, sessionId,
   })
   const segmentElements = renderSegments(segments)

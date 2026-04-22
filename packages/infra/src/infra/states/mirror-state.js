@@ -29,6 +29,7 @@ class MirrorState extends State {
     const { wsUrl, sessionId = 'user-default', headers, getHeaders, onAuthFailed, onUnrecoverable } = opts
     this.cache = { _reconnecting: false }
     this.lastStateVersion = null   // Phase 5: WS init/state 메시지로 갱신. 클라이언트 stale 감지용.
+    this.workingDir = null         // WS init 메시지의 effective workingDir. 클라이언트 표시용.
     this.wsUrl = wsUrl
     this.sessionId = sessionId
     const staticHeaders = headers
@@ -100,6 +101,7 @@ class MirrorState extends State {
       if (msg.type === 'init') {
         this.applySnapshot(msg.state)
         this.lastStateVersion = msg.stateVersion ?? null   // init 은 무조건 덮어씀
+        if (typeof msg.workingDir === 'string') this.workingDir = msg.workingDir
       } else if (msg.type === 'state') {
         // stale 판정: 내 lastStateVersion 보다 앞 (lex 비교) 이면 skip.
         // TCP ordered 하에선 드물지만 재접속 직후 중복 메시지 방어.
