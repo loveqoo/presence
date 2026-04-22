@@ -74,7 +74,7 @@ const ephemeralInits = {
 
   initToolRegistry(userContext) {
     const personaFilter = (tool) => {
-      const persona = userContext.persona.get()
+      const persona = userContext.getPrimaryPersona()
       if (!persona.tools || persona.tools.length === 0) return true
       return new Set(persona.tools).has(tool.name)
     }
@@ -119,7 +119,7 @@ const ephemeralInits = {
       resolveTools: this.getTools,
       resolveAgents: () => userContext.agentRegistry.list(),
       resolveWorkingDir: () => this.workingDir,
-      persona: userContext.persona.get(),
+      persona: userContext.getPrimaryPersona(),
       responseFormatMode: userContext.config.llm.responseFormat,
       maxRetries: userContext.config.llm.maxRetries,
       maxIterations: userContext.config.maxIterations,

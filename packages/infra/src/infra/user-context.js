@@ -1,7 +1,7 @@
 import { createToolRegistry } from './tools/tool-registry.js'
 import { createLocalTools } from './tools/local-tools.js'
 import { initMcpIntegration } from './tools/mcp-tools.js'
-import { createPersona } from './persona.js'
+import { createPersona, DEFAULT_PERSONA } from './persona.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm/llm-client.js'
 import { createAgentRegistry, registerSummarizer } from './agents/agent-registry.js'
@@ -66,8 +66,11 @@ class UserContext {
     }
 
     // --- Persona ---
+    // docs/design/agent-identity-model.md §6.1 — persona 는 agent 의 필드.
+    // 런타임 소비처(ephemeral-inits, server API)는 getPrimaryPersona() 사용.
+    // userContext.persona (global Conf) 는 legacy 테스트 호환용으로만 유지.
     userContext.persona = createPersona()
-    userContext.personaConfig = userContext.persona.get()
+    userContext.personaConfig = userContext.getPrimaryPersona()
 
     // --- Memory (외부 주입) ---
     userContext.memory = opts.memory ?? null
@@ -104,6 +107,23 @@ class UserContext {
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
 
     return userContext
+  }
+
+  // primaryAgentId 가 가리키는 agent 반환 (없으면 null).
+  // Agent ID 는 `{username}/{agentName}` — agentName 만 파싱해서 config.agents 에서 찾음.
+  getPrimaryAgent() {
+    const primaryId = this.config.primaryAgentId
+    if (!primaryId || typeof primaryId !== 'string') return null
+    const agentName = primaryId.split('/')[1]
+    if (!agentName) return null
+    const agents = Array.isArray(this.config.agents) ? this.config.agents : []
+    return agents.find(a => a.name === agentName) || null
+  }
+
+  // primary agent 의 persona 반환. 없거나 persona 비어있으면 DEFAULT_PERSONA.
+  getPrimaryPersona() {
+    const agent = this.getPrimaryAgent()
+    return { ...DEFAULT_PERSONA, ...(agent?.persona || {}) }
   }
 
   // 세션 → 인프라 순서로 정리.

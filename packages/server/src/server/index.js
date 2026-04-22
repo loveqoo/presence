@@ -67,7 +67,7 @@ class PresenceServer {
       agents: this.#defaultSession.agents,
       config: this.#userContext.config,
       logger: this.#userContext.logger,
-      personaConfig: this.#userContext.personaConfig,
+      personaConfig: this.#userContext.getPrimaryPersona(),
       memory: this.#userContext.memory,
       llm: this.#userContext.llm,
       toolRegistry: this.#userContext.toolRegistry,

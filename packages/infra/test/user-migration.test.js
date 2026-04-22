@@ -8,6 +8,8 @@ import {
   DEFAULT_AGENT_NAME,
   DEFAULT_AGENT_PERSONA,
 } from '@presence/infra/infra/user-migration.js'
+import { UserContext } from '@presence/infra/infra/user-context.js'
+import { DEFAULT_PERSONA } from '@presence/infra/infra/persona.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const createTmpDir = () => {
@@ -157,6 +159,70 @@ function run() {
     assert(tmp.length === 0, `UM7: tmp 잔여 없음 (${tmp.join(',')})`)
 
     rmSync(dir, { recursive: true, force: true })
+  }
+
+  // UC1. UserContext.getPrimaryAgent — primaryAgentId 에서 agentName 파싱 + agents 조회
+  {
+    const uc = Object.assign(Object.create(UserContext.prototype), {
+      config: {
+        primaryAgentId: 'anthony/default',
+        agents: [
+          { name: 'legacy', persona: { name: 'Old' } },
+          { name: 'default', persona: { name: 'Presence', tools: ['file_read'] } },
+        ],
+      },
+    })
+    const agent = uc.getPrimaryAgent()
+    assert(agent !== null, 'UC1: agent found')
+    assert(agent.name === 'default', 'UC1: default agent selected')
+    assert(agent.persona.tools[0] === 'file_read', 'UC1: persona 필드 접근')
+  }
+
+  // UC2. primaryAgentId 없으면 null, persona 는 DEFAULT_PERSONA
+  {
+    const uc = Object.assign(Object.create(UserContext.prototype), {
+      config: { primaryAgentId: undefined, agents: [] },
+    })
+    assert(uc.getPrimaryAgent() === null, 'UC2: primaryAgentId 누락 → null')
+    const persona = uc.getPrimaryPersona()
+    assert(persona.name === DEFAULT_PERSONA.name, 'UC2: DEFAULT_PERSONA.name')
+    assert(Array.isArray(persona.tools) && persona.tools.length === 0, 'UC2: DEFAULT_PERSONA.tools')
+  }
+
+  // UC3. primaryAgentId 있지만 agents 비어있으면 null + DEFAULT_PERSONA fallback
+  {
+    const uc = Object.assign(Object.create(UserContext.prototype), {
+      config: { primaryAgentId: 'ghost/default', agents: [] },
+    })
+    assert(uc.getPrimaryAgent() === null, 'UC3: agents 비어있음 → null')
+    assert(uc.getPrimaryPersona().name === DEFAULT_PERSONA.name, 'UC3: DEFAULT_PERSONA fallback')
+  }
+
+  // UC4. agent.persona 가 DEFAULT_PERSONA 와 merge (부분 override)
+  {
+    const uc = Object.assign(Object.create(UserContext.prototype), {
+      config: {
+        primaryAgentId: 'bob/default',
+        agents: [{ name: 'default', persona: { systemPrompt: 'custom prompt' } }],
+      },
+    })
+    const persona = uc.getPrimaryPersona()
+    assert(persona.systemPrompt === 'custom prompt', 'UC4: override 된 필드 반영')
+    assert(persona.name === DEFAULT_PERSONA.name, 'UC4: 누락 필드는 DEFAULT 로 채움')
+    assert(Array.isArray(persona.rules), 'UC4: DEFAULT 의 rules 유지')
+  }
+
+  // UC5. Admin (agent name='manager') 정상 조회
+  {
+    const uc = Object.assign(Object.create(UserContext.prototype), {
+      config: {
+        primaryAgentId: 'admin/manager',
+        agents: [{ name: 'manager', persona: { systemPrompt: 'admin prompt', tools: [] } }],
+      },
+    })
+    const agent = uc.getPrimaryAgent()
+    assert(agent !== null && agent.name === 'manager', 'UC5: admin manager agent')
+    assert(uc.getPrimaryPersona().systemPrompt === 'admin prompt', 'UC5: admin persona')
   }
 
   // UM8. 레거시 브릿지 ↔ Reader 동치
