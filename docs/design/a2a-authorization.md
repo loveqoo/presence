@@ -278,7 +278,7 @@ Identity model §11 과 동일한 lifecycle:
 ├── policies/                   ← 글로벌 (admin 관리)
 │   ├── 00-base.cedar           (auto-seed)
 │   └── 10-operations.cedar
-└── data/{user}/
+└── users/{username}/
     ├── config.json
     └── policies/               ← 유저 개인 — user lifecycle
         └── 50-custom.cedar

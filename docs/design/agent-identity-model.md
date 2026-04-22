@@ -349,7 +349,7 @@ Created agent 'anthony/daily-report'
 Quota 초과 시:
 ```
   ✗ quota exceeded (5/5)
-    Request queued: ~/.presence/data/admin/pending/req-abc123.json
+    Request queued: ~/.presence/users/admin/pending/req-abc123.json
     Admin must review at: admin's TUI → /requests
 ```
 
@@ -360,7 +360,7 @@ Quota 초과 시:
 ### 8.1 `agent-policies.json` 구조 (블로커 #2 해결)
 
 ```json
-// ~/.presence/data/admin/agent-policies.json
+// ~/.presence/users/admin/agent-policies.json
 {
   "maxAgentsPerUser": 5,
   "autoApproveUnderQuota": true
@@ -383,7 +383,7 @@ const getActiveAgentCount = (username) => {
 ### 8.2 Pending queue — 요청당 별도 파일 (블로커 리팩토링 #7 해결)
 
 ```
-~/.presence/data/admin/
+~/.presence/users/admin/
 ├─ agent-policies.json
 ├─ pending/
 │   ├─ req-abc123.json
@@ -581,7 +581,7 @@ const canAccessAgent = ({ jwtSub, agentId, intent }) => {
 ### 10.1 포함
 
 - 로컬 all agents (admin/manager + 모든 user agents)
-- Peer cache (`data/{userId}/peers/`)
+- Peer cache (`users/{username}/peers/`)
 
 ### 10.2 Entry 스키마
 
@@ -672,7 +672,7 @@ M2~M6 중 하나라도 실패 시 서버 부팅 실패 + 에러 로그에 복구
 
 ```
 [ERROR] Migration M4 failed for user 'bob': persona file corrupted
-  Fix: Restore ~/.presence/data/bob/config.json from backup,
+  Fix: Restore ~/.presence/users/bob/config.json from backup,
        or delete persona field to use default.
   Then restart server.
 ```
@@ -687,7 +687,7 @@ M2~M6 중 하나라도 실패 시 서버 부팅 실패 + 에러 로그에 복구
 
 ### 12.4 롤백
 
-- 각 단계 완료 전 `~/.presence/data/{username}/config.json.backup-preM3` 생성
+- 각 단계 완료 전 `~/.presence/users/{username}/config.json.backup-preM3` 생성
 - Migration 실패 시 사용자가 backup 수동 복원 → 이전 버전 서버 계속 사용 가능
 - 롤백 자동화는 v2
 
