@@ -113,6 +113,7 @@ const tests = [
   'test/regression/e2e-scenario.test.js',
   // Spec invariant static checks
   'test/regression/fsm-single-writer.test.js',
+  'test/regression/agent-access-enforcement.test.js',
   // applyFinalState ordering + turn chaining
   'packages/core/test/core/apply-final-state.test.js',
   // Turn concurrency
