@@ -52,7 +52,10 @@ Config.DEFAULTS
 | `scheduler.todoReview.enabled` | true | TODO 리뷰 잡 활성화 |
 | `scheduler.todoReview.cron` | `0 9 * * *` | TODO 리뷰 cron |
 | `delegatePolling.intervalMs` | 10,000 | 위임 폴링 간격 (ms) |
-| `agents` | `[]` | 에이전트 정의 목록 |
+| `agents` | `[]` | 에이전트 정의 목록. 각 entry: `{ name, description, capabilities, persona, createdAt, createdBy, archived, archivedAt? }`. 상세 schema는 `docs/specs/agent-identity.md` I1/I5 참조. |
+| `primaryAgentId` | (없음, user config 전용) | 유저의 기본 agentId (`{username}/{agentName}`). M3 구현 완료 전까지 `{username}/default` hardcode (KG-16). |
+| `a2a.enabled` | `false` | A2A 기능 활성화 플래그. false이면 `/a2a/*` 미등록. |
+| `a2a.publicUrl` | `null` | `a2a.enabled=true` 시 필수. Self agent card URL 생성에 사용. |
 | `prompt.maxContextTokens` | 8,000 | 컨텍스트 최대 토큰 |
 | `prompt.reservedOutputTokens` | 1,000 | 출력 예약 토큰 |
 | `prompt.maxContextChars` | null | 대안: 문자 수 기반 컨텍스트 예산 |
@@ -94,6 +97,7 @@ Config.DEFAULTS
 ## 변경 이력
 
 - 2026-04-10: 초기 작성
+- 2026-04-22: agents 항목 확장 — entry schema 요약 + primaryAgentId/a2a.enabled/a2a.publicUrl 추가 (agent identity 도입 반영). KG-16 참조 추가.
 - 2026-04-10: 실제 코드 기반 설정 항목 전체 갱신 — embed/locale/scheduler/delegatePolling/agents/memory/prompt 추가, I10(resolveDir 우선순위), I11(embed.dimensions 이중 기본값 위험), E10/E11 추가
 - 2026-04-10: I10 falsy 폴백 명시 — basePath가 빈 문자열 포함 falsy이면 PRESENCE_DIR로 폴백하는 || 체인 동작 기술
 - 2026-04-10: I9 구현 일치 확인 — Config.presenceDir()이 PRESENCE_DIR 환경변수를 직접 반영하도록 수정됨, I9 서술을 구현과 일치하도록 정교화.

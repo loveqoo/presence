@@ -10,17 +10,22 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 ~/.presence/
 ├── server.json                         ← 서버 전역 설정
 ├── users.json                          ← 인증 유저 목록 (bcrypt 해시 + refresh 세션)
+├── admin-initial-password.txt          ← admin bootstrap 시 생성 (0600, 첫 비밀번호 변경 후 삭제)
 ├── memory/
 │   ├── vector_store.db                 ← mem0 vector DB (SQLite)
 │   └── mem0_history.db                 ← mem0 히스토리 DB (SQLite)
 └── users/
     └── {username}/
-        ├── config.json                 ← 유저별 설정 override
+        ├── config.json                 ← 유저별 설정 override (agents[], primaryAgentId 포함)
         ├── user-data.db                ← UserDataStore (SQLite, category/status 구조)
-        ├── jobs.db                     ← JobStore (SQLite, cron 스케줄)
-        └── sessions/
-            └── {sessionId}/
-                └── state.json          ← 세션 상태 (Conf JSON, PersistenceActor 관리)
+        ├── jobs.db                     ← JobStore (SQLite, cron 스케줄, schema v1: owner_user_id + owner_agent_id)
+        ├── sessions/
+        │   └── {sessionId}/
+        │       └── state.json          ← 세션 상태 (Conf JSON, PersistenceActor 관리)
+        ├── agent-policies.json         ← admin 전용: maxAgentsPerUser quota 정책
+        ├── pending/                    ← admin 전용: 승인 대기 요청 파일 (req-{id}.json)
+        ├── approved/                   ← admin 전용: 승인 완료 파일
+        └── rejected/                   ← admin 전용: 거부 완료 파일
 ```
 
 ## 불변식 (Invariants)
@@ -78,6 +83,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 
 ## 변경 이력
 
+- 2026-04-22: 파일 경로 트리 갱신 — agent identity 도입 경로 추가: admin-initial-password.txt, agent-policies.json, pending/approved/rejected/ 디렉토리, jobs.db schema v1 표기. config.json에 agents[]/primaryAgentId 포함 명시.
 - 2026-04-10: 초기 작성
 - 2026-04-10: I1~I3 경로 표기 정정 — `~/.presence/...` 하드코딩에서 Config.resolveDir() 기반으로 정정. PRESENCE_DIR override 명시
 - 2026-04-10: I1에 Known Limitation 추가 — Config.userDataPath()가 PRESENCE_DIR을 반영하지 않는 현재 코드 한계 병기. 관련 코드에 user-context.js 및 Config.resolveDir() 추가.
