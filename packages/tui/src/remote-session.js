@@ -163,7 +163,7 @@ class RemoteSession {
       username: this.#username,
       sessionId: this.#currentSessionId,
       onListSessions: this.#client.getJson.bind(this.#client, '/api/sessions'),
-      onCreateSession: (id) => this.#client.post('/api/sessions', { id, type: 'user', workingDir: this.#cwd }),
+      onCreateSession: (id) => this.#client.post('/api/sessions', { id, type: 'user' }),
       onDeleteSession: (id) => this.#client.del(`/api/sessions/${id}`),
       onSwitchSession: this.switchSession.bind(this),
       disconnected: this.#disconnected,
