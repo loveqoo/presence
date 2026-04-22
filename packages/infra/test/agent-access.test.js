@@ -62,6 +62,17 @@ console.log('canAccessAgent tests')
   assert(r.reason === REASON.ARCHIVED, 'AA7: reason=archived')
 }
 
+// AA7b. archived + scheduled-run → deny (§5.4 — archived agent 는 새 scheduled run 차단)
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.SCHEDULED_RUN, registry: reg,
+  })
+  assert(r.allow === false, 'AA7b: archived + scheduled-run denied')
+  assert(r.reason === REASON.ARCHIVED, 'AA7b: reason=archived')
+}
+
 // AA8. non-archived agent + registry → allow
 {
   const reg = createAgentRegistry()
