@@ -1,6 +1,7 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { AUTH_ERROR } from '@presence/infra/infra/auth/policy.js'
 import { isPathAllowed } from '@presence/infra/infra/tools/local-tools.js'
+import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
 import { WS_CLOSE, WATCHED_PATHS } from './constants.js'
 import { findOrCreateSession } from './session-api.js'
 
@@ -146,6 +147,22 @@ class WsHandler {
     if (this.#authEnabled && wsUsername && entry.owner !== null && entry.owner !== wsUsername) {
       ws.send(JSON.stringify({ type: 'error', code: 403, message: 'Access denied: session belongs to another user' }))
       return
+    }
+
+    // docs §9.4 진입점 #3 — WebSocket join 시 continue-session intent 로 canAccessAgent.
+    // 인증 활성화 + 유저 식별 시에만 강제. 실패 시 WS close(4001) + error 메시지.
+    if (this.#authEnabled && wsUsername) {
+      const access = canAccessAgent({
+        jwtSub: wsUsername,
+        agentId: entry.session.agentId,
+        intent: INTENT.CONTINUE_SESSION,
+        registry: effectiveCtx.agentRegistry,
+      })
+      if (!access.allow) {
+        ws.send(JSON.stringify({ type: 'error', code: 403, message: `Access denied: ${access.reason}`, reason: access.reason }))
+        ws.close(WS_CLOSE.AUTH_FAILED, `agent-access-denied: ${access.reason}`)
+        return
+      }
     }
 
     // workingDir backfill — pendingBackfill=true 인 세션만 TUI cwd 수용.
