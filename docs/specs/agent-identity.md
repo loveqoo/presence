@@ -42,6 +42,8 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - I12. **M1 단계 agentId hardcode**: 현재(M1) 모든 USER 타입 세션은 `{username}/default`로 hardcode. M3 이후 `config.primaryAgentId` 경유로 이관 예정.
 
+- I-WD. **workingDir = Config.userDataPath(userId) 고정**: 모든 세션의 `workingDir`은 생성 시 `Config.userDataPath(userId)`로 자동 결정된다. 외부 입력(`opts.workingDir`, TUI `cwd`, `POST /sessions` body `workingDir`)은 무시된다. 런타임 변경 불가. 세션 유형(USER/SCHEDULED/AGENT)과 무관하게 동일 규칙이 적용된다. `workingDir`은 persistence에 저장하지 않으며 복원 시에도 `userId` 기반으로 재계산한다. tool 경계 검증(`isWithinWorkspace`), `shell_exec` cwd, system prompt `WORKING_DIR` 섹션의 유일 기준점.
+
 ---
 
 ## 경계 조건 (Edge Cases)
@@ -87,6 +89,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
 - I10 → (resolveDelegateTarget 직접 단위 테스트 없음) ⚠️
 - I11 → (a2a.enabled=false 라우트 미등록 테스트 없음) ⚠️
+- I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
 - E6 → `packages/infra/test/agent-access.test.js` AA3
 - E7/E8 → `packages/infra/test/agent-access.test.js` AA5/AA6
 - E12 → `packages/infra/test/agent-access.test.js` AA14
@@ -115,3 +118,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 ## 변경 이력
 
 - 2026-04-22: 초기 작성 — feature/agent-identity-model 브랜치 23커밋 검증 후 작성. KG-15~18 등록.
+- 2026-04-23: I-WD 추가 — W1(cb6c59a) workingDir 단일 규칙 리팩토링 반영. `workingDir = Config.userDataPath(userId)` 고정, 외부 입력 무시, persistence 미저장 규칙. 테스트 커버리지 I-WD 추가.

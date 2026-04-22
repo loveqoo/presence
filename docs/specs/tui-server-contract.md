@@ -22,7 +22,7 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
   - `POST /api/auth/change-password` — 비밀번호 변경 (mustChangePassword 플로우)
   - `POST /api/auth/refresh` — access token 갱신
   - `GET  /api/sessions` — 세션 목록 조회
-  - `POST /api/sessions` — 세션 생성. 요청 body: `{ id?, type?, workingDir? }`. 응답 body(201): `{ id, type, workingDir }` (effective workingDir 포함)
+  - `POST /api/sessions` — 세션 생성. 요청 body: `{ id?, type?, workingDir? }` (`workingDir`은 서버가 무시). 응답 body(201): `{ id, type, workingDir }` (effective workingDir — 항상 `Config.userDataPath(userId)` 반환)
   - `DELETE /api/sessions/:id` — 세션 삭제
   - `GET  /api/sessions/:id/tools` — 세션 도구 목록
   - `GET  /api/sessions/:id/agents` — 세션 에이전트 목록
@@ -39,20 +39,20 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 **WebSocket 프로토콜**
 
 - I6. **WS 연결 인증**: `createMirrorState` 호출 시 `authState.accessToken`이 있으면 `Authorization: Bearer <token>` 헤더를 포함해 WebSocket upgrade 요청을 보낸다. 서버의 WS 인증 3단계 폴백(헤더 → query param → 쿠키) 중 TUI는 헤더 방식만 사용한다.
-- I7. **WS 메시지 시퀀스**: 연결(`open`) 즉시 클라이언트가 `{ type: 'join', session_id: <sessionId>, cwd?: <string> }`를 전송한다. `cwd`는 TUI 실행 디렉토리로, `pendingBackfill=true`인 세션에만 적용된다 (INV-WD-BACKFILL 참조). 서버는 순서대로 `{ type: 'init', session_id, state: <snapshot>, stateVersion, workingDir: <effective> }` → `{ type: 'state', session_id, path, value }` (변경 발생 시마다)를 push한다. `init` 응답의 `workingDir`은 세션의 현재 effective workingDir이며 TUI가 매 join 시 수신하여 stale cache를 회피한다.
+- I7. **WS 메시지 시퀀스**: 연결(`open`) 즉시 클라이언트가 `{ type: 'join', session_id: <sessionId> }`를 전송한다. `cwd` 필드는 전송하지 않는다 — workingDir은 서버가 `userId` 기반으로 자동 결정하므로 TUI 입력이 불필요하다 (`agent-identity.md I-WD`). 서버는 순서대로 `{ type: 'init', session_id, state: <snapshot>, stateVersion, workingDir: <effective> }` → `{ type: 'state', session_id, path, value }` (변경 발생 시마다)를 push한다. `init` 응답의 `workingDir`은 세션의 effective workingDir (`Config.userDataPath(userId)`)이며 TUI가 매 join 시 수신한다.
 - I8. **MirrorState 구독 경로**: `MirrorState.applySnapshot()`은 `SNAPSHOT_PATHS`에 정의된 경로(turnState, lastTurn, turn, context.memories, context.conversationHistory, _streaming, _retry, _approve, _debug.*, _budgetWarning, _toolResults, _toolTranscript, _pendingInput, todos, events, delegates)만 local cache에 반영한다. 그 외 경로는 수신해도 무시한다.
 - I10. **WS close 코드 분기 처리**: `MirrorState.handleClose(code)`는 close 코드에 따라 네 가지 경로로 분기한다.
   - `4002`(`PASSWORD_CHANGE_REQUIRED`) / `4003`(`ORIGIN_NOT_ALLOWED`): 재연결 즉시 중단 + `onUnrecoverable(code)` 콜백 호출.
   - `4001`(`AUTH_FAILED`): `onAuthFailed()` 콜백으로 토큰 갱신 1회 시도. 성공 시 즉시 재연결, 실패 시 `onUnrecoverable(code)` 호출 후 중단.
-  - `4004`(`WORKING_DIR_INVALID`): TUI `cwd`가 `allowedDirs` 밖. 재연결 즉시 중단 + `onUnrecoverable(code)` 호출. 영구 실패로 처리한다.
+  - `4004`(`WORKING_DIR_INVALID`): (제거됨) W1 리팩토링으로 이 close 코드 경로가 삭제되었다. `WS_CLOSE` 상수에도 존재하지 않는다.
   - 그 외: 기존 지수 백오프(최소 500ms, 최대 15,000ms) 재연결.
   콜백은 `RemoteSession` 생성자가 `tryRefresh`를 받아 `MirrorState`에 주입한다.
 - I13. **onUnrecoverable 발동 시 UI 상태**: `RemoteSession.#createMirrorState`의 `onUnrecoverable(code)` 콜백이 호출되면 `#disconnected = { code, at: Date.now() }`를 설정하고 App을 rerender한다. App은 `disconnected` prop이 non-null이면 빨간 double-border 배너를 렌더링하고 `InputBar.disabled`를 true로 설정한다. 배너의 사유 문구(`disconnectedReason`)는 close code에 따라 분기된다:
   - `4001` → "세션이 만료되었습니다"
   - `4002` → "비밀번호 변경이 필요합니다"
   - `4003` → "접근이 거부되었습니다"
-  - `4004` → "작업 디렉토리가 허용 범위 밖입니다"
   - 그 외 → "서버 연결이 끊겼습니다"
+  (`4004`는 W1 리팩토링으로 제거되어 도달하지 않는다.)
   배너 본문: `"⚠ {disconnectedReason} (close {code})."` + `"TUI 를 재시작하세요 (Ctrl+C)."`. `InputBar`에는 `hint` prop으로 i18n 키 `input_hint.disconnected`("연결 끊김 · Ctrl+C로 재시작") 값이 전달된다. 배너 표시는 "복구 불가"(4001 refresh 실패, 4002, 4003, 4004) 경로에만 한정된다 — 백오프 재연결 경로에서는 발동하지 않는다.
 - I11. **WS 재연결 시 최신 토큰 사용**: `MirrorState.connect()`는 매번 `getHeaders()` 콜백을 호출하여 최신 Authorization 헤더를 사용한다. `onAuthFailed` 성공 후 갱신된 access token이 다음 재연결에 자동 반영된다.
 
@@ -86,10 +86,10 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 
 **workingDir 해결 및 경계**
 
-- INV-WD-CHAIN. **workingDir 결정 체인**: `POST /sessions` body의 `workingDir` → 없으면 `userContext.config.tools.allowedDirs[0]` fallback → 둘 다 없으면(allowedDirs 비어 있음) 서버 400 에러. `process.cwd()`는 세션 의미 결정에 사용되지 않는다. fallback 경로로 결정된 세션은 `pendingBackfill=true` 플래그가 세워진다.
-- INV-WD-BOUND. **workingDir 경계 검증**: 세션의 workingDir은 반드시 `allowedDirs` 내부여야 한다. 위반 시 `POST /sessions`는 HTTP 400, WS join(backfill 수용) 시에는 `WS_CLOSE.WORKING_DIR_INVALID(4004)`로 close. 경계 검사는 `isPathAllowed(path, allowedDirs)`로 — 경로가 `allowedDirs` 중 하나와 동일하거나 그 하위 경로이면 허용.
-- INV-WD-BACKFILL. **pendingBackfill 1회 덮어쓰기**: `pendingBackfill=true`인 세션은 첫 WS join 메시지의 `cwd` 필드를 workingDir로 채택하고 `pendingBackfill=false`로 갱신 후 persistence에 flush한다. 이후 join의 `cwd`는 무시(기존 workingDir 우선). `pendingBackfill`이 false이거나 join 메시지에 `cwd`가 없으면 backfill 단계를 건너뛴다.
-- INV-WD-PROMPT. **프롬프트 workingDir 섹션**: `workingDir`이 결정된 세션에서 system prompt에 `PROMPT_SECTIONS.WORKING_DIR(workingDir)` 섹션이 포함된다. 이 섹션은 에이전트가 상대경로를 해석하는 기준점을 명시한다. workingDir 미결정 세션에는 해당 섹션이 없다.
+- INV-WD-CHAIN. **workingDir 단일 결정 규칙**: 모든 세션의 `workingDir`은 `Config.userDataPath(userId)` 고정. `POST /sessions` body의 `workingDir`, `allowedDirs`, TUI `cwd`, `process.cwd()`는 일절 사용되지 않는다. `pendingBackfill` 개념은 제거되었다. 세부 규칙은 `agent-identity.md I-WD`.
+- INV-WD-BOUND. **workingDir 경계 = userDataPath 내부**: 툴/shell_exec의 파일 경로 경계는 `workingDir`(`Config.userDataPath(userId)`)이며 `isWithinWorkspace(path, workingDir)` (lexical prefix)로 검사한다. 경계 밖 접근 시 인터프리터가 에러를 throw한다. `allowedDirs` 개념은 제거되었다.
+- INV-WD-BACKFILL. (제거됨) `pendingBackfill`/backfill 메커니즘은 W1 리팩토링으로 삭제되었다.
+- INV-WD-PROMPT. **프롬프트 workingDir 섹션**: 모든 세션에서 system prompt에 `PROMPT_SECTIONS.WORKING_DIR(workingDir)` 섹션이 포함된다. `workingDir`은 항상 `Config.userDataPath(userId)`이므로 미결정 상태가 없다.
 
 **stateVersion 단조증가**
 
