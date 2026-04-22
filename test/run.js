@@ -21,6 +21,7 @@ const NETWORK_TESTS = new Set([
   'packages/server/test/auth-e2e.test.js',
   'packages/server/test/scheduler-e2e.test.js',
   'packages/server/test/a2a-boot-guard.test.js',
+  'packages/server/test/a2a-discovery.test.js',
 ])
 
 const tests = [
@@ -73,6 +74,7 @@ const tests = [
   'packages/infra/test/agent-access.test.js',
   'packages/infra/test/agent-governance.test.js',
   'packages/infra/test/agent-cli.test.js',
+  'packages/infra/test/self-card.test.js',
   'packages/infra/test/a2a-client.test.js',
   'packages/infra/test/events.test.js',
   'packages/infra/test/scheduler.test.js',
@@ -125,6 +127,7 @@ const tests = [
   'packages/server/test/auth-e2e.test.js',
   'packages/server/test/scheduler-e2e.test.js',
   'packages/server/test/a2a-boot-guard.test.js',
+  'packages/server/test/a2a-discovery.test.js',
 ]
 
 const noNetwork = process.argv.includes('--no-network')

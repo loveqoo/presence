@@ -13,6 +13,7 @@ import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
 import { createAuthSetup } from './auth-setup.js'
 import { createSessionRouter } from './session-api.js'
+import { createA2aRouter } from './a2a-router.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 import { corsMiddleware, mountStaticWebUi, logStartupSummaryR, warnPresenceDirChange, closeAsync, listenAsync } from './server-utils.js'
 
@@ -220,7 +221,15 @@ class PresenceServer {
     app.use('/api', createSessionRouter({
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
     }))
-    // 8. Static web UI (catch-all — 반드시 마지막)
+    // 8. /a2a — docs/design/agent-identity-model.md §11. enabled=true 에서만 마운트.
+    // JSON-RPC 메시지 처리 + A2A JWT 는 authz phase — 현재 discovery 엔드포인트만.
+    if (this.#userContext.config.a2a?.enabled) {
+      app.use('/a2a', createA2aRouter({
+        userContext: this.#userContext,
+        config: this.#userContext.config,
+      }))
+    }
+    // 9. Static web UI (catch-all — 반드시 마지막)
     mountStaticWebUi(this.#expressApp)
   }
 
