@@ -23,12 +23,14 @@ const createServerScheduler = (userContext, opts = {}) => {
     store: userContext.jobStore,
     onDispatch: (jobEvent) => {
       const sessionId = `scheduled-${jobEvent.runId}`
-      // agentId: M1 runtime hardcode. M7 이후 jobEvent.ownerAgentId 읽음 (identity §4.3).
+      // docs §4.3 — job 생성 시 owner 가 확정되어 있으므로 event 에서 직접 사용.
+      // legacy row (owner null) 는 scheduler-actor 가 null 로 전파 → fallback 으로 막음.
       const agentId = jobEvent.ownerAgentId || `${defaultUserId}/default`
+      const userId = jobEvent.ownerUserId || defaultUserId
       const entry = userContext.sessions.create({
         type: SESSION_TYPE.SCHEDULED,
         id: sessionId,
-        userId: defaultUserId,
+        userId,
         agentId,
         workingDir: jobEvent.workingDir || defaultWd,
         onScheduledJobDone: (event, outcome) => {

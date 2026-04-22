@@ -47,10 +47,19 @@ const formatRun = (run) => {
 class JobToolFactory {
   #store
   #eventActor
+  #ownerUserId
+  #ownerAgentId
 
-  constructor({ store, eventActor }) {
-    this.#store = store
-    this.#eventActor = eventActor
+  constructor(opts) {
+    this.#store = opts.store
+    this.#eventActor = opts.eventActor
+    // docs §4.3 — 세션 소속 agent 가 생성한 job 의 owner.
+    // 스케줄러가 job session 을 dispatch 할 때 이 owner 의 권한으로 실행.
+    this.#ownerUserId = opts.ownerUserId
+    this.#ownerAgentId = opts.ownerAgentId
+    if (!this.#ownerUserId || !this.#ownerAgentId) {
+      throw new Error('JobToolFactory: ownerUserId + ownerAgentId required')
+    }
   }
 
   build() {
@@ -83,7 +92,10 @@ class JobToolFactory {
         const { name, cron, prompt, max_retries: maxRetries = 3, allowed_tools: allowedTools = [] } = args
         if (!validateCron(cron)) return `오류: 유효하지 않은 cron 표현식: "${cron}"`
         const nextRun = calcNextRun(cron)
-        const job = this.#store.createJob({ name, prompt, cron, maxRetries, allowedTools, nextRun })
+        const job = this.#store.createJob({
+          name, prompt, cron, maxRetries, allowedTools, nextRun,
+          ownerUserId: this.#ownerUserId, ownerAgentId: this.#ownerAgentId,
+        })
         return `Job 생성됨:\n${formatJob(job)}`
       },
     }
@@ -199,6 +211,8 @@ class JobToolFactory {
           runId,
           attempt: 1,
           allowedTools: job.allowedTools || [],
+          ownerUserId: job.ownerUserId,
+          ownerAgentId: job.ownerAgentId,
         })
         fireAndForget(this.#eventActor.enqueue(event))
         return `Job 즉시 실행 요청됨: ${job.name} (runId: ${runId})`
@@ -207,8 +221,8 @@ class JobToolFactory {
   }
 }
 
-const createJobToolsR = Reader.asks(({ store, eventActor }) =>
-  new JobToolFactory({ store, eventActor }).build()
+const createJobToolsR = Reader.asks(({ store, eventActor, ownerUserId, ownerAgentId }) =>
+  new JobToolFactory({ store, eventActor, ownerUserId, ownerAgentId }).build()
 )
 
 // 레거시 브릿지

@@ -86,7 +86,12 @@ class UserSession extends EphemeralSession {
   // --- Tools: job/todo 툴 등록 ---
 
   initTools(userContext) {
-    const jobTools = createJobTools({ store: userContext.jobStore, eventActor: this.actors.eventActor })
+    // docs §4.3 — job tool 이 생성하는 job 은 현재 session 의 agent 소속.
+    // Session.agentId 는 이미 qualified ({userId}/{agentName}) — ownerAgentId 로 그대로 사용.
+    const jobTools = createJobTools({
+      store: userContext.jobStore, eventActor: this.actors.eventActor,
+      ownerUserId: this.userId, ownerAgentId: this.agentId,
+    })
     for (const tool of jobTools) userContext.toolRegistry.register(tool)
 
     userContext.toolRegistry.register({
@@ -112,6 +117,8 @@ class UserSession extends EphemeralSession {
           cron,
           maxRetries: 1,
           nextRun: calcNextRun(cron),
+          ownerUserId: this.userId,
+          ownerAgentId: this.agentId,
         })
       }
     }

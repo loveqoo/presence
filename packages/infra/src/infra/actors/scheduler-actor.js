@@ -145,6 +145,10 @@ class SchedulerActor extends ActorWrapper {
       attempt,
       allowedTools: job.allowedTools || [],
       createdAt: Date.now(),
+      // docs §4.3 — scheduler dispatch 시 job owner 를 event 로 전파.
+      // scheduler-factory 가 scheduled session 생성 시 agentId 로 사용.
+      ownerUserId: job.ownerUserId,
+      ownerAgentId: job.ownerAgentId,
     }
   }
 

@@ -43,6 +43,8 @@ async function run() {
         cron: '0 0 1 1 *',   // 실제 다음 실행은 먼 미래
         maxRetries: 0,
         nextRun: 1,           // 과거 → polling 이 즉시 due
+        ownerUserId: 'default',
+        ownerAgentId: 'default/default',
       })
 
       // scheduler polling (200ms) + turn 실행 + DB update 대기
@@ -80,6 +82,8 @@ async function run() {
         cron: '0 0 1 1 *',
         maxRetries: 0,
         nextRun: 1,
+        ownerUserId: 'default',
+        ownerAgentId: 'default/default',
       })
       let capturedSession = null
       const origCreate = userContext.sessions.create.bind(userContext.sessions)
