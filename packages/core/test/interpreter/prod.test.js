@@ -230,12 +230,12 @@ async function run() {
   {
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'reviewer',
+      agentId: 'test/reviewer',
       description: 'Code reviewer',
       run: async (task) => `reviewed: ${task}`,
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test',
     })
     const [result] = await runProg(interpret, ST)(delegate('reviewer', 'check PR'))
     assert(result.status === 'completed', 'Delegate local: completed')
@@ -246,7 +246,7 @@ async function run() {
   // 14d. Delegate: unknown agent → failed
   {
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: createAgentRegistry()
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: createAgentRegistry(), currentUserId: 'test',
     })
     const [result] = await runProg(interpret, ST)(delegate('nonexistent', 'task'))
     assert(result.status === 'failed', 'Delegate unknown: failed')
@@ -257,12 +257,12 @@ async function run() {
   {
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'crasher',
+      agentId: 'test/crasher',
       description: 'Agent that crashes',
       run: async () => { throw new Error('agent crash') },
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test',
     })
     const [result] = await runProg(interpret, ST)(delegate('crasher', 'task'))
     assert(result.status === 'failed', 'Delegate crash: failed (not exception)')
@@ -274,7 +274,7 @@ async function run() {
   {
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'remote-helper',
+      agentId: 'test/remote-helper',
       description: 'Remote agent',
       type: 'remote',
       endpoint: 'https://a2a.test/rpc',
@@ -291,7 +291,7 @@ async function run() {
       }),
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch,
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test',
     })
     const [result] = await runProg(interpret, ST)(delegate('remote-helper', 'task'))
     assert(result.status === 'completed', 'Delegate remote completed: status')
@@ -303,14 +303,14 @@ async function run() {
   {
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'remote-down',
+      agentId: 'test/remote-down',
       description: 'Remote agent (down)',
       type: 'remote',
       endpoint: 'https://a2a.test/rpc',
     })
     const mockFetch = async () => { throw new Error('ECONNREFUSED') }
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch,
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test',
     })
     const [result] = await runProg(interpret, ST)(delegate('remote-down', 'task'))
     assert(result.status === 'failed', 'Delegate remote fail: returns failed')
@@ -322,7 +322,7 @@ async function run() {
     const testReactive = createOriginState({ delegates: { pending: [] } })
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'slow-agent',
+      agentId: 'test/slow-agent',
       description: 'Slow remote',
       type: 'remote',
       endpoint: 'https://a2a.test/rpc',
@@ -335,7 +335,7 @@ async function run() {
       }),
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState: testReactive, agentRegistry: agentReg, fetchFn: mockFetch,
+      llm: mockLLM(''), toolRegistry: registry, reactiveState: testReactive, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test',
     })
     const [result] = await runProg(interpret, ST)(delegate('slow-agent', 'long task'))
     assert(result.status === 'submitted', 'Delegate submitted: status')
@@ -358,7 +358,7 @@ async function run() {
   {
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'summarizer',
+      agentId: 'test/summarizer',
       description: 'Summarizer',
       run: async (task) => `요약: ${task}`,
     })
@@ -382,7 +382,7 @@ async function run() {
       }
     }
 
-    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test' })
 
     const { Agent } = await import('@presence/core/core/agent.js')
     const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })

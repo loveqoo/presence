@@ -271,13 +271,13 @@ async function run() {
     const state = createOriginState({
       turnState: TurnState.idle(),
       delegates: { pending: [
-        { target: 'remote-agent', taskId: 'tid-1', endpoint: 'https://a2a.test/rpc' },
+        { target: 'remote-agent', agentId: 'test/remote-agent', taskId: 'tid-1', endpoint: 'https://a2a.test/rpc' },
       ]},
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
     const agentReg = createAgentRegistry()
-    agentReg.register({ name: 'remote-agent', type: 'remote', endpoint: 'https://a2a.test/rpc' })
+    agentReg.register({ agentId: 'test/remote-agent', type: 'remote', endpoint: 'https://a2a.test/rpc' })
 
     const mockFetch = async () => ({
       ok: true,
@@ -310,13 +310,13 @@ async function run() {
     const state = createOriginState({
       turnState: TurnState.idle(),
       delegates: { pending: [
-        { target: 'slow', taskId: 'tid-2', endpoint: 'https://a2a.test/rpc' },
+        { target: 'slow', agentId: 'test/slow', taskId: 'tid-2', endpoint: 'https://a2a.test/rpc' },
       ]},
       events: { queue: [], inFlight: null, lastProcessed: null, deadLetter: [] },
       todos: [],
     })
     const agentReg = createAgentRegistry()
-    agentReg.register({ name: 'slow', type: 'remote', endpoint: 'https://a2a.test/rpc' })
+    agentReg.register({ agentId: 'test/slow', type: 'remote', endpoint: 'https://a2a.test/rpc' })
 
     let pollCount = 0
     const mockFetch = async () => {

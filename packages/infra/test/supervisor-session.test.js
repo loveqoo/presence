@@ -184,13 +184,13 @@ async function run() {
       try {
         const agentSession = Session.create(freshCtx, { type: SESSION_TYPE.AGENT })
         freshCtx.agentRegistry.register({
-          name: 'test-agent-sa7',
+          agentId: 'test/test-agent-sa7',
           description: '테스트용',
           type: 'local',
           run: (task) => agentSession.handleInput(task),
         })
 
-        const entry = freshCtx.agentRegistry.get('test-agent-sa7')
+        const entry = freshCtx.agentRegistry.get('test/test-agent-sa7')
         assert(entry.isJust(), 'SA7: agent registered in registry')
         const delegateResult = await entry.value.run('위임 작업')
         assert(delegateResult === '응답', 'SA7: agent handleInput called via run()')

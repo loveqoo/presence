@@ -62,7 +62,7 @@ const registerAgentSessions = (userContext, username) => {
       workingDir: agentDef.workingDir || defaultWd,
     })
     userContext.agentRegistry.register({
-      name: agentDef.name,
+      agentId,
       description: agentDef.description,
       capabilities: agentDef.capabilities || [],
       type: DelegationMode.LOCAL,

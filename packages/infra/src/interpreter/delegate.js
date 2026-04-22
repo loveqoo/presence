@@ -1,18 +1,28 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { Delegation, DelegationMode } from '../infra/agents/delegation.js'
 import { A2AClient } from '../infra/agents/a2a-client.js'
+import { resolveDelegateTarget } from '../infra/agents/resolve-delegate-target.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
 
-const { Task, Maybe, Reader } = fp
+const { Task, Maybe, Reader, Either } = fp
 
 // --- DelegateInterpreter ---
 // Delegate — 로컬/리모트 에이전트 위임.
+// f.target → resolveDelegateTarget(currentUserId) → qualified agentId → registry.get
 
-const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn }) => {
+const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId }) => {
   const a2a = new A2AClient({ fetchFn })
   return new Interpreter(['Delegate'], (f) => {
-    const maybeEntry = agentRegistry ? agentRegistry.get(f.target) : Maybe.Nothing()
+    const resolved = resolveDelegateTarget(f.target, { currentUserId })
+    if (Either.isLeft(resolved)) {
+      const reason = Either.fold(e => e, () => '', resolved)
+      return ST.of(f.next(Delegation.failed(f.target, `Unknown agent: ${f.target} (${reason})`)))
+    }
+    const agentId = Either.fold(() => '', v => v, resolved)
+    const maybeEntry = agentRegistry ? agentRegistry.get(agentId) : Maybe.Nothing()
 
+    // Delegation.target 은 user 원본 (f.target) 유지 — 감사/로그에서 사용자 의도 보존.
+    // registry lookup 은 qualified agentId 로 수행.
     const runLocal = (entry) =>
       ST.lift(Task.fromPromise(() =>
         entry.run(f.task)
@@ -25,7 +35,9 @@ const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetch
         const result = await a2a.sendTask(f.target, entry.endpoint, f.task)
         if (result.isPending()) {
           delegateUi.addPending({
-            target: f.target, taskId: result.taskId,
+            target: f.target,     // user 원본 (UI 표시용)
+            agentId,              // qualified (registry lookup 용)
+            taskId: result.taskId,
             endpoint: entry.endpoint, submittedAt: Date.now(),
           })
         }

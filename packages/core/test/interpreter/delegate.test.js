@@ -20,6 +20,7 @@ const makeInterpreter = (agentRegistry) => prodInterpreterR.run({
   toolRegistry: createToolRegistry(),
   reactiveState: createOriginState({}),
   agentRegistry,
+  currentUserId: 'test',
 })
 
 async function run() {
@@ -31,7 +32,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'echo',
+      agentId: 'test/echo',
       description: 'Echo agent',
       type: 'local',
       run: async (task) => `echoed: ${task}`,
@@ -52,7 +53,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'broken',
+      agentId: 'test/broken',
       type: 'local',
       run: async () => { throw new Error('agent crashed') },
     })
@@ -86,7 +87,7 @@ async function run() {
   // ==========================================================================
   {
     const reg = createAgentRegistry()
-    reg.register({ name: 'norun', type: 'local', description: 'no run fn' })
+    reg.register({ agentId: 'test/norun', type: 'local', description: 'no run fn' })
     // run 미지정
 
     const { interpret, ST } = makeInterpreter(reg)
@@ -104,6 +105,7 @@ async function run() {
       llm: mockLLM(),
       toolRegistry: createToolRegistry(),
       reactiveState: createOriginState({}),
+      currentUserId: 'test',
       // agentRegistry 미전달
     })
     const [result] = await runProg(interpret, ST)(delegate('anyone', 'task'))
@@ -118,7 +120,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'summarizer',
+      agentId: 'test/summarizer',
       type: 'local',
       run: async (task) => `요약: ${task}`,
     })
@@ -138,7 +140,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'sync',
+      agentId: 'test/sync',
       type: 'local',
       run: (task) => Promise.resolve(`sync: ${task}`),
     })
@@ -156,7 +158,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'remote-worker',
+      agentId: 'test/remote-worker',
       type: 'remote',
       endpoint: 'http://remote.agent/a2a',
     })
@@ -187,6 +189,7 @@ async function run() {
       reactiveState: createOriginState({}),
       agentRegistry: reg,
       fetchFn: mockFetch,
+      currentUserId: 'test',
     })
 
     const [result] = await runProg(interpret, ST)(delegate('remote-worker', '원격 작업'))
@@ -204,12 +207,12 @@ async function run() {
     const reg = createAgentRegistry()
     const calls = []
     reg.register({
-      name: 'step1',
+      agentId: 'test/step1',
       type: 'local',
       run: async (task) => { calls.push('step1:' + task); return 'result1' },
     })
     reg.register({
-      name: 'step2',
+      agentId: 'test/step2',
       type: 'local',
       run: async (task) => { calls.push('step2:' + task); return 'result2' },
     })
@@ -233,7 +236,7 @@ async function run() {
   {
     const reg = createAgentRegistry()
     reg.register({
-      name: 'anything',
+      agentId: 'test/anything',
       type: 'local',
       run: async (task) => `got: "${task}"`,
     })

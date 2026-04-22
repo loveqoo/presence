@@ -97,7 +97,7 @@ class UserContext {
       timeoutMs: userContext.config.llm.timeoutMs,
     })
     userContext.agentRegistry = createAgentRegistry()
-    registerSummarizer(userContext.agentRegistry, userContext.llm)
+    registerSummarizer(userContext.agentRegistry, userContext.llm, { userId: username || 'default' })
 
     // --- Job Store + User Data Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))

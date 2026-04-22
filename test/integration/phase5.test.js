@@ -108,7 +108,7 @@ async function run() {
 
     const agentReg = createAgentRegistry()
     agentReg.register({
-      name: 'summarizer',
+      agentId: 'test/summarizer',
       description: '텍스트 요약',
       run: async (task) => `요약: ${task}`,
     })
@@ -121,7 +121,7 @@ async function run() {
           return JSON.stringify({
             type: 'plan',
             steps: [
-              { op: 'DELEGATE', args: { target: 'summarizer', task: '긴 보고서 내용' } },
+              { op: 'DELEGATE', args: { target: 'test/summarizer', task: '긴 보고서 내용' } },
               { op: 'RESPOND', args: { ref: 1 } },
             ],
           })

@@ -119,10 +119,12 @@ class DelegateActor extends ActorWrapper {
   }
 
   #resolveEndpoint(entry) {
+    // entry.agentId: delegate.js M5 이후 추가. 없으면 legacy state → entry.target fallback.
+    const lookupKey = entry.agentId || entry.target
     return Maybe.fold(
       () => entry.endpoint,
       agent => agent.endpoint || entry.endpoint,
-      this.#agentRegistry ? this.#agentRegistry.get(entry.target) : Maybe.Nothing(),
+      this.#agentRegistry ? this.#agentRegistry.get(lookupKey) : Maybe.Nothing(),
     )
   }
 

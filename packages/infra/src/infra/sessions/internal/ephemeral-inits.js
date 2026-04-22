@@ -96,6 +96,8 @@ const ephemeralInits = {
       // getter — WS join backfill 로 값이 바뀌어도 다음 tool 호출 시 최신값 반영.
       getWorkingDir: () => this.workingDir,
       allowedDirs: userContext.config.tools.allowedDirs,
+      // currentUserId — Delegate target resolver (§3.6) 가 short-name qualify 에 사용.
+      currentUserId: this.userId,
     })
   },
 

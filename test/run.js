@@ -68,6 +68,7 @@ const tests = [
   'packages/infra/test/actors.test.js',
   'packages/infra/test/turn-controller.test.js',
   'packages/infra/test/agent-registry.test.js',
+  'packages/infra/test/resolve-delegate-target.test.js',
   'packages/infra/test/a2a-client.test.js',
   'packages/infra/test/events.test.js',
   'packages/infra/test/scheduler.test.js',
