@@ -56,7 +56,8 @@ const hasFlag = (name) => process.argv.includes(`--${name}`)
 const BASE_URL = cliArg('url', 'http://127.0.0.1:3000')
 const WS_URL = BASE_URL.replace(/^http/, 'ws')
 // 테스트 유저 — 매 실행마다 고유 이름으로 생성/삭제.
-const USERNAME = `livefocus_${Date.now().toString(36)}`
+// username 은 agent-id agentName part 규칙 (kebab-case, 언더바 금지) 준수.
+const USERNAME = `livefocus-${Date.now().toString(36)}`
 const INITIAL_PW = 'init_password_1234'
 const NEW_PW = 'new_password_5678'
 const KEEP_USER = hasFlag('keep-user')
