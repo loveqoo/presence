@@ -248,6 +248,48 @@ async function run() {
     assert(result.output === 'got: ""', '10: empty task forwarded to run')
   }
 
+  // ==========================================================================
+  // 11. canAccessAgent 거부 — 다른 user 의 qualified agent 에 delegate 시도
+  //     (§9.4 진입점 #5)
+  // ==========================================================================
+  {
+    const reg = createAgentRegistry()
+    // 다른 user (bob) 의 agent 를 registry 에 등록
+    reg.register({
+      agentId: 'bob/private',
+      type: 'local',
+      run: async () => 'secret',
+    })
+
+    const { interpret, ST } = makeInterpreter(reg)
+    // currentUserId='test' 인데 bob/private 에 접근
+    const [result] = await runProg(interpret, ST)(delegate('bob/private', 'intrude'))
+
+    assert(result.status === 'failed', '11: cross-user delegate 거부')
+    assert(result.error.includes('Access denied'), '11: error 에 Access denied')
+    assert(result.error.includes('not-owner'), '11: reason=not-owner')
+  }
+
+  // ==========================================================================
+  // 12. canAccessAgent 거부 — archived agent (new delegate 차단, §5.4)
+  // ==========================================================================
+  {
+    const reg = createAgentRegistry()
+    reg.register({
+      agentId: 'test/retired',
+      type: 'local',
+      archived: true,
+      run: async (task) => `old: ${task}`,
+    })
+
+    const { interpret, ST } = makeInterpreter(reg)
+    const [result] = await runProg(interpret, ST)(delegate('retired', 'task'))
+
+    assert(result.status === 'failed', '12: archived agent delegate 거부')
+    assert(result.error.includes('Access denied'), '12: error 에 Access denied')
+    assert(result.error.includes('archived'), '12: reason=archived')
+  }
+
   summary()
 }
 

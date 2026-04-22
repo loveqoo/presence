@@ -2,13 +2,15 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { Delegation, DelegationMode } from '../infra/agents/delegation.js'
 import { A2AClient } from '../infra/agents/a2a-client.js'
 import { resolveDelegateTarget } from '../infra/agents/resolve-delegate-target.js'
+import { canAccessAgent, INTENT } from '../infra/authz/agent-access.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
 
 const { Task, Maybe, Reader, Either } = fp
 
 // --- DelegateInterpreter ---
 // Delegate — 로컬/리모트 에이전트 위임.
-// f.target → resolveDelegateTarget(currentUserId) → qualified agentId → registry.get
+// f.target → resolveDelegateTarget(currentUserId) → canAccessAgent(DELEGATE) → registry.get
+// docs/design/agent-identity-model.md §9.4 진입점 #5.
 
 const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId }) => {
   const a2a = new A2AClient({ fetchFn })
@@ -19,6 +21,17 @@ const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetch
       return ST.of(f.next(Delegation.failed(f.target, `Unknown agent: ${f.target} (${reason})`)))
     }
     const agentId = Either.fold(() => '', v => v, resolved)
+
+    // §9.4 진입점 #5 — delegate intent 로 접근 판정. currentUserId 가 없으면 skip (legacy 호환).
+    if (currentUserId) {
+      const access = canAccessAgent({
+        jwtSub: currentUserId, agentId, intent: INTENT.DELEGATE, registry: agentRegistry,
+      })
+      if (!access.allow) {
+        return ST.of(f.next(Delegation.failed(f.target, `Access denied: ${access.reason} (agent=${agentId})`)))
+      }
+    }
+
     const maybeEntry = agentRegistry ? agentRegistry.get(agentId) : Maybe.Nothing()
 
     // Delegation.target 은 user 원본 (f.target) 유지 — 감사/로그에서 사용자 의도 보존.
