@@ -13,7 +13,7 @@ class Repl {
     this.agentRegistry = opts.agentRegistry
     this.memory = opts.memory
     this.mcp = opts.mcp
-    this.userId = opts.userId
+    this.agentId = opts.agentId
     this.t = opts.t || identity
     this._running = true
     this._turnCount = 0

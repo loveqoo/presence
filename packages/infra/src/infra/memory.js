@@ -8,7 +8,9 @@ const defaultMemoryPath = () => join(Config.presenceDir(), 'memory')
 
 // =============================================================================
 // Memory: mem0 기반 메모리. 서버 레벨 공유 인스턴스.
-// 모든 메서드는 userId를 파라미터로 받아 멀티유저 격리.
+// 모든 메서드는 agentId 를 파라미터로 받아 agent 단위 격리.
+// qualified form `{username}/{agentName}` 을 그대로 mem0 opts.userId 로 전달 —
+// 서로 다른 agent 의 기억은 키 충돌 없이 분리. 유저 격리는 qualifier 자동 달성.
 // =============================================================================
 
 class Memory {
@@ -67,25 +69,25 @@ class Memory {
 
   // --- 검색 ---
 
-  async search(userId, input, limit = 10) {
-    const result = await this.#mem0.search(input, { userId, limit })
+  async search(agentId, input, limit = 10) {
+    const result = await this.#mem0.search(input, { userId: agentId, limit })
     return (result.results || []).map(record => ({ label: record.memory }))
   }
 
   // --- 저장 ---
 
-  async add(userId, userInput, assistantOutput) {
+  async add(agentId, userInput, assistantOutput) {
     await this.#mem0.add([
       { role: 'user', content: userInput },
       { role: 'assistant', content: assistantOutput || '' },
-    ], { userId })
+    ], { userId: agentId })
   }
 
   // --- 조회 ---
 
-  async allNodes(userId) {
+  async allNodes(agentId) {
     try {
-      const result = await this.#mem0.getAll({ userId })
+      const result = await this.#mem0.getAll({ userId: agentId })
       return (result.results || []).map(record => ({
         id: record.id,
         label: record.memory,
@@ -98,15 +100,15 @@ class Memory {
 
   // --- 삭제 ---
 
-  async clearAll(userId) {
-    const nodes = await this.allNodes(userId)
+  async clearAll(agentId) {
+    const nodes = await this.allNodes(agentId)
     const count = nodes.length
-    if (count > 0) await this.#mem0.deleteAll({ userId }).catch(() => {})
+    if (count > 0) await this.#mem0.deleteAll({ userId: agentId }).catch(() => {})
     return count
   }
 
-  async removeOlderThan(userId, maxAgeMs) {
-    const nodes = await this.allNodes(userId)
+  async removeOlderThan(agentId, maxAgeMs) {
+    const nodes = await this.allNodes(agentId)
     const cutoff = Date.now() - maxAgeMs
     const toDelete = nodes.filter(node => node.createdAt < cutoff)
     await Promise.all(toDelete.map(node => this.#mem0.delete(node.id).catch(() => {})))

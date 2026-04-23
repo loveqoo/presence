@@ -15,13 +15,14 @@ import { delegateActorR } from '../../actors/delegate-actor.js'
 
 class SessionActors {
   constructor(opts) {
-    const { userContext, state, logger, persistenceActor, userId, turnLifecycle, turnController, delegateRuntime, dispatchTurn, onScheduledJobDone } = opts
+    const { userContext, state, logger, persistenceActor, agentId, turnLifecycle, turnController, delegateRuntime, dispatchTurn, onScheduledJobDone } = opts
     // --- Turn 라이프사이클 (Session 이 주입한 단일 인스턴스) ---
     this.turnLifecycle = turnLifecycle
     this.turnController = turnController
 
     // --- 메모리/압축 Actor ---
-    const sessionEnv = { memory: userContext.memory, userId, logger, llm: userContext.llm, state }
+    // memoryActorR 는 agentId 로 mem0 격리. compactionActorR 는 extra field 무시하고 llm 만 사용.
+    const sessionEnv = { memory: userContext.memory, agentId, logger, llm: userContext.llm, state }
     this.memoryActor = memoryActorR.run(sessionEnv)
     this.compactionActor = compactionActorR.run(sessionEnv)
     this.persistenceActor = persistenceActor

@@ -56,7 +56,7 @@ const cmdAgents = (repl) => {
 
 const cmdMemory = async (repl) => {
   if (!repl.memory) { repl.emit(repl.t('repl.memory_unavailable')); return }
-  const nodes = (await repl.memory.allNodes(repl.userId)).slice(-10)
+  const nodes = (await repl.memory.allNodes(repl.agentId)).slice(-10)
   if (nodes.length === 0) { repl.emit(repl.t('repl.no_memories')); return }
   const lines = nodes.map(node => `  ${node.label}`)
   repl.emit(`Recent memories (${nodes.length}):\n${lines.join('\n')}`)

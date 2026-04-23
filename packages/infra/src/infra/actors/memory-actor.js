@@ -8,10 +8,10 @@ class MemoryActor extends ActorWrapper {
   static RESULT = Object.freeze({ OK: 'ok', SKIP: 'skip', NO_OP: 'no-op' })
 
   #memory
-  #userId
+  #agentId
   #logger
 
-  constructor(memory, userId, opts = {}) {
+  constructor(memory, agentId, opts = {}) {
     const { logger } = opts
     const R = MemoryActor.RESULT
     super({}, (actorState, msg) => {
@@ -19,7 +19,7 @@ class MemoryActor extends ActorWrapper {
         // 유사 메모리 검색
         case MemoryActor.MSG.RECALL: {
           if (!this.#memory) return [[], actorState]
-          return Task.fromPromise(() => this.#memory.search(this.#userId, msg.input))()
+          return Task.fromPromise(() => this.#memory.search(this.#agentId, msg.input))()
             .map(nodes => [nodes, actorState])
             .catchError(err => this.#onRecallError(err, actorState))
         }
@@ -29,7 +29,7 @@ class MemoryActor extends ActorWrapper {
           if (!this.#memory) return [R.SKIP, actorState]
           const { data } = msg.node || {}
           if (!data?.input) return [R.SKIP, actorState]
-          return Task.fromPromise(() => this.#memory.add(this.#userId, data.input, data.output))()
+          return Task.fromPromise(() => this.#memory.add(this.#agentId, data.input, data.output))()
             .map(() => [R.OK, actorState])
             .catchError(err => this.#onSaveError(err, actorState))
         }
@@ -40,7 +40,7 @@ class MemoryActor extends ActorWrapper {
     })
 
     this.#memory = memory
-    this.#userId = userId
+    this.#agentId = agentId
     this.#logger = logger
   }
 
@@ -59,6 +59,6 @@ class MemoryActor extends ActorWrapper {
   save(node) { return this.send({ type: MemoryActor.MSG.SAVE, node }) }
 }
 
-const memoryActorR = Reader.asks(({ memory, userId, ...opts }) => new MemoryActor(memory, userId, opts))
+const memoryActorR = Reader.asks(({ memory, agentId, ...opts }) => new MemoryActor(memory, agentId, opts))
 
 export { MemoryActor, memoryActorR }

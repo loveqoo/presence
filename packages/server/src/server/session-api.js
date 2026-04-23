@@ -95,7 +95,7 @@ const mountSessionEndpoints = (router, deps) => {
       const cmd = await handleSlashCommand(input, {
         state: session.state, tools: session.tools,
         memory: effectiveCtx.memory, toolRegistry: effectiveCtx.toolRegistry,
-        userId: req.presenceSession.session.userId,
+        agentId: req.presenceSession.session.agentId,
       })
       if (cmd.handled) {
         // state 변경 커맨드(/clear 등) 후 persistence flush

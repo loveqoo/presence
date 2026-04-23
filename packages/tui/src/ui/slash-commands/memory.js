@@ -22,13 +22,13 @@ const formatAge = (ts) => {
   return `${Math.floor(sec / 86400)}d`
 }
 
-const cmdSummary = async (memory, userId, addMessage) => {
-  const nodes = await memory.allNodes(userId)
+const cmdSummary = async (memory, agentId, addMessage) => {
+  const nodes = await memory.allNodes(agentId)
   addMessage({ role: 'system', content: t('memory_cmd.summary', { count: nodes.length, detail: nodes.length > 0 ? `${nodes.length} nodes` : t('memory_cmd.empty') }), transient: true })
 }
 
-const cmdList = async (args, memory, userId, addMessage) => {
-  let nodes = await memory.allNodes(userId)
+const cmdList = async (args, memory, agentId, addMessage) => {
+  let nodes = await memory.allNodes(agentId)
   if (nodes.length === 0) { addMessage({ role: 'system', content: t('memory_cmd.not_found'), transient: true }); return }
   nodes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
   const lines = nodes.slice(0, 30).map((n, i) => {
@@ -40,7 +40,7 @@ const cmdList = async (args, memory, userId, addMessage) => {
   addMessage({ role: 'system', content: lines.join('\n'), transient: true })
 }
 
-const cmdClear = async (args, memory, userId, addMessage) => {
+const cmdClear = async (args, memory, agentId, addMessage) => {
   const clearArgs = args.slice(5).trim().split(/\s+/).filter(Boolean)
   let maxAgeMs = null
   for (const arg of clearArgs) {
@@ -49,15 +49,15 @@ const cmdClear = async (args, memory, userId, addMessage) => {
     else { addMessage({ role: 'system', content: t('memory_cmd.unknown_arg', { arg }) }); return }
   }
   let removed
-  if (!maxAgeMs) removed = await memory.clearAll(userId)
-  else removed = await memory.removeOlderThan(userId, maxAgeMs)
+  if (!maxAgeMs) removed = await memory.clearAll(agentId)
+  else removed = await memory.removeOlderThan(agentId, maxAgeMs)
   const key = maxAgeMs ? 'memory_cmd.cleared_with_age' : 'memory_cmd.cleared'
   const age = maxAgeMs ? clearArgs.find(a => DURATION_RE.test(a)) : null
   addMessage({ role: 'system', content: t(key, { count: removed, age }), transient: true })
 }
 
 const handleMemory = async (input, ctx) => {
-  const { memory, userId, addMessage, onInput } = ctx
+  const { memory, agentId, addMessage, onInput } = ctx
   // remote 모드: memory가 null이면 서버로 전달
   if (!memory) {
     if (onInput) {
@@ -68,10 +68,10 @@ const handleMemory = async (input, ctx) => {
     return
   }
   const args = input.slice('/memory'.length).trim()
-  if (!args) return cmdSummary(memory, userId, addMessage)
+  if (!args) return cmdSummary(memory, agentId, addMessage)
   if (args === 'help') { addMessage({ role: 'system', content: t('memory_cmd.help') }); return }
-  if (args === 'list' || args.startsWith('list ')) return cmdList(args, memory, userId, addMessage)
-  if (args === 'clear' || args.startsWith('clear ')) return cmdClear(args, memory, userId, addMessage)
+  if (args === 'list' || args.startsWith('list ')) return cmdList(args, memory, agentId, addMessage)
+  if (args === 'clear' || args.startsWith('clear ')) return cmdClear(args, memory, agentId, addMessage)
   addMessage({ role: 'system', content: t('memory_cmd.unknown_sub') })
 }
 

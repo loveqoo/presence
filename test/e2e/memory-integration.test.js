@@ -112,7 +112,7 @@ async function run() {
 
   // =========================================================================
   // MI1. 서버 턴 후 자동 메모리 저장
-  //   chat → executor가 memory.add(userId, input, output) 호출 → 다음 state 조회 시 증가
+  //   chat → executor가 memory.add(agentId, input, output) 호출 → 다음 state 조회 시 증가
   // =========================================================================
   {
     const tmpDir = mkdtempSync(join(tmpdir(), 'memory-integ-mi1-'))
@@ -141,21 +141,23 @@ async function run() {
 
   // =========================================================================
   // MI2. 프롬프트 주입 — 사전 등록된 메모리가 recall되어 state.context.memories 에 반영
-  //   주의: 사전 등록 시 userId는 서버 세션의 userId(=username)와 일치해야 한다.
+  //   주의: 사전 등록 시 agentId 는 서버 세션의 agentId (`${username}/default` 기본) 와 일치해야 한다.
+  //   Memory 는 agent 단위 격리 (docs/specs/architecture.md I7, docs/design/data-scope-alignment.md).
   // =========================================================================
   {
     const tmpDir = mkdtempSync(join(tmpdir(), 'memory-integ-mi2-'))
     const memoryPath = join(tmpDir, 'memory')
 
-    // 서버와 같은 userId 로 사전 등록 (세션 userId = username 규약)
+    // 서버와 같은 qualified agentId 로 사전 등록 (세션 agentId = `${username}/default`)
     const memory = await Memory.create(makeConfig(memoryPath))
     assert(memory !== null, 'MI2: Memory 인스턴스 생성')
 
-    await memory.add(TEST_USERNAME, '내 이름은 Anthony입니다', '안녕하세요 Anthony님!')
-    await memory.add(TEST_USERNAME, '나는 소프트웨어 엔지니어입니다', '개발자시군요!')
+    const TEST_AGENT_ID = `${TEST_USERNAME}/default`
+    await memory.add(TEST_AGENT_ID, '내 이름은 Anthony입니다', '안녕하세요 Anthony님!')
+    await memory.add(TEST_AGENT_ID, '나는 소프트웨어 엔지니어입니다', '개발자시군요!')
 
     // mem0는 의미적으로 유사한 입력을 하나의 노드로 병합할 수 있으므로 정확한 노드 수는 강제하지 않는다.
-    const seeded = await memory.allNodes(TEST_USERNAME)
+    const seeded = await memory.allNodes(TEST_AGENT_ID)
     assert(seeded.length >= 1, `MI2: 사전 메모리 등록됨 (${seeded.length}개)`)
 
     const ctx = await createAuthServer(memoryPath)

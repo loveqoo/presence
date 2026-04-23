@@ -65,10 +65,10 @@ const SLASH_COMMANDS = {
     return { type: 'system', content: tools.map(tool => tool.name).join(', ') || '(none)' }
   },
 
-  memory: async (args, { memory, userId }) => {
+  memory: async (args, { memory, agentId }) => {
     if (args[0] !== 'list') return null // 미지원 서브커맨드 → 에이전트에 위임
     if (!memory) return { type: 'system', content: 'Memory disabled.' }
-    const nodes = await memory.allNodes(userId)
+    const nodes = await memory.allNodes(agentId)
     const summary = nodes.slice(0, 20).map(node => node.label).join('\n')
     return { type: 'system', content: `${nodes.length} nodes:\n${summary}` }
   },

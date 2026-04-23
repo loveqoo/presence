@@ -103,7 +103,7 @@ const ephemeralInits = {
     this.actors = new SessionActors({
       userContext, state: this.state, logger: this.logger,
       persistenceActor: this.persistenceActor,
-      userId: this.userId,
+      agentId: this.agentId,
       turnLifecycle: this.turnLifecycle,
       turnController: this.turnController,
       delegateRuntime: this.delegateRuntime,

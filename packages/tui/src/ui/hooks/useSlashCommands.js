@@ -20,12 +20,15 @@ const useSlashCommands = ({ core, context, ui, session }) => {
     // 이전 정보 조회 결과(transient) 제거
     core.clearTransient()
     const { username, ...restContext } = context
+    // agentId M1 하드코딩: `${username}/default`. 서버 session-api.js 의 기본 세션 규칙과 일치.
+    // local Repl 모드 (ctx.memory 인스턴스 존재) 에서만 memory 호출에 쓰임. remote 모드는
+    // memory=null → onInput 으로 서버 위임이므로 TUI 내부 agentId 사용 없음.
     const slashCtx = {
       ...core,
       ...restContext,
       ...ui,
       ...session,
-      userId: username,
+      agentId: username ? `${username}/default` : null,
     }
     if (await dispatchSlashCommand(input, slashCtx)) return
 

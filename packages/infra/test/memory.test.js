@@ -66,8 +66,12 @@ const createMemoryWithMock = async (mockMem0) => {
   return new Memory(mockMem0)
 }
 
+// agent 단위 격리: 첫 파라미터는 qualified agentId (`{userId}/{agentName}`).
+// 레거시 변수명 USER_A/USER_B 는 단일 agent 격리 시나리오 (값은 임의 문자열) 를 의미.
 const USER_A = 'userA'
 const USER_B = 'userB'
+const SAME_USER_AGENT_1 = 'shared/agent1'
+const SAME_USER_AGENT_2 = 'shared/agent2'
 
 async function run() {
   console.log('Memory unit tests')
@@ -256,7 +260,7 @@ async function run() {
   }
 
   // =========================================================================
-  // MC14. userId 격리 — 다른 userId는 서로 보이지 않음
+  // MC14. agentId 격리 — 다른 agentId는 서로 보이지 않음
   // =========================================================================
   {
     const mock = createMockMem0()
@@ -268,17 +272,37 @@ async function run() {
     const nodesA = await memory.allNodes(USER_A)
     const nodesB = await memory.allNodes(USER_B)
 
-    assert(nodesA.length === 1, 'MC14: userA 노드 1개')
-    assert(nodesB.length === 1, 'MC14: userB 노드 1개')
-    assert(nodesA[0].label.includes('A만의'), 'MC14: userA는 자신의 데이터만')
-    assert(nodesB[0].label.includes('B만의'), 'MC14: userB는 자신의 데이터만')
+    assert(nodesA.length === 1, 'MC14: agentA 노드 1개')
+    assert(nodesB.length === 1, 'MC14: agentB 노드 1개')
+    assert(nodesA[0].label.includes('A만의'), 'MC14: agentA는 자신의 데이터만')
+    assert(nodesB[0].label.includes('B만의'), 'MC14: agentB는 자신의 데이터만')
 
-    // clearAll은 해당 userId만 삭제
+    // clearAll은 해당 agentId만 삭제
     await memory.clearAll(USER_A)
     const nodesAAfter = await memory.allNodes(USER_A)
     const nodesBAfter = await memory.allNodes(USER_B)
-    assert(nodesAAfter.length === 0, 'MC14: userA 데이터 삭제됨')
-    assert(nodesBAfter.length === 1, 'MC14: userB 데이터 유지됨')
+    assert(nodesAAfter.length === 0, 'MC14: agentA 데이터 삭제됨')
+    assert(nodesBAfter.length === 1, 'MC14: agentB 데이터 유지됨')
+  }
+
+  // =========================================================================
+  // MC15. 같은 유저의 서로 다른 agent 는 기억 격리 — qualified agentId 로 분리
+  // =========================================================================
+  {
+    const mock = createMockMem0()
+    const memory = await createMemoryWithMock(mock)
+
+    await memory.add(SAME_USER_AGENT_1, 'agent1 이 보고 들은 것', 'ack1')
+    await memory.add(SAME_USER_AGENT_2, 'agent2 가 보고 들은 것', 'ack2')
+
+    const nodes1 = await memory.allNodes(SAME_USER_AGENT_1)
+    const nodes2 = await memory.allNodes(SAME_USER_AGENT_2)
+    assert(nodes1.length === 1 && nodes1[0].label.includes('agent1'), 'MC15: agent1 자신 기억만')
+    assert(nodes2.length === 1 && nodes2[0].label.includes('agent2'), 'MC15: agent2 자신 기억만')
+
+    // agent1 의 search 결과는 agent1 의 store 에서만 나오고, agent2 기억은 절대 포함되지 않는다.
+    const searchFromAgent1 = await memory.search(SAME_USER_AGENT_1, 'anything')
+    assert(!searchFromAgent1.some(r => r.label.includes('agent2')), 'MC15: agent1 search 결과에 agent2 기억 포함되지 않음')
   }
 
   summary()
