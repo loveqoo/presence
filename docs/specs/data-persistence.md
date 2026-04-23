@@ -19,9 +19,11 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
         ├── config.json                 ← 유저별 설정 override (agents[], primaryAgentId 포함)
         ├── user-data.db                ← UserDataStore (SQLite, category/status 구조)
         ├── jobs.db                     ← JobStore (SQLite, cron 스케줄, schema v1: owner_user_id + owner_agent_id)
-        ├── sessions/
-        │   └── {sessionId}/
-        │       └── state.json          ← 세션 상태 (Conf JSON, PersistenceActor 관리)
+        ├── agents/
+        │   └── {agentName}/
+        │       └── sessions/
+        │           └── {sessionId}/
+        │               └── state.json  ← 세션 상태 (Conf JSON, PersistenceActor 관리)
         ├── agent-policies.json         ← admin 전용: maxAgentsPerUser quota 정책
         ├── pending/                    ← admin 전용: 승인 대기 요청 파일 (req-{id}.json)
         ├── approved/                   ← admin 전용: 승인 완료 파일
@@ -33,7 +35,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - I1. **유저 데이터 경로**: `Config.userDataPath(username)` 경유. 실제 경로는 `Config.presenceDir()/users/{username}/` — 기본값 `~/.presence/users/{username}/`. 구현: `Config.presenceDir()`이 `PRESENCE_DIR` 환경변수를 직접 읽어 모든 파생 경로(`Config.userDataPath()`, `defaultUserDataPath()`, `defaultMemoryPath()`)에 전파된다.
 
 - I2. **서버 전역 경로**: `Config.resolveDir()` 경유. 기본값 `~/.presence/` (`Config.presenceDir()` 반환값). `PRESENCE_DIR` 환경변수 또는 `basePath` 옵션으로 override 가능.
-- I3. **세션 persistence 경로**: `Config.resolveDir()/users/{username}/sessions/{sessionId}/state.json` — 기본값 `~/.presence/users/{username}/sessions/{sessionId}/state.json`. `Conf` 라이브러리 사용 (`{ cwd, configName: 'state' }`).
+- I3. **세션 persistence 경로**: `Config.resolveDir()/users/{username}/agents/{agentName}/sessions/{sessionId}/state.json` — 기본값 `~/.presence/users/{username}/agents/{agentName}/sessions/{sessionId}/state.json`. `Conf` 라이브러리 사용 (`{ cwd, configName: 'state' }`). M1 단계에서 `agentName`은 `default` 하드코딩, M3 이후 `config.primaryAgentId`로 이관 예정 (KG-16).
 - I4. **transient 필드 미저장**: `_` 접두사 키(`_streaming`, `_debug`, `_toolResults`, `_approve`, `_budgetWarning`, `_compactionEpoch`)는 디스크에 저장하지 않는다. `stripTransient()`가 snapshot에서 제거.
 - I12. **workingDir/pendingBackfill 미영속화**: `workingDir`은 state.json에 저장하지 않는다. `UserSession.flushPersistence()`는 snapshot에 `workingDir`을 포함하지 않는다. 복원(restoreState) 시에도 `workingDir`을 복원하지 않으며, 항상 `Config.userDataPath(userId)`로 재계산한다. `pendingBackfill` 필드는 제거되었다. 세부 규칙은 `agent-identity.md I-WD` 참조.
 - I5. **PersistenceActor 경유 저장**: 세션 상태의 디스크 저장은 PersistenceActor를 통해서만. debounce `PERSISTENCE.DEBOUNCE_MS`(현재 500ms, `packages/core/src/core/policies.js` 정의) 적용. Actor 내부에서 `this.#store.set(PERSISTENCE.STORE_KEY, stripTransient(snapshot))` 실행 (`persistence-actor.js:49`, `PERSISTENCE`는 `@presence/core/core/policies.js` 상수 객체).
@@ -46,8 +48,8 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 
 ## 경계 조건 (Edge Cases)
 
-- E1. 세션 경로(`users/{username}/sessions/{sessionId}/`)가 없는 경우 → 일반 세션 생성(`POST /sessions`)에서는 `persistenceCwd`를 `sessions.create()`에 전달하고 디렉토리 생성은 `Conf` 라이브러리에 위임 (`session-api.js:193-194`). `mkdirSync(persistenceCwd, { recursive: true })`는 레거시 상태 파일(`users/{username}/state.json`) → 새 경로(`users/{username}/sessions/{sessionId}/state.json`) 마이그레이션 분기에서만 호출됨 (`session-api.js:83-84`).
-- E2. 레거시 상태 파일 (`users/{username}/state.json`) 존재 시 → 새 경로로 `renameSync`. 이미 새 경로에 파일이 있으면 마이그레이션 건너뜀.
+- E1. 세션 경로(`users/{username}/agents/{agentName}/sessions/{sessionId}/`)가 없는 경우 → 일반 세션 생성(`POST /sessions`)에서는 `persistenceCwd`를 `sessions.create()`에 전달하고 디렉토리 생성은 `Conf` 라이브러리에 위임.
+- E2. 레거시 경로 (`users/{username}/sessions/{sessionId}/state.json`) 존재 시 → 자동 마이그레이션 없음. 기존 데이터를 버리는 결정 (`data-scope-alignment.md §6`). 서버는 새 경로에서 찾지 못하면 빈 상태로 시작. 구 2단계 migration 블록(`state.json` → `sessions/{sid}/state.json`)도 함께 제거됨.
 - E3. `state.json`이 손상(JSON 파싱 오류)된 경우 → `restore()` null 반환 → fresh state. 손상 파일은 그대로 남음 (자동 삭제 없음).
 - E4. `_compactionEpoch`는 transient 필드지만 restore 후 증가시킴 → `restoreState()` 에서 restore 성공 시 `_compactionEpoch + 1`을 `state.set`으로 반영.
 - E5. `users.json`이 없는 경우 → `hasUsers()` false 반환 → 서버 CLI 진입점에서 "No users configured" 출력 후 exit(1).
@@ -65,7 +67,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - I7 → `packages/infra/test/persistence.test.js` (migrateHistoryIds)
 - I8 → `packages/infra/test/session.test.js` (EphemeralSession no-op persistence)
 - I9 → 독립 CRUD 테스트 부재 — `packages/infra/test/scheduler.test.js` / `packages/infra/test/events.test.js` 에 간접 검증만 존재 ⚠️
-- E2 → (자동화 테스트 없음) ⚠️ 레거시 마이그레이션
+- E2 → (마이그레이션 없음 — 기존 데이터 버림 결정, 테스트 불필요)
 - E4 → `packages/infra/test/session.test.js` (_compactionEpoch restore 후 증가)
 - E9 → (미커버) ⚠️ 중첩 transient 필드 저장 케이스
 
@@ -95,3 +97,4 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - 2026-04-10: I10에 JobStore 이력 보존 정책 추가 — HISTORY_MAX_PER_JOB(50), HISTORY_TTL_DAYS(90). job-store.js 로컬 상수, policies.js 미등록 Known Gap 명시.
 - 2026-04-10: I10 Known Gap 해소 — JOB 상수가 policies.js로 이동, job-store.js는 JOB.HISTORY_MAX_PER_JOB / JOB.HISTORY_TTL_DAYS import 사용.
 - 2026-04-12: KG-06 부분 해소 — E8에 경고 로그 동작 추가. PRESENCE_DIR이 기본 경로와 다르고 기본 경로에 users.json이 존재하면 서버 부트 시 경고 로그 출력. 데이터 미이전 알림 한계는 유지.
+- 2026-04-24: data-scope-alignment 완료 반영 — I3 세션 경로에 `agents/{agentName}/` 디렉토리 삽입. 파일 경로 트리 갱신. E1 경로 표기 갱신. E2 레거시 마이그레이션 → "기존 데이터 버림" 결정으로 재작성. 테스트 커버리지 E2 주석 갱신.

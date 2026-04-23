@@ -204,7 +204,7 @@ const connect = async () => {
     if (!username || !store) return
     try {
       const userDir = join(Config.presenceDir(), 'users', username)
-      await removeUserCompletely({ store, memory: null, username, userDir })
+      await removeUserCompletely({ store, memory: null, username, userDir, agentIds: [] })
       console.log(`[teardown] 임시 유저 삭제: ${username}`)
     } catch (err) {
       console.error(`[teardown] 유저 삭제 실패:`, err.message)

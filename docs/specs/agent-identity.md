@@ -107,12 +107,18 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - `packages/infra/src/infra/agents/resolve-delegate-target.js` — resolveDelegateTarget
 - `packages/infra/src/infra/agents/agent-registry.js` — createAgentRegistry
 - `packages/infra/src/infra/sessions/session.js` — Session 생성자 (agentId 필수 검증)
-- `packages/server/src/server/session-api.js` — 진입점 #1 (NEW_SESSION/CONTINUE_SESSION)
+- `packages/server/src/server/session-api.js` — 진입점 #1 (NEW_SESSION/CONTINUE_SESSION), agents/{agentName}/sessions/{sid}/ 경로 생성
 - `packages/server/src/server/a2a-router.js` — 진입점 #2 (DELEGATE, stub auth)
 - `packages/server/src/server/ws-handler.js` — 진입점 #3 (CONTINUE_SESSION)
 - `packages/server/src/server/scheduler-factory.js` — 진입점 #4 (SCHEDULED_RUN)
 - `packages/infra/src/interpreter/delegate.js` — 진입점 #5 (DELEGATE)
 - `packages/infra/src/infra/jobs/job-store.js` — JobStore schema v1 (owner_user_id + owner_agent_id)
+- `packages/infra/src/infra/memory.js` — Memory 클래스 (agentId 파라미터 격리)
+- `packages/infra/src/infra/actors/memory-actor.js` — MemoryActor (agentId 기반 recall/save)
+- `packages/infra/src/infra/sessions/internal/session-actors.js` — sessionEnv에 agentId 주입
+- `packages/infra/src/infra/auth/remove-user.js` — removeUserCompletely (agentIds 순회 clearAll)
+- `packages/server/src/server/slash-commands.js` — /memory 슬래시 커맨드 ctx.agentId 전달
+- `packages/core/src/core/repl-commands.js` — Repl agentId 기반 memory 조회
 
 ---
 
@@ -121,3 +127,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-22: 초기 작성 — feature/agent-identity-model 브랜치 23커밋 검증 후 작성. KG-15~18 등록.
 - 2026-04-23: I-WD 추가 — W1(cb6c59a) workingDir 단일 규칙 리팩토링 반영. `workingDir = Config.userDataPath(userId)` 고정, 외부 입력 무시, persistence 미저장 규칙. 테스트 커버리지 I-WD 추가.
 - 2026-04-24: KG-19 추가 — feature/agent-scoped-data 브랜치 data-scope 조사에서 발견. JobStore 의 owner_user_id/owner_agent_id 컬럼이 schema 에만 존재, 조회/수정/삭제 쿼리에서 필터링에 사용 안 됨. 이번 data-scope 리팩토링 범위 분리 — 별도 티켓으로 등록.
+- 2026-04-24: data-scope-alignment 완료 반영 — Memory/Session 격리 단위 변경(docs/design/data-scope-alignment.md) 구현 완료. 관련 코드 목록에 memory.js / memory-actor.js / session-actors.js / remove-user.js / slash-commands.js / repl-commands.js 추가. session-api.js 설명에 agents/{agentName}/sessions/{sid}/ 경로 생성 명시.

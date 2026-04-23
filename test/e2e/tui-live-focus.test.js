@@ -123,7 +123,7 @@ const teardown = async () => {
   }
   try {
     const userDir = join(Config.presenceDir(), 'users', USERNAME)
-    await removeUserCompletely({ store, memory: null, username: USERNAME, userDir })
+    await removeUserCompletely({ store, memory: null, username: USERNAME, userDir, agentIds: [] })
     console.log(`[teardown] 테스트 유저 삭제: ${USERNAME}`)
   } catch (err) {
     console.error(`[teardown] 유저 삭제 실패:`, err.message)

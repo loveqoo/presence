@@ -18,20 +18,23 @@ const setupStore = async (prefix, username) => {
 }
 
 const run = async () => {
-  // --- 세 단계 모두 정리 ---
+  // --- 세 단계 모두 정리 — 각 agentId 마다 clearAll 호출 ---
   {
     const { dir, store, userDir } = await setupStore('kg04a', 'alice')
     const cleared = []
-    const memory = { clearAll: async (uid) => { cleared.push(uid); return 7 } }
+    const memory = { clearAll: async (aid) => { cleared.push(aid); return 7 } }
+    const agentIds = ['alice/default', 'alice/summarizer']
 
     const result = await removeUserCompletely({
-      store, memory, username: 'alice', userDir,
+      store, memory, username: 'alice', userDir, agentIds,
     })
 
-    assert(result.memoryCount === 7, 'removeUserCompletely: memoryCount 반영')
+    assert(result.memoryCount === 14, 'removeUserCompletely: memoryCount 합계 반영 (7 * 2 agent)')
     assert(result.dirRemoved === true, 'removeUserCompletely: dirRemoved=true')
-    assert(cleared.length === 1 && cleared[0] === 'alice',
-      'removeUserCompletely: memory.clearAll 이 username 으로 호출')
+    assert(cleared.length === 2,
+      'removeUserCompletely: 각 agent 마다 clearAll 호출')
+    assert(cleared[0] === 'alice/default' && cleared[1] === 'alice/summarizer',
+      'removeUserCompletely: qualified agentId 순서대로 전달')
     assert(store.findUser('alice') === null,
       'removeUserCompletely: users.json 에서 제거됨')
     assert(!existsSync(userDir),
@@ -44,7 +47,7 @@ const run = async () => {
   {
     const { dir, store, userDir } = await setupStore('kg04b', 'bob')
     const result = await removeUserCompletely({
-      store, memory: null, username: 'bob', userDir,
+      store, memory: null, username: 'bob', userDir, agentIds: ['bob/default'],
     })
     assert(result.memoryCount === 0,
       'removeUserCompletely: memory null → memoryCount=0')
@@ -55,15 +58,40 @@ const run = async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // --- memory.clearAll 실패 → best effort ---
+  // --- agentIds 빈 배열 → memory 단계 skip ---
   {
-    const { dir, store, userDir } = await setupStore('kg04c', 'carol')
-    const memory = { clearAll: async () => { throw new Error('mem0 backend down') } }
+    const { dir, store, userDir } = await setupStore('kg04b2', 'bob2')
+    const cleared = []
+    const memory = { clearAll: async (aid) => { cleared.push(aid); return 3 } }
     const result = await removeUserCompletely({
-      store, memory, username: 'carol', userDir,
+      store, memory, username: 'bob2', userDir, agentIds: [],
     })
     assert(result.memoryCount === 0,
-      'removeUserCompletely: clearAll throw → memoryCount=0 (best effort)')
+      'removeUserCompletely: agentIds=[] → memoryCount=0 (skip)')
+    assert(cleared.length === 0,
+      'removeUserCompletely: agentIds=[] → memory.clearAll 호출 없음')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // --- memory.clearAll 한 agent 실패 → 나머지 agent 는 계속 진행 ---
+  {
+    const { dir, store, userDir } = await setupStore('kg04c', 'carol')
+    let callCount = 0
+    const memory = {
+      clearAll: async (aid) => {
+        callCount++
+        if (aid === 'carol/default') throw new Error('mem0 backend down')
+        return 5
+      },
+    }
+    const result = await removeUserCompletely({
+      store, memory, username: 'carol', userDir,
+      agentIds: ['carol/default', 'carol/summarizer'],
+    })
+    assert(callCount === 2,
+      'removeUserCompletely: 실패한 agent 다음 agent 도 호출')
+    assert(result.memoryCount === 5,
+      'removeUserCompletely: 실패 agent 제외한 합계 반환')
     assert(result.dirRemoved === true,
       'removeUserCompletely: clearAll 실패해도 dir 삭제 진행')
     assert(store.findUser('carol') === null,
@@ -78,12 +106,13 @@ const run = async () => {
     await store.addUser('dave', 'password123')
 
     const cleared = []
-    const memory = { clearAll: async (uid) => { cleared.push(uid); return 5 } }
+    const memory = { clearAll: async (aid) => { cleared.push(aid); return 5 } }
 
     let thrown = null
     try {
       await removeUserCompletely({
         store, memory, username: 'ghost', userDir: join(dir, 'users', 'ghost'),
+        agentIds: ['ghost/default'],
       })
     } catch (err) { thrown = err }
 
@@ -104,7 +133,7 @@ const run = async () => {
     await store.addUser('eve', 'password123')
     const result = await removeUserCompletely({
       store, memory: null, username: 'eve',
-      userDir: join(dir, 'users', 'eve'),
+      userDir: join(dir, 'users', 'eve'), agentIds: [],
     })
     assert(result.dirRemoved === false,
       'removeUserCompletely: 디렉토리 부재 → dirRemoved=false')
