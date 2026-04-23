@@ -239,7 +239,7 @@ async function run() {
       await post(`/api/sessions/${sid}/chat`, { input: 'persist-test' })
       await delay(1000) // debounce flush 대기
 
-      const stateFile = join(ctx.tmpDir, 'users', 'testuser', 'sessions', sid, 'state.json')
+      const stateFile = join(ctx.tmpDir, 'users', 'testuser', 'agents', 'default', 'sessions', sid, 'state.json')
       const before = JSON.parse(readFileSync(stateFile, 'utf-8'))
       assert(before.agentState?.context?.conversationHistory?.length > 0, 'S18: chat 후 history 저장됨')
 

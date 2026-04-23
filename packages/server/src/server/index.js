@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { join } from 'node:path'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import { UserContext } from '@presence/infra/infra/user-context.js'
@@ -145,8 +146,14 @@ class PresenceServer {
     const defaultUserId = this.#username || 'default'
     // agentId: M1 단계 runtime hardcode `${userId}/default`.
     // M3 에서 config.primaryAgentId 로 이관 (docs/design/agent-identity-model.md §12).
+    // 세션 경로에 agent 디렉토리 삽입 — opts.persistenceCwd 가 주어진 경우에만
+    // agent 계층 조립. 프로덕션 cli.js 는 persistenceCwd 없이 호출 → persistence no-op.
+    // 테스트 mock-server.js 는 tmpDir 주입 → tmpDir/agents/default/sessions/user-default/.
+    const defaultPersistenceCwd = persistenceCwd
+      ? join(persistenceCwd, 'agents', 'default', 'sessions', 'user-default')
+      : undefined
     const defaultEntry = this.#userContext.sessions.create({
-      id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd,
+      id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd: defaultPersistenceCwd,
       userId: defaultUserId,
       agentId: `${defaultUserId}/default`,
       onScheduledJobDone: Function.prototype,

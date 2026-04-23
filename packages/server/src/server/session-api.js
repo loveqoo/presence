@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
@@ -21,13 +20,9 @@ const findOrCreateSession = (sessionId, username, effectiveUserContext) => {
   // 세션 없으면 자동 생성 ({username}-default 패턴)
   if (!entry && username && sessionId === `${username}-default`) {
     const userDir = join(Config.resolveDir(), 'users', username)
-    const persistenceCwd = join(userDir, 'sessions', sessionId)
-    // 레거시 경로(users/{username}/state.json) → 새 경로 마이그레이션
-    const legacyState = join(userDir, 'state.json')
-    if (existsSync(legacyState) && !existsSync(join(persistenceCwd, 'state.json'))) {
-      mkdirSync(persistenceCwd, { recursive: true })
-      renameSync(legacyState, join(persistenceCwd, 'state.json'))
-    }
+    // 세션 경로에 agent 디렉토리 삽입 (docs/design/data-scope-alignment.md §3.2).
+    // agent name 'default' 는 M1 하드코딩 — M3 에서 config.primaryAgentId 로 이관.
+    const persistenceCwd = join(userDir, 'agents', 'default', 'sessions', sessionId)
     // agentId: M1 runtime hardcode. M3 에서 config.primaryAgentId 경유 (identity §12)
     entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username, agentId: `${username}/default` })
   }
@@ -171,7 +166,8 @@ const mountSessionsCrud = (router, deps) => {
     }
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
-    const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'sessions', sessionId) : undefined
+    // 세션 경로에 agent 디렉토리 삽입. agent name 'default' 는 M1 하드코딩.
+    const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'agents', 'default', 'sessions', sessionId) : undefined
     try {
       // agentId: M1 runtime hardcode. M3 이후 config.primaryAgentId / type 별 결정 로직 이관.
       const effectiveUserId = owner || 'default'
