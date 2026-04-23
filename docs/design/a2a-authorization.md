@@ -79,7 +79,7 @@ Audit 기록
   ↓
 CLI 가 agent-policies.json 읽음 + user config 기반 count
   ↓
-Cedar: (principal=User::"anthony", action=create_agent, resource=User::"anthony", context={count, quota, role, time, ...})
+Cedar: (principal=LocalUser::"anthony", action=create_agent, resource=User::"anthony", context={count, quota, role, time, ...})
   ↓
 allow → identity model §8.3.5 idempotent replay 로 append
 deny  → pending/{reqId}.json 에 저장 (admin 수동 검토)
@@ -352,17 +352,36 @@ Identity model §11.1 에서 결정. `enabled=false` 면:
 
 ## 10. 구현 Phase
 
+v6 에서 Phase 를 **v1 (이번 구현)** 과 **v2 (후속)** 로 분리. v2 상세는 [`a2a-transport.md`](a2a-transport.md) 참고.
+
+### v1 — Authz 기반 + governance (이번 구현)
+
 | 단계 | 내용 | 의존 |
 |---|---|---|
 | **P23-0** | Action catalog + CallerIdentity + AuthzDecision 타입 (순수) | identity v5 |
-| **P23-1** | Cedar wrapper (`infra/authz/`) + `evaluate` + `assertValid` | P23-0 |
-| **P23-2** | Policy loader (2-layer) + `00-base.cedar` auto-seed + mtime 판별 | P23-1 |
+| **P23-1** | Cedar wrapper (`infra/authz/`) + `evaluate` + `assertValid` + entity-bag | P23-0 |
+| **P23-2** | Policy loader (2-layer) + `00-base.cedar` auto-seed + mtime 판별 + schema.cedarschema | P23-1 |
 | **P23-3** | Audit 포맷 + winston transport | P23-1 |
-| **P23-4** | AgentCard `x-presence.publicKey` + peer registry + CLI (`peer add`) | identity §11 |
-| **P23-5** | JWT `iss`/`aud`/publicKey 검증 + `fromJwt` | P23-4 |
-| **P23-6** | HTTP `/a2a/:username/:agentName` 수신 handler — canAccessAgent 먼저 + Cedar 평가 | P23-2, P23-3, P23-5 |
-| **P23-7** | `create_agent` action 연계 — admin CLI approve 경로에 Cedar 평가 삽입 | P23-2, identity §8 |
-| **P23-8** | Live probe — 외부 peer 가 로컬 agent 에 delegate 하는 시나리오 | P23-6 |
+| **P23-7** | `create_agent` action 연계 — admin CLI approve 경로에 Cedar 평가 삽입. quota 체크를 Cedar 로 이전 | P23-2, identity §8 |
+
+**v1 스코프 결정**:
+- Cedar `a2a-delegate` 평가는 **정책/스키마 정의만** v1 에 포함. 실제 라우터 연결은 v2
+- `/a2a/*` 라우트는 v1 에서 stub 유지 (KG-17 개방 유지)
+- `canAccessAgent` 시그니처를 `{caller: CallerIdentity}` 로 전환 (5 진입점 일괄)
+
+### v2 — A2A 통신 연결 (후속, 별도 플랜)
+
+| 단계 | 내용 | 의존 |
+|---|---|---|
+| **P23-4** | AgentCard `x-presence.publicKey` + per-agent RSA keypair + peer registry (target-user scoped, filesystem-only) + CLI (`peer add/refresh/remove`) | v1 완료 |
+| **P23-5** | JWT RS256 검증 (`iss`/`aud`/`sub`/`exp`/`iat`/`jti`) + aud route binding + URL canonicalization + `fromJwt` | P23-4 |
+| **P23-6** | HTTP `/a2a/:username/:agentName` 라우터 wire-up — JWT 미들웨어 + PeerAgent entity + 항상 Cedar `a2a-delegate` 평가 (same-user fast-path 제외) | P23-2, P23-3, P23-5 |
+| **P23-8** | Live probe — 두 서버 프로세스 간 peer delegate 시나리오 | P23-6 |
+
+**v2 제약 요약** (상세 [`a2a-transport.md`](a2a-transport.md)):
+- v1 single-instance 전용 (jti LRU 공유 없음). multi-instance 배포 금지
+- entity-bag 은 여전히 flat-only. PeerAgent/Agent entity 추가 필요
+- peer compromise 영향 범위 추적 경로 없음 — 운영 절차 문서화 필요
 
 ---
 
@@ -391,3 +410,4 @@ Identity model §11.1 에서 결정. `enabled=false` 면:
 
 - v1~v4: 광범위 scope 시도. 반복 no-ship → identity 모델 분리 결정
 - **v5**: [`agent-identity-model.md`](agent-identity-model.md) v5 토대 위에 재작성. Cedar 의 scope 를 복합 정책 2 지점 (`create_agent`, `a2a-delegate`) 으로 극축소. 내부 `Op.Delegate` 는 `canAccessAgent` 로 충분 (Cedar 미사용). 문서 크기 ~200 줄로 축소. Phase 재정의 (P23-0 ~ P23-8).
+- **v6**: Phase 를 v1 (이번 구현 — authz 기반 + governance, P23-0/1/2/3/7) 과 v2 (후속 — A2A 통신 연결, P23-4/5/6/8) 로 분리. v2 상세 설계는 새 문서 [`a2a-transport.md`](a2a-transport.md) 로 이관. 분리 이유: 한 번에 9단계 진행 시 플랜이 수렴하지 않는 adversarial review 패턴 관측 — 의존성 낮은 기반층 먼저 확정 후 통신층 별도 진행. `/a2a/*` 라우트는 v1 동안 stub 유지 (KG-17 개방 유지). v1 에서 `canAccessAgent` 시그니처 `{caller: CallerIdentity}` 로 전환 (5 진입점 일괄).
