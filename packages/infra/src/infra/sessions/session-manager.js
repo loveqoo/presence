@@ -40,7 +40,25 @@ const createSessionManager = (userContext, opts = {}) => {
     await entry.session.cleanup().catch(() => {})
   }
 
-  return { create, get, list, destroy }
+  // A2A Phase 1 S1 수신 session 라우팅 (a2a-internal.md §4.2):
+  //   AGENT type session 중 session.agentId 가 매치되는 entry 를 찾는다.
+  //   USER session 과 같은 agentId 가 공존해도 (dual-homed: default/manager) AGENT 만 선택.
+  //   → SendTodo 가 유저 대화 흐름 (UserSession) 을 교란하지 않음.
+  //
+  // tagged union 반환:
+  //   { kind: 'ok', entry }           — 정확히 1 개 AGENT session 매치
+  //   { kind: 'not-registered', entry: null } — 0 개 매치 (등록된 AGENT session 없음)
+  //   { kind: 'ambiguous', entry: null }      — 2 개 이상 (이론상 발생 없음, 방어)
+  const findAgentSession = (agentId) => {
+    const matches = [...sessions.values()].filter(
+      entry => entry.type === SESSION_TYPE.AGENT && entry.session.agentId === agentId,
+    )
+    if (matches.length === 0) return { kind: 'not-registered', entry: null }
+    if (matches.length > 1) return { kind: 'ambiguous', entry: null }
+    return { kind: 'ok', entry: matches[0] }
+  }
+
+  return { create, get, list, destroy, findAgentSession }
 }
 
 export { createSessionManager }

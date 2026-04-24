@@ -1,5 +1,6 @@
 import { Cron } from 'croner'
 import fp from '@presence/core/lib/fun-fp.js'
+import { EVENT_TYPE } from '@presence/core/core/policies.js'
 import { withEventMeta } from '../events.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 
@@ -204,7 +205,7 @@ class JobToolFactory {
         const runId = this.#store.startRun(job.id, 1)
         const event = withEventMeta({
           id: runId,
-          type: 'scheduled_job',
+          type: EVENT_TYPE.SCHEDULED_JOB,
           jobId: job.id,
           jobName: job.name,
           prompt: job.prompt,

@@ -174,3 +174,17 @@ export const PROMPT = Object.freeze({
   BUDGET_WARN_PCT: 90,
 })
 
+// EventActor event.type enum — scheduler/a2a 경로에서 공유.
+// 정의와 사용이 한 enum 을 참조해야 scheduled_job 콜백 회귀를 막을 수 있다.
+export const EVENT_TYPE = Object.freeze({
+  SCHEDULED_JOB: 'scheduled_job',
+  TODO_REVIEW:   'todo_review',
+  TODO_REQUEST:  'todo_request',
+})
+
+// A2A Phase 1 정책 상수. S4 enforcement/expire 에서 소비.
+export const A2A = Object.freeze({
+  QUEUE_MAX_PER_AGENT: 100,
+  DEFAULT_TIMEOUT_MS: 300000,
+})
+

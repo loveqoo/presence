@@ -9,7 +9,7 @@ import { eventActorR } from '@presence/infra/infra/actors/event-actor.js'
 import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
 import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { eventToPrompt } from '@presence/infra/infra/events.js'
-import { TurnState } from '@presence/core/core/policies.js'
+import { TurnState, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
@@ -287,7 +287,7 @@ async function run() {
 
     await new Promise(r => actor.send({ type: 'poll' }).fork(() => {}, r))
     assert(mockActor.enqueued.length === 1, 'S13: enqueued due job')
-    assert(mockActor.enqueued[0].type === 'scheduled_job', 'S13: event type')
+    assert(mockActor.enqueued[0].type === EVENT_TYPE.SCHEDULED_JOB, 'S13: event type')
     assert(mockActor.enqueued[0].prompt === '실행', 'S13: prompt forwarded')
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
@@ -422,13 +422,13 @@ async function run() {
 
   // S22. eventToPrompt: scheduled_job → prompt 필드 사용
   {
-    const event = { type: 'scheduled_job', prompt: '일일 리포트 생성' }
+    const event = { type: EVENT_TYPE.SCHEDULED_JOB, prompt: '일일 리포트 생성' }
     assert(eventToPrompt(event) === '일일 리포트 생성', 'S22: scheduled_job uses prompt field')
   }
 
   // S23. eventToPrompt: prompt 없으면 fallback
   {
-    const event = { type: 'scheduled_job' }
+    const event = { type: EVENT_TYPE.SCHEDULED_JOB }
     assert(eventToPrompt(event) === '이벤트 처리: scheduled_job', 'S23: fallback when no prompt')
   }
 
@@ -454,7 +454,7 @@ async function run() {
     const eventActor = eventActorR.run({
       turnActor, state, logger: null,
       onEventDone: (event, { success, result, error }) => {
-        if (event.type !== 'scheduled_job') return
+        if (event.type !== EVENT_TYPE.SCHEDULED_JOB) return
         if (success) {
           schedulerActor.send({ type: 'job_done', runId: event.runId, result }).fork(() => {}, () => {})
         } else {
@@ -466,7 +466,7 @@ async function run() {
     // scheduled_job 이벤트 enqueue
     eventActor.send({
       type: 'enqueue',
-      event: { id: runId, type: 'scheduled_job', jobId: job.id, jobName: job.name, prompt: '리포트', runId, attempt: 1, createdAt: Date.now() },
+      event: { id: runId, type: EVENT_TYPE.SCHEDULED_JOB, jobId: job.id, jobName: job.name, prompt: '리포트', runId, attempt: 1, createdAt: Date.now() },
     }).fork(() => {}, () => {})
 
     await delay(150)
@@ -496,7 +496,7 @@ async function run() {
     const eventActor = eventActorR.run({
       turnActor, state, logger: null,
       onEventDone: (event, { success, result, error }) => {
-        if (event.type !== 'scheduled_job') return
+        if (event.type !== EVENT_TYPE.SCHEDULED_JOB) return
         if (success) {
           schedulerActor.send({ type: 'job_done', runId: event.runId, result }).fork(() => {}, () => {})
         } else {
@@ -507,7 +507,7 @@ async function run() {
 
     eventActor.send({
       type: 'enqueue',
-      event: { id: runId, type: 'scheduled_job', jobId: job.id, jobName: job.name, prompt: 'p', runId, attempt: 1, createdAt: Date.now() },
+      event: { id: runId, type: EVENT_TYPE.SCHEDULED_JOB, jobId: job.id, jobName: job.name, prompt: 'p', runId, attempt: 1, createdAt: Date.now() },
     }).fork(() => {}, () => {})
 
     await delay(150)
@@ -682,7 +682,7 @@ async function run() {
     const result = runNowTool.handler({ id: job.id })
     assert(result.includes('즉시 실행 요청됨'), 'T12: success message')
     assert(mockActor.enqueued.length === 1, 'T12: event enqueued')
-    assert(mockActor.enqueued[0].type === 'scheduled_job', 'T12: correct event type')
+    assert(mockActor.enqueued[0].type === EVENT_TYPE.SCHEDULED_JOB, 'T12: correct event type')
     assert(mockActor.enqueued[0].prompt === '즉시 실행 테스트', 'T12: prompt forwarded')
     // run_id가 DB에 기록됨
     const history = store.getRunHistory(job.id)
@@ -794,10 +794,10 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null, todoReviewJobName: TODO_REVIEW_JOB_NAME, userDataStore })
 
-    // SchedulerActor가 생성하는 것과 동일한 형태 (type: 'scheduled_job', jobName: '__todo_review__')
+    // SchedulerActor가 생성하는 것과 동일한 형태 (type: EVENT_TYPE.SCHEDULED_JOB, jobName: '__todo_review__')
     eventActor.send({
       type: 'enqueue',
-      event: { id: 'tr0', type: 'scheduled_job', jobName: TODO_REVIEW_JOB_NAME, prompt: TODO_REVIEW_JOB_NAME, receivedAt: Date.now() },
+      event: { id: 'tr0', type: EVENT_TYPE.SCHEDULED_JOB, jobName: TODO_REVIEW_JOB_NAME, prompt: TODO_REVIEW_JOB_NAME, receivedAt: Date.now() },
     }).fork(() => {}, () => {})
     await delay(150)
 
@@ -821,7 +821,7 @@ async function run() {
 
     eventActor.send({
       type: 'enqueue',
-      event: { id: 'tr0b', type: 'scheduled_job', jobName: TODO_REVIEW_JOB_NAME, prompt: TODO_REVIEW_JOB_NAME, receivedAt: Date.now() },
+      event: { id: 'tr0b', type: EVENT_TYPE.SCHEDULED_JOB, jobName: TODO_REVIEW_JOB_NAME, prompt: TODO_REVIEW_JOB_NAME, receivedAt: Date.now() },
     }).fork(() => {}, () => {})
     await delay(100)
 
@@ -840,7 +840,7 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
-    eventActor.send({ type: 'enqueue', event: { id: 'tr1', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
+    eventActor.send({ type: 'enqueue', event: { id: 'tr1', type: EVENT_TYPE.TODO_REVIEW, receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(100)
 
     assert(turnCalled === false, 'TR1: turn not started when no todos')
@@ -862,7 +862,7 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
-    eventActor.send({ type: 'enqueue', event: { id: 'tr2', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
+    eventActor.send({ type: 'enqueue', event: { id: 'tr2', type: EVENT_TYPE.TODO_REVIEW, receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(150)
 
     assert(receivedPrompt !== null, 'TR2: turn was started')
@@ -886,7 +886,7 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: async (input) => { receivedPrompt = input; return 'ok' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
-    eventActor.send({ type: 'enqueue', event: { id: 'tr3', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
+    eventActor.send({ type: 'enqueue', event: { id: 'tr3', type: EVENT_TYPE.TODO_REVIEW, receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(150)
 
     assert(receivedPrompt !== null, 'TR3: turn started (pending todo exists)')
@@ -909,7 +909,7 @@ async function run() {
     const turnActor = turnActorR.run({ runTurn: async () => { turnCalled = true; return 'ok' } })
     const eventActor = eventActorR.run({ turnActor, state, logger: null, userDataStore })
 
-    eventActor.send({ type: 'enqueue', event: { id: 'tr4', type: 'todo_review', receivedAt: Date.now() } }).fork(() => {}, () => {})
+    eventActor.send({ type: 'enqueue', event: { id: 'tr4', type: EVENT_TYPE.TODO_REVIEW, receivedAt: Date.now() } }).fork(() => {}, () => {})
     await delay(100)
 
     assert(turnCalled === false, 'TR4: turn not started when all todos done')

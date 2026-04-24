@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Session as SessionModule } from '@presence/infra/infra/sessions/index.js'
-import { TurnState } from '@presence/core/core/policies.js'
+import { TurnState, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
@@ -105,7 +105,7 @@ async function run() {
         session.eventActor.send({
           type: 'enqueue',
           event: {
-            id: 'evt-sd3', type: 'scheduled_job', runId: 'run-sd3', jobId: 'job-sd3',
+            id: 'evt-sd3', type: EVENT_TYPE.SCHEDULED_JOB, runId: 'run-sd3', jobId: 'job-sd3',
             prompt: '배치 작업 실행', attempt: 1, createdAt: Date.now(),
           },
         }).fork(() => {}, resolve)
@@ -146,7 +146,7 @@ async function run() {
         sd3bSession.eventActor.send({
           type: 'enqueue',
           event: {
-            id: 'evt-sd3b', type: 'scheduled_job', runId: 'run-sd3b', jobId: 'job-sd3b',
+            id: 'evt-sd3b', type: EVENT_TYPE.SCHEDULED_JOB, runId: 'run-sd3b', jobId: 'job-sd3b',
             prompt: '작업 실행', attempt: 1, createdAt: Date.now(),
             allowedTools: ['tracker'],  // 허용 툴 목록 설정
           },

@@ -1,4 +1,4 @@
-import { HISTORY, STATE_PATH } from '@presence/core/core/policies.js'
+import { HISTORY, STATE_PATH, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { SYSTEM_JOBS } from '../../constants.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 import { memoryActorR } from '../../actors/memory-actor.js'
@@ -73,7 +73,7 @@ class SessionActors {
   // --- Scheduled job 완료 콜백 ---
 
   handleEventDone(event, { success, result, error }, onScheduledJobDone) {
-    if (event.type !== 'scheduled_job') return
+    if (event.type !== EVENT_TYPE.SCHEDULED_JOB) return
     if (onScheduledJobDone) {
       onScheduledJobDone(event, { success, result, error })
     }

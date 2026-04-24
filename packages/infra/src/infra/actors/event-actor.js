@@ -1,6 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
-import { PHASE, STATE_PATH, TODO, TURN_SOURCE } from '@presence/core/core/policies.js'
+import { PHASE, STATE_PATH, TODO, TURN_SOURCE, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection } from '../events.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
@@ -107,7 +107,7 @@ class EventActor extends ActorWrapper {
   }
 
   #resolveTodoReview(event, state, todoReviewJobName) {
-    const isTodoReview = event.type === 'todo_review' ||
+    const isTodoReview = event.type === EVENT_TYPE.TODO_REVIEW ||
       (todoReviewJobName && event.jobName === todoReviewJobName)
     if (!isTodoReview) return { event, skip: false }
     const pending = this.#userDataStore
