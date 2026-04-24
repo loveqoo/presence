@@ -20,6 +20,9 @@ class SessionActors {
     this.turnLifecycle = turnLifecycle
     this.turnController = turnController
 
+    // A2A Phase 1 S1 — receiver 측 queue 전이를 위해 userContext.a2aQueueStore 참조 보관.
+    this.a2aQueueStore = userContext.a2aQueueStore ?? null
+
     // --- 메모리/압축 Actor ---
     // memoryActorR 는 agentId 로 mem0 격리. compactionActorR 는 extra field 무시하고 llm 만 사용.
     const sessionEnv = { memory: userContext.memory, agentId, logger, llm: userContext.llm, state }
@@ -37,7 +40,10 @@ class SessionActors {
       turnActor: this.turnActor, state, logger,
       todoReviewJobName: SYSTEM_JOBS.TODO_REVIEW,
       userDataStore: userContext.userDataStore,
-      onEventDone: (event, outcome) => this.handleEventDone(event, outcome, onScheduledJobDone),
+      // A2A S1: markProcessing hook — drain 시작 전 todo_request 이벤트는 queue row 전이 시도.
+      //         false = 이미 processing/completed/failed/expired → skipDuplicateTodoRequest.
+      a2aQueueStore: this.a2aQueueStore,
+      onEventDone: (event, outcome) => this.handleEventDone(event, outcome, { onScheduledJobDone, a2aQueueStore: this.a2aQueueStore }),
     })
 
     this.budgetActor = budgetActorR.run({ state })
@@ -70,13 +76,25 @@ class SessionActors {
     })
   }
 
-  // --- Scheduled job 완료 콜백 ---
+  // --- Event 완료 콜백 (type 별 분기) ---
 
-  handleEventDone(event, { success, result, error }, onScheduledJobDone) {
-    if (event.type !== EVENT_TYPE.SCHEDULED_JOB) return
-    if (onScheduledJobDone) {
-      onScheduledJobDone(event, { success, result, error })
+  handleEventDone(event, outcome, deps) {
+    const { success, result, error } = outcome
+    const onScheduledJobDone = deps?.onScheduledJobDone
+    const a2aQueueStore = deps?.a2aQueueStore
+    if (event.type === EVENT_TYPE.SCHEDULED_JOB) {
+      // scheduled_job: 기존 콜백 경로. 다른 type 과 분리.
+      if (onScheduledJobDone) onScheduledJobDone(event, { success, result, error })
+      return
     }
+    if (event.type === EVENT_TYPE.TODO_REQUEST) {
+      // A2A S1: turn 성공 → completed, 실패 → failed.
+      if (!a2aQueueStore || !event.requestId) return
+      if (success) a2aQueueStore.markCompleted(event.requestId)
+      else a2aQueueStore.markFailed(event.requestId, String(error ?? 'agent-error'))
+      return
+    }
+    // 다른 type (todo_review 등) 은 EventActor 내부에서 처리 완료 — 여기선 no-op.
   }
 
   // --- Agent에 전달할 actors 묶음 ---

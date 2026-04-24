@@ -18,9 +18,10 @@ class EventActor extends ActorWrapper {
   #logger
   #onEventDone
   #userDataStore
+  #a2aQueueStore
 
   constructor(turnActor, state, opts = {}) {
-    const { logger, onEventDone, todoReviewJobName, userDataStore } = opts
+    const { logger, onEventDone, todoReviewJobName, userDataStore, a2aQueueStore } = opts
     const R = EventActor.RESULT
     // queue: 처리 대기 이벤트. inFlight: 현재 처리 중인 이벤트. deadLetter: 실패한 이벤트.
     super(
@@ -50,6 +51,14 @@ class EventActor extends ActorWrapper {
             if (todoResult.skip) return this.#skipTodoReview(actorState, rest)
             const event = todoResult.event
 
+            // A2A S1: todo_request 는 queue row 를 pending → processing 으로 전이.
+            //   markProcessing=false 집합 (이미 processing/completed/failed/expired 또는 row 없음)
+            //   은 모두 "이미 처리된 상태, skip 안전" — #skipDuplicateTodoRequest 로 drain 진행.
+            if (event.type === EVENT_TYPE.TODO_REQUEST && this.#a2aQueueStore && event.requestId) {
+              const transitioned = this.#a2aQueueStore.markProcessing(event.requestId)
+              if (!transitioned) return this.#skipDuplicateTodoRequest(actorState, rest, event)
+            }
+
             const draining = { ...actorState, queue: rest, inFlight: event }
             this.#projectEvents(draining)
 
@@ -72,6 +81,7 @@ class EventActor extends ActorWrapper {
     this.#logger = logger
     this.#onEventDone = onEventDone
     this.#userDataStore = userDataStore
+    this.#a2aQueueStore = a2aQueueStore ?? null
   }
 
   // --- Public 메시지 API ---
@@ -146,6 +156,19 @@ class EventActor extends ActorWrapper {
   }
 
   #skipTodoReview(actorState, rest) {
+    const skipped = { ...actorState, queue: rest }
+    this.#projectEvents(skipped)
+    if (rest.length > 0) fireAndForget(this.drain())
+    return [EventActor.RESULT.NO_OP_NO_TODOS, skipped]
+  }
+
+  // A2A S1: todo_request 중복 event drain skip. markProcessing=false 이므로
+  //   이미 처리된 상태 (processing/completed/failed/expired 또는 row 없음).
+  //   queue 에서 제거하고 남은 이벤트는 다음 drain 으로 처리 — #skipTodoReview 와 같은 패턴.
+  #skipDuplicateTodoRequest(actorState, rest, event) {
+    ;(this.#logger || console).warn?.('SendTodo duplicate skip', {
+      requestId: event.requestId, reason: 'markProcessing-false',
+    })
     const skipped = { ...actorState, queue: rest }
     this.#projectEvents(skipped)
     if (rest.length > 0) fireAndForget(this.drain())

@@ -5,6 +5,7 @@ import { stateInterpreterR } from '@presence/core/interpreter/state.js'
 import { llmInterpreterR } from '@presence/core/interpreter/llm.js'
 import { toolInterpreterR } from '@presence/core/interpreter/tool.js'
 import { delegateInterpreterR } from './delegate.js'
+import { sendTodoInterpreterR } from './send-todo.js'
 import { approvalInterpreterR } from '@presence/core/interpreter/approval.js'
 import { controlInterpreterR } from '@presence/core/interpreter/control.js'
 import { parallelInterpreterR } from '@presence/core/interpreter/parallel.js'
@@ -64,7 +65,7 @@ const createUiHelpers = (reactiveState, delegateRuntime) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, currentUserId } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, currentUserId, currentAgentId, a2aQueueStore, sessionManager, logger } = {}) => {
   const ui = createUiHelpers(reactiveState, delegateRuntime)
   // Tool handler 가 받을 resolvePath — 호출 시점의 workingDir 기준 해석 + 경계 검증.
   const resolvePath = getWorkingDir
@@ -88,6 +89,7 @@ const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reacti
     llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
     toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi, getWorkingDir, resolvePath }),
     delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId }),
+    sendTodoInterpreterR.run({ ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger }),
     approvalInterpreterR.run({ ST, onApprove }),
     controlInterpreterR.run({ ST }),
     parallelInterpreterR.run({ ST, runProgram }),
