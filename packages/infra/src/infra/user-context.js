@@ -5,6 +5,7 @@ import { createPersona, DEFAULT_PERSONA } from './persona.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm/llm-client.js'
 import { createAgentRegistry, registerSummarizer } from './agents/agent-registry.js'
+import { createListAgentsTool } from './agents/agent-tools.js'
 import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { createA2aQueueStore, defaultA2aQueueDbPath } from './a2a/a2a-queue-store.js'
@@ -100,6 +101,9 @@ class UserContext {
     })
     userContext.agentRegistry = createAgentRegistry()
     registerSummarizer(userContext.agentRegistry, userContext.llm, { userId: username || 'default' })
+    // A2A Phase 1 S3 — agent discovery tool. registerAgentSessions 이후에
+    // config.agents 가 추가되어도 handler 호출 시점에 agentRegistry.list() 가 최신 값 반환.
+    userContext.toolRegistry.register(createListAgentsTool(userContext.agentRegistry))
 
     // --- Job Store + User Data Store + A2A Queue Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))
