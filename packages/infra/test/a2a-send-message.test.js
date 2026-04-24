@@ -1,8 +1,8 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
-import { sendTodoR, SendTodo } from '@presence/core/core/op.js'
-import { sendTodoInterpreterR, SEND_TODO_ERROR } from '@presence/infra/interpreter/send-todo.js'
+import { sendA2aMessageR, SendA2aMessage } from '@presence/core/core/op.js'
+import { sendA2aInterpreterR, SEND_A2A_ERROR } from '@presence/infra/interpreter/send-a2a-message.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const { Task, StateT, Maybe } = fp
@@ -62,16 +62,16 @@ const mockSessionEntry = (agentId, eventActor) => ({
 })
 
 // 인터프리터 돌림 헬퍼
-const runSendTodo = async ({ to, payload, timeoutMs, env }) => {
-  const program = sendTodoR.run({ to, payload, timeoutMs })
-  const interpreter = sendTodoInterpreterR.run({ ST, ...env })
+const runSendA2aMessage = async ({ to, payload, timeoutMs, env }) => {
+  const program = sendA2aMessageR.run({ to, payload, timeoutMs })
+  const interpreter = sendA2aInterpreterR.run({ ST, ...env })
   const composed = Interpreter.compose(ST, interpreter)
   const [result] = await runFreeWithStateT(composed, ST)(program)({})
   return result
 }
 
 const run = async () => {
-  console.log('SendTodo interpreter tests')
+  console.log('SendA2aMessage interpreter tests')
 
   // ST1. 정상 경로 — enqueueRequest + eventActor.enqueue 호출, accepted=true
   {
@@ -79,7 +79,7 @@ const run = async () => {
     const enqueued = []
     const receiverActor = mockEventActor(e => enqueued.push(e))
     const session = mockSessionEntry(AGENT_B, receiverActor)
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'hello',
       env: {
         a2aQueueStore: store,
@@ -91,14 +91,14 @@ const run = async () => {
     assert(result.accepted === true, 'ST1: accepted=true')
     assert(typeof result.requestId === 'string', 'ST1: requestId 발급')
     assert(store.rows.size === 1, 'ST1: queue row 1개')
-    assert(enqueued.length === 1 && enqueued[0].type === 'todo_request', 'ST1: receiver eventActor enqueue 호출')
+    assert(enqueued.length === 1 && enqueued[0].type === 'a2a_request', 'ST1: receiver eventActor enqueue 호출')
     assert(enqueued[0].requestId === result.requestId, 'ST1: requestId 전달')
   }
 
   // ST2. 크로스 유저 거부 — queue 무변, requestId=null
   {
     const store = mockQueueStore()
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_OTHER_USER, payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -108,7 +108,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST2: accepted=false')
-    assert(result.error === SEND_TODO_ERROR.OWNERSHIP_DENIED, 'ST2: ownership-denied')
+    assert(result.error === SEND_A2A_ERROR.OWNERSHIP_DENIED, 'ST2: ownership-denied')
     assert(result.requestId === null, 'ST2: requestId=null')
     assert(store.rows.size === 0, 'ST2: queue 무변')
   }
@@ -121,7 +121,7 @@ const run = async () => {
     const defaultId = 'alice/default'
     // AGENT session 만 라우팅 결과에 포함 (findAgentSession 이 이미 type=AGENT 필터)
     const agentSession = mockSessionEntry(defaultId, agentActor)
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: defaultId, payload: 'assignment',
       env: {
         a2aQueueStore: store,
@@ -137,7 +137,7 @@ const run = async () => {
   // ST4. not-registered — findAgentSession 0 매치
   {
     const store = mockQueueStore()
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: 'alice/ghost', payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -147,7 +147,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST4: rejected')
-    assert(result.error === SEND_TODO_ERROR.NOT_REGISTERED, 'ST4: not-registered')
+    assert(result.error === SEND_A2A_ERROR.NOT_REGISTERED, 'ST4: not-registered')
     assert(store.rows.size === 0, 'ST4: queue 무변')
   }
 
@@ -155,7 +155,7 @@ const run = async () => {
   {
     const store = mockQueueStore()
     const session = mockSessionEntry(AGENT_B, mockEventActor())
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -165,17 +165,17 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST5: rejected')
-    assert(result.error === SEND_TODO_ERROR.ARCHIVED, 'ST5: target-archived')
+    assert(result.error === SEND_A2A_ERROR.ARCHIVED, 'ST5: target-archived')
     assert(typeof result.requestId === 'string', 'ST5: requestId 발급 (audit)')
     const row = store.getMessage(result.requestId)
     assert(row.status === 'failed', 'ST5: row.status=failed')
-    assert(row.error === SEND_TODO_ERROR.ARCHIVED, 'ST5: row.error audit')
+    assert(row.error === SEND_A2A_ERROR.ARCHIVED, 'ST5: row.error audit')
   }
 
   // ST6. ambiguous — 2 AGENT session 매치 (방어)
   {
     const store = mockQueueStore()
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -185,7 +185,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST6: rejected')
-    assert(result.error === SEND_TODO_ERROR.SESSION_AMBIGUOUS, 'ST6: session-routing-ambiguous')
+    assert(result.error === SEND_A2A_ERROR.SESSION_AMBIGUOUS, 'ST6: session-routing-ambiguous')
     assert(store.rows.size === 0, 'ST6: queue 무변')
   }
 
@@ -196,7 +196,7 @@ const run = async () => {
       enqueue: () => ({ fork: (reject) => reject(new Error('actor-down')) }),
     }
     const session = { kind: 'ok', entry: { type: 'agent', session: { agentId: AGENT_B, actors: { eventActor: failingActor } } } }
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -206,7 +206,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST7: rejected')
-    assert(result.error === SEND_TODO_ERROR.ENQUEUE_FAILED, 'ST7: queue-enqueue-failed')
+    assert(result.error === SEND_A2A_ERROR.ENQUEUE_FAILED, 'ST7: queue-enqueue-failed')
     assert(typeof result.requestId === 'string', 'ST7: requestId 발급')
     const row = store.getMessage(result.requestId)
     assert(row.status === 'failed', 'ST7: row failed')
@@ -215,7 +215,7 @@ const run = async () => {
   // ST8. qualified form 위반 — assertValidAgentId throw 잡아 invalid-agent-id
   {
     const store = mockQueueStore()
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: 'not-a-qualified-id', payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -225,7 +225,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST8: rejected')
-    assert(result.error === SEND_TODO_ERROR.INVALID_AGENT_ID, 'ST8: invalid-agent-id')
+    assert(result.error === SEND_A2A_ERROR.INVALID_AGENT_ID, 'ST8: invalid-agent-id')
     assert(store.rows.size === 0, 'ST8: queue 무변')
   }
 
@@ -233,7 +233,7 @@ const run = async () => {
   {
     const store = mockQueueStore()
     const session = { kind: 'ok', entry: { type: 'agent', session: { agentId: AGENT_B } } } // actors 없음
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -243,7 +243,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST9: rejected')
-    assert(result.error === SEND_TODO_ERROR.SESSION_NOT_FOUND, 'ST9: target-session-not-found')
+    assert(result.error === SEND_A2A_ERROR.SESSION_NOT_FOUND, 'ST9: target-session-not-found')
     const row = store.getMessage(result.requestId)
     assert(row.status === 'failed', 'ST9: row failed (audit)')
   }
@@ -253,7 +253,7 @@ const run = async () => {
   {
     const store = mockQueueStore()
     const session = mockSessionEntry(AGENT_B, mockEventActor())
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'x',
       env: {
         a2aQueueStore: store,
@@ -263,14 +263,14 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'ST10: rejected')
-    assert(result.error === SEND_TODO_ERROR.REGISTRY_MISSING, 'ST10: registry-missing')
+    assert(result.error === SEND_A2A_ERROR.REGISTRY_MISSING, 'ST10: registry-missing')
     assert(result.requestId === null, 'ST10: requestId=null (row 생성 전)')
     assert(store.rows.size === 0, 'ST10: queue 무변')
   }
 
   // ST extra. a2aQueueStore 미주입 fallback — 인프라 미제공 환경 (test interpreter)
   {
-    const result = await runSendTodo({
+    const result = await runSendA2aMessage({
       to: AGENT_B, payload: 'x',
       env: {
         a2aQueueStore: null,
@@ -280,7 +280,7 @@ const run = async () => {
       },
     })
     assert(result.accepted === false, 'STx: a2a 미주입 → rejected')
-    assert(result.error === SEND_TODO_ERROR.NOT_REGISTERED, 'STx: not-registered 로 통합')
+    assert(result.error === SEND_A2A_ERROR.NOT_REGISTERED, 'STx: not-registered 로 통합')
   }
 
   summary()

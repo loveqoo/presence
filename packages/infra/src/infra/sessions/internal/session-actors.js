@@ -42,10 +42,10 @@ class SessionActors {
       turnActor: this.turnActor, state, logger,
       todoReviewJobName: SYSTEM_JOBS.TODO_REVIEW,
       userDataStore: userContext.userDataStore,
-      // A2A S1: markProcessing hook — drain 시작 전 todo_request 이벤트는 queue row 전이 시도.
-      //         false = 이미 processing/completed/failed/expired → skipDuplicateTodoRequest.
+      // A2A S1: markProcessing hook — drain 시작 전 a2a_request 이벤트는 queue row 전이 시도.
+      //         false = 이미 processing/completed/failed/expired → skipDuplicateA2aRequest.
       a2aQueueStore: this.a2aQueueStore,
-      // A2A S2: turnLifecycle — todo_response drain 시 SYSTEM entry 추가용.
+      // A2A S2: turnLifecycle — a2a_response drain 시 SYSTEM entry 추가용.
       //         SessionActors 가 주입한 turnLifecycle 을 그대로 전파.
       turnLifecycle: this.turnLifecycle,
       onEventDone: (event, outcome) => this.handleEventDone(event, outcome, {
@@ -99,7 +99,7 @@ class SessionActors {
       if (onScheduledJobDone) onScheduledJobDone(event, { success, result, error })
       return
     }
-    if (event.type === EVENT_TYPE.TODO_REQUEST) {
+    if (event.type === EVENT_TYPE.A2A_REQUEST) {
       // A2A S1+S2: turn 성공/실패에 따라 queue 전이 + sender 에게 response 발행.
       if (!a2aQueueStore || !event.requestId) return
       const request = a2aQueueStore.getMessage(event.requestId)
@@ -118,7 +118,7 @@ class SessionActors {
       }
       return
     }
-    // 다른 type (todo_review, todo_response 등) 은 EventActor 내부에서 처리 완료 — 여기선 no-op.
+    // 다른 type (todo_review, a2a_response 등) 은 EventActor 내부에서 처리 완료 — 여기선 no-op.
   }
 
   // --- Agent에 전달할 actors 묶음 ---

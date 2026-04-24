@@ -7,18 +7,18 @@ import { withEventMeta } from '../infra/events.js'
 const { Task, Reader } = fp
 
 // =============================================================================
-// SendTodo Interpreter — A2A Phase 1 S1
+// SendA2aMessage Interpreter — A2A Phase 1 (v8 rename)
 //
-// `Op.SendTodo(to, payload, { timeoutMs? })` → 같은 유저의 다른 agent 에게
-// 비동기 TODO 를 전달한다.
+// `Op.SendA2aMessage(to, payload, { timeoutMs?, category? })` → 같은 유저의
+// 다른 agent 에게 비동기 메시지를 전달한다.
 //
 // 반환 (a2a-internal.md §4.4):
 //   { requestId: UUID|null, accepted: boolean, error?: string }
 //
 // 처리 흐름:
 //   1. validateTarget — qualified form / ownership / session routing / archived
-//   2. enqueueRequest → SQLite row 생성 (pending)
-//   3. 수신 AGENT session 의 eventActor 에 todo_request 이벤트 enqueue
+//   2. enqueueRequest → SQLite row 생성 (pending, category 포함)
+//   3. 수신 AGENT session 의 eventActor 에 a2a_request 이벤트 enqueue
 //   4. 결과를 op.next(result) 로 반환
 //
 // 거부 경로:
@@ -30,7 +30,7 @@ const { Task, Reader } = fp
 // =============================================================================
 
 // 관측 계약 (외부에 노출되는 error 문자열, 8 종).
-const SEND_TODO_ERROR = Object.freeze({
+const SEND_A2A_ERROR = Object.freeze({
   INVALID_AGENT_ID:   'invalid-agent-id',
   OWNERSHIP_DENIED:   'ownership-denied',
   NOT_REGISTERED:     'target-not-registered',
@@ -60,23 +60,23 @@ const validateTarget = (opts) => {
   const sessionManager = opts.sessionManager
 
   try { assertValidAgentId(to) }
-  catch (_) { return { ok: false, error: SEND_TODO_ERROR.INVALID_AGENT_ID } }
+  catch (_) { return { ok: false, error: SEND_A2A_ERROR.INVALID_AGENT_ID } }
 
   if (usernameOf(to) !== usernameOf(currentAgentId)) {
-    return { ok: false, error: SEND_TODO_ERROR.OWNERSHIP_DENIED }
+    return { ok: false, error: SEND_A2A_ERROR.OWNERSHIP_DENIED }
   }
 
   const routing = sessionManager.findAgentSession(to)
   if (routing.kind === 'not-registered') {
-    return { ok: false, error: SEND_TODO_ERROR.NOT_REGISTERED }
+    return { ok: false, error: SEND_A2A_ERROR.NOT_REGISTERED }
   }
   if (routing.kind === 'ambiguous') {
-    return { ok: false, error: SEND_TODO_ERROR.SESSION_AMBIGUOUS }
+    return { ok: false, error: SEND_A2A_ERROR.SESSION_AMBIGUOUS }
   }
 
   const registryEntry = unwrapMaybeEntry(agentRegistry?.get?.(to))
   if (!registryEntry) {
-    return { ok: false, error: SEND_TODO_ERROR.REGISTRY_MISSING }
+    return { ok: false, error: SEND_A2A_ERROR.REGISTRY_MISSING }
   }
 
   return { ok: true, entry: routing.entry, archived: registryEntry.archived === true }
@@ -87,16 +87,17 @@ const forkToPromise = (task) => new Promise((resolve, reject) => {
   try { task.fork(reject, resolve) } catch (err) { reject(err) }
 })
 
-const sendTodoInterpreterR = Reader.asks(({
+const sendA2aInterpreterR = Reader.asks(({
   ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger,
-}) => new Interpreter(['SendTodo'], (op) => {
+}) => new Interpreter(['SendA2aMessage'], (op) => {
   const to = op.to
   const payload = op.payload
   const timeoutMs = op.timeoutMs ?? null
+  const category = op.category ?? 'todo'
 
   // 인프라 미주입 경로 (test interpreter 등) → not-registered 로 즉시 응답
   if (!a2aQueueStore || !sessionManager) {
-    return ST.of(op.next({ requestId: null, accepted: false, error: SEND_TODO_ERROR.NOT_REGISTERED }))
+    return ST.of(op.next({ requestId: null, accepted: false, error: SEND_A2A_ERROR.NOT_REGISTERED }))
   }
 
   const validation = validateTarget({ to, currentAgentId, agentRegistry, sessionManager })
@@ -107,43 +108,44 @@ const sendTodoInterpreterR = Reader.asks(({
   // archived: queue 에 fail row (감사)
   if (validation.archived) {
     const msg = a2aQueueStore.enqueueRequest({
-      fromAgentId: currentAgentId, toAgentId: to, payload, timeoutMs,
+      fromAgentId: currentAgentId, toAgentId: to, payload, timeoutMs, category,
     })
-    a2aQueueStore.markFailed(msg.id, SEND_TODO_ERROR.ARCHIVED)
-    return ST.of(op.next({ requestId: msg.id, accepted: false, error: SEND_TODO_ERROR.ARCHIVED }))
+    a2aQueueStore.markFailed(msg.id, SEND_A2A_ERROR.ARCHIVED)
+    return ST.of(op.next({ requestId: msg.id, accepted: false, error: SEND_A2A_ERROR.ARCHIVED }))
   }
 
   // 정상 경로: pending row + 수신 event queue enqueue
   const msg = a2aQueueStore.enqueueRequest({
-    fromAgentId: currentAgentId, toAgentId: to, payload, timeoutMs,
+    fromAgentId: currentAgentId, toAgentId: to, payload, timeoutMs, category,
   })
 
   const receiverSession = validation.entry?.session
   const receiverEventActor = receiverSession?.actors?.eventActor ?? receiverSession?.eventActor
   if (!receiverEventActor) {
-    a2aQueueStore.markFailed(msg.id, SEND_TODO_ERROR.SESSION_NOT_FOUND)
-    return ST.of(op.next({ requestId: msg.id, accepted: false, error: SEND_TODO_ERROR.SESSION_NOT_FOUND }))
+    a2aQueueStore.markFailed(msg.id, SEND_A2A_ERROR.SESSION_NOT_FOUND)
+    return ST.of(op.next({ requestId: msg.id, accepted: false, error: SEND_A2A_ERROR.SESSION_NOT_FOUND }))
   }
 
   const event = withEventMeta({
     id: msg.id,
-    type: EVENT_TYPE.TODO_REQUEST,
+    type: EVENT_TYPE.A2A_REQUEST,
     prompt: payload,
     fromAgentId: currentAgentId,
     toAgentId: to,
     requestId: msg.id,
+    category,
   })
 
   // StateT(Task) 에 catchError 가 없으므로 Promise 단에서 에러를 값으로 변환 (delegate.js 패턴)
   const enqueuePromise = forkToPromise(receiverEventActor.enqueue(event))
     .then(() => ({ accepted: true, error: undefined }))
     .catch((err) => {
-      a2aQueueStore.markFailed(msg.id, SEND_TODO_ERROR.ENQUEUE_FAILED)
-      logger?.warn?.('SendTodo enqueue failed', { error: err?.message ?? String(err), requestId: msg.id })
-      return { accepted: false, error: SEND_TODO_ERROR.ENQUEUE_FAILED }
+      a2aQueueStore.markFailed(msg.id, SEND_A2A_ERROR.ENQUEUE_FAILED)
+      logger?.warn?.('SendA2aMessage enqueue failed', { error: err?.message ?? String(err), requestId: msg.id })
+      return { accepted: false, error: SEND_A2A_ERROR.ENQUEUE_FAILED }
     })
   return ST.lift(Task.fromPromise(() => enqueuePromise)())
     .map((outcome) => op.next({ requestId: msg.id, accepted: outcome.accepted, error: outcome.error }))
 }))
 
-export { sendTodoInterpreterR, SEND_TODO_ERROR, validateTarget }
+export { sendA2aInterpreterR, SEND_A2A_ERROR, validateTarget }

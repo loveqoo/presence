@@ -9,7 +9,7 @@ import { TODO_STATUS } from './a2a-queue-store.js'
 // 책임:
 //   1. response row 생성 (A2aQueueStore.enqueueResponse)
 //   2. sender session 조회 (sessionManager.findSenderSession — USER + AGENT)
-//   3. sender session 의 eventActor 에 todo_response event enqueue
+//   3. sender session 의 eventActor 에 a2a_response event enqueue
 //   4. sender 부재 / enqueue 실패 시 response row status='orphaned' 로 전이
 //
 // 반환 계약 (a2a-internal.md v4 §4.4):
@@ -61,10 +61,11 @@ const dispatchResponse = async (opts) => {
 
     const event = withEventMeta({
       id: responseRow.id,
-      type: EVENT_TYPE.TODO_RESPONSE,
+      type: EVENT_TYPE.A2A_RESPONSE,
       correlationId: request.id,
       fromAgentId: request.toAgentId,
       toAgentId: request.fromAgentId,
+      category: request.category ?? 'todo',
       status: effectiveStatus,
       payload,
       error,

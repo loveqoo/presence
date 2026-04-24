@@ -96,7 +96,7 @@ const ephemeralInits = {
       getWorkingDir: () => this.workingDir,
       // currentUserId — Delegate target resolver (§3.6) 가 short-name qualify 에 사용.
       currentUserId: this.userId,
-      // A2A Phase 1 S1 — SendTodo interpreter 가 같은 유저 내 agent 로 이벤트 전달 (a2a-internal.md §4).
+      // A2A Phase 1 S1 — SendA2aMessage interpreter 가 같은 유저 내 agent 로 이벤트 전달 (a2a-internal.md §4).
       currentAgentId: this.agentId,
       a2aQueueStore: userContext.a2aQueueStore,
       sessionManager: userContext.sessions,

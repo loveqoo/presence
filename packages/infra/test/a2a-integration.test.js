@@ -23,7 +23,7 @@ const makeTmpDir = () => {
   return dir
 }
 
-// EventActor + SessionActors.handleEventDone 의 TODO_REQUEST 분기를 통합 검증.
+// EventActor + SessionActors.handleEventDone 의 A2A_REQUEST 분기를 통합 검증.
 // 실제 session 을 띄우는 대신 receiver 쪽 eventActor 만 a2aQueueStore 연동으로 구성.
 const setupReceiver = ({ a2aQueueStore, turnFn, onEventDone }) => {
   const state = createOriginState({
@@ -57,14 +57,14 @@ const run = async () => {
       a2aQueueStore: store,
       turnFn,
       onEventDone: (event, { success, error }) => {
-        if (event.type !== EVENT_TYPE.TODO_REQUEST) return
+        if (event.type !== EVENT_TYPE.A2A_REQUEST) return
         if (success) store.markCompleted(event.requestId)
         else store.markFailed(event.requestId, String(error ?? 'agent-error'))
       },
     })
 
     const event = withEventMeta({
-      id: msg.id, type: EVENT_TYPE.TODO_REQUEST, prompt: '조사',
+      id: msg.id, type: EVENT_TYPE.A2A_REQUEST, prompt: '조사',
       fromAgentId: 'alice/planner', toAgentId: 'alice/worker', requestId: msg.id,
     })
     await new Promise((resolve) => { eventActor.enqueue(event).fork(() => {}, resolve) })
@@ -88,14 +88,14 @@ const run = async () => {
       a2aQueueStore: store,
       turnFn,
       onEventDone: (event, { success, error }) => {
-        if (event.type !== EVENT_TYPE.TODO_REQUEST) return
+        if (event.type !== EVENT_TYPE.A2A_REQUEST) return
         if (success) store.markCompleted(event.requestId)
         else store.markFailed(event.requestId, String(error ?? 'agent-error'))
       },
     })
 
     const event = withEventMeta({
-      id: msg.id, type: EVENT_TYPE.TODO_REQUEST, prompt: 'x',
+      id: msg.id, type: EVENT_TYPE.A2A_REQUEST, prompt: 'x',
       fromAgentId: 'alice/planner', toAgentId: 'alice/worker', requestId: msg.id,
     })
     await new Promise((resolve) => { eventActor.enqueue(event).fork(() => {}, resolve) })
@@ -124,7 +124,7 @@ const run = async () => {
     })
 
     const event = withEventMeta({
-      id: msg.id, type: EVENT_TYPE.TODO_REQUEST, prompt: 'x',
+      id: msg.id, type: EVENT_TYPE.A2A_REQUEST, prompt: 'x',
       fromAgentId: 'alice/planner', toAgentId: 'alice/worker', requestId: msg.id,
     })
     await new Promise((resolve) => { eventActor.enqueue(event).fork(() => {}, resolve) })
@@ -243,13 +243,13 @@ const run = async () => {
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
 
-  // EA1. todo_response drain → turn 미호출 + SYSTEM entry 추가
+  // EA1. a2a_response drain → turn 미호출 + SYSTEM entry 추가
   {
     const sender = setupSender()
     let turnCalled = 0
     // turnActor 내부를 계측하는 대신, TurnLifecycle 의 SYSTEM entry 추가 여부 + queue 비움을 확인
     const event = withEventMeta({
-      id: 'r-1', type: EVENT_TYPE.TODO_RESPONSE,
+      id: 'r-1', type: EVENT_TYPE.A2A_RESPONSE,
       correlationId: 'req-1', fromAgentId: AGENT_RECEIVER, toAgentId: AGENT_SENDER,
       status: 'completed', payload: 'done',
     })
@@ -266,7 +266,7 @@ const run = async () => {
   {
     const sender = setupSender()
     const makeEvent = (id, payload) => withEventMeta({
-      id, type: EVENT_TYPE.TODO_RESPONSE,
+      id, type: EVENT_TYPE.A2A_RESPONSE,
       correlationId: `req-${id}`, fromAgentId: AGENT_RECEIVER, toAgentId: AGENT_SENDER,
       status: 'completed', payload,
     })
@@ -281,7 +281,7 @@ const run = async () => {
     assert(contents.some(c => c.includes('second')), 'EA2: second payload 반영')
   }
 
-  // EA3. turnLifecycle 미주입 + todo_response → warn 로그 + drain 계속 (fallback)
+  // EA3. turnLifecycle 미주입 + a2a_response → warn 로그 + drain 계속 (fallback)
   {
     const state = createOriginState({
       turnState: TurnState.idle(),
@@ -296,7 +296,7 @@ const run = async () => {
     const eventActor = eventActorR.run({ turnActor, state, logger, userDataStore: null })
 
     const event = withEventMeta({
-      id: 'r-no-lifecycle', type: EVENT_TYPE.TODO_RESPONSE,
+      id: 'r-no-lifecycle', type: EVENT_TYPE.A2A_RESPONSE,
       correlationId: 'req-x', fromAgentId: AGENT_RECEIVER, toAgentId: AGENT_SENDER,
       status: 'completed', payload: 'x',
     })

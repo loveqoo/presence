@@ -5,7 +5,7 @@ import { stateInterpreterR } from '@presence/core/interpreter/state.js'
 import { llmInterpreterR } from '@presence/core/interpreter/llm.js'
 import { toolInterpreterR } from '@presence/core/interpreter/tool.js'
 import { delegateInterpreterR } from './delegate.js'
-import { sendTodoInterpreterR } from './send-todo.js'
+import { sendA2aInterpreterR } from './send-a2a-message.js'
 import { approvalInterpreterR } from '@presence/core/interpreter/approval.js'
 import { controlInterpreterR } from '@presence/core/interpreter/control.js'
 import { parallelInterpreterR } from '@presence/core/interpreter/parallel.js'
@@ -89,7 +89,7 @@ const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reacti
     llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
     toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi, getWorkingDir, resolvePath }),
     delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId }),
-    sendTodoInterpreterR.run({ ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger }),
+    sendA2aInterpreterR.run({ ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger }),
     approvalInterpreterR.run({ ST, onApprove }),
     controlInterpreterR.run({ ST }),
     parallelInterpreterR.run({ ST, runProgram }),

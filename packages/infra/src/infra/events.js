@@ -54,7 +54,7 @@ const syncTodosProjection = (state, userDataStore) => {
   state.set('todos', todos)
 }
 
-// A2A Phase 1 S2 — todo_response event 를 송신 agent 의 conversationHistory
+// A2A Phase 1 S2 — a2a_response event 를 송신 agent 의 conversationHistory
 // SYSTEM entry 용 문자열로 변환 (a2a-internal.md §4.5). EventActor drain 이
 // turnLifecycle.appendSystemEntrySync 에 전달.
 const formatResponseMessage = (event) => {

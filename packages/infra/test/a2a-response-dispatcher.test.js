@@ -28,7 +28,7 @@ const mockSessionManager = (routing) => ({ findSenderSession: () => routing })
 const run = async () => {
   console.log('A2A Response Dispatcher tests')
 
-  // RD1. sender=ok → response row 'completed' + todo_response event enqueue + enqueued=true
+  // RD1. sender=ok → response row 'completed' + a2a_response event enqueue + enqueued=true
   {
     const dir = makeTmpDir()
     const store = createA2aQueueStore(join(dir, 'a2a.db'))
@@ -50,8 +50,8 @@ const run = async () => {
 
     assert(result.enqueued === true, 'RD1: enqueued=true')
     assert(typeof result.responseId === 'string', 'RD1: responseId')
-    assert(enqueued.length === 1, 'RD1: todo_response event 1 회 enqueue')
-    assert(enqueued[0].type === EVENT_TYPE.TODO_RESPONSE, 'RD1: event type')
+    assert(enqueued.length === 1, 'RD1: a2a_response event 1 회 enqueue')
+    assert(enqueued[0].type === EVENT_TYPE.A2A_RESPONSE, 'RD1: event type')
     assert(enqueued[0].correlationId === request.id, 'RD1: correlationId 설정')
     assert(enqueued[0].payload === 'answer', 'RD1: payload 전달')
     const row = store.getMessage(result.responseId)

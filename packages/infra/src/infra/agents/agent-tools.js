@@ -2,7 +2,7 @@
 // Agent Tools — agent discovery (S3)
 //
 // A2A Phase 1 S3: 같은 유저 내 등록된 agent 목록을 LLM 에게 노출. planner
-// agent 가 delegate / SendTodo target 선택 전에 사용.
+// agent 가 delegate / SendA2aMessage target 선택 전에 사용.
 //
 // 다자 협업 자체는 Op.Parallel([Delegate(a,...), Delegate(b,...)]) 로 이미
 // 해결되므로 (Q7 재평가 2026-04-24), S3 는 discovery 만 추가한다.
@@ -20,7 +20,7 @@ const formatAgent = (agent) => {
 // 등록해도 자동 반영.
 const createListAgentsTool = (agentRegistry) => ({
   name: 'list_agents',
-  description: '같은 유저에 등록된 다른 agent 의 목록을 반환합니다. delegate 또는 SendTodo 발행 전 target 선택에 사용하세요. archived agent 는 제외됩니다.',
+  description: '같은 유저에 등록된 다른 agent 의 목록을 반환합니다. delegate 또는 SendA2aMessage 발행 전 target 선택에 사용하세요. archived agent 는 제외됩니다.',
   parameters: { type: 'object', properties: {} },
   handler: () => {
     const agents = agentRegistry.list().filter(a => !a.archived)

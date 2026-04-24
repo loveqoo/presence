@@ -43,7 +43,7 @@ const createSessionManager = (userContext, opts = {}) => {
   // A2A Phase 1 S1 수신 session 라우팅 (a2a-internal.md §4.2):
   //   AGENT type session 중 session.agentId 가 매치되는 entry 를 찾는다.
   //   USER session 과 같은 agentId 가 공존해도 (dual-homed: default/manager) AGENT 만 선택.
-  //   → SendTodo 가 유저 대화 흐름 (UserSession) 을 교란하지 않음.
+  //   → SendA2aMessage 가 유저 대화 흐름 (UserSession) 을 교란하지 않음.
   //
   // tagged union 반환:
   //   { kind: 'ok', entry }           — 정확히 1 개 AGENT session 매치
@@ -59,7 +59,7 @@ const createSessionManager = (userContext, opts = {}) => {
   }
 
   // A2A Phase 1 S2 — response 송신자 조회 (a2a-internal.md §4.2):
-  //   SendTodo 는 USER session 의 turn 에서도 호출 가능하므로 response 는
+  //   SendA2aMessage 는 USER session 의 turn 에서도 호출 가능하므로 response 는
   //   대화창으로 돌아가야 유저가 확인 가능. USER + AGENT 양쪽 검색.
   //   우선순위: AGENT 선호 (delegate 경로) → 없으면 USER fallback.
   const findSenderSession = (agentId) => {
