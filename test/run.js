@@ -83,6 +83,7 @@ const tests = [
   'packages/infra/test/session-manager-routing.test.js',
   'packages/infra/test/a2a-queue-store.test.js',
   'packages/infra/test/a2a-send-todo.test.js',
+  'packages/infra/test/a2a-response-dispatcher.test.js',
   'packages/infra/test/a2a-integration.test.js',
   'packages/infra/test/mirror-state.test.js',
   'packages/infra/test/local-tools.test.js',

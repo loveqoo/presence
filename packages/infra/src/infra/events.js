@@ -54,4 +54,17 @@ const syncTodosProjection = (state, userDataStore) => {
   state.set('todos', todos)
 }
 
-export { withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate, syncTodosProjection }
+// A2A Phase 1 S2 — todo_response event 를 송신 agent 의 conversationHistory
+// SYSTEM entry 용 문자열로 변환 (a2a-internal.md §4.5). EventActor drain 이
+// turnLifecycle.appendSystemEntrySync 에 전달.
+const formatResponseMessage = (event) => {
+  const from = event.fromAgentId ?? 'unknown'
+  const status = event.status
+  if (status === 'completed') return `[A2A 응답 from ${from}] ${event.payload ?? ''}`
+  if (status === 'failed') return `[A2A 응답 실패 from ${from}] ${event.error ?? ''}`
+  if (status === 'expired') return `[A2A 응답 타임아웃 from ${from}]`
+  // orphaned 는 sender 에게 event 전달 안 됨 — 이 경로 도달 없음
+  return `[A2A 응답 from ${from}] status=${status ?? 'unknown'}`
+}
+
+export { withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate, syncTodosProjection, formatResponseMessage }

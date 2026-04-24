@@ -20,6 +20,17 @@ const makeFindAgentSession = (entries) => (agentId) => {
   return { kind: 'ok', entry: matches[0] }
 }
 
+// S2: findSenderSession — USER + AGENT 양쪽, AGENT 우선
+const makeFindSenderSession = (entries) => (agentId) => {
+  const agents = entries.filter(e => e.type === SESSION_TYPE.AGENT && e.session.agentId === agentId)
+  if (agents.length > 1) return { kind: 'ambiguous', entry: null }
+  if (agents.length === 1) return { kind: 'ok', entry: agents[0] }
+  const users = entries.filter(e => e.type === SESSION_TYPE.USER && e.session.agentId === agentId)
+  if (users.length > 1) return { kind: 'ambiguous', entry: null }
+  if (users.length === 1) return { kind: 'ok', entry: users[0] }
+  return { kind: 'not-registered', entry: null }
+}
+
 const run = () => {
   console.log('SessionManager.findAgentSession routing tests')
 
@@ -70,6 +81,40 @@ const run = () => {
     const result = find('alice/worker')
     assert(result.kind === 'ambiguous', 'SM4: ambiguous')
     assert(result.entry === null, 'SM4: entry null')
+  }
+
+  // --- S2: findSenderSession ---
+
+  // SM5. AGENT 없고 USER 만 — USER fallback
+  {
+    const entries = [
+      { id: 'alice-default', type: SESSION_TYPE.USER, session: { agentId: 'alice/default' } },
+    ]
+    const find = makeFindSenderSession(entries)
+    const result = find('alice/default')
+    assert(result.kind === 'ok', 'SM5: USER only → ok')
+    assert(result.entry.type === SESSION_TYPE.USER, 'SM5: USER entry 반환')
+  }
+
+  // SM6. AGENT + USER 공존 — AGENT 우선
+  {
+    const entries = [
+      { id: 'alice-default', type: SESSION_TYPE.USER, session: { agentId: 'alice/default' } },
+      { id: 'agent-default', type: SESSION_TYPE.AGENT, session: { agentId: 'alice/default' } },
+    ]
+    const find = makeFindSenderSession(entries)
+    const result = find('alice/default')
+    assert(result.kind === 'ok', 'SM6: dual-homed → ok')
+    assert(result.entry.type === SESSION_TYPE.AGENT, 'SM6: AGENT 우선 선택')
+  }
+
+  // SM7. USER 도 AGENT 도 없음 → not-registered
+  {
+    const entries = []
+    const find = makeFindSenderSession(entries)
+    const result = find('alice/default')
+    assert(result.kind === 'not-registered', 'SM7: 둘 다 없음 → not-registered')
+    assert(result.entry === null, 'SM7: entry null')
   }
 
   summary()

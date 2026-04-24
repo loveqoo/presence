@@ -58,7 +58,25 @@ const createSessionManager = (userContext, opts = {}) => {
     return { kind: 'ok', entry: matches[0] }
   }
 
-  return { create, get, list, destroy, findAgentSession }
+  // A2A Phase 1 S2 — response 송신자 조회 (a2a-internal.md §4.2):
+  //   SendTodo 는 USER session 의 turn 에서도 호출 가능하므로 response 는
+  //   대화창으로 돌아가야 유저가 확인 가능. USER + AGENT 양쪽 검색.
+  //   우선순위: AGENT 선호 (delegate 경로) → 없으면 USER fallback.
+  const findSenderSession = (agentId) => {
+    const agents = [...sessions.values()].filter(
+      entry => entry.type === SESSION_TYPE.AGENT && entry.session.agentId === agentId,
+    )
+    if (agents.length > 1) return { kind: 'ambiguous', entry: null }
+    if (agents.length === 1) return { kind: 'ok', entry: agents[0] }
+    const users = [...sessions.values()].filter(
+      entry => entry.type === SESSION_TYPE.USER && entry.session.agentId === agentId,
+    )
+    if (users.length > 1) return { kind: 'ambiguous', entry: null }
+    if (users.length === 1) return { kind: 'ok', entry: users[0] }
+    return { kind: 'not-registered', entry: null }
+  }
+
+  return { create, get, list, destroy, findAgentSession, findSenderSession }
 }
 
 export { createSessionManager }
