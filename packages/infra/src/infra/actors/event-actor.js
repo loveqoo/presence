@@ -1,7 +1,7 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
 import { PHASE, STATE_PATH, TODO, TURN_SOURCE, EVENT_TYPE } from '@presence/core/core/policies.js'
-import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection } from '../events.js'
+import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection, formatResponseMessage } from '../events.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
 const { Task, Maybe, Reader } = fp
@@ -19,9 +19,10 @@ class EventActor extends ActorWrapper {
   #onEventDone
   #userDataStore
   #a2aQueueStore
+  #turnLifecycle
 
   constructor(turnActor, state, opts = {}) {
-    const { logger, onEventDone, todoReviewJobName, userDataStore, a2aQueueStore } = opts
+    const { logger, onEventDone, todoReviewJobName, userDataStore, a2aQueueStore, turnLifecycle } = opts
     const R = EventActor.RESULT
     // queue: 처리 대기 이벤트. inFlight: 현재 처리 중인 이벤트. deadLetter: 실패한 이벤트.
     super(
@@ -47,6 +48,12 @@ class EventActor extends ActorWrapper {
             if (!ts || ts.tag !== PHASE.IDLE) return [R.NO_OP_BUSY, actorState]
 
             const [head, ...rest] = actorState.queue
+
+            // A2A S2: todo_response 는 turn 재발행 없이 SYSTEM entry 만 추가 + skip.
+            if (head.type === EVENT_TYPE.TODO_RESPONSE) {
+              return this.#handleTodoResponse(actorState, rest, head)
+            }
+
             const todoResult = this.#resolveTodoReview(head, state, todoReviewJobName)
             if (todoResult.skip) return this.#skipTodoReview(actorState, rest)
             const event = todoResult.event
@@ -82,6 +89,7 @@ class EventActor extends ActorWrapper {
     this.#onEventDone = onEventDone
     this.#userDataStore = userDataStore
     this.#a2aQueueStore = a2aQueueStore ?? null
+    this.#turnLifecycle = turnLifecycle ?? null
   }
 
   // --- Public 메시지 API ---
@@ -169,6 +177,29 @@ class EventActor extends ActorWrapper {
     ;(this.#logger || console).warn?.('SendTodo duplicate skip', {
       requestId: event.requestId, reason: 'markProcessing-false',
     })
+    const skipped = { ...actorState, queue: rest }
+    this.#projectEvents(skipped)
+    if (rest.length > 0) fireAndForget(this.drain())
+    return [EventActor.RESULT.NO_OP_NO_TODOS, skipped]
+  }
+
+  // A2A S2: todo_response drain — turn 재발행 없이 SYSTEM entry 만 추가.
+  //   turnLifecycle 이 env 에 있어야 appendSystemEntrySync 호출 가능.
+  //   프로덕션 (SessionActors → EventActor) 는 항상 turnLifecycle 을 주입.
+  //   미주입은 테스트/직접 생성 케이스 — warn + drain 계속 (fallback).
+  #handleTodoResponse(actorState, rest, event) {
+    if (this.#turnLifecycle?.appendSystemEntrySync) {
+      try {
+        const content = formatResponseMessage(event)
+        this.#turnLifecycle.appendSystemEntrySync(this.#state, { content, tag: 'a2a-response' })
+      } catch (err) {
+        ;(this.#logger || console).warn?.('A2A todo_response SystemEntry 실패', { error: err?.message })
+      }
+    } else {
+      ;(this.#logger || console).warn?.('A2A todo_response drop — turnLifecycle missing', {
+        responseId: event.id, correlationId: event.correlationId,
+      })
+    }
     const skipped = { ...actorState, queue: rest }
     this.#projectEvents(skipped)
     if (rest.length > 0) fireAndForget(this.drain())

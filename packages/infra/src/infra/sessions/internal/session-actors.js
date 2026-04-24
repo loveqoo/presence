@@ -7,6 +7,7 @@ import { turnActorR } from '../../actors/turn-actor.js'
 import { eventActorR } from '../../actors/event-actor.js'
 import { budgetActorR } from '../../actors/budget-actor.js'
 import { delegateActorR } from '../../actors/delegate-actor.js'
+import { dispatchResponse } from '../../a2a/a2a-response-dispatcher.js'
 
 // =============================================================================
 // SessionActors: 세션에 필요한 Actor 생성 + compaction 구독.
@@ -20,8 +21,9 @@ class SessionActors {
     this.turnLifecycle = turnLifecycle
     this.turnController = turnController
 
-    // A2A Phase 1 S1 — receiver 측 queue 전이를 위해 userContext.a2aQueueStore 참조 보관.
+    // A2A Phase 1 S1+S2 — receiver 측 queue 전이 + response dispatch 용 참조.
     this.a2aQueueStore = userContext.a2aQueueStore ?? null
+    this.sessionManager = userContext.sessions ?? null
 
     // --- 메모리/압축 Actor ---
     // memoryActorR 는 agentId 로 mem0 격리. compactionActorR 는 extra field 무시하고 llm 만 사용.
@@ -43,7 +45,15 @@ class SessionActors {
       // A2A S1: markProcessing hook — drain 시작 전 todo_request 이벤트는 queue row 전이 시도.
       //         false = 이미 processing/completed/failed/expired → skipDuplicateTodoRequest.
       a2aQueueStore: this.a2aQueueStore,
-      onEventDone: (event, outcome) => this.handleEventDone(event, outcome, { onScheduledJobDone, a2aQueueStore: this.a2aQueueStore }),
+      // A2A S2: turnLifecycle — todo_response drain 시 SYSTEM entry 추가용.
+      //         SessionActors 가 주입한 turnLifecycle 을 그대로 전파.
+      turnLifecycle: this.turnLifecycle,
+      onEventDone: (event, outcome) => this.handleEventDone(event, outcome, {
+        onScheduledJobDone,
+        a2aQueueStore: this.a2aQueueStore,
+        sessionManager: this.sessionManager,
+        logger,
+      }),
     })
 
     this.budgetActor = budgetActorR.run({ state })
@@ -82,19 +92,33 @@ class SessionActors {
     const { success, result, error } = outcome
     const onScheduledJobDone = deps?.onScheduledJobDone
     const a2aQueueStore = deps?.a2aQueueStore
+    const sessionManager = deps?.sessionManager
+    const logger = deps?.logger
     if (event.type === EVENT_TYPE.SCHEDULED_JOB) {
       // scheduled_job: 기존 콜백 경로. 다른 type 과 분리.
       if (onScheduledJobDone) onScheduledJobDone(event, { success, result, error })
       return
     }
     if (event.type === EVENT_TYPE.TODO_REQUEST) {
-      // A2A S1: turn 성공 → completed, 실패 → failed.
+      // A2A S1+S2: turn 성공/실패에 따라 queue 전이 + sender 에게 response 발행.
       if (!a2aQueueStore || !event.requestId) return
-      if (success) a2aQueueStore.markCompleted(event.requestId)
-      else a2aQueueStore.markFailed(event.requestId, String(error ?? 'agent-error'))
+      const request = a2aQueueStore.getMessage(event.requestId)
+      if (!request) return  // row 사라짐 (방어)
+      const dispatchOpts = { a2aQueueStore, sessionManager, logger, request }
+      if (success) {
+        // markCompleted=false → expire tick 이 먼저 markExpired 한 race. 중복 response 방지로 skip.
+        if (!a2aQueueStore.markCompleted(event.requestId)) return
+        dispatchResponse({ ...dispatchOpts, status: 'completed', payload: result, error: null })
+          .catch(err => logger?.warn?.('dispatchResponse threw (completed)', { error: err?.message }))
+      } else {
+        const errorMsg = String(error ?? 'agent-error')
+        if (!a2aQueueStore.markFailed(event.requestId, errorMsg)) return
+        dispatchResponse({ ...dispatchOpts, status: 'failed', payload: null, error: errorMsg })
+          .catch(err => logger?.warn?.('dispatchResponse threw (failed)', { error: err?.message }))
+      }
       return
     }
-    // 다른 type (todo_review 등) 은 EventActor 내부에서 처리 완료 — 여기선 no-op.
+    // 다른 type (todo_review, todo_response 등) 은 EventActor 내부에서 처리 완료 — 여기선 no-op.
   }
 
   // --- Agent에 전달할 actors 묶음 ---
