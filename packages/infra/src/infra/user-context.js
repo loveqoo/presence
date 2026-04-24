@@ -7,6 +7,7 @@ import { LLMClient } from './llm/llm-client.js'
 import { createAgentRegistry, registerSummarizer } from './agents/agent-registry.js'
 import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
+import { createA2aQueueStore, defaultA2aQueueDbPath } from './a2a/a2a-queue-store.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
 import { loadUserMerged } from './config-loader.js'
@@ -98,9 +99,10 @@ class UserContext {
     userContext.agentRegistry = createAgentRegistry()
     registerSummarizer(userContext.agentRegistry, userContext.llm, { userId: username || 'default' })
 
-    // --- Job Store + User Data Store ---
+    // --- Job Store + User Data Store + A2A Queue Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))
     userContext.userDataStore = new UserDataStore(defaultUserDataDbPath(userContext.userDataPath))
+    userContext.a2aQueueStore = createA2aQueueStore(defaultA2aQueueDbPath(userContext.userDataPath))
 
     // --- Sessions (userContext 자기 참조) ---
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
@@ -130,6 +132,7 @@ class UserContext {
     await Promise.all(this.sessions.list().map(({ session }) => session.shutdown().catch(() => {})))
     this.jobStore.close()
     this.userDataStore.close()
+    this.a2aQueueStore.close()
     for (const conn of this.mcpConnections) {
       try { await conn.close() } catch (_) {}
     }
