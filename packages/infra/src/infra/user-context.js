@@ -8,6 +8,8 @@ import { createAgentRegistry, registerSummarizer } from './agents/agent-registry
 import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { createA2aQueueStore, defaultA2aQueueDbPath } from './a2a/a2a-queue-store.js'
+import { dispatchResponse } from './a2a/a2a-response-dispatcher.js'
+import { A2A } from '@presence/core/core/policies.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
 import { loadUserMerged } from './config-loader.js'
@@ -107,7 +109,46 @@ class UserContext {
     // --- Sessions (userContext 자기 참조) ---
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
 
+    // --- A2A expire tick (S2, a2a-internal.md §6.6) ---
+    userContext.a2aExpireInterval = null
+    userContext.a2aExpireInFlight = null
+    userContext.startA2aExpireTick(opts.a2aExpireTickMs ?? A2A.EXPIRE_TICK_MS)
+
     return userContext
+  }
+
+  // A2A Phase 1 S2 — pending/processing request 가 timeout 초과 시 expired 전이
+  // + sender 에게 expired response dispatch. unref() 로 프로세스 종료 방해 없음.
+  startA2aExpireTick(intervalMs) {
+    if (this.a2aExpireInterval) return
+    this.a2aExpireInterval = setInterval(() => this.#runA2aExpireTick(), intervalMs)
+    this.a2aExpireInterval.unref?.()
+  }
+
+  async #runA2aExpireTick() {
+    const p = this.#expireTickBody().catch(err => {
+      this.logger?.warn?.('A2A expire tick failed', { error: err?.message })
+    })
+    this.a2aExpireInFlight = p
+    try { await p } finally { this.a2aExpireInFlight = null }
+  }
+
+  async #expireTickBody() {
+    const now = Date.now()
+    const expired = this.a2aQueueStore.listExpired(now)
+    for (const request of expired) {
+      // markExpired=false → receiver 가 먼저 completed 한 race. dispatchResponse skip.
+      if (!this.a2aQueueStore.markExpired(request.id)) continue
+      await dispatchResponse({
+        a2aQueueStore: this.a2aQueueStore,
+        sessionManager: this.sessions,
+        logger: this.logger,
+        request,
+        status: 'expired',
+        payload: null,
+        error: `timeout-${request.timeoutMs ?? A2A.DEFAULT_TIMEOUT_MS}ms`,
+      })
+    }
   }
 
   // primaryAgentId 가 가리키는 agent 반환 (없으면 null).
@@ -128,7 +169,15 @@ class UserContext {
   }
 
   // 세션 → 인프라 순서로 정리.
+  // A2A expire tick 우선 정리 (새 tick 차단 + in-flight 완료 대기) 후 store close.
   async shutdown() {
+    if (this.a2aExpireInterval) {
+      clearInterval(this.a2aExpireInterval)
+      this.a2aExpireInterval = null
+    }
+    if (this.a2aExpireInFlight) {
+      try { await this.a2aExpireInFlight } catch (_) {}
+    }
     await Promise.all(this.sessions.list().map(({ session }) => session.shutdown().catch(() => {})))
     this.jobStore.close()
     this.userDataStore.close()

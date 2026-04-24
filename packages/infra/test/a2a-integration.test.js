@@ -310,6 +310,45 @@ const run = async () => {
     assert(queue.length === 0, 'EA3: queue 비움 (drain 진행)')
   }
 
+  // --- RC1/RC2: receiver complete vs expire race ---
+
+  // RC1. receiver markCompleted=false (expire 가 먼저 markExpired 성공) → dispatchResponse skip
+  //      실제 session-actors handleEventDone 로직을 간이 재현
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const request = store.enqueueRequest({ fromAgentId: AGENT_SENDER, toAgentId: AGENT_RECEIVER, payload: 'q' })
+    store.markProcessing(request.id)
+    // expire 가 먼저 markExpired 성공
+    assert(store.markExpired(request.id) === true, 'RC1: expire 먼저 성공')
+
+    // receiver 가 뒤늦게 markCompleted 시도 → false
+    const shouldDispatch = store.markCompleted(request.id)
+    assert(shouldDispatch === false, 'RC1: markCompleted=false (이미 expired)')
+    // handleEventDone 이 shouldDispatch=false 면 dispatchResponse 호출 안 함 → skip.
+    // 이 시나리오에서는 expire tick 의 dispatchResponse 만 수행되어 중복 response 없음.
+    const row = store.getMessage(request.id)
+    assert(row.status === TODO_STATUS.EXPIRED, 'RC1: row.status=expired 유지')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // RC2. expire markExpired=false (receiver 가 먼저 completed) → dispatchResponse skip
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const request = store.enqueueRequest({ fromAgentId: AGENT_SENDER, toAgentId: AGENT_RECEIVER, payload: 'q' })
+    store.markProcessing(request.id)
+    store.markCompleted(request.id)
+
+    // expire tick 이 뒤늦게 markExpired 시도 → false
+    const shouldDispatch = store.markExpired(request.id)
+    assert(shouldDispatch === false, 'RC2: markExpired=false (이미 completed)')
+    // UserContext 의 expire tick 은 false 이면 continue → dispatchResponse 호출 안 함
+    const row = store.getMessage(request.id)
+    assert(row.status === TODO_STATUS.COMPLETED, 'RC2: row.status=completed 유지')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

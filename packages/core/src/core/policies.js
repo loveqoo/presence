@@ -187,5 +187,6 @@ export const EVENT_TYPE = Object.freeze({
 export const A2A = Object.freeze({
   QUEUE_MAX_PER_AGENT: 100,
   DEFAULT_TIMEOUT_MS: 300000,
+  EXPIRE_TICK_MS: 30000,   // UserContext 의 a2a expire 스캔 주기 (S2)
 })
 
