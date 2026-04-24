@@ -107,7 +107,7 @@ class JobToolFactory {
       description: '등록된 Job 목록과 다음 실행 예정 시각을 표시합니다.',
       parameters: { type: 'object', properties: {} },
       handler: () => {
-        const jobs = this.#store.listJobs()
+        const jobs = this.#store.listJobs({ ownerAgentId: this.#ownerAgentId })
         if (jobs.length === 0) return '등록된 Job이 없습니다.'
         return jobs.map(formatJob).join('\n')
       },
@@ -133,7 +133,8 @@ class JobToolFactory {
       },
       handler: (args) => {
         const { id, name, cron, prompt, enabled, max_retries: maxRetries, allowed_tools: allowedTools } = args
-        if (!this.#store.getJob(id)) return `오류: Job을 찾을 수 없음: ${id}`
+        const opts = { ownerAgentId: this.#ownerAgentId }
+        if (!this.#store.getJob(id, opts)) return `오류: Job을 찾을 수 없음: ${id}`
         if (cron !== undefined && !validateCron(cron)) return `오류: 유효하지 않은 cron 표현식: "${cron}"`
 
         const fields = {}
@@ -144,7 +145,8 @@ class JobToolFactory {
         if (maxRetries !== undefined) fields.max_retries = maxRetries
         if (allowedTools !== undefined) fields.allowed_tools = JSON.stringify(allowedTools)
 
-        const job = this.#store.updateJob(id, fields)
+        const job = this.#store.updateJob(id, fields, opts)
+        if (!job) return `오류: Job을 찾을 수 없음: ${id}` // pre-check 후 race
         return `Job 업데이트됨:\n${formatJob(job)}`
       },
     }
@@ -160,9 +162,11 @@ class JobToolFactory {
         required: ['id'],
       },
       handler: ({ id }) => {
-        const job = this.#store.getJob(id)
+        const opts = { ownerAgentId: this.#ownerAgentId }
+        const job = this.#store.getJob(id, opts)
         if (!job) return `오류: Job을 찾을 수 없음: ${id}`
-        this.#store.deleteJob(id)
+        const deleted = this.#store.deleteJob(id, opts)
+        if (!deleted) return `오류: Job을 찾을 수 없음: ${id}` // pre-check 후 race
         return `Job 삭제됨: ${job.name} (${id})`
       },
     }
@@ -181,8 +185,9 @@ class JobToolFactory {
         required: ['id'],
       },
       handler: ({ id, limit = 10 }) => {
-        if (!this.#store.getJob(id)) return `오류: Job을 찾을 수 없음: ${id}`
-        const runs = this.#store.getRunHistory(id, Math.min(limit, 50))
+        const opts = { ownerAgentId: this.#ownerAgentId }
+        if (!this.#store.getJob(id, opts)) return `오류: Job을 찾을 수 없음: ${id}`
+        const runs = this.#store.getRunHistory(id, Math.min(limit, 50), opts)
         if (runs.length === 0) return '실행 이력이 없습니다.'
         return runs.map(formatRun).join('\n')
       },
@@ -199,7 +204,7 @@ class JobToolFactory {
         required: ['id'],
       },
       handler: ({ id }) => {
-        const job = this.#store.getJob(id)
+        const job = this.#store.getJob(id, { ownerAgentId: this.#ownerAgentId })
         if (!job) return `오류: Job을 찾을 수 없음: ${id}`
         const runId = this.#store.startRun(job.id, 1)
         const event = withEventMeta({

@@ -74,7 +74,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - **KG-16**: M3 미완료. `config.primaryAgentId` 적용 없이 `{username}/default` hardcode (I12). M3 완료 전까지 `primaryAgentId` 변경 CLI 동작이 세션 생성에 반영되지 않는다.
 - **KG-17**: `canAccessAgent` 진입점 #2 (a2a-router) 의 A2A JWT 인증 미완성. 현재 `X-Presence-Caller` 헤더 stub 사용. 실제 JWT 서명 검증은 authz phase (P23-5) 구현 후 연결 예정.
 - **KG-18**: 5진입점 enforcement 테스트가 정적 grep 수준 (text 존재 여부). 실제 `canAccessAgent` 반환값을 무시하는 코드가 추가되어도 테스트가 통과할 수 있다. 동적 spy 테스트로 강화 필요.
-- **KG-19**: JobStore 소유권 필터링 누락. `listJobs()`, `updateJob(id, ...)`, `deleteJob(id)` 가 `owner_user_id` / `owner_agent_id` 컬럼을 필터링/검증에 사용하지 않는다. `createJob(opts)` 에서 owner 값을 저장하지만 조회/수정/삭제 경로에서는 owner 를 검사하지 않음. 결과: agent A 의 세션에서 호출된 job-tools (`list_jobs` / `update_job` / `delete_job`) 가 같은 유저의 다른 agent B 의 cron 잡을 조회/수정/삭제 가능. SchedulerActor 자체는 유저 단위 1개이고 dispatch 시 `ownerAgentId` 를 이벤트에 실어 올바른 agent 세션으로 전달하므로 실행 경로는 영향 없음. 영향 범위는 **사용자 도구를 통한 관리 경계**. v2 에서 owner 필터링 활성화 + 소유권 검증 실패 시 명시적 거부. 연관: `feature/agent-scoped-data` 브랜치에서 JobStore 를 유저 단위로 유지하기로 결정했으므로 경로 분리가 아니라 컬럼 기반 필터링 수정으로 해소한다.
+- **KG-19**: ~~JobStore 소유권 필터링 누락.~~ resolved by fix/kg-19-job-owner-filter (2026-04-24, tool boundary 봉합 범위). `listJobs` / `getJob` / `updateJob` / `deleteJob` / `getRunHistory` 5 메서드에 `{ ownerAgentId }` 옵션 추가. `JobToolFactory` 가 고정 전달해 agent tool 경로는 자기 소유 job 만 관리 가능. 시스템 스케줄러 경로(`getDueJobs` / `startRun` 등)는 owner 무시 유지. Legacy owner-null row 는 tool 경로에서 조회 불가. 미해소 범위: 관측성 분리, TODO_REVIEW agent-per-instance 정책, 시스템 경로 자동 drift 탐지. M3 복수 agent 허용 시 재검토 필요.
 
 ---
 
@@ -112,7 +112,8 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - `packages/server/src/server/ws-handler.js` — 진입점 #3 (CONTINUE_SESSION)
 - `packages/server/src/server/scheduler-factory.js` — 진입점 #4 (SCHEDULED_RUN)
 - `packages/infra/src/interpreter/delegate.js` — 진입점 #5 (DELEGATE)
-- `packages/infra/src/infra/jobs/job-store.js` — JobStore schema v1 (owner_user_id + owner_agent_id)
+- `packages/infra/src/infra/jobs/job-store.js` — JobStore schema v1 (owner_user_id + owner_agent_id), agent tool 경로 5 메서드 ownerAgentId 필터링
+- `packages/infra/src/infra/jobs/job-tools.js` — JobToolFactory, 5 tool(list_jobs/update_job/delete_job/job_history/run_job_now) ownerAgentId 고정 전달
 - `packages/infra/src/infra/memory.js` — Memory 클래스 (agentId 파라미터 격리)
 - `packages/infra/src/infra/actors/memory-actor.js` — MemoryActor (agentId 기반 recall/save)
 - `packages/infra/src/infra/sessions/internal/session-actors.js` — sessionEnv에 agentId 주입
@@ -127,4 +128,5 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-22: 초기 작성 — feature/agent-identity-model 브랜치 23커밋 검증 후 작성. KG-15~18 등록.
 - 2026-04-23: I-WD 추가 — W1(cb6c59a) workingDir 단일 규칙 리팩토링 반영. `workingDir = Config.userDataPath(userId)` 고정, 외부 입력 무시, persistence 미저장 규칙. 테스트 커버리지 I-WD 추가.
 - 2026-04-24: KG-19 추가 — feature/agent-scoped-data 브랜치 data-scope 조사에서 발견. JobStore 의 owner_user_id/owner_agent_id 컬럼이 schema 에만 존재, 조회/수정/삭제 쿼리에서 필터링에 사용 안 됨. 이번 data-scope 리팩토링 범위 분리 — 별도 티켓으로 등록.
+- 2026-04-24: KG-19 resolved — fix/kg-19-job-owner-filter. JobStore agent tool 경로 5 메서드 owner 필터링 활성화. JobToolFactory ownerAgentId 고정 전달. tool boundary 봉합 범위(partial resolve). 관련 코드 목록에 job-tools.js 추가.
 - 2026-04-24: data-scope-alignment 완료 반영 — Memory/Session 격리 단위 변경(docs/design/data-scope-alignment.md) 구현 완료. 관련 코드 목록에 memory.js / memory-actor.js / session-actors.js / remove-user.js / slash-commands.js / repl-commands.js 추가. session-api.js 설명에 agents/{agentName}/sessions/{sid}/ 경로 생성 명시.
