@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import fp from '@presence/core/lib/fun-fp.js'
+import { A2A } from '@presence/core/core/policies.js'
 
 const { Reader } = fp
 
@@ -127,6 +128,63 @@ class A2aQueueStore {
       UPDATE todo_messages SET status = ?, error = ?
       WHERE id = ? AND status IN (?, ?)
     `).run(TODO_STATUS.FAILED, error ?? null, id, TODO_STATUS.PENDING, TODO_STATUS.PROCESSING)
+    return result.changes > 0
+  }
+
+  // --- S2 확장: response 발행 ---
+
+  // response row 생성 — kind='response'. status 는 즉시 final (pending 단계 없음).
+  // correlationId 로 원본 request 와 연결.
+  enqueueResponse({ correlationId, fromAgentId, toAgentId, payload, status, error = null }) {
+    if (!fromAgentId || !toAgentId) {
+      throw new Error('enqueueResponse: fromAgentId + toAgentId required')
+    }
+    if (!correlationId) {
+      throw new Error('enqueueResponse: correlationId required')
+    }
+    const finalStatuses = [TODO_STATUS.COMPLETED, TODO_STATUS.FAILED, TODO_STATUS.EXPIRED, TODO_STATUS.ORPHANED]
+    if (!finalStatuses.includes(status)) {
+      throw new Error(`enqueueResponse: status must be one of ${finalStatuses.join('|')} (got ${status})`)
+    }
+    const now = Date.now()
+    const id = randomUUID()
+    this.#db.prepare(`
+      INSERT INTO todo_messages (id, from_agent_id, to_agent_id, kind, correlation_id, payload, status, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, fromAgentId, toAgentId, TODO_KIND.RESPONSE, correlationId, payload ?? '', status, error, now)
+    return this.getMessage(id)
+  }
+
+  // --- S2 확장: expire ---
+
+  // pending/processing 중 timeout 초과 request row.
+  // timeout_ms null 인 row 는 정책 기본값 (A2A.DEFAULT_TIMEOUT_MS) 적용.
+  listExpired(now = Date.now()) {
+    const defaultTimeout = A2A.DEFAULT_TIMEOUT_MS
+    const rows = this.#db.prepare(`
+      SELECT * FROM todo_messages
+      WHERE kind = ?
+        AND status IN (?, ?)
+        AND created_at + COALESCE(timeout_ms, ?) < ?
+      ORDER BY created_at ASC
+    `).all(TODO_KIND.REQUEST, TODO_STATUS.PENDING, TODO_STATUS.PROCESSING, defaultTimeout, now)
+    return rows.map(A2aQueueStore.#rowToMessage)
+  }
+
+  // pending|processing → expired. 다른 상태면 false (receiver 가 먼저 완료한 경우 등).
+  markExpired(id, error = null) {
+    const result = this.#db.prepare(`
+      UPDATE todo_messages SET status = ?, error = ?
+      WHERE id = ? AND status IN (?, ?)
+    `).run(TODO_STATUS.EXPIRED, error, id, TODO_STATUS.PENDING, TODO_STATUS.PROCESSING)
+    return result.changes > 0
+  }
+
+  // response row → orphaned 재분류. 전이 제약 없음 (이미 final status 에서 전환).
+  markOrphaned(id) {
+    const result = this.#db.prepare(`
+      UPDATE todo_messages SET status = ? WHERE id = ?
+    `).run(TODO_STATUS.ORPHANED, id)
     return result.changes > 0
   }
 

@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdirSync, rmSync } from 'node:fs'
 import { createA2aQueueStore, TODO_STATUS, TODO_KIND } from '@presence/infra/infra/a2a/a2a-queue-store.js'
+import { A2A } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const makeTmpDir = () => {
@@ -127,6 +128,117 @@ const run = async () => {
     const fetched = s2.getMessage(m.id)
     assert(fetched !== null && fetched.payload === 'data', 'AQ7: 재개방 후 동일 데이터 조회')
     s2.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // --- S2 확장: response + expire ---
+
+  // AQ8. enqueueResponse — kind='response', correlation_id 설정, status 즉시 final
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const req = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'q' })
+    const resp = store.enqueueResponse({
+      correlationId: req.id, fromAgentId: AGENT_B, toAgentId: AGENT_A,
+      payload: 'a', status: TODO_STATUS.COMPLETED,
+    })
+    assert(resp.kind === TODO_KIND.RESPONSE, 'AQ8: kind=response')
+    assert(resp.correlationId === req.id, 'AQ8: correlationId round-trip')
+    assert(resp.status === TODO_STATUS.COMPLETED, 'AQ8: status=completed')
+    assert(resp.fromAgentId === AGENT_B && resp.toAgentId === AGENT_A, 'AQ8: from/to 역방향')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ9. enqueueResponse — 모든 status 변형 허용 + 잘못된 status 거부
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const req = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'x' })
+    const base = { correlationId: req.id, fromAgentId: AGENT_B, toAgentId: AGENT_A, payload: 'x' }
+    for (const status of [TODO_STATUS.COMPLETED, TODO_STATUS.FAILED, TODO_STATUS.EXPIRED, TODO_STATUS.ORPHANED]) {
+      const r = store.enqueueResponse({ ...base, status })
+      assert(r.status === status, `AQ9: status=${status} 허용`)
+    }
+    let thrown = null
+    try { store.enqueueResponse({ ...base, status: TODO_STATUS.PENDING }) } catch (e) { thrown = e }
+    assert(thrown !== null, 'AQ9: status=pending 거부 (response 는 final 만)')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ10. listExpired — pending/processing 중 timeout 초과만. 타 status 제외.
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const now = Date.now()
+
+    // 만든 후 created_at 수동 조작 — raw SQL
+    const { default: BetterSqlite } = await import('better-sqlite3')
+    const db = new BetterSqlite(join(dir, 'a2a.db'))
+
+    const pendingExpired = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p1', timeoutMs: 1000 })
+    db.prepare('UPDATE todo_messages SET created_at = ? WHERE id = ?').run(now - 2000, pendingExpired.id)
+
+    const processingExpired = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p2', timeoutMs: 1000 })
+    db.prepare('UPDATE todo_messages SET created_at = ?, status = ? WHERE id = ?').run(now - 2000, TODO_STATUS.PROCESSING, processingExpired.id)
+
+    const pendingFresh = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'fresh', timeoutMs: 1000 })
+    const completedOld = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'done', timeoutMs: 1000 })
+    db.prepare('UPDATE todo_messages SET created_at = ?, status = ? WHERE id = ?').run(now - 2000, TODO_STATUS.COMPLETED, completedOld.id)
+
+    db.close()
+
+    const expired = store.listExpired(now)
+    const expiredIds = expired.map(m => m.id).sort()
+    const expectedIds = [pendingExpired.id, processingExpired.id].sort()
+    assert(expiredIds.length === 2, `AQ10: 2 개 만료 (got ${expiredIds.length})`)
+    assert(JSON.stringify(expiredIds) === JSON.stringify(expectedIds), 'AQ10: pending/processing 만 포함')
+    assert(!expired.some(m => m.id === pendingFresh.id), 'AQ10: fresh 제외')
+    assert(!expired.some(m => m.id === completedOld.id), 'AQ10: completed 제외')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ11. listExpired — timeout_ms null 인 row 는 A2A.DEFAULT_TIMEOUT_MS 적용
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const now = Date.now()
+    const msg = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'x' /* timeoutMs 생략 */ })
+
+    const { default: BetterSqlite } = await import('better-sqlite3')
+    const db = new BetterSqlite(join(dir, 'a2a.db'))
+    // created_at 을 DEFAULT_TIMEOUT_MS + 1000 이전으로 설정
+    db.prepare('UPDATE todo_messages SET created_at = ? WHERE id = ?').run(now - (A2A.DEFAULT_TIMEOUT_MS + 1000), msg.id)
+    db.close()
+
+    const expired = store.listExpired(now)
+    assert(expired.length === 1 && expired[0].id === msg.id, 'AQ11: null timeout_ms → DEFAULT_TIMEOUT_MS 적용')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ12. markExpired / markOrphaned 멱등 + 상태 전이
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const req = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'x' })
+
+    // pending → expired
+    assert(store.markExpired(req.id) === true, 'AQ12: pending → expired true')
+    assert(store.getMessage(req.id).status === TODO_STATUS.EXPIRED, 'AQ12: status=expired')
+    // 재호출 false (멱등)
+    assert(store.markExpired(req.id) === false, 'AQ12: expired → markExpired false (멱등)')
+    // completed 상태에서는 false
+    const req2 = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'y' })
+    store.markProcessing(req2.id)
+    store.markCompleted(req2.id)
+    assert(store.markExpired(req2.id) === false, 'AQ12: completed → markExpired false (race 방지)')
+
+    // response row 의 markOrphaned
+    const resp = store.enqueueResponse({
+      correlationId: req.id, fromAgentId: AGENT_B, toAgentId: AGENT_A,
+      payload: '', status: TODO_STATUS.COMPLETED,
+    })
+    assert(store.markOrphaned(resp.id) === true, 'AQ12: completed response → orphaned true')
+    assert(store.getMessage(resp.id).status === TODO_STATUS.ORPHANED, 'AQ12: response status=orphaned')
+    store.close(); rmSync(dir, { recursive: true, force: true })
   }
 
   summary()

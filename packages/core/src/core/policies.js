@@ -180,6 +180,7 @@ export const EVENT_TYPE = Object.freeze({
   SCHEDULED_JOB: 'scheduled_job',
   TODO_REVIEW:   'todo_review',
   TODO_REQUEST:  'todo_request',
+  TODO_RESPONSE: 'todo_response',
 })
 
 // A2A Phase 1 정책 상수. S4 enforcement/expire 에서 소비.
