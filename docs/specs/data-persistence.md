@@ -46,6 +46,8 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - I8. **EphemeralSession은 no-op persistence**: `scheduled`, `agent` 세션의 `flushPersistence()`, `clearPersistence()`는 no-op. 디스크 I/O 없음.
 - I9. **UserDataStore**: 유저별 SQLite 파일 (`user-data.db`). category/status 기반 단일 테이블. WAL 모드, foreign keys ON.
 - I10. **JobStore**: 유저별 SQLite 파일 (`jobs.db`). cron 기반 잡 스케줄 관리. 잡 실행 이력은 잡당 최대 50건 / 90일 TTL로 보존 (`JOB.HISTORY_MAX_PER_JOB = 50`, `JOB.HISTORY_TTL_DAYS = 90` — 단일 진원: `packages/core/src/core/policies.js`의 `JOB` 상수 객체. `job-store.js`는 이를 import하여 사용).
+  - **Agent tool 경로 소유권 필터링**: `listJobs` / `getJob` / `updateJob` / `deleteJob` / `getRunHistory` 는 `{ ownerAgentId }` 옵션 지원. `JobToolFactory` 가 ownerAgentId 를 고정 전달하므로 agent tool 은 자기 소유 job 만 관리 가능. 소유권 위반(미존재 포함)은 tool UX 에서 "오류: Job을 찾을 수 없음" 로 마스킹. `updateJob` 의 null 반환은 "미존재·소유권 위반·race" 통합 계약. `getRunHistory` 소유권 검증은 job 기준 best-effort (job 조회와 run SELECT 사이 race 시 빈 배열 반환 가능). Legacy owner-null row 는 tool 경로에서 조회 불가.
+  - **시스템 경로 소유권 필터 미적용**: `getDueJobs` / `startRun` / `finishRun` / `getRunningJobs` / `cleanupExpired` 및 `scheduler-actor.js` / `server-utils.js` / `user-session.js` 의 listJobs 호출은 ownerAgentId 없이 유지. 시스템 경로는 owner 무시가 의도된 설계.
 - I11. **users.json은 서버 레벨**: 인증 유저 목록은 유저별 폴더가 아닌 서버 전역 `~/.presence/users.json`.
 - I13. **A2aQueueStore**: 유저별 SQLite 파일 (`~/.presence/users/{u}/memory/a2a-queue.db`). JobStore 와 같은 `memory/` 디렉토리. WAL 모드, foreign keys ON.
 
@@ -130,5 +132,6 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - 2026-04-24: data-scope-alignment 완료 반영 — I3 세션 경로에 `agents/{agentName}/` 디렉토리 삽입. 파일 경로 트리 갱신. E1 경로 표기 갱신. E2 레거시 마이그레이션 → "기존 데이터 버림" 결정으로 재작성. 테스트 커버리지 E2 주석 갱신.
 - 2026-04-24: A2A Phase 1 S1 구현 반영 — I13 신규(A2aQueueStore 경로/schema/상태머신/멱등성/상한 계약). 파일 경로 트리에 `memory/a2a-queue.db` 삽입. 관련 코드에 a2a-queue-store.js 추가. 테스트 커버리지 I13 미커버 경고 등록.
 - 2026-04-24: A2A Phase 1 S2 구현 반영 — I13 확장: response row 계약(kind='response', final status 즉시, pending 없음), expire 클럭(UserContext setInterval/clearInterval/await in-flight), markCompleted/markExpired boolean race 방어, markOrphaned response row 재분류. 관련 코드에 a2a-response-dispatcher.js 추가. 테스트 커버리지 I13 미커버 시나리오 확장.
+- 2026-04-24: I10 agent 소유권 필터링 계약 추가 — fix/kg-19-job-owner-filter 반영. agent tool 경로 5 메서드 ownerAgentId 옵션, JobToolFactory 고정 전달, 시스템 경로 필터 미적용 유지, legacy owner-null row 조회 불가, getRunHistory best-effort 계약.
 - 2026-04-25: A2A 네이밍 범용화 반영 (v8) — I13 재작성: 테이블명 todo_messages → a2a_messages (schema v2), category 컬럼 추가, migration v1→v2 계약, A2A 프리미티브 범용성 불변식(금지 패턴 포함), enqueueResponse 시그니처 필수/옵션 분리. 파일 경로 트리 표기 갱신.
 - 2026-04-25: A2A Phase 1 S4 구현 반영 — I13 보강: `enqueueRequestBounded` 계약(COUNT+INSERT 원자화, 초과 시 failed+error='queue-full' audit row), `listByStatus({ kind, limit })` 계약(recovery bounded batch용), `A2A.RECOVER_BATCH_MAX = 1000` 상수 추가, 큐 상한 race-free 불변식 명시.

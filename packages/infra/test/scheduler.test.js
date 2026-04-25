@@ -915,6 +915,314 @@ async function run() {
     assert(turnCalled === false, 'TR4: turn not started when all todos done')
   }
 
+  // =============================================
+  // KG-19: JobStore 소유권 필터링
+  // =============================================
+
+  const OWNER_USER = 'u1'
+  const AGENT_A = 'u1/agentA'
+  const AGENT_B = 'u1/agentB'
+  const createBareJob = (store, ownerAgentId, name = 'job') =>
+    store.createJob({ ownerUserId: OWNER_USER, ownerAgentId, name, prompt: 'p', cron: '* * * * *' })
+
+  // KG19a. listJobs owner 필터 — agent A/B 의 job 분리
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    createBareJob(store, AGENT_A, 'a1')
+    createBareJob(store, AGENT_A, 'a2')
+    createBareJob(store, AGENT_B, 'b1')
+
+    const aJobs = store.listJobs({ ownerAgentId: AGENT_A })
+    const bJobs = store.listJobs({ ownerAgentId: AGENT_B })
+    assert(aJobs.length === 2, 'KG19a: agent A 2 jobs')
+    assert(bJobs.length === 1, 'KG19a: agent B 1 job')
+    assert(aJobs.every(j => j.ownerAgentId === AGENT_A), 'KG19a: A filter returns only A')
+    assert(bJobs[0].ownerAgentId === AGENT_B, 'KG19a: B filter returns only B')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19b. getJob owner 필터 — 다른 agent job 조회 시 null
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B, 'b-private')
+
+    assert(store.getJob(bJob.id, { ownerAgentId: AGENT_A }) === null, 'KG19b: A filter → B job null')
+    assert(store.getJob(bJob.id, { ownerAgentId: AGENT_B }) !== null, 'KG19b: B filter → B job present')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19c. updateJob owner 필터 — 다른 agent 수정 시 null + DB 불변
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B, 'original')
+
+    const result = store.updateJob(bJob.id, { name: 'hacked' }, { ownerAgentId: AGENT_A })
+    assert(result === null, 'KG19c: other-agent update → null')
+    const check = store.getJob(bJob.id)
+    assert(check.name === 'original', 'KG19c: DB row unchanged')
+
+    const ownResult = store.updateJob(bJob.id, { name: 'renamed' }, { ownerAgentId: AGENT_B })
+    assert(ownResult !== null && ownResult.name === 'renamed', 'KG19c: own-agent update succeeds')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19d. deleteJob owner 필터 — 다른 agent 삭제 시 false + DB 유지
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B)
+
+    assert(store.deleteJob(bJob.id, { ownerAgentId: AGENT_A }) === false, 'KG19d: other-agent delete → false')
+    assert(store.getJob(bJob.id) !== null, 'KG19d: B job still in DB')
+    assert(store.deleteJob(bJob.id, { ownerAgentId: AGENT_B }) === true, 'KG19d: own-agent delete → true')
+    assert(store.getJob(bJob.id) === null, 'KG19d: B job removed')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19e. getRunHistory owner 필터 — 다른 agent 이력 조회 시 []
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B)
+    const runId = store.startRun(bJob.id, 1)
+    store.finishRun(runId, { status: 'success', result: 'ok' })
+
+    const aHistory = store.getRunHistory(bJob.id, 10, { ownerAgentId: AGENT_A })
+    assert(Array.isArray(aHistory) && aHistory.length === 0, 'KG19e: A filter → []')
+    const bHistory = store.getRunHistory(bJob.id, 10, { ownerAgentId: AGENT_B })
+    assert(bHistory.length === 1, 'KG19e: B filter → 1')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19f. Legacy row (owner null) 은 필터 활성화 시 조회 불가
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    // legacy row 직접 INSERT (createJob 은 owner 필수이므로 raw SQL)
+    // 플랜 D1 의 "기존 데이터 버림" 검증을 위한 예외적 경로
+    const legacyId = 'legacy-1'
+    const db = store._testDb?.() // 없으므로 다른 방법 필요 — store 를 통한 방법이 없다면 스킵
+    // better-sqlite3 raw access 가 없으므로, createJob 후 UPDATE 로 owner null 로 만든다
+    const job = createBareJob(store, AGENT_A)
+    // 일반 updateJob 은 owner 컬럼에 null 을 허용하지 않음 — 따로 설정. UPDATABLE_FIELDS 에 owner_agent_id 포함.
+    store.updateJob(job.id, { owner_agent_id: null })
+
+    const filtered = store.listJobs({ ownerAgentId: AGENT_A })
+    assert(filtered.length === 0, 'KG19f: legacy owner-null not visible under filter')
+    const all = store.listJobs()
+    assert(all.length === 1, 'KG19f: legacy still present without filter')
+    assert(store.getJob(job.id, { ownerAgentId: AGENT_A }) === null, 'KG19f: legacy getJob with filter → null')
+    assert(store.deleteJob(job.id, { ownerAgentId: AGENT_A }) === false, 'KG19f: legacy delete with filter → false')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19g. getDueJobs 는 필터 없이 모든 agent + legacy 반환 (시스템 경로)
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const now = Date.now()
+    const past = now - 60000
+    store.createJob({ ownerUserId: OWNER_USER, ownerAgentId: AGENT_A, name: 'a', prompt: 'p', cron: '* * * * *', nextRun: past })
+    store.createJob({ ownerUserId: OWNER_USER, ownerAgentId: AGENT_B, name: 'b', prompt: 'p', cron: '* * * * *', nextRun: past })
+    const legacy = store.createJob({ ownerUserId: OWNER_USER, ownerAgentId: AGENT_A, name: 'l', prompt: 'p', cron: '* * * * *', nextRun: past })
+    store.updateJob(legacy.id, { owner_agent_id: null })
+
+    const due = store.getDueJobs(now)
+    assert(due.length === 3, 'KG19g: getDueJobs returns all (A + B + legacy)')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19h. #dispatchJob 의 updateJob(next_run) 이 필터 없이 동작
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const job = createBareJob(store, AGENT_A)
+    // 시스템 호출자가 옵션 없이 next_run 갱신
+    const result = store.updateJob(job.id, { next_run: 99999 })
+    assert(result !== null && result.nextRun === 99999, 'KG19h: system path updates next_run without filter')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19i. #handleJobFailure 의 getJob 도 필터 없이 동작
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const job = createBareJob(store, AGENT_A)
+    // 시스템 호출자는 옵션 미지정
+    const result = store.getJob(job.id)
+    assert(result !== null && result.ownerAgentId === AGENT_A, 'KG19i: system getJob returns any owner')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19j. #disableJob 의 updateJob(enabled:0) 도 필터 없이 동작
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const job = createBareJob(store, AGENT_B)
+    const result = store.updateJob(job.id, { enabled: 0 })
+    assert(result !== null && result.enabled === false, 'KG19j: system disable without filter')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19k. list_jobs 툴 — agent A 는 B 의 job 미노출
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    createBareJob(store, AGENT_A, 'a-visible')
+    createBareJob(store, AGENT_B, 'b-hidden')
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const listTool = tools.find(t => t.name === 'list_jobs')
+
+    const result = listTool.handler({})
+    assert(result.includes('a-visible'), 'KG19k: A own job shown')
+    assert(!result.includes('b-hidden'), 'KG19k: B job hidden from A')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19l. update_job(B-id) 시도 — not-found 마스킹, DB 불변
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B, 'b-original')
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const updateTool = tools.find(t => t.name === 'update_job')
+
+    const result = updateTool.handler({ id: bJob.id, name: 'hacked' })
+    assert(result.startsWith('오류: Job을 찾을 수 없음'), 'KG19l: cross-agent update masked as not-found')
+    assert(store.getJob(bJob.id).name === 'b-original', 'KG19l: B job name unchanged')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19m. update_job race — store mock 이 updateJob null 반환 (pre-check 통과 후 삭제)
+  {
+    const aJob = { id: 'raced', name: 'a', ownerAgentId: AGENT_A, ownerUserId: OWNER_USER }
+    const mockStore = {
+      getJob: () => aJob, // pre-check 통과
+      updateJob: () => null, // race: 실제 UPDATE 시 owner 조건 매치 실패
+    }
+    const tools = createJobTools({ store: mockStore, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const updateTool = tools.find(t => t.name === 'update_job')
+
+    const result = updateTool.handler({ id: 'raced', name: 'renamed' })
+    assert(result.startsWith('오류: Job을 찾을 수 없음'), 'KG19m: race → not-found (no false success)')
+  }
+
+  // KG19n. delete_job(B-id) 시도 — not-found, B job 유지
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B)
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const deleteTool = tools.find(t => t.name === 'delete_job')
+
+    const result = deleteTool.handler({ id: bJob.id })
+    assert(result.startsWith('오류'), 'KG19n: cross-agent delete masked')
+    assert(store.getJob(bJob.id) !== null, 'KG19n: B job still present')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19o. delete_job race — pre-check 통과 후 deleteJob false 반환
+  {
+    const aJob = { id: 'raced', name: 'a', ownerAgentId: AGENT_A, ownerUserId: OWNER_USER }
+    const mockStore = {
+      getJob: () => aJob,
+      deleteJob: () => false, // race
+    }
+    const tools = createJobTools({ store: mockStore, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const deleteTool = tools.find(t => t.name === 'delete_job')
+
+    const result = deleteTool.handler({ id: 'raced' })
+    assert(result.startsWith('오류: Job을 찾을 수 없음'), 'KG19o: delete race → not-found (no false success)')
+  }
+
+  // KG19p. job_history(B-id) 시도 — not-found
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const bJob = createBareJob(store, AGENT_B)
+    const runId = store.startRun(bJob.id, 1)
+    store.finishRun(runId, { status: 'success', result: 'ok' })
+    const tools = createJobTools({ store, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const historyTool = tools.find(t => t.name === 'job_history')
+
+    const result = historyTool.handler({ id: bJob.id })
+    assert(result.startsWith('오류'), 'KG19p: cross-agent history masked')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19q. job_history race — getRunHistory 가 빈 배열 반환 (best-effort)
+  {
+    const aJob = { id: 'raced', name: 'a', ownerAgentId: AGENT_A, ownerUserId: OWNER_USER }
+    const mockStore = {
+      getJob: () => aJob,
+      getRunHistory: () => [], // race: job 은 있었지만 history 조회 시 이미 삭제됨
+    }
+    const tools = createJobTools({ store: mockStore, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const historyTool = tools.find(t => t.name === 'job_history')
+
+    const result = historyTool.handler({ id: 'raced' })
+    assert(result.includes('이력이 없습니다'), 'KG19q: history race → empty (best-effort, no false content)')
+  }
+
+  // KG19r. run_job_now(B-id) 시도 — not-found, startRun 미호출
+  {
+    const bJob = { id: 'b1', name: 'b', ownerAgentId: AGENT_B, ownerUserId: OWNER_USER }
+    let startRunCalled = false
+    const mockStore = {
+      getJob: (id, opts) => (opts?.ownerAgentId === AGENT_A ? null : bJob), // A 필터로는 못 찾음
+      startRun: () => { startRunCalled = true; return 'r1' },
+    }
+    const tools = createJobTools({ store: mockStore, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+    const runTool = tools.find(t => t.name === 'run_job_now')
+
+    const result = runTool.handler({ id: 'b1' })
+    assert(result.startsWith('오류'), 'KG19r: cross-agent run masked')
+    assert(startRunCalled === false, 'KG19r: startRun not called')
+  }
+
+  // KG19s. updateJob no-op (owner 일치 + 값 변경 없음) → null 이 아닌 정상 job 반환
+  {
+    const dir = makeTmpDir()
+    const store = createJobStore(join(dir, 'jobs.db'))
+    const job = createBareJob(store, AGENT_A, 'same')
+
+    const result = store.updateJob(job.id, { name: 'same' }, { ownerAgentId: AGENT_A })
+    assert(result !== null, 'KG19s: no-op update not null-masked')
+    assert(result.name === 'same', 'KG19s: no-op returns same value')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // KG19t. Tool option-forwarding guard — 모든 필터 대상 store 호출에 ownerAgentId 전달
+  {
+    const calls = []
+    const mockStore = {
+      listJobs: (opts) => { calls.push({ method: 'listJobs', opts }); return [] },
+      getJob: (id, opts) => { calls.push({ method: 'getJob', id, opts }); return { id, ownerAgentId: AGENT_A, name: 'x' } },
+      updateJob: (id, fields, opts) => { calls.push({ method: 'updateJob', id, opts }); return { id, name: 'x' } },
+      deleteJob: (id, opts) => { calls.push({ method: 'deleteJob', id, opts }); return true },
+      getRunHistory: (id, limit, opts) => { calls.push({ method: 'getRunHistory', id, opts }); return [] },
+      startRun: () => 'r1',
+    }
+    const tools = createJobTools({ store: mockStore, eventActor: createMockEventActor(), ownerUserId: OWNER_USER, ownerAgentId: AGENT_A })
+
+    // 필터 대상 5 메서드를 호출하는 툴 4개 (+ list_jobs) 실행 — run_job_now 는 getJob 만 호출
+    tools.find(t => t.name === 'list_jobs').handler({})
+    tools.find(t => t.name === 'update_job').handler({ id: 'x', name: 'y' })
+    tools.find(t => t.name === 'delete_job').handler({ id: 'x' })
+    tools.find(t => t.name === 'job_history').handler({ id: 'x' })
+    tools.find(t => t.name === 'run_job_now').handler({ id: 'x' })
+
+    const filteredCalls = calls.filter(c => ['listJobs', 'getJob', 'updateJob', 'deleteJob', 'getRunHistory'].includes(c.method))
+    assert(filteredCalls.length > 0, 'KG19t: filter-target store methods were called')
+    for (const call of filteredCalls) {
+      assert(call.opts && call.opts.ownerAgentId === AGENT_A,
+        `KG19t: ${call.method} received ownerAgentId (drift guard)`)
+    }
+  }
+
   summary()
 }
 

@@ -48,6 +48,14 @@ const SCHEMA = `
 
 const UPDATABLE_FIELDS = ['name', 'prompt', 'cron', 'enabled', 'max_retries', 'allowed_tools', 'next_run', 'owner_user_id', 'owner_agent_id']
 
+// --- Owner 필터 적용 대상 / 미대상 메서드 분류 (KG-19) ---
+//   필터 대상 (agent tool 에서 호출): listJobs, getJob, updateJob, deleteJob, getRunHistory
+//     → { ownerAgentId } 옵션 전달 시 `WHERE owner_agent_id = ?` 추가.
+//     → "null / [] / false = agent-scoped lookup 미스" 단일 계약 (미존재·소유권 위반·race 통합).
+//   필터 미대상 (시스템 내부 / run-id 기반): getDueJobs, startRun, finishRun, getRunningJobs, cleanupExpired
+//     → 시그니처에 옵션 없음. 소유권 무관.
+//   신규 호출자 추가 시 위 분류에 맞춰 배치 — agent tool 경로이면 옵션 필수, 시스템 경로이면 옵션 없이.
+
 class JobStore {
   #db
 
@@ -102,26 +110,43 @@ class JobStore {
     return this.getJob(id)
   }
 
-  getJob(id) {
-    const row = this.#db.prepare('SELECT * FROM jobs WHERE id = ?').get(id)
+  getJob(id, { ownerAgentId } = {}) {
+    const row = ownerAgentId
+      ? this.#db.prepare('SELECT * FROM jobs WHERE id = ? AND owner_agent_id = ?').get(id, ownerAgentId)
+      : this.#db.prepare('SELECT * FROM jobs WHERE id = ?').get(id)
     return row ? JobStore.#rowToJob(row) : null
   }
 
-  listJobs() {
-    return this.#db.prepare('SELECT * FROM jobs ORDER BY created_at ASC').all().map(JobStore.#rowToJob)
+  listJobs({ ownerAgentId } = {}) {
+    const rows = ownerAgentId
+      ? this.#db.prepare('SELECT * FROM jobs WHERE owner_agent_id = ? ORDER BY created_at ASC').all(ownerAgentId)
+      : this.#db.prepare('SELECT * FROM jobs ORDER BY created_at ASC').all()
+    return rows.map(JobStore.#rowToJob)
   }
 
-  updateJob(id, fields) {
+  // 반환 단일 계약: "null = agent-scoped lookup 미스" (미존재·소유권 위반·race 통합).
+  // 판정은 UPDATE 의 changes 숫자가 아니라 owner-filtered getJob 재조회 결과로 한다.
+  // no-op update (owner 일치 + 값 변경 없음) 는 getJob 이 row 반환 → 정상 job.
+  updateJob(id, fields, { ownerAgentId } = {}) {
     const updates = Object.entries(fields).filter(([key]) => UPDATABLE_FIELDS.includes(key))
-    if (updates.length === 0) return this.getJob(id)
+    if (updates.length === 0) return this.getJob(id, { ownerAgentId })
     const setClauses = [...updates.map(([key]) => `${key} = ?`), 'updated_at = ?'].join(', ')
     const values = [...updates.map(([, val]) => val), Date.now(), id]
-    this.#db.prepare(`UPDATE jobs SET ${setClauses} WHERE id = ?`).run(...values)
-    return this.getJob(id)
+    const whereClause = ownerAgentId
+      ? 'WHERE id = ? AND owner_agent_id = ?'
+      : 'WHERE id = ?'
+    const bindings = ownerAgentId ? [...values, ownerAgentId] : values
+    this.#db.prepare(`UPDATE jobs SET ${setClauses} ${whereClause}`).run(...bindings)
+    return this.getJob(id, { ownerAgentId })
   }
 
-  deleteJob(id) {
-    this.#db.prepare('DELETE FROM jobs WHERE id = ?').run(id)
+  // boolean 반환 — tool 레이어가 pre-check 후 race 를 구분 가능 (KG-19).
+  deleteJob(id, { ownerAgentId } = {}) {
+    const stmt = ownerAgentId
+      ? this.#db.prepare('DELETE FROM jobs WHERE id = ? AND owner_agent_id = ?')
+      : this.#db.prepare('DELETE FROM jobs WHERE id = ?')
+    const result = ownerAgentId ? stmt.run(id, ownerAgentId) : stmt.run(id)
+    return result.changes > 0
   }
 
   // 다음 실행이 필요한 Job 목록 (enabled=1, next_run <= now)
@@ -155,7 +180,10 @@ class JobStore {
     if (resolvedJobId) this.#trimHistory(resolvedJobId)
   }
 
-  getRunHistory(jobId, limit = 20) {
+  // job_runs 에는 owner 컬럼이 없으므로 jobs 를 먼저 owner 필터 조회 후 history SELECT.
+  // best-effort: getJob 성공과 history SELECT 사이 다른 경로의 delete 시 빈 배열 반환 가능.
+  getRunHistory(jobId, limit = 20, { ownerAgentId } = {}) {
+    if (ownerAgentId && !this.getJob(jobId, { ownerAgentId })) return []
     return this.#db.prepare(`
       SELECT * FROM job_runs WHERE job_id = ?
       ORDER BY started_at DESC LIMIT ?
