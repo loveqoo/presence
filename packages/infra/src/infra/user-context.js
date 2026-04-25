@@ -41,12 +41,20 @@ class UserContext {
   /**
    * Builds a UserContext for a single user: bootstraps all infrastructure and creates a SessionManager.
    * @param {object|null} configOverride
-   * @param {{ username?: string, onSessionCreated?: Function }} [opts]
+   * @param {{ username?: string, onSessionCreated?: Function, evaluator: Function }} opts
    * @returns {Promise<UserContext>}
+   *
+   * `opts.evaluator` 는 필수: Cedar 인프라가 부팅된 상태가 invariant.
+   * 부재 또는 falsy 시 throw — server boot 가 bootCedarSubsystem 결과를 그대로 전달하는 게 정상 경로.
+   * (cedar-infra-y-prime plan v1.3 §4b)
    */
   static async create(configOverride, opts = {}) {
-    const { username, onSessionCreated } = opts
+    const { username, onSessionCreated, evaluator } = opts
+    if (typeof evaluator !== 'function') {
+      throw new Error('UserContext.create: opts.evaluator (function) 필수 — Cedar 인프라가 부팅된 상태가 invariant')
+    }
     const userContext = new UserContext()
+    userContext.evaluator = evaluator
 
     // --- Config + logger ---
     // configOverride 는 plain object 가능 → Config 인스턴스 보장

@@ -17,11 +17,16 @@ class UserContextManager {
   #bridge
   #serverConfig
   #memory
+  #evaluator
 
-  constructor({ bridge, serverConfig, memory }) {
+  constructor({ bridge, serverConfig, memory, evaluator }) {
+    if (typeof evaluator !== 'function') {
+      throw new Error('UserContextManager: evaluator (function) 필수 — Cedar 인프라가 부팅된 상태가 invariant')
+    }
     this.#bridge = bridge
     this.#serverConfig = serverConfig
     this.#memory = memory
+    this.#evaluator = evaluator
   }
 
   // S4: single-flight — 동시 첫 접근 (REST + WS) 시 UserContext.create 가 두 번 실행되어
@@ -40,6 +45,7 @@ class UserContextManager {
     const userContext = await UserContext.create(userConfig, {
       username,
       memory: this.#memory,
+      evaluator: this.#evaluator,
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },

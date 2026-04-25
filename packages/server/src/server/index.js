@@ -142,6 +142,7 @@ class PresenceServer {
     this.#userContext = await UserContext.create(config, {
       username: this.#username,
       memory: this.#memory,
+      evaluator: this.#evaluator,
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },
@@ -180,7 +181,7 @@ class PresenceServer {
       },
     })
     this.#authEnabled = true
-    this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory })
+    this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory, evaluator: this.#evaluator })
     const getUserContextManager = () => this.#userContextManager
 
     // Express 라우트 마운트 (순서 중요)
