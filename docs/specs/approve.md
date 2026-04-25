@@ -20,7 +20,7 @@
 
 `HIGH_RISK_PATTERNS` (`ApprovePrompt.js`)에 해당하면 `'high'`, 그 외는 `'normal'`.
 
-현재 HIGH 패턴 (21개, 카테고리별):
+현재 HIGH 패턴 (20개, 실질 19 unique — `TRUNCATE`가 line 15/25에 중복, 카테고리별):
 
 **명령 실행**: `shell_exec`, `sudo`
 
@@ -77,3 +77,4 @@
 - 2026-04-11: FP-46 resolved — HIGH_RISK_PATTERNS 6개 → 21개 확장, E3 잔여 false negative만 남김, E4를 KG-07로 격상
 - 2026-04-11: FP-22 해소와 KG-07 경계 명시 — E4에 onUnrecoverable 발동 시(복구 불가 경로)에도 pending approve 해소 불가임을 명시. tui-server-contract.md I13 참조 링크 추가.
 - 2026-04-11: KG-07 재검증으로 정정 — `_approve`의 transient 범위를 persistence 한정으로 명확화. I3 범위 정정, I8(재연결 시 _approve 복원 보장) 신규 추가, E4를 정상 경로로 전환, E4b(복구 불가 경로)로 분리, 테스트 커버리지 S20 매핑 추가.
+- 2026-04-25: HIGH_RISK_PATTERNS 카운트 정정 — 21 → 20 (실질 19 unique). `TRUNCATE`가 line 15/25에 중복 등록되어 있음. FP-46 확장 시점 이후 변동 없음, 초기 카운트 오기.
