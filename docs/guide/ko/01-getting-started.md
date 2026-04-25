@@ -1,4 +1,4 @@
-<!-- 최종 업데이트: 2026-04-20 (Phase 20 workingDir, FP-04/09/17/18/19/20/21/24/25/26 반영) -->
+<!-- 최종 업데이트: 2026-04-25 (05-troubleshooting.md 링크 추가, 다음 단계 섹션 갱신) -->
 
 # 시작하기
 
@@ -383,3 +383,4 @@ presence 첫 화면에 진입하셨다면, 이어서 아래 문서를 읽어 보
 - **[02-chat-basics.md](02-chat-basics.md)** — 메시지 보내기, AI 작업 취소, 대화 이력 다루기
 - **[03-tools-and-approval.md](03-tools-and-approval.md)** — AI가 파일을 쓰거나 명령을 실행할 때 나오는 승인 창 사용법
 - **[04-slash-commands.md](04-slash-commands.md)** — `/clear`, `/help`, `/memory` 등 슬래시 커맨드 전체 목록
+- **[05-troubleshooting.md](05-troubleshooting.md)** — 뜻밖의 메시지나 에러가 생겼을 때 대처법

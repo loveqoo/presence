@@ -1,4 +1,4 @@
-<!-- 최종 업데이트: 2026-04-20 (Phase 20 workingDir, FP-62 web_fetch 품질 개선 반영) -->
+<!-- 최종 업데이트: 2026-04-25 (05-troubleshooting.md 관련 링크 추가) -->
 
 # 03. 도구 실행과 승인
 
@@ -432,3 +432,4 @@ status: error | turn: 5 | mem: 12 | last: failure
 
 - [대화하기](./02-chat-basics.md) — 메시지 보내기, 대화 히스토리
 - [슬래시 커맨드](./04-slash-commands.md) — `/status`, `/report`, `/tool list`, `/panel` 등 전체 커맨드 목록
+- [문제 해결](./05-troubleshooting.md) — 에러 메시지 대처, A2A 시스템 메시지 안내
