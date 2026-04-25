@@ -76,6 +76,10 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - **KG-18**: ~~5진입점 enforcement 테스트가 정적 grep 수준 (text 존재 여부). 실제 `canAccessAgent` 반환값을 무시하는 코드가 추가되어도 테스트가 통과할 수 있다.~~ resolved by 2026-04-25. `agent-access.js`에 ring 버퍼(cap 200) spy infra(`inspectAccessInvocations` / `resetAccessInvocations`) 도입. 5 진입점 각각에 동적 spy 검증 추가: #1 server.test.js S1, #2 a2a-invoke.test.js AI1, #3 server.test.js S10, #4 scheduler-e2e.test.js SE1, #5 delegate.test.js #1. spy unit 테스트는 agent-access.test.js AA17~AA19. 정적 grep(test/regression/agent-access-enforcement.test.js)은 1차 방어로 병존 유지.
 - **KG-19**: ~~JobStore 소유권 필터링 누락.~~ resolved by fix/kg-19-job-owner-filter (2026-04-24, tool boundary 봉합 범위). `listJobs` / `getJob` / `updateJob` / `deleteJob` / `getRunHistory` 5 메서드에 `{ ownerAgentId }` 옵션 추가. `JobToolFactory` 가 고정 전달해 agent tool 경로는 자기 소유 job 만 관리 가능. 시스템 스케줄러 경로(`getDueJobs` / `startRun` 등)는 owner 무시 유지. Legacy owner-null row 는 tool 경로에서 조회 불가. 미해소 범위: 관측성 분리, TODO_REVIEW agent-per-instance 정책, 시스템 경로 자동 drift 탐지. M3 복수 agent 허용 시 재검토 필요.
 
+- **KG-20** (REGISTRY: KG-20): AgentId branded type 런타임 강제 부재. 설계 (`docs/design/agent-identity-model.md` §14.2): JS 환경에서 `string & { __brand }` 타입 시뮬레이션은 컴파일 타임 방어이며, 실제 `makeAgentId` 팩토리 호출 discipline 강제는 통합 테스트에 의존. 그러나 `validateAgentId` 미경유 raw 문자열을 `Session({ agentId })` 등에 직접 주입하는 경로의 회귀 검증 부재. 영향: M3 다중 agent 도입 시 raw `${user}/${name}` 조립 코드가 늘어나면 검증 우회 위험. 후속: KG-18 spy infra 패턴 확장 (validateAgentId 호출 trace) 또는 Session 생성자가 매번 `validateAgentId.either(opts.agentId)` 검증.
+
+- **KG-21** (REGISTRY: KG-21): Parser→Resolver→Authz 순서 런타임 검증 부재. 설계 (`docs/design/agent-identity-model.md` §14.2 item 2): `UnresolvedTarget` / `ResolvedAgentId` shape 분리로 컴파일 타임 방어 (TypeScript 였다면). JS 환경에선 `resolveDelegateTarget` 결과 (`ResolvedAgentId`) 를 거치지 않고 raw target 을 `canAccessAgent` 에 직접 넣는 경로가 회귀로 들어와도 탐지 불가. 영향: I10 (Parser→Resolver→Authz 순서) 의 런타임 보장 없음. KG-18 spy 가 `agentId` 캡처는 하지만 "이 값이 resolver 를 거쳤는가" 는 모름. 후속: ResolvedAgentId 에 `__resolved: true` 마커 추가 + `canAccessAgent` 가 마커 없는 입력 거부, 또는 resolver 진입 spy 와 authz spy 의 호출 순서 검증.
+
 ---
 
 ## 테스트 커버리지
@@ -131,3 +135,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-24: KG-19 resolved — fix/kg-19-job-owner-filter. JobStore agent tool 경로 5 메서드 owner 필터링 활성화. JobToolFactory ownerAgentId 고정 전달. tool boundary 봉합 범위(partial resolve). 관련 코드 목록에 job-tools.js 추가.
 - 2026-04-24: data-scope-alignment 완료 반영 — Memory/Session 격리 단위 변경(docs/design/data-scope-alignment.md) 구현 완료. 관련 코드 목록에 memory.js / memory-actor.js / session-actors.js / remove-user.js / slash-commands.js / repl-commands.js 추가. session-api.js 설명에 agents/{agentName}/sessions/{sid}/ 경로 생성 명시.
 - 2026-04-25: KG-18 resolved — spy infra 도입 + 5진입점 동적 검증 완료. I4 테스트 커버리지 갱신.
+- 2026-04-25: KG-20 + KG-21 추가 — A2A Phase 1 S4 + KG-18 spy infra 마무리 후 진실의 원천 정합성 검증에서 발견된 branded type 런타임 강제 부재(KG-20) 및 Parser→Resolver→Authz 순서 런타임 검증 부재(KG-21).
