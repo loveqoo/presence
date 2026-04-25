@@ -74,6 +74,7 @@ const tests = [
   'packages/infra/test/resolve-delegate-target.test.js',
   'packages/infra/test/agent-access.test.js',
   'packages/infra/test/agent-governance.test.js',
+  'packages/infra/test/cedar-evaluator.test.js',
   'packages/infra/test/agent-cli.test.js',
   'packages/infra/test/self-card.test.js',
   'packages/infra/test/a2a-client.test.js',

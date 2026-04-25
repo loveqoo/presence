@@ -8,7 +8,13 @@
     "./interpreter/*.js": "./src/interpreter/*.js",
     "./i18n": "./src/i18n/index.js"
   },
+  "files": [
+    "src/**/*.js",
+    "src/infra/authz/cedar/policies/**/*.cedar",
+    "src/infra/authz/cedar/*.cedarschema"
+  ],
   "dependencies": {
+    "@cedar-policy/cedar-wasm": "^4.10.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@mozilla/readability": "^0.6.0",
     "@presence/core": "*",
