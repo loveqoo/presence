@@ -6,7 +6,10 @@ import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createA2aQueueStore, TODO_STATUS } from '@presence/infra/infra/a2a/a2a-queue-store.js'
 import { dispatchResponse } from '@presence/infra/infra/a2a/a2a-response-dispatcher.js'
 import { withEventMeta } from '@presence/infra/infra/events.js'
+import { initI18n } from '@presence/infra/i18n'
 import { TurnLifecycle } from '@presence/core/core/turn-lifecycle.js'
+
+initI18n('ko')
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdirSync, rmSync } from 'node:fs'
@@ -217,7 +220,7 @@ const run = async () => {
     const history = sender.state.get(STATE_PATH.CONTEXT_CONVERSATION_HISTORY) || []
     const systemEntry = history.find(e => e.type === HISTORY_ENTRY_TYPE.SYSTEM && e.tag === 'a2a-response')
     assert(systemEntry !== undefined, 'AI5: sender 에 expired SYSTEM entry')
-    assert(String(systemEntry.content).includes('타임아웃'), 'AI5: 타임아웃 문구')
+    assert(String(systemEntry.content).includes('응답 없음'), 'AI5: expired 헤더 (FP-67)')
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
 

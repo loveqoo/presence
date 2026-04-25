@@ -1,6 +1,6 @@
 # A2A Phase 1 — 내부 에이전트 통신 설계
 
-**Status**: 2026-04-25 v9. S1 + S2 + S3 + v8 네이밍 범용화 완료. **S4 (큐 상한 + 재시작 회복) 설계 확정**, 구현 5 커밋 예정 — 트랜잭션 큐 상한 enforcement, bounded batch recovery, feature flag, 두 부트 hook (메인 + 인증 모드 single-flight 보호).
+**Status**: 2026-04-25 v10. S1 + S2 + S3 + S4 + v8 네이밍 범용화 + FP-67 (formatResponseMessage 사용자 친화 헤더 + advice) 완료.
 
 **Owner**: Presence core.
 
@@ -226,18 +226,24 @@ Op.SendA2aMessage(to, payload, { timeoutMs?, category? })
 송신 agent 는 requestId 를 받고 턴을 마칠 수 있음. response 는 event queue 를 통해 비동기 수신.
 Delegate 와 병행 존재 — 의미론 분리가 장기 유지보수에 유리.
 
-### 4.5 `a2a_response` event 처리 (v8 — S2 rename 반영)
+### 4.5 `a2a_response` event 처리 (v10 — FP-67 헤더 i18n + advice)
 
 송신 agent 의 EventActor drain 이 `a2a_response` type 을 만나면:
 - **turnActor.run 호출하지 않음** (Q15 — 자동 turn 미발행)
 - `turnLifecycle.appendSystemEntrySync(state, { content: formatResponseMessage(event), tag: 'a2a-response' })` 로 conversationHistory 에 SYSTEM entry 추가
 - `#skipTodoReview` 와 동일 패턴으로 queue 정상 배수 + 다음 drain 재귀
 
-`formatResponseMessage(event)` 형식 (v8):
-- `status='completed'`: `"[A2A 응답 from ${fromAgentId}] ${payload}"`
-- `status='failed'`: `"[A2A 응답 실패 from ${fromAgentId}] ${error}"`
-- `status='expired'`: `"[A2A 응답 타임아웃 from ${fromAgentId}]"`
+`formatResponseMessage(event)` 출력 (v10):
+- `status='completed'`: `"{i18n a2a.header.completed} ${payload}"` — 빈 payload 시 헤더만
+- `status='failed'`: `"{i18n a2a.header.failed} {humanizeA2aError(error)} {i18n a2a.advice.<error>}"` — advice 미등록 시 생략
+- `status='expired'`: `"{i18n a2a.header.expired}"` — 헤더만
+- 미지원 status: `"{i18n a2a.header.fallback} status=${status}"` — 디버그
 - `orphaned` 는 sender 에게 event 전달 안 됨 → 이 경로 도달 없음
+
+**불변식 (FP-67 해소)**:
+- 출력에 내부 식별자 (`fromAgentId`, "A2A") 노출 금지. 헤더는 i18n `a2a.header.*` 키로만 결정.
+- 헤더 + 본문 + advice 3 단 합성. 본문/advice 공백 합성은 falsy 필터링 (trailing space 제거).
+- error 코드는 raw 보존 (event.error / row.error). 표시 계층만 i18n 변환. interpreter 결과는 raw 코드 유지 (LLM 식별 정확도).
 
 turnLifecycle 은 EventActor env 에 필수 (SessionActors 가 주입). 미주입 + `a2a_response` = 프로덕션 불변식 위반 → warn 로그 + skip (실제 발생 없음).
 
@@ -477,6 +483,7 @@ Phase 1 이 Phase 2 로 확장될 때 바뀌는 점 (예상):
 
 ## Changelog
 
+- **v10 (2026-04-25)**: **FP-67 해소.** `formatResponseMessage` 헤더 라벨을 i18n `a2a.header.*` 키로 (`completed` / `failed` / `expired` / `fallback`), failed 분기에 `a2a.advice.*` 합성 (queue-full 등 4 코드). 출력에서 `fromAgentId` + "A2A" 내부 용어 제거 — 사용자 가시 메시지에 내부 식별자 노출 차단 불변식 추가. 헤더 + 본문 + advice 3 단 합성, falsy 필터로 trailing space 제거. 호환성: error 코드는 raw 보존, 표시 계층만 변환 (interpreter 결과 / LLM 입력은 raw 유지). 테스트 HM1~HM7 (events.test.js).
 - **v9 (2026-04-25)**: **S4 (큐 상한 + 회복력) 설계 확정.** §6.4 재시작 절차 구체화 — processing→failed (server-restart), pending→re-enqueue 또는 markFailed (server-restart-target-missing / server-restart-enqueue-failed), bounded batch (RECOVER_BATCH_MAX=1000), feature flag (config.a2a.recoverOnStart, default true). 두 부트 hook (메인 + 인증 모드 lazy) + UserContextManager single-flight 보호. §6.5 enforcement = `enqueueRequest({ maxPending })` 트랜잭션 (race-free). §4.1 error 가능 값에 server-restart* / queue-full 추가. §8 S4 paths. 운영 rollback 경로 = feature flag (데이터 rollback 은 비가역 명시).
 - **v8 (2026-04-24)**: **A2A 네이밍 범용화** (사용자 지적). "TODO" 가 agent 작업의 한 종류 (category) 일 뿐이라는 원칙 반영. 프리미티브 재명명: `Op.SendTodo` → `Op.SendA2aMessage`, `todo_messages` 테이블 → `a2a_messages`, `TODO_REQUEST`/`TODO_RESPONSE` → `A2A_REQUEST`/`A2A_RESPONSE`, `SEND_TODO_ERROR` → `SEND_A2A_ERROR`, `TodoMessage` → `A2aMessage`. 스키마에 `category` 컬럼 추가 (기본 `'todo'`, 향후 `'question'`/`'report'` 확장 가능). SCHEMA_VERSION v1 → v2 migration (`ALTER TABLE RENAME` + `ADD COLUMN`). 스펙 불변식으로 "특정 category 이름을 프리미티브에 고정 금지" 승격 (`data-persistence.md` I13, `session.md` I16). UserDataStore 의 category 패턴과 정합.
 - **v6 (2026-04-24)**: S3 재정의. "다자 협업 via TODO" 는 `Op.Parallel + Op.Delegate` 로 이미 해결됨 (Promise.allSettled 집계, 개별 fulfilled/rejected 보존) — 과공학 회피. SendTodo 는 비동기 맥락 투입 용도로 구분. S3 의 실질 범위 = `list_agents` tool 추가 (agent discovery). Q7 종결.

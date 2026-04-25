@@ -58,23 +58,42 @@ const syncTodosProjection = (state, userDataStore) => {
 // A2A Phase 1 S2 — a2a_response event 를 송신 agent 의 conversationHistory
 // SYSTEM entry 용 문자열로 변환 (a2a-internal.md §4.5). EventActor drain 이
 // turnLifecycle.appendSystemEntrySync 에 전달.
-//
-// S4 (v9) — failed 분기 의 error 코드를 i18n 매핑으로 사람 친화 메시지로 변환.
-//   알려지지 않은 코드는 raw fallback (현 동작 유지).
+const i18nLookup = (key, fallback) =>
+  i18next.isInitialized && i18next.exists(key) ? i18next.t(key) : fallback
+
 const humanizeA2aError = (code) => {
   if (typeof code !== 'string' || code.length === 0) return ''
-  const key = `a2a.error.${code}`
-  return i18next.isInitialized && i18next.exists(key) ? i18next.t(key) : code
+  return i18nLookup(`a2a.error.${code}`, code)
+}
+
+const STATUS_HEADER_KEYS = Object.freeze({ completed: 'completed', failed: 'failed', expired: 'expired' })
+
+const headerFor = (status) => {
+  const subKey = STATUS_HEADER_KEYS[status] ?? 'fallback'
+  return i18nLookup(`a2a.header.${subKey}`, '[서브 에이전트 응답]')
+}
+
+const adviceFor = (code) => {
+  if (typeof code !== 'string' || code.length === 0) return ''
+  return i18nLookup(`a2a.advice.${code}`, '')
 }
 
 const formatResponseMessage = (event) => {
-  const from = event.fromAgentId ?? 'unknown'
   const status = event.status
-  if (status === 'completed') return `[A2A 응답 from ${from}] ${event.payload ?? ''}`
-  if (status === 'failed') return `[A2A 응답 실패 from ${from}] ${humanizeA2aError(event.error)}`
-  if (status === 'expired') return `[A2A 응답 타임아웃 from ${from}]`
+  const header = headerFor(status)
+  if (status === 'completed') {
+    const payload = event.payload ?? ''
+    return payload ? `${header} ${payload}` : header
+  }
+  if (status === 'failed') {
+    const reason = humanizeA2aError(event.error)
+    const advice = adviceFor(event.error)
+    const tail = [reason, advice].filter(Boolean).join(' ')
+    return tail ? `${header} ${tail}` : header
+  }
+  if (status === 'expired') return header
   // orphaned 는 sender 에게 event 전달 안 됨 — 이 경로 도달 없음
-  return `[A2A 응답 from ${from}] status=${status ?? 'unknown'}`
+  return `${header} status=${status ?? 'unknown'}`
 }
 
 export { withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate, syncTodosProjection, formatResponseMessage }

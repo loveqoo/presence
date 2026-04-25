@@ -168,11 +168,23 @@
     "thinking": "thinking..."
   },
   "a2a": {
+    "header": {
+      "completed": "[Sub-agent response]",
+      "failed": "[Sub-agent error]",
+      "expired": "[Sub-agent no response]",
+      "fallback": "[Sub-agent response]"
+    },
     "error": {
       "queue-full": "recipient queue is full",
       "server-restart": "server restarted; in-flight message was interrupted",
       "server-restart-target-missing": "recipient agent is not registered after server restart",
       "server-restart-enqueue-failed": "failed to re-enqueue to recipient after server restart"
+    },
+    "advice": {
+      "queue-full": "Try again in a moment.",
+      "server-restart": "Please resend the message if needed.",
+      "server-restart-target-missing": "Verify the recipient agent is registered, then try again.",
+      "server-restart-enqueue-failed": "Try again in a moment."
     }
   }
 }

@@ -303,33 +303,79 @@ async function run() {
     assert(isDuplicate([], 'e1') === false, 'isDuplicate: empty list')
   }
 
-  // S4 (v9): formatResponseMessage humanize — i18n a2a.error.* 매핑
-  // HM1: 알려진 코드 'server-restart' → 한국어 메시지 포함 (ko locale)
+  // FP-67: formatResponseMessage 사용자 친화 헤더 + advice 합성 (헤더/본문/조치 모두 i18n)
+  // HM1: failed + 알려진 코드 → 한국어 헤더 + 본문 + advice. raw 코드 + agentId 미노출
   {
     initI18n('ko')
     const msg = formatResponseMessage({
       fromAgentId: 'alice/worker', status: 'failed', error: 'server-restart',
     })
-    assert(msg.includes('서버가 재시작'), 'HM1: 한국어 메시지 변환됨')
+    assert(msg.startsWith('[서브 에이전트 오류]'), 'HM1: 사용자 친화 헤더')
+    assert(msg.includes('서버가 재시작'), 'HM1: 한국어 본문')
+    assert(msg.includes('메시지를 다시 보내'), 'HM1: advice 합성')
     assert(!msg.includes('server-restart'), 'HM1: raw 코드 노출 없음')
+    assert(!msg.includes('alice/worker'), 'HM1: agentId 노출 없음')
   }
 
-  // HM2: 미등록 코드 → raw 코드 fallback
+  // HM2: 미등록 코드 → raw 코드 fallback (advice 없음)
   {
     initI18n('ko')
     const msg = formatResponseMessage({
       fromAgentId: 'alice/worker', status: 'failed', error: 'unknown-xyz',
     })
+    assert(msg.startsWith('[서브 에이전트 오류]'), 'HM2: 헤더 유지')
     assert(msg.includes('unknown-xyz'), 'HM2: 미등록 코드는 raw 출력')
+    assert(!msg.includes('alice/worker'), 'HM2: agentId 노출 없음')
   }
 
-  // HM3: en locale 도 영어 메시지로 변환
+  // HM3: en locale → 영어 헤더 + 본문 + advice
   {
     initI18n('en')
     const msg = formatResponseMessage({
       fromAgentId: 'alice/worker', status: 'failed', error: 'queue-full',
     })
-    assert(msg.includes('queue is full'), 'HM3: 영어 메시지 변환됨')
+    assert(msg.startsWith('[Sub-agent error]'), 'HM3: 영어 헤더')
+    assert(msg.includes('queue is full'), 'HM3: 영어 본문')
+    assert(msg.includes('Try again'), 'HM3: 영어 advice')
+  }
+
+  // HM4: completed + payload → 헤더 + 본문
+  {
+    initI18n('ko')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'completed', payload: '작업 결과',
+    })
+    assert(msg === '[서브 에이전트 응답] 작업 결과', 'HM4: completed 포맷')
+    assert(!msg.includes('alice/worker'), 'HM4: agentId 노출 없음')
+  }
+
+  // HM5: completed + payload 없음 → 헤더만 (trailing space 없음)
+  {
+    initI18n('ko')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'completed', payload: '',
+    })
+    assert(msg === '[서브 에이전트 응답]', 'HM5: 빈 payload 시 헤더만')
+  }
+
+  // HM6: expired → 전용 헤더만
+  {
+    initI18n('ko')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'expired',
+    })
+    assert(msg === '[서브 에이전트 응답 없음]', 'HM6: expired 전용 헤더')
+    assert(!msg.includes('alice/worker'), 'HM6: agentId 노출 없음')
+  }
+
+  // HM7: 알 수 없는 status → fallback 헤더 + status 디버그 표기
+  {
+    initI18n('ko')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'weird',
+    })
+    assert(msg.startsWith('[서브 에이전트 응답]'), 'HM7: fallback 헤더')
+    assert(msg.includes('status=weird'), 'HM7: 디버그용 status 표기')
   }
   // 정리: 다른 테스트 영향 없게 ko 로 복원
   initI18n('ko')
