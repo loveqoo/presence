@@ -19,8 +19,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
         ├── config.json                 ← 유저별 설정 override (agents[], primaryAgentId 포함)
         ├── user-data.db                ← UserDataStore (SQLite, category/status 구조)
         ├── jobs.db                     ← JobStore (SQLite, cron 스케줄, schema v1: owner_user_id + owner_agent_id)
-        ├── memory/
-        │   └── a2a-queue.db            ← A2aQueueStore (SQLite, A2A 메시지 큐, schema v2: a2a_messages + category)
+        ├── a2a-queue.db                ← A2aQueueStore (SQLite, A2A 메시지 큐, schema v2: a2a_messages + category)
         ├── agents/
         │   └── {agentName}/
         │       └── sessions/
@@ -49,7 +48,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
   - **Agent tool 경로 소유권 필터링**: `listJobs` / `getJob` / `updateJob` / `deleteJob` / `getRunHistory` 는 `{ ownerAgentId }` 옵션 지원. `JobToolFactory` 가 ownerAgentId 를 고정 전달하므로 agent tool 은 자기 소유 job 만 관리 가능. 소유권 위반(미존재 포함)은 tool UX 에서 "오류: Job을 찾을 수 없음" 로 마스킹. `updateJob` 의 null 반환은 "미존재·소유권 위반·race" 통합 계약. `getRunHistory` 소유권 검증은 job 기준 best-effort (job 조회와 run SELECT 사이 race 시 빈 배열 반환 가능). Legacy owner-null row 는 tool 경로에서 조회 불가.
   - **시스템 경로 소유권 필터 미적용**: `getDueJobs` / `startRun` / `finishRun` / `getRunningJobs` / `cleanupExpired` 및 `scheduler-actor.js` / `server-utils.js` / `user-session.js` 의 listJobs 호출은 ownerAgentId 없이 유지. 시스템 경로는 owner 무시가 의도된 설계.
 - I11. **users.json은 서버 레벨**: 인증 유저 목록은 유저별 폴더가 아닌 서버 전역 `~/.presence/users.json`.
-- I13. **A2aQueueStore**: 유저별 SQLite 파일 (`~/.presence/users/{u}/memory/a2a-queue.db`). JobStore 와 같은 `memory/` 디렉토리. WAL 모드, foreign keys ON.
+- I13. **A2aQueueStore**: 유저별 SQLite 파일 (`~/.presence/users/{u}/a2a-queue.db`). jobs.db 와 같은 `{username}/` 직하 디렉토리. WAL 모드, foreign keys ON.
 
   **테이블 스키마 (schema v2, SCHEMA_VERSION = 2)**: `a2a_messages` 단일 테이블 — 컬럼: `id / from_agent_id / to_agent_id / kind / correlation_id / category / payload / status / error / created_at / timeout_ms / processed_at`. `category TEXT NOT NULL DEFAULT 'todo'`.
 
@@ -135,3 +134,4 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - 2026-04-24: I10 agent 소유권 필터링 계약 추가 — fix/kg-19-job-owner-filter 반영. agent tool 경로 5 메서드 ownerAgentId 옵션, JobToolFactory 고정 전달, 시스템 경로 필터 미적용 유지, legacy owner-null row 조회 불가, getRunHistory best-effort 계약.
 - 2026-04-25: A2A 네이밍 범용화 반영 (v8) — I13 재작성: 테이블명 todo_messages → a2a_messages (schema v2), category 컬럼 추가, migration v1→v2 계약, A2A 프리미티브 범용성 불변식(금지 패턴 포함), enqueueResponse 시그니처 필수/옵션 분리. 파일 경로 트리 표기 갱신.
 - 2026-04-25: A2A Phase 1 S4 구현 반영 — I13 보강: `enqueueRequestBounded` 계약(COUNT+INSERT 원자화, 초과 시 failed+error='queue-full' audit row), `listByStatus({ kind, limit })` 계약(recovery bounded batch용), `A2A.RECOVER_BATCH_MAX = 1000` 상수 추가, 큐 상한 race-free 불변식 명시.
+- 2026-04-25: A) 경로 오류 수정 — a2a-queue.db 경로가 `memory/` 하위로 잘못 기술되어 있었음. 실제 코드(`defaultA2aQueueDbPath(userDataPath)`)는 `{username}/a2a-queue.db` 직하. 파일 경로 트리와 I13 본문 모두 수정.
