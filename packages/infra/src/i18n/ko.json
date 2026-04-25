@@ -283,5 +283,13 @@
   },
   "streaming": {
     "thinking": "생각 중..."
+  },
+  "a2a": {
+    "error": {
+      "queue-full": "수신자 메시지 대기열이 가득 찼습니다",
+      "server-restart": "서버가 재시작되어 처리 중이던 메시지가 중단되었습니다",
+      "server-restart-target-missing": "서버 재시작 후 수신 에이전트가 등록되어 있지 않습니다",
+      "server-restart-enqueue-failed": "서버 재시작 후 수신 큐 재진입에 실패했습니다"
+    }
   }
 }

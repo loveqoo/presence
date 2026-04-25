@@ -1,6 +1,7 @@
 import {
-  withEventMeta, eventToPrompt, todoFromEvent, isDuplicate,
+  withEventMeta, eventToPrompt, todoFromEvent, isDuplicate, formatResponseMessage,
 } from '@presence/infra/infra/events.js'
+import { initI18n } from '@presence/infra/i18n'
 import { EventActor, eventActorR } from '@presence/infra/infra/actors/event-actor.js'
 import { turnActorR } from '@presence/infra/infra/actors/turn-actor.js'
 import { forkTask } from '@presence/core/lib/task.js'
@@ -301,6 +302,37 @@ async function run() {
     assert(isDuplicate(todos, 'e3') === false, 'isDuplicate: not found')
     assert(isDuplicate([], 'e1') === false, 'isDuplicate: empty list')
   }
+
+  // S4 (v9): formatResponseMessage humanize — i18n a2a.error.* 매핑
+  // HM1: 알려진 코드 'server-restart' → 한국어 메시지 포함 (ko locale)
+  {
+    initI18n('ko')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'failed', error: 'server-restart',
+    })
+    assert(msg.includes('서버가 재시작'), 'HM1: 한국어 메시지 변환됨')
+    assert(!msg.includes('server-restart'), 'HM1: raw 코드 노출 없음')
+  }
+
+  // HM2: 미등록 코드 → raw 코드 fallback
+  {
+    initI18n('ko')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'failed', error: 'unknown-xyz',
+    })
+    assert(msg.includes('unknown-xyz'), 'HM2: 미등록 코드는 raw 출력')
+  }
+
+  // HM3: en locale 도 영어 메시지로 변환
+  {
+    initI18n('en')
+    const msg = formatResponseMessage({
+      fromAgentId: 'alice/worker', status: 'failed', error: 'queue-full',
+    })
+    assert(msg.includes('queue is full'), 'HM3: 영어 메시지 변환됨')
+  }
+  // 정리: 다른 테스트 영향 없게 ko 로 복원
+  initI18n('ko')
 
   summary()
 }
