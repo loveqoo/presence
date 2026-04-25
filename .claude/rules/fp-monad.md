@@ -23,6 +23,10 @@ paths:
 - Reader.asks만 사용. 클로저 DI(`const createX = (deps) => { ... }`) 신규 작성 금지
 - 레거시 브릿지(`const createX = (deps) => xR.run(deps)`)는 단일 라인 위임만 허용
 - 외부 모듈/전역 변수 직접 참조 금지 — Reader env를 통해 전달
+- **함수 파라미터 5개 초과 시 Reader 또는 옵션 객체 사용** (refactor.md Long Parameter List 통일, `eslint max-params: 5`):
+  - 의존성 묶음이면 `Reader.asks(env => ...)` env 객체에 흡수
+  - 단순 옵션 묶음이면 destructuring `({ a, b, c, d, e, f })` — ESLint 는 1 param 으로 카운트
+  - positional 6+ 는 금지 (호출자 가독성 + Reader 패턴 일관성)
 
 ## 상태 변경
 

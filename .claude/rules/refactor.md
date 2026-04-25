@@ -53,7 +53,7 @@ paths:
 
 | 신호 (Code Smell) | 판단 기준 | 조치 |
 |---|---|---|
-| **Long Parameter List** | 함수 파라미터 5개 초과 | 공유 설정을 인스턴스 필드로 |
+| **Long Parameter List** | 함수 파라미터 5개 초과 (`eslint max-params: 5`) | (a) Reader DI 환경 객체로 묶음, (b) 옵션 객체 destructuring `({ a, b, c, d, e, f })`, (c) 공유 설정을 인스턴스 필드로 |
 | **Data Clump** | 같은 묶음이 반복 (파라미터, 맵 키셋, 설정 그룹 등 형태 무관) | 묶음을 클래스로 응집 |
 | **Pass-through** | 함수 A가 받은 인자를 거의 그대로 함수 B에 전달 | A와 B를 같은 클래스의 메서드로 |
 | **Feature Envy** | 여러 함수가 같은 상태의 필드를 반복 참조 (독립 함수, 맵 값, 콜백 등 형태 무관) | 그 상태를 가진 클래스의 메서드로 이동 |

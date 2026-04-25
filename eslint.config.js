@@ -7,7 +7,9 @@
 //
 // 임계치 산정:
 //   max-lines (LOC): 300
-//   max-params:        5
+//   max-params:        5   (5 초과 → Reader DI 또는 옵션 객체 — fp-monad.md / refactor.md 통일)
+//                          객체 destructuring `({ a, b, c, d, e, f })` 는 1 param 으로 카운트
+//                          되므로 옵션 객체 패턴은 자연스럽게 우회.
 //   max-depth:         6
 //   complexity (CC):  70  (App.js 가 62 — 자체 도구의 48 보다 ESLint 가 엄격, 마진 +8)
 //   sonarjs/cognitive-complexity: 50  (App.js 가 41, 마진 +9)
