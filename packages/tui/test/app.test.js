@@ -1654,16 +1654,16 @@ await (async () => {
   assert(SERVER_URL_SOURCE_LABEL.default === '기본값', 'source label default')
 }
 
-// --- FP-19/20: remainingLabel ---
+// --- FP-19/20: remainingLabel — i18n auth.* 키 사용 (i18n 이관 후) ---
 
-// 76. 첫 시도 (attempt 0/3) → '2번 남음'
+// 76. 첫 시도 (attempt 0/3) → '2번 남음' (auth.attempts_remaining)
 {
-  assert(remainingLabel(0, 3) === '2번 남음', 'remainingLabel: attempt 0 → 2 left')
+  assert(remainingLabel(0, 3) === '2번 남음', 'remainingLabel: attempt 0 → 2번 남음')
 }
 
-// 77. 두 번째 시도 (attempt 1/3) → '마지막 시도'
+// 77. 두 번째 시도 (attempt 1/3) → '마지막 시도' (auth.last_attempt)
 {
-  assert(remainingLabel(1, 3) === '마지막 시도', 'remainingLabel: attempt 1 → 마지막')
+  assert(remainingLabel(1, 3) === '마지막 시도', 'remainingLabel: attempt 1 → 마지막 시도')
 }
 
 // 78. 마지막 시도 (attempt 2/3) → null (표기 없음)

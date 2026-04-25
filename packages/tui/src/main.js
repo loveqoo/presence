@@ -1,5 +1,10 @@
+import { initI18n, t } from '@presence/infra/i18n'
 import { checkServer, loginToServer, changePasswordOnServer } from './http.js'
 import { runRemote } from './remote.js'
+
+// remote.js 의 `runRemote` 가 config.locale 받은 후 다시 init — main 의 인증 흐름은
+// locale 결정 전이므로 ko 를 기본으로 미리 초기화. initI18n 은 idempotent.
+initI18n('ko')
 
 // =============================================================================
 // CLI 진입점 보조 함수들 (서버 URL 결정, 프롬프트, 인증 흐름)
@@ -51,44 +56,45 @@ const promptPassword = async (prompt = 'Password: ') => {
 
 const MAX_AUTH_ATTEMPTS = 3
 
-// N번 남았다는 한국어 접미. 마지막 시도에는 "마지막 시도" 라고 표기한다.
+// 시도 잔여 표기. left=0 인 마지막 시도에는 라벨 없음 (null), left=1 은 "마지막 시도",
+// 그 이상은 "{{left}}번 남음" — i18n auth.last_attempt / auth.attempts_remaining.
 const remainingLabel = (attempt, max = MAX_AUTH_ATTEMPTS) => {
   const left = max - attempt - 1
   if (left <= 0) return null
-  if (left === 1) return '마지막 시도'
-  return `${left}번 남음`
+  if (left === 1) return t('auth.last_attempt')
+  return t('auth.attempts_remaining', { left })
 }
 
 // mustChangePassword 흐름: 새 비밀번호 입력 → API 호출 → 새 토큰 반환. 3회 실패 시 exit.
 const changePasswordFlow = async (baseUrl, username, currentPassword, authState) => {
-  console.log(`\n[${username}] 최초 로그인입니다. 새 비밀번호를 설정하세요.`)
+  console.log(t('auth.must_change_intro', { username }))
   for (let attempt = 0; attempt < MAX_AUTH_ATTEMPTS; attempt++) {
     const suffix = remainingLabel(attempt)
-    const label = suffix ? `새 비밀번호 (${suffix}): ` : '새 비밀번호: '
+    const label = suffix ? t('auth.new_password_prompt_remaining', { suffix }) : t('auth.new_password_prompt')
     const newPassword = await promptPassword(label)
-    const confirmPassword = await promptPassword('새 비밀번호 확인: ')
-    if (newPassword !== confirmPassword) { console.error('비밀번호가 일치하지 않습니다.'); continue }
-    if (!newPassword) { console.error('비밀번호를 입력하세요.'); continue }
+    const confirmPassword = await promptPassword(t('auth.new_password_confirm'))
+    if (newPassword !== confirmPassword) { console.error(t('auth.password_mismatch')); continue }
+    if (!newPassword) { console.error(t('auth.password_empty')); continue }
     const res = await changePasswordOnServer(baseUrl, authState.accessToken, currentPassword, newPassword)
     if (res.status === 200) {
-      console.log('비밀번호가 변경되었습니다.')
+      console.log(t('auth.password_changed'))
       return {
         accessToken: res.body.accessToken ?? authState.accessToken,
         refreshToken: res.body.refreshToken ?? authState.refreshToken,
       }
     }
-    console.error(res.body?.error || '비밀번호 변경 실패')
+    console.error(res.body?.error || t('auth.change_failed'))
   }
-  console.error('비밀번호 변경에 실패했습니다.')
+  console.error(t('auth.change_failed_total'))
   process.exit(1)
 }
 
 // 로그인 루프 (최대 3회 시도) + mustChangePassword 후속 처리.
 const loginFlow = async (baseUrl) => {
-  const username = await promptInput('사용자명: ')
+  const username = await promptInput(t('auth.username_prompt'))
   for (let attempt = 0; attempt < MAX_AUTH_ATTEMPTS; attempt++) {
     const suffix = remainingLabel(attempt)
-    const label = suffix ? `비밀번호 (${suffix}): ` : '비밀번호: '
+    const label = suffix ? t('auth.password_prompt_remaining', { suffix }) : t('auth.password_prompt')
     const password = await promptPassword(label)
     const res = await loginToServer(baseUrl, username, password)
     if (res.status === 200) {
@@ -101,9 +107,9 @@ const loginFlow = async (baseUrl) => {
       }
       return { authState, username }
     }
-    console.error(res.body?.error || '로그인 실패')
+    console.error(res.body?.error || t('auth.login_failed'))
   }
-  console.error('로그인에 실패했습니다.')
+  console.error(t('auth.login_failed_total'))
   process.exit(1)
 }
 

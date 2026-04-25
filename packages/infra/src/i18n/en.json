@@ -167,6 +167,25 @@
   "streaming": {
     "thinking": "thinking..."
   },
+  "auth": {
+    "username_prompt": "Username: ",
+    "password_prompt": "Password: ",
+    "password_prompt_remaining": "Password ({{suffix}}): ",
+    "new_password_prompt": "New password: ",
+    "new_password_prompt_remaining": "New password ({{suffix}}): ",
+    "new_password_confirm": "Confirm new password: ",
+    "must_change_intro": "\n[{{username}}] First login — please set a new password.",
+    "password_mismatch": "Passwords do not match.",
+    "password_empty": "Please enter a password.",
+    "password_changed": "Password changed.",
+    "change_failed": "Password change failed",
+    "change_failed_total": "Password change failed.",
+    "login_failed": "Login failed",
+    "login_failed_total": "Login failed.",
+    "session_expired": "Session expired. Please log in again.",
+    "attempts_remaining": "{{left}} attempts left",
+    "last_attempt": "last attempt"
+  },
   "a2a": {
     "header": {
       "completed": "[Sub-agent response]",

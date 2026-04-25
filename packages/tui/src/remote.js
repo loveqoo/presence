@@ -1,6 +1,6 @@
 import { WS_CLOSE } from '@presence/core/core/policies.js'
 import { defaultSessionId } from '@presence/infra/infra/constants.js'
-import { initI18n } from '@presence/infra/i18n'
+import { initI18n, t } from '@presence/infra/i18n'
 import { createTokenRefresher, createAuthClient } from './auth-client.js'
 import { RemoteSession } from './remote-session.js'
 
@@ -15,7 +15,7 @@ async function runRemote(baseUrl, opts = {}) {
   const tryRefresh = createTokenRefresher(baseUrl, authState)
   const authFailedHolder = {
     handler() {
-      console.error('인증이 만료되었습니다. 다시 로그인 해주세요.')
+      console.error(t('auth.session_expired'))
       process.exit(1)
     },
   }
