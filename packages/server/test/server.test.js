@@ -290,6 +290,27 @@ async function run() {
       await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
     }
 
+    // SC-Y1a. Cedar evaluator 가용성 — 부팅 후 ctx.evaluator 함수 (CI-Y3 통합 검증).
+    {
+      assert(typeof ctx.evaluator === 'function', 'SC-Y1a: ctx.evaluator 함수 가용')
+    }
+
+    // SC-Y3. 정상 부팅 후 evaluator 1 회 호출 → audit log 파일에 entry 1 줄 추가.
+    {
+      const { join: joinPath } = await import('node:path')
+      const { existsSync: exists, readFileSync: readFile } = await import('node:fs')
+      const auditPath = joinPath(ctx.tmpDir, 'logs', 'authz-audit.log')
+      const before = exists(auditPath) ? readFile(auditPath, 'utf-8').split('\n').filter(Boolean).length : 0
+      const r = ctx.evaluator({
+        principal: { type: 'LocalUser', id: 'admin' },
+        action:    'create_agent',
+        resource:  { type: 'User', id: 'admin' },
+      })
+      assert(r.decision === 'allow', `SC-Y3: 실 자산으로 admin allow (got ${r.decision})`)
+      const after = readFile(auditPath, 'utf-8').split('\n').filter(Boolean).length
+      assert(after === before + 1, `SC-Y3: audit entry 1 줄 추가 (${before} → ${after})`)
+    }
+
     // S21. INV-RJT-SNAPSHOT — chat 500 응답은 snapshot + stateVersion 동반
     {
       const errCtx = await createTestServer(() => { throw new Error('llm boom') })

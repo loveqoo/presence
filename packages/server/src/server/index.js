@@ -9,6 +9,7 @@ import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { Config } from '@presence/infra/infra/config.js'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { runAdminBootstrap, deleteInitialPasswordFile, ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
+import { bootCedarSubsystem } from '@presence/infra/infra/authz/cedar/index.js'
 import { createServerScheduler, registerAgentSessions } from './scheduler-factory.js'
 import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
@@ -38,6 +39,7 @@ class PresenceServer {
   #port
   #host
   #username
+  #evaluator
 
   static async create(configOverride, opts = {}) {
     const instance = new PresenceServer(opts)
@@ -61,6 +63,7 @@ class PresenceServer {
   get server() { return this.#httpServer }
   get wss() { return this.#wss }
   get userContext() { return this.#userContext }
+  get evaluator() { return this.#evaluator }
 
   get app() {
     return {
@@ -123,6 +126,10 @@ class PresenceServer {
     } catch (err) {
       throw new Error(`Admin bootstrap failed: ${err.message}. Recovery: check ${presenceDir} write permissions or delete partial files.`)
     }
+
+    // Cedar 인프라 부팅 — 정책/스키마 parse 검증 (boot fail-closed) + audit writer.
+    // 의미론 호출처는 governance-cedar v2.1 phase 에서 박힘. 이 phase 는 evaluator 노출만.
+    this.#evaluator = await bootCedarSubsystem({ presenceDir })
 
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
@@ -249,7 +256,7 @@ class PresenceServer {
 
 }
 
-// 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, shutdown }
+// 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, evaluator, shutdown }
 const startServer = async (configOverride, opts = {}) => {
   const instance = await PresenceServer.create(configOverride, opts)
   return {
@@ -257,6 +264,7 @@ const startServer = async (configOverride, opts = {}) => {
     wss: instance.wss,
     app: instance.app,
     userContext: instance.userContext,
+    evaluator: instance.evaluator,
     shutdown: instance.shutdown.bind(instance),
   }
 }
