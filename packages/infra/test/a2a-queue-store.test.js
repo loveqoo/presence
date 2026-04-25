@@ -100,18 +100,19 @@ const run = async () => {
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
 
-  // AQ6. schema migration — 빈 DB 에서 v1 생성 smoke
+  // AQ6. schema migration — 빈 DB 에서 v2 생성 smoke (a2a_messages + category 컬럼)
   {
     const dir = makeTmpDir()
     const dbPath = join(dir, 'a2a.db')
     const store = createA2aQueueStore(dbPath)
     const { default: BetterSqlite } = await import('better-sqlite3')
     const ro = new BetterSqlite(dbPath, { readonly: true })
-    const cols = ro.prepare('PRAGMA table_info(todo_messages)').all().map(c => c.name)
+    const cols = ro.prepare('PRAGMA table_info(a2a_messages)').all().map(c => c.name)
     assert(cols.includes('id'), 'AQ6: id 컬럼')
     assert(cols.includes('to_agent_id'), 'AQ6: to_agent_id 컬럼')
     assert(cols.includes('status'), 'AQ6: status 컬럼')
-    assert(ro.pragma('user_version', { simple: true }) === 1, 'AQ6: user_version=1')
+    assert(cols.includes('category'), 'AQ6: category 컬럼')
+    assert(ro.pragma('user_version', { simple: true }) === 2, 'AQ6: user_version=2')
     ro.close()
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
@@ -175,14 +176,14 @@ const run = async () => {
     const db = new BetterSqlite(join(dir, 'a2a.db'))
 
     const pendingExpired = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p1', timeoutMs: 1000 })
-    db.prepare('UPDATE todo_messages SET created_at = ? WHERE id = ?').run(now - 2000, pendingExpired.id)
+    db.prepare('UPDATE a2a_messages SET created_at = ? WHERE id = ?').run(now - 2000, pendingExpired.id)
 
     const processingExpired = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p2', timeoutMs: 1000 })
-    db.prepare('UPDATE todo_messages SET created_at = ?, status = ? WHERE id = ?').run(now - 2000, TODO_STATUS.PROCESSING, processingExpired.id)
+    db.prepare('UPDATE a2a_messages SET created_at = ?, status = ? WHERE id = ?').run(now - 2000, TODO_STATUS.PROCESSING, processingExpired.id)
 
     const pendingFresh = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'fresh', timeoutMs: 1000 })
     const completedOld = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'done', timeoutMs: 1000 })
-    db.prepare('UPDATE todo_messages SET created_at = ?, status = ? WHERE id = ?').run(now - 2000, TODO_STATUS.COMPLETED, completedOld.id)
+    db.prepare('UPDATE a2a_messages SET created_at = ?, status = ? WHERE id = ?').run(now - 2000, TODO_STATUS.COMPLETED, completedOld.id)
 
     db.close()
 
@@ -206,7 +207,7 @@ const run = async () => {
     const { default: BetterSqlite } = await import('better-sqlite3')
     const db = new BetterSqlite(join(dir, 'a2a.db'))
     // created_at 을 DEFAULT_TIMEOUT_MS + 1000 이전으로 설정
-    db.prepare('UPDATE todo_messages SET created_at = ? WHERE id = ?').run(now - (A2A.DEFAULT_TIMEOUT_MS + 1000), msg.id)
+    db.prepare('UPDATE a2a_messages SET created_at = ? WHERE id = ?').run(now - (A2A.DEFAULT_TIMEOUT_MS + 1000), msg.id)
     db.close()
 
     const expired = store.listExpired(now)
@@ -238,6 +239,79 @@ const run = async () => {
     })
     assert(store.markOrphaned(resp.id) === true, 'AQ12: completed response → orphaned true')
     assert(store.getMessage(resp.id).status === TODO_STATUS.ORPHANED, 'AQ12: response status=orphaned')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // --- Category 필드 (v2) ---
+
+  // AQ-cat1. enqueueRequest 기본 category='todo' 저장
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const msg = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'q' })
+    assert(msg.category === 'todo', 'AQ-cat1: 기본 category=todo')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ-cat2. enqueueRequest / enqueueResponse category override
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const req = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'q', category: 'question' })
+    assert(req.category === 'question', 'AQ-cat2: request category=question')
+    const resp = store.enqueueResponse({
+      correlationId: req.id, fromAgentId: AGENT_B, toAgentId: AGENT_A,
+      payload: 'a', status: TODO_STATUS.COMPLETED,
+    }, { category: 'question' })
+    assert(resp.category === 'question', 'AQ-cat2: response category=question (요청과 동일 분류 유지)')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ-cat3. migration v1 → v2 — ALTER TABLE RENAME + ADD COLUMN + DEFAULT 'todo' 백필
+  {
+    const dir = makeTmpDir()
+    const dbPath = join(dir, 'a2a.db')
+    const { default: BetterSqlite } = await import('better-sqlite3')
+
+    // v1 스키마를 수동 생성 — todo_messages 테이블 + category 컬럼 없음
+    const legacy = new BetterSqlite(dbPath)
+    legacy.pragma('journal_mode = WAL')
+    legacy.exec(`
+      CREATE TABLE todo_messages (
+        id              TEXT PRIMARY KEY,
+        from_agent_id   TEXT NOT NULL,
+        to_agent_id     TEXT NOT NULL,
+        kind            TEXT NOT NULL,
+        correlation_id  TEXT,
+        payload         TEXT NOT NULL,
+        status          TEXT NOT NULL,
+        error           TEXT,
+        created_at      INTEGER NOT NULL,
+        timeout_ms      INTEGER,
+        processed_at    INTEGER
+      );
+    `)
+    const legacyId = 'legacy-id-1'
+    legacy.prepare(`
+      INSERT INTO todo_messages (id, from_agent_id, to_agent_id, kind, payload, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(legacyId, AGENT_A, AGENT_B, 'request', 'legacy-payload', 'pending', Date.now())
+    legacy.pragma('user_version = 1')
+    legacy.close()
+
+    // createA2aQueueStore 가 v1→v2 migration 을 자동 실행
+    const store = createA2aQueueStore(dbPath)
+    const migrated = store.getMessage(legacyId)
+    assert(migrated !== null, 'AQ-cat3: legacy row 조회 가능')
+    assert(migrated.payload === 'legacy-payload', 'AQ-cat3: legacy payload 보존')
+    assert(migrated.category === 'todo', 'AQ-cat3: category DEFAULT todo 백필')
+
+    const ro = new BetterSqlite(dbPath, { readonly: true })
+    assert(ro.pragma('user_version', { simple: true }) === 2, 'AQ-cat3: user_version=2')
+    const tables = ro.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name)
+    assert(tables.includes('a2a_messages'), 'AQ-cat3: a2a_messages 테이블 존재')
+    assert(!tables.includes('todo_messages'), 'AQ-cat3: todo_messages 테이블 사라짐')
+    ro.close()
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
 

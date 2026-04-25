@@ -10,25 +10,27 @@ const { Reader } = fp
 // =============================================================================
 // A2aQueueStore — A2A Phase 1 S1 영속 큐 (SQLite)
 //
-// 같은 유저 내 agent 간 TODO (request/response) 메시지를 저장한다.
+// 같은 유저 내 agent 간 A2A (request/response) 메시지를 저장한다.
 // JobStore 패턴 복사 — better-sqlite3 동기 API, PRAGMA user_version migration.
 //
 // 경로: ~/.presence/users/{u}/memory/a2a-queue.db (JobStore 와 같은 디렉토리).
-// 설계: docs/design/a2a-internal.md v3 §4 ~ §6.
+// 설계: docs/design/a2a-internal.md v8 §4 ~ §6.
 //
-// S1 에서는 request + pending→processing→completed/failed 만 사용.
-// response/correlationId/timeoutMs expire 는 S2 에서 추가.
+// v2 (2026-04-25): 테이블명 todo_messages → a2a_messages, category 컬럼 추가.
+//   category 는 분류 필드 (기본 'todo'). 현재 'todo' 하나만 사용되지만
+//   프리미티브는 범용 — 'question'/'report'/'announcement' 등 자유 확장 가능.
 // =============================================================================
 
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 const SCHEMA = `
-  CREATE TABLE IF NOT EXISTS todo_messages (
+  CREATE TABLE IF NOT EXISTS a2a_messages (
     id              TEXT PRIMARY KEY,
     from_agent_id   TEXT NOT NULL,
     to_agent_id     TEXT NOT NULL,
     kind            TEXT NOT NULL,
     correlation_id  TEXT,
+    category        TEXT NOT NULL DEFAULT 'todo',
     payload         TEXT NOT NULL,
     status          TEXT NOT NULL,
     error           TEXT,
@@ -36,8 +38,8 @@ const SCHEMA = `
     timeout_ms      INTEGER,
     processed_at    INTEGER
   );
-  CREATE INDEX IF NOT EXISTS idx_todo_to_agent_status ON todo_messages(to_agent_id, status);
-  CREATE INDEX IF NOT EXISTS idx_todo_from_agent ON todo_messages(from_agent_id);
+  CREATE INDEX IF NOT EXISTS idx_a2a_to_agent_status ON a2a_messages(to_agent_id, status);
+  CREATE INDEX IF NOT EXISTS idx_a2a_from_agent ON a2a_messages(from_agent_id);
 `
 
 // 상태 머신 (§6.1):
@@ -73,17 +75,28 @@ class A2aQueueStore {
   }
 
   // PRAGMA user_version 기반 idempotent migration.
+  //   0 → 2: 신규 DB. SCHEMA 로 a2a_messages 테이블 생성.
+  //   1 → 2: 기존 todo_messages 를 a2a_messages 로 rename + category 컬럼 추가.
+  //          DEFAULT 'todo' 로 기존 row 자동 백필.
   #migrate() {
     const current = this.#db.pragma('user_version', { simple: true })
     if (current === 0) {
       this.#db.exec(SCHEMA)
       this.#db.pragma(`user_version = ${SCHEMA_VERSION}`)
+      return
+    }
+    if (current === 1) {
+      this.#db.exec(`
+        ALTER TABLE todo_messages RENAME TO a2a_messages;
+        ALTER TABLE a2a_messages ADD COLUMN category TEXT NOT NULL DEFAULT 'todo';
+      `)
+      this.#db.pragma('user_version = 2')
     }
   }
 
   // --- Request enqueue ---
 
-  enqueueRequest({ fromAgentId, toAgentId, payload, timeoutMs = null }) {
+  enqueueRequest({ fromAgentId, toAgentId, payload, timeoutMs = null, category = 'todo' }) {
     if (!fromAgentId || !toAgentId) {
       throw new Error('enqueueRequest: fromAgentId + toAgentId required')
     }
@@ -93,9 +106,9 @@ class A2aQueueStore {
     const now = Date.now()
     const id = randomUUID()
     this.#db.prepare(`
-      INSERT INTO todo_messages (id, from_agent_id, to_agent_id, kind, payload, status, created_at, timeout_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, fromAgentId, toAgentId, TODO_KIND.REQUEST, payload, TODO_STATUS.PENDING, now, timeoutMs)
+      INSERT INTO a2a_messages (id, from_agent_id, to_agent_id, kind, category, payload, status, created_at, timeout_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, fromAgentId, toAgentId, TODO_KIND.REQUEST, category, payload, TODO_STATUS.PENDING, now, timeoutMs)
     return this.getMessage(id)
   }
 
@@ -107,7 +120,7 @@ class A2aQueueStore {
   markProcessing(id) {
     const now = Date.now()
     const result = this.#db.prepare(`
-      UPDATE todo_messages SET status = ?, processed_at = ?
+      UPDATE a2a_messages SET status = ?, processed_at = ?
       WHERE id = ? AND status = ?
     `).run(TODO_STATUS.PROCESSING, now, id, TODO_STATUS.PENDING)
     return result.changes > 0
@@ -116,7 +129,7 @@ class A2aQueueStore {
   // processing → completed 전이. 다른 상태면 false.
   markCompleted(id) {
     const result = this.#db.prepare(`
-      UPDATE todo_messages SET status = ?
+      UPDATE a2a_messages SET status = ?
       WHERE id = ? AND status = ?
     `).run(TODO_STATUS.COMPLETED, id, TODO_STATUS.PROCESSING)
     return result.changes > 0
@@ -125,7 +138,7 @@ class A2aQueueStore {
   // pending | processing → failed. error 저장.
   markFailed(id, error) {
     const result = this.#db.prepare(`
-      UPDATE todo_messages SET status = ?, error = ?
+      UPDATE a2a_messages SET status = ?, error = ?
       WHERE id = ? AND status IN (?, ?)
     `).run(TODO_STATUS.FAILED, error ?? null, id, TODO_STATUS.PENDING, TODO_STATUS.PROCESSING)
     return result.changes > 0
@@ -134,8 +147,9 @@ class A2aQueueStore {
   // --- S2 확장: response 발행 ---
 
   // response row 생성 — kind='response'. status 는 즉시 final (pending 단계 없음).
-  // correlationId 로 원본 request 와 연결.
-  enqueueResponse({ correlationId, fromAgentId, toAgentId, payload, status, error = null }) {
+  // correlationId 로 원본 request 와 연결. error/category 는 분류·진단 필드라 opts 로 분리.
+  enqueueResponse({ correlationId, fromAgentId, toAgentId, payload, status }, opts = {}) {
+    const { error = null, category = 'todo' } = opts
     if (!fromAgentId || !toAgentId) {
       throw new Error('enqueueResponse: fromAgentId + toAgentId required')
     }
@@ -149,9 +163,9 @@ class A2aQueueStore {
     const now = Date.now()
     const id = randomUUID()
     this.#db.prepare(`
-      INSERT INTO todo_messages (id, from_agent_id, to_agent_id, kind, correlation_id, payload, status, error, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, fromAgentId, toAgentId, TODO_KIND.RESPONSE, correlationId, payload ?? '', status, error, now)
+      INSERT INTO a2a_messages (id, from_agent_id, to_agent_id, kind, correlation_id, category, payload, status, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, fromAgentId, toAgentId, TODO_KIND.RESPONSE, correlationId, category, payload ?? '', status, error, now)
     return this.getMessage(id)
   }
 
@@ -162,7 +176,7 @@ class A2aQueueStore {
   listExpired(now = Date.now()) {
     const defaultTimeout = A2A.DEFAULT_TIMEOUT_MS
     const rows = this.#db.prepare(`
-      SELECT * FROM todo_messages
+      SELECT * FROM a2a_messages
       WHERE kind = ?
         AND status IN (?, ?)
         AND created_at + COALESCE(timeout_ms, ?) < ?
@@ -174,7 +188,7 @@ class A2aQueueStore {
   // pending|processing → expired. 다른 상태면 false (receiver 가 먼저 완료한 경우 등).
   markExpired(id, error = null) {
     const result = this.#db.prepare(`
-      UPDATE todo_messages SET status = ?, error = ?
+      UPDATE a2a_messages SET status = ?, error = ?
       WHERE id = ? AND status IN (?, ?)
     `).run(TODO_STATUS.EXPIRED, error, id, TODO_STATUS.PENDING, TODO_STATUS.PROCESSING)
     return result.changes > 0
@@ -183,7 +197,7 @@ class A2aQueueStore {
   // response row → orphaned 재분류. 전이 제약 없음 (이미 final status 에서 전환).
   markOrphaned(id) {
     const result = this.#db.prepare(`
-      UPDATE todo_messages SET status = ? WHERE id = ?
+      UPDATE a2a_messages SET status = ? WHERE id = ?
     `).run(TODO_STATUS.ORPHANED, id)
     return result.changes > 0
   }
@@ -191,14 +205,14 @@ class A2aQueueStore {
   // --- 조회 ---
 
   getMessage(id) {
-    const row = this.#db.prepare('SELECT * FROM todo_messages WHERE id = ?').get(id)
+    const row = this.#db.prepare('SELECT * FROM a2a_messages WHERE id = ?').get(id)
     return row ? A2aQueueStore.#rowToMessage(row) : null
   }
 
   listByRecipient(toAgentId, { status } = {}) {
     const stmt = status
-      ? this.#db.prepare('SELECT * FROM todo_messages WHERE to_agent_id = ? AND status = ? ORDER BY created_at ASC')
-      : this.#db.prepare('SELECT * FROM todo_messages WHERE to_agent_id = ? ORDER BY created_at ASC')
+      ? this.#db.prepare('SELECT * FROM a2a_messages WHERE to_agent_id = ? AND status = ? ORDER BY created_at ASC')
+      : this.#db.prepare('SELECT * FROM a2a_messages WHERE to_agent_id = ? ORDER BY created_at ASC')
     const rows = status ? stmt.all(toAgentId, status) : stmt.all(toAgentId)
     return rows.map(A2aQueueStore.#rowToMessage)
   }
@@ -212,6 +226,7 @@ class A2aQueueStore {
       toAgentId: row.to_agent_id,
       kind: row.kind,
       correlationId: row.correlation_id,
+      category: row.category,
       payload: row.payload,
       status: row.status,
       error: row.error,

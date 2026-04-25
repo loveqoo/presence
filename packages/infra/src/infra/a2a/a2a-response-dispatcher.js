@@ -44,7 +44,9 @@ const dispatchResponse = async (opts) => {
       toAgentId: request.fromAgentId,
       payload: payload ?? '',
       status: effectiveStatus,
+    }, {
       error: error ?? null,
+      category: request.category ?? 'todo',
     })
 
     if (sender.kind !== 'ok') {
