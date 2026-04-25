@@ -30,6 +30,15 @@ for FILE in $STAGED; do
   BASENAME=$(basename "$FILE")
   DIRNAME=$(dirname "$FILE")
 
+  # 예외 0: 외부 생태계 표준 config 파일 (도구가 파일명 강제 — 변경 불가)
+  case "$BASENAME" in
+    eslint.config.js|eslint.config.mjs|eslint.config.cjs|\
+    jest.config.js|vitest.config.js|babel.config.js|\
+    rollup.config.js|vite.config.js|tsup.config.js)
+      continue
+      ;;
+  esac
+
   # 예외 1: React 컴포넌트 (*/components/* 하위) → PascalCase
   if echo "$DIRNAME" | grep -qE '/components(/|$)'; then
     if [[ "$BASENAME" =~ $PASCAL ]] || [[ "$BASENAME" =~ $KEBAB ]]; then

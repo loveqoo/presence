@@ -17,12 +17,13 @@ if [ -z "$STAGED" ]; then
   exit 0
 fi
 
-# AST 기반 복잡도 검사
-RESULT=$(node scripts/complexity.js --check $STAGED 2>&1)
+# ESLint 기반 복잡도 검사 (eslint.config.js 의 max-lines / max-params /
+# max-depth / complexity / sonarjs/cognitive-complexity)
+RESULT=$(npx --no-install eslint --max-warnings 0 $STAGED 2>&1)
 EXIT_CODE=$?
 
 if [ "$EXIT_CODE" -ne 0 ]; then
-  echo "❌ 복잡도 임계치 초과. 리팩토링 후 커밋하세요." >&2
+  echo "❌ 복잡도/품질 임계치 초과. 리팩토링 후 커밋하세요." >&2
   echo "$RESULT" >&2
   exit 2
 fi

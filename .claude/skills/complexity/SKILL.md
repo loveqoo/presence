@@ -1,44 +1,57 @@
 ---
 name: complexity
-description: AST 기반 코드 복잡도 분석 및 리팩토링 우선순위 결정
+description: ESLint 기반 코드 복잡도/품질 검사 및 리팩토링 우선순위 결정
 ---
 
 # 복잡도 분석
 
-`scripts/complexity.js`를 실행하여 코드 복잡도를 측정한다.
+`eslint.config.js` 의 임계치 기반으로 ESLint 가 측정한다 (built-in 규칙 + sonarjs).
 
 ## 실행
 
-인자가 없으면 전체 리포트를 실행하고, 인자가 있으면 그대로 전달한다.
-
 ```bash
-node scripts/complexity.js $ARGUMENTS
+# 전체 리포트
+npm run lint
+
+# 임계치 초과만 (warning 0 허용 안 함, exit code 사용)
+npm run lint:check
+
+# 특정 파일/디렉토리
+npx eslint $ARGUMENTS
 ```
 
 ## 측정 지표
 
-| 지표 | 설명 | 임계치 |
+| 지표 | 규칙 | 임계치 |
 |------|------|--------|
-| LOC | 빈 줄/주석 제외 코드 라인 | 300 |
-| Fn | 함수/메서드 수 | 25 |
-| Params | 최대 파라미터 수 (destructuring 포함) | 5 |
-| Depth | 최대 중첩 깊이 (AST 기반) | 6 |
-| CC | Cyclomatic Complexity (분기 + 논리연산자) | 50 |
-| Imports | import 문 수 | 15 |
-| Score | 가중합 (LOC*0.5 + Fn*1 + Params*3 + Depth*5 + CC*2 + Imports*0.5) | - |
+| LOC | `max-lines` (skipBlankLines, skipComments) | 300 |
+| Params | `max-params` | 5 |
+| Depth | `max-depth` | 6 |
+| CC | `complexity` (Cyclomatic Complexity) | 70 |
+| Cognitive | `sonarjs/cognitive-complexity` | 50 |
+
+ESLint 의 cyclomatic 측정은 함수 진입 + 분기 + 논리 연산자 등 자체 도구보다 포괄적이라
+임계치를 50 → 70 으로 조정 (이전 자체 도구 호환). cognitive complexity 는 SonarSource
+표준 — 인지적 복잡도 (중첩, 흐름 단절 가중).
 
 ## 출력 해석
 
-결과 테이블은 Score 내림차순으로 정렬된다. Score가 높을수록 리팩토링 우선순위가 높다.
+각 위반은 ESLint 형식으로 출력 — 파일, 라인, 위반 규칙, 권고치. exit code 0 이 통과,
+1+ 가 위반.
 
-- Score 200 이상: 즉시 리팩토링 대상
-- Score 150~200: 주의 관찰
-- Score 150 미만: 양호
+```
+packages/.../foo.js
+  18:21  error  Arrow function has a complexity of 75. Maximum allowed is 70  complexity
+```
 
 ## 결과 보고
 
-실행 결과를 바탕으로 다음을 간결하게 보고한다:
+1. 임계치 초과 파일 수
+2. 각 위반의 파일/위치/규칙/측정값
+3. 자체 도구 시절의 Score 가중합은 제거됨 — ESLint 위반 자체로 판정
 
-1. 전체 파일 수와 임계치 초과 파일 수
-2. Score 상위 10개 파일 테이블
-3. 임계치 초과 항목이 있는 파일별 구체적 위반 내용
+## 자체 도구 폐기 (2026-04-25)
+
+이전 `scripts/complexity.js` 는 method 이중 카운트 버그 등 자체 AST 분석 한계로 폐기.
+ESLint 가 산업 표준 + 활발 유지보수. SonarJS 가 cognitive complexity 같은 현대적 메트릭
+제공. 임계치 조정은 `eslint.config.js` 에서.

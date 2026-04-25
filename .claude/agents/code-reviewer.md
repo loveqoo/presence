@@ -47,7 +47,7 @@ presence 프로젝트의 **코드 리뷰 에이전트**. 규칙 준수를 검증
 
 - 코드를 수정하지 않는다. 보고만 한다.
 - 규칙에 명시되지 않은 주관적 스타일은 지적하지 않는다.
-- 복잡도 임계치(`scripts/complexity.js`)는 별도 hook이 검사하므로 중복 보고하지 않는다.
+- 복잡도 임계치(`eslint.config.js` 의 max-lines/max-params/max-depth/complexity/sonarjs/cognitive-complexity)는 별도 hook이 ESLint 로 검사하므로 중복 보고하지 않는다.
 - 테스트 파일(`**/test/**`)은 test.md 규칙만 적용한다. refactor.md의 "한 곳에서만 사용" 같은 규칙은 테스트 헬퍼에 적용하지 않는다.
 - 기존 코드의 레거시 위반은 보고하지 않는다. **변경된 부분**에만 집중한다.
 

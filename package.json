@@ -22,12 +22,13 @@
     "server:restart": "scripts/server.sh restart",
     "server:logs": "scripts/server.sh logs",
     "user": "node packages/infra/src/infra/auth/cli.js",
-    "complexity": "node scripts/complexity.js",
-    "complexity:check": "node scripts/complexity.js --check"
+    "lint": "eslint \"packages/*/src/**/*.js\"",
+    "lint:check": "eslint --max-warnings 0 \"packages/*/src/**/*.js\""
   },
   "devDependencies": {
-    "acorn": "^8.16.0",
-    "acorn-walk": "^8.3.5",
-    "fast-check": "^4.6.0"
+    "eslint": "^9.39.4",
+    "eslint-plugin-sonarjs": "^4.0.3",
+    "fast-check": "^4.6.0",
+    "globals": "^17.5.0"
   }
 }
