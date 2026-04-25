@@ -63,10 +63,12 @@ class Config {
     // docs/design/agent-identity-model.md §11.1 — A2A 활성화 플래그.
     // enabled=false (기본): /a2a 라우트 미등록 / self card 미생성 / publicUrl 불요.
     // enabled=true:  publicUrl 필수. self card URL = publicUrl + '/a2a/' + agentId.
+    // recoverOnStart: A2A 큐 재시작 회복 (S4). false 면 recoverA2aQueue skip — 운영 rollback.
     a2a: z.object({
       enabled: z.boolean().default(false),
       publicUrl: z.string().nullable().default(null),
-    }).default({ enabled: false, publicUrl: null }),
+      recoverOnStart: z.boolean().default(true),
+    }).default({ enabled: false, publicUrl: null, recoverOnStart: true }),
   })
 
   // --- Semigroup: 2단계 deep merge ---
@@ -123,7 +125,7 @@ class Config {
       maxContextChars: null,
       reservedOutputChars: null,
     },
-    a2a: { enabled: false, publicUrl: null },
+    a2a: { enabled: false, publicUrl: null, recoverOnStart: true },
   })
 
   constructor(data) { Object.assign(this, data) }
