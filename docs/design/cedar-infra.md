@@ -276,7 +276,7 @@ const evaluator = createEvaluator({ cedarInstance, auditWriter })
 - **CI-Y3**: 서버 boot 후 evaluator 가 UserContext 또는 singleton 으로 가용
 - **CI-Y4**: audit 호출 후 `~/.presence/logs/authz-audit.log` 에 정확한 JSONL entry 추가
 - **CI-Y5**: 정책 파일 syntax 에러 시 boot throw + 서버 시작 금지 (boot fail-closed)
-- **CI-Y6** (신설, deny-path 자동화): `policies/50-custom.cedar` 에 `forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { principal.id == "blocked-user" };` 정책 일시 추가 → `evaluate({ LocalUser id="blocked-user", create_agent, User })` 가 deny 반환 + audit `decision=deny` + `matchedPolicies=["50-custom"]`. 테스트 종료 후 정책 파일 정리. enforcement point 가 실제 deny 를 반환할 수 있는 능력의 자동 검증
+- **CI-Y6** (신설, deny-path 자동화): `policies/50-custom.cedar` 에 `forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { principal.id == "blocked-user" };` 정책 일시 추가 → `evaluate({ LocalUser id="blocked-user", create_agent, User })` 가 deny 반환 + audit `decision=deny` + `matchedPolicies=["50-custom"]`. 테스트 종료 후 정책 파일 정리. enforcement point 가 실제 deny 를 반환할 수 있는 능력의 자동 검증. **호출 정합성 미검증** (KG-24): 이 항목은 정책/엔진 측 deny 능력만 검증, 실제 호출처 (`agent-governance.js`) 가 evaluator 를 정확히 호출하는지는 governance-cedar v2.1 phase 의 GV-Y1~Y4 가 담당
 - **CI-Y7** (신설, 런타임 fail-closed): evaluator 가 던지는 stub (Cedar 호출 직전 throw 주입) → 호출처에서 deny 로 fallback + audit `errors: [...]` + `decision=deny`. §1.9 의 런타임 fail-closed 정의 검증
 
 이 7 항목이 Y' 의 불변식. X' 마이그레이션 시 CI-Y1/Y2/Y3 는 의미론이 풍부해지면 자연 진화, CI-Y4/Y5/Y6/Y7 는 그대로 유지.

@@ -1,6 +1,8 @@
 # Cedar 인프라 도입 — 옵션 Y' 최소 (5 커밋 + 사전검증)
 
-**plan-reviewer round 1 (a) 6건 흡수 후 갱신 (2026-04-25). 커밋 4 → 4a + 4b 로 분리, 검증 cross-reference 추가, 정적 자산 경로 해소 명시, 테스트 격리 정정, 롤백 의존성 명시, Node 버전 + POSIX 권한 위험 추가.**
+**v1.2 (2026-04-26)**: plan-reviewer round 2 결함 (a) 4건 흡수 + (b) 1건 KG-24 등록. 커밋 수 5개로 통일, 롤백 자기모순 해소 (evaluator 필수 인자), packages/infra `files` 필드에 정적 자산 명시.
+
+**v1.1 (2026-04-25)**: plan-reviewer round 1 결함 (a) 6건 흡수. 커밋 4 → 4a + 4b 로 분리, 검증 cross-reference 추가, 정적 자산 경로 해소 명시, 테스트 격리 정정, 롤백 의존성 명시, Node 버전 + POSIX 권한 위험 추가.
 
 ## Context
 
@@ -82,13 +84,26 @@ npm search cedar-policy 2>&1
 
 ---
 
-## 구현 (커밋 4 개)
+## 구현 (커밋 5 개 — 1, 2, 3, 4a, 4b)
 
 ### 커밋 1 — wasm 의존성 + evaluator.js + 단위 테스트
 
 **`packages/infra/package.json`**:
 - Pre-1 결정 패키지 추가 (예: `@cedar-policy/cedar-wasm@^x.y.z`)
 - `npm install` 후 lockfile 갱신
+- **`files` 필드에 정적 자산 명시 (plan-reviewer round 2 항목 3 처방)**:
+  ```json
+  {
+    "files": [
+      "src/**/*.js",
+      "src/infra/authz/cedar/policies/**/*.cedar",
+      "src/infra/authz/cedar/*.cedarschema"
+    ]
+  }
+  ```
+  - 기존 `files` 항목 유지하면서 정적 자산 glob 추가 (현재 구조 검토 후 정확한 형태 결정 — 현재 `files` 필드 자체 부재라면 위 형태로 신설, 존재하면 cedar 자산 라인만 추가)
+  - 이유: 4a 의 `paths.js` 가 `import.meta.url` 로 `policies/*.cedar` + `schema.cedarschema` 를 절대 경로 해석. 이 정적 자산들이 패키지 publish/번들 시 누락되면 boot 단계에서 readFileSync ENOENT — boot fail-closed 로 서버 부팅 실패. 모노레포 workspace 심볼릭 링크 환경에선 즉시 영향 없으나, 향후 publish/bundling 도구가 `files` 필드 기준으로 자산 수집할 때 안전망 제공
+  - 검증: `npm pack --dry-run` 로 tarball 내용 확인 — `policies/00-base.cedar` + `schema.cedarschema` 포함되는지
 
 **`packages/infra/src/infra/authz/cedar/evaluator.js`** (신규):
 ```js
@@ -272,17 +287,25 @@ this.evaluator = await bootCedarSubsystem({ presenceDir: this.config.presenceDir
 ### 커밋 4b — UserContext evaluator 주입 + 호출 인터페이스
 
 **`packages/infra/src/infra/user-context.js`** (수정):
-- `UserContext` constructor 가 `evaluator` 인자 받음 (선택)
+- `UserContext` constructor 가 `evaluator` 인자를 **필수** 로 받음 (`opts.evaluator` 부재 또는 falsy 시 throw — Cedar 인프라가 부팅된 상태가 invariant)
 - `userContext.evaluator(...)` 로 호출처가 사용 (또는 import 경로)
 
 **`packages/server/src/server/user-context-manager.js`** (수정):
-- `getOrCreate(username)` 시 `presenceServer.evaluator` 를 UserContext 에 전달
+- `getOrCreate(username)` 시 `presenceServer.evaluator` 를 UserContext 에 전달 (필수 인자)
 
 **`packages/infra/test/user-context.test.js`** (수정 또는 신규):
 - **UC-Y1**: UserContext 가 evaluator 보유 → `userContext.evaluator({...})` 정상 동작
-- **UC-Y2**: evaluator 미주입 시 (legacy 테스트 호환) → `evaluator` 가 undefined, 호출처가 명시적 분기 가능
+- **UC-Y2**: evaluator 미전달 (`new UserContext({ ... })` 에 `evaluator` 부재) → constructor throw — invariant 검증 (legacy fallback 없음)
 
-이 커밋의 단일 책임: **호출 인터페이스 노출 (UserContext)**. server boot 분리되어 실패 시 원인 분리 명확.
+**evaluator 필수 인자 결정 근거 (plan-reviewer round 2 항목 5 처방 (i))**: "선택 인자 + fallback" 패턴은 롤백 표 ("4a 단독 revert → 4b 호환 깨짐") 와 자기모순. 실제 사용에서 evaluator 부재 상태로 UserContext 만드는 시나리오가 없음 (Cedar boot 가 PresenceServer.#boot() 의 본질적 산출물, §3.3 참조). invariant 로 박아 모순 해소.
+
+기존 테스트 호환성 영향: `UserContext` 직접 인스턴스화하는 테스트가 있다면 mock evaluator 주입 필요. 주요 영향 grep:
+
+```bash
+grep -rn "new UserContext\|UserContext.create" packages/ --include="*.test.js"
+```
+
+이 커밋의 단일 책임: **호출 인터페이스 노출 (UserContext)** + **Cedar invariant 강제**. 4a 와 분리되어 실패 시 원인 분리 명확.
 
 ---
 
@@ -320,9 +343,9 @@ this.evaluator = await bootCedarSubsystem({ presenceDir: this.config.presenceDir
 | CI-Y3 (evaluator boot 후 가용) | `server.test.js` SC-Y1a | 이 phase |
 | CI-Y4 (audit JSONL 정확) | `cedar-audit.test.js` CA1 | 이 phase |
 | CI-Y5 (boot fail-closed) | `cedar-boot.test.js` CB2/CB3 | 이 phase |
-| CI-Y6 (deny-path 자동화) | `cedar-boot.test.js` CB4 | 이 phase |
+| CI-Y6 (deny-path 자동화 — 정책/엔진 측만, 호출 정합성은 KG-24) | `cedar-boot.test.js` CB4 | 이 phase |
 | CI-Y7 (런타임 fail-closed) | `cedar-evaluator.test.js` CE4 | 이 phase |
-| GV-Y1~Y4 (호출 정합성) | governance-cedar v2.1 phase | **다음 phase** |
+| GV-Y1~Y4 (호출 정합성 — KG-24 해소 경로) | governance-cedar v2.1 phase | **다음 phase** |
 
 코드 사실: 현재 `submitUserAgent` 에 Cedar 훅 없음 — 이 plan 에서 호출처를 박지 *않음* (governance-cedar v2.1 phase 책임). 이 분리가 위험 항목 "minimal seed 전부 allow 의미론 우회" 의 안전망 (인프라 단독 머지 시점에 호출처가 evaluator 미사용 = enforcement 부재 = 의미론 우회 위험 0).
 
@@ -343,6 +366,7 @@ this.evaluator = await bootCedarSubsystem({ presenceDir: this.config.presenceDir
 | Audit 로그 무한 증가 | rotation 별도 작업 (logrotate 또는 자체 helper). Y' 범위 밖 — 후속 KG 등록 |
 | Cedar latency | 인프라 구현 후 벤치 (목표 < 5ms p99). 미달 시 caching 검토 (X' 영역) |
 | Op wrapping 부재 (KG-23) | 인프라 phase 호출처가 서비스 레이어 (LLM 경계 밖). LLM 직접 트리거 시나리오 생기면 도입 |
+| **CI-Y6 호출 정합성 미검증 (KG-24)** | 이 phase 의 CI-Y6 은 정책/엔진 측 deny 능력만 검증. 호출처 (`agent-governance.js`) 가 evaluator 를 정확히 호출하는지는 governance-cedar v2.1 phase 의 GV-Y1~Y4 가 담당. 인프라 단독 머지 시점엔 호출처 미사용 = enforcement 부재 = 의미론 우회 위험 0 (안전망). governance phase 와 머지 간격 최소화로 완화 |
 | Minimal seed "전부 allow" 의 의미론 우회 | **인프라 단독 머지 금지** — governance-cedar v2.1 phase 와 함께 머지. 인프라만 단독 머지 시점엔 호출처가 evaluator 를 사용하지 않으므로 enforcement 부재 = 기존 코드 분기 그대로 작동 = 의미론 우회 위험 0. 단 머지 간격 최소화 |
 | Audit log 권한 0644 (다른 사용자 읽기) | `audit.js` 에서 0600 명시 적용 + 기존 파일 권한 보정 (`chmodSync` try/catch) |
 | **Node.js 버전 의존**: Cedar wasm 패키지가 특정 Node 버전 (예: 18+ ESM 동기 import) 요구. 기존 presence 가 그보다 낮은 Node 지원 시 incompatible | Pre-1 단계에서 `npm view <pkg> engines` 확인 + `packages/infra/package.json` 의 `engines` 필드에 명시. 기존 다른 패키지 engines 와 충돌 시 Y' 자체 재검토 |
@@ -356,11 +380,13 @@ this.evaluator = await bootCedarSubsystem({ presenceDir: this.config.presenceDir
 
 | 커밋 | 단독 revert 가능? | 이유 |
 |---|---|---|
-| 4b (UserContext 주입) | **가능** | 4a 의 evaluator 가용성에만 의존, 호출처는 governance-cedar phase 가 아직 박지 않음 |
-| 4a (server boot 통합) | 4b 와 함께만 | 4a 만 되돌리면 4b 의 UserContext 주입 인자가 undefined → 4b 호환 깨짐. 4a + 4b 함께 revert |
-| 3 (audit.js) | **단독 불가** | 1 의 evaluator 가 audit 사용 → 3 revert 만 하면 evaluator 부팅 실패. 3 + 4a + 4b 함께 revert 또는 1 도 함께 |
+| 4b (UserContext 주입) | **단독 불가** | 4b 의 UserContext invariant (evaluator 필수 인자) 가 4a 의 evaluator 가용성에 의존. 4a 단독 revert 시 4b 가 throw — 4a + 4b 함께 revert |
+| 4a (server boot 통합) | **단독 불가** | 4b 가 4a 의 evaluator 에 invariant 로 의존 — 4a 단독 revert 시 4b throw. 4a + 4b 함께 revert |
+| 3 (audit.js) | **단독 불가** | 1 의 evaluator 가 audit 사용 → 3 revert 만 하면 evaluator 부팅 실패. 3 + 4a + 4b 함께 revert |
 | 2 (boot + 정책 + schema) | **단독 불가** | 1 의 evaluator 가 cedarInstance 의존 → 2 revert 시 evaluator 미부팅. 2~4b 묶음 revert |
-| 1 (wasm + evaluator) | **단독 가능** | 다른 커밋이 1에 의존 (역방향). 1만 되돌리려면 2~4b 도 같이 |
+| 1 (wasm + evaluator) | **단독 불가** | 2~4b 가 1 의 evaluator 에 의존 (역방향). 1 revert 시 2~4b 모두 깨짐. 1~4b 묶음 revert |
+
+**모든 커밋이 단독 revert 불가** — Y' 인프라는 5 커밋 묶음으로 atomic. 부분 revert 시 항상 4b 의 invariant 가 깨짐 (evaluator 필수 인자, 4b commit 후 시점부터). 권장 운영 rollback 단위: **1~4b 전체 묶음 revert (5 커밋)**.
 
 **권장 운영 rollback 단위**: 1~4b 전체 묶음 revert (5 커밋). 부분 revert 는 의존성 충돌 위험.
 
