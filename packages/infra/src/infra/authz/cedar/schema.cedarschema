@@ -1,0 +1,7 @@
+entity LocalUser { id: String, role: String };
+entity User { id: String };
+action create_agent appliesTo {
+  principal: [LocalUser],
+  resource: [User],
+  context: {}
+};
