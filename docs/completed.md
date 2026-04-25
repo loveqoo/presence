@@ -422,7 +422,7 @@ turnState 전이 규칙이 여전히 `turn-controller.js` / `executor.js` / `act
 멀티 UI (TUI + WUI + A2A) 확장 시 race / 거부 규칙이 재발할 위험. **상태 전이를
 first-class value 로 표현**하는 FSM 대수를 도입해 근본 해소.
 
-설계 근거: [`docs/design/fsm.md`](design/fsm.md) (Transition Algebra 내부 설계)
+설계 근거: [`docs/archive/fsm.md`](archive/fsm.md) (Transition Algebra 내부 설계)
 
 총 13 Phase, 35+ 커밋. 2654 → 3130 pass (+476 assertion).
 
@@ -514,7 +514,7 @@ first-class value 로 표현**하는 FSM 대수를 도입해 근본 해소.
 근본 원인). 동시에 `web_fetch` 가 HTML 을 raw 로 반환해 LLM 에게 template boilerplate
 만 전달하던 FP-62 도 드러났다.
 
-설계 문서: [`docs/design/fsm.md`](design/fsm.md) 의 후속으로 workingDir 계약이
+설계 문서: [`docs/archive/fsm.md`](archive/fsm.md) 의 후속으로 workingDir 계약이
 `docs/specs/tui-server-contract.md` 에 추가됨.
 
 총 13 단계 + FP-62/63/64 후속. 회귀 3158 → 3203 pass.

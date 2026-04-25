@@ -2,7 +2,7 @@
 
 **Status**: 2026-04-21 초안. 실행 계획 아님. 큰 변경 제안 시 돌아와 확인하는 방향성 문서.
 **Owner**: Presence core.
-**관련 문서**: [`design-philosophy.md`](../design-philosophy.md) (기반 철학), [`fsm.md`](fsm.md) (FSM 계층의 북극성), [`../completed.md`](../completed.md) (이력).
+**관련 문서**: [`design-philosophy.md`](../design-philosophy.md) (기반 철학), [`../archive/fsm.md`](../archive/fsm.md) (FSM 계층의 결정 트레일 — Phase 1~13 구현 완료, archive), [`../completed.md`](../completed.md) (이력).
 
 ---
 
