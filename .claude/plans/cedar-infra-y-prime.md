@@ -1,5 +1,7 @@
 # Cedar 인프라 도입 — 옵션 Y' 최소 (5 커밋 + 사전검증)
 
+**v1.3 (2026-04-26)**: Pre-1 검증 PASS (`@cedar-policy/cedar-wasm@4.10.0`, AWS 공식, 2026-04-23 published, 모든 API sync, `nodejs` export 보유). 실제 wasm API 가 stateless 톱레벨 함수 (`isAuthorized` / `validate` / `checkParse*` / `preparse*` / `statefulIsAuthorized`) 임을 반영하여 evaluator/boot/bootCedarSubsystem 의사코드 정정. 설계 결정 불변 (Y' 최소, 동기, fail-closed, JSONL audit), wrapper 구조만 보정.
+
 **v1.2 (2026-04-26)**: plan-reviewer round 2 결함 (a) 4건 흡수 + (b) 1건 KG-24 등록. 커밋 수 5개로 통일, 롤백 자기모순 해소 (evaluator 필수 인자), packages/infra `files` 필드에 정적 자산 명시.
 
 **v1.1 (2026-04-25)**: plan-reviewer round 1 결함 (a) 6건 흡수. 커밋 4 → 4a + 4b 로 분리, 검증 cross-reference 추가, 정적 자산 경로 해소 명시, 테스트 격리 정정, 롤백 의존성 명시, Node 버전 + POSIX 권한 위험 추가.
@@ -82,6 +84,13 @@ npm search cedar-policy 2>&1
 
 검증 결과는 plan-reviewer 통과 후 첫 commit 메시지에 명시.
 
+**Pre-1 실행 결과 (2026-04-26, v1.3 시점)**: **PASS**.
+- 패키지: `@cedar-policy/cedar-wasm@4.10.0` (AWS 공식, 4 maintainers `cedar-wasm-team@amazon.com` 외, Apache-2.0)
+- maintained: 2026-04-23 published, 24 versions, 2024-05 부터
+- export: `./nodejs` 전용 (CJS+ESM 양쪽), TS types 포함, deps 0
+- 동기 API: `isAuthorized(call): AuthorizationAnswer` 등 모든 함수가 sync. wasm init 도 module-load 시 `fs.readFileSync` + `new WebAssembly.Instance` 동기 (별도 async `init()` 호출 불필요)
+- API surface 차이 발견 → v1.3 이 wrapper 의사코드 정정 (커밋 1/2/4a)
+
 ---
 
 ## 구현 (커밋 5 개 — 1, 2, 3, 4a, 4b)
@@ -109,36 +118,53 @@ npm search cedar-policy 2>&1
 ```js
 // Cedar wasm wrapper. evaluate 는 동기 함수.
 // 호출처에서 직접 import + 호출 (Op ADT wrapping 없음 — KG-23).
+//
+// cedar-wasm 4.10.0: isAuthorized 는 stateless top-level 함수.
+// 매 호출마다 policies + entities + schema 텍스트 전달.
+// 응답: { type: 'success', response: { decision, diagnostics: { reason, errors } }, warnings }
+//   또는 { type: 'failure', errors, warnings } (parse/eval 자체 실패).
+// EntityUid 는 객체 형태 { type, id } 또는 { __entity: { type, id } }.
 
-export function createEvaluator({ cedarInstance, auditWriter }) {
+export function createEvaluator({ cedar, schemaText, policiesText, auditWriter }) {
   return function evaluate({ principal, action, resource, context = {} }) {
+    const audit = (entry) => auditWriter.append({
+      ts: new Date().toISOString(),
+      caller: principal.id,
+      action,
+      resource: resource.id,
+      ...entry,
+    })
     try {
-      const result = cedarInstance.isAuthorized({
-        principal: `${principal.type}::"${principal.id}"`,
-        action: `Action::"${action}"`,
-        resource: `${resource.type}::"${resource.id}"`,
+      const answer = cedar.isAuthorized({
+        principal: { type: principal.type, id: principal.id },
+        action:    { type: 'Action',       id: action },
+        resource:  { type: resource.type,  id: resource.id },
         context,
+        schema:   schemaText,
+        policies: { staticPolicies: policiesText },
+        entities: [],
       })
-      auditWriter.append({
-        ts: new Date().toISOString(),
-        caller: principal.id,
-        action,
-        resource: resource.id,
-        decision: result.decision,
-        matchedPolicies: result.matchedPolicies ?? [],
-        errors: [],
-      })
-      return result
+      if (answer.type === 'success') {
+        const result = {
+          decision:        answer.response.decision,
+          matchedPolicies: answer.response.diagnostics.reason,
+          errors:          answer.response.diagnostics.errors.map(e => e.error?.message ?? String(e)),
+        }
+        audit({ decision: result.decision, matchedPolicies: result.matchedPolicies, errors: result.errors })
+        return result
+      }
+      // type === 'failure' : 호출 자체 실패 → 런타임 fail-closed
+      const failResult = {
+        decision:        'deny',
+        matchedPolicies: [],
+        errors:          answer.errors.map(e => e.message ?? String(e)),
+      }
+      audit(failResult)
+      return failResult
     } catch (err) {
       // 런타임 fail-closed: deny + audit errors
       const failResult = { decision: 'deny', matchedPolicies: [], errors: [String(err)] }
-      auditWriter.append({
-        ts: new Date().toISOString(),
-        caller: principal.id,
-        action,
-        resource: resource.id,
-        ...failResult,
-      })
+      audit(failResult)
       return failResult
     }
   }
@@ -149,7 +175,7 @@ export function createEvaluator({ cedarInstance, auditWriter }) {
 - **CE1**: minimal seed 인라인 + admin → allow + audit 기록
 - **CE2**: minimal seed 인라인 + user → allow (RBAC 게이트만, role 무관) — CI-Y1/Y2
 - **CE3**: deny 정책 인라인 + 해당 케이스 → deny + matchedPolicies 정확
-- **CE4**: cedarInstance 가 throw → deny fallback + errors 기록 — CI-Y7
+- **CE4**: `cedar.isAuthorized` mock 이 throw → deny fallback + errors 기록 — CI-Y7. answer.type='failure' 시에도 동일 deny + errors 흡수
 
 테스트는 Cedar wasm 인스턴스를 mock 또는 인라인 실 인스턴스로 격리. boot 흐름 미사용.
 
@@ -182,17 +208,42 @@ action create_agent appliesTo {
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
+// cedar-wasm 4.10.0: createInstance 부재. 함수는 모두 stateless top-level.
+// boot 의 역할 = 정적 자산을 텍스트로 읽어 parse 검증 + 호출자가 쓸 수 있는 텍스트로 반환.
+// nodejs export (`@cedar-policy/cedar-wasm/nodejs`) 가 `fs.readFileSync` 로 wasm 동기 로딩 → import 자체가 sync 효과.
+
 export async function bootCedar({ policiesDir, schemaPath }) {
-  const cedar = await import('@cedar-policy/cedar-wasm')  // Pre-1 결정 따름
-  const schema = readFileSync(schemaPath, 'utf-8')
+  const cedar = await import('@cedar-policy/cedar-wasm/nodejs')
+
+  const schemaText = readFileSync(schemaPath, 'utf-8')
   const policyFiles = readdirSync(policiesDir)
     .filter(f => f.endsWith('.cedar'))
     .sort()  // 사전순 (§1.8)
-  const policies = policyFiles.map(f =>
-    readFileSync(join(policiesDir, f), 'utf-8')
-  ).join('\n\n')
+  const policiesText = policyFiles
+    .map(f => readFileSync(join(policiesDir, f), 'utf-8'))
+    .join('\n\n')
+
   // boot fail-closed: parse 실패 시 throw → 서버 부팅 실패
-  return cedar.createInstance({ schema, policies })
+  const schemaCheck = cedar.checkParseSchema(schemaText)
+  if (schemaCheck.type !== 'success') {
+    throw new Error(`Cedar schema parse failed: ${JSON.stringify(schemaCheck.errors)}`)
+  }
+  const policiesCheck = cedar.checkParsePolicySet({ staticPolicies: policiesText })
+  if (policiesCheck.type !== 'success') {
+    throw new Error(`Cedar policies parse failed: ${JSON.stringify(policiesCheck.errors)}`)
+  }
+  // 선택: 정책-스키마 정합 검증 (validate). 의미론 강화 지점이지만 Y' 에선 가벼운 적용
+  const validation = cedar.validate({ schema: schemaText, policies: { staticPolicies: policiesText } })
+  if (validation.type === 'success' && validation.validationErrors.length > 0) {
+    throw new Error(`Cedar validation failed: ${JSON.stringify(validation.validationErrors)}`)
+  }
+  if (validation.type === 'failure') {
+    throw new Error(`Cedar validation call failed: ${JSON.stringify(validation.errors)}`)
+  }
+
+  // 평가 시 cedar + 텍스트 두 개를 evaluator 가 보유.
+  // X' 마이그레이션 시 preparsePolicySet + statefulIsAuthorized 로 캐싱 도입 후보.
+  return { cedar, schemaText, policiesText }
 }
 ```
 
@@ -256,12 +307,12 @@ import { POLICIES_DIR, SCHEMA_PATH } from './paths.js'
 
 // 일괄 부팅 helper. server 가 이것만 호출 — 정적 자산 경로 노출 없음
 export async function bootCedarSubsystem({ presenceDir }) {
-  const cedarInstance = await bootCedar({
+  const { cedar, schemaText, policiesText } = await bootCedar({
     policiesDir: POLICIES_DIR,
     schemaPath: SCHEMA_PATH,
   })
   const auditWriter = createAuditWriter(`${presenceDir}/logs/authz-audit.log`)
-  return createEvaluator({ cedarInstance, auditWriter })
+  return createEvaluator({ cedar, schemaText, policiesText, auditWriter })
 }
 ```
 
@@ -383,7 +434,7 @@ grep -rn "new UserContext\|UserContext.create" packages/ --include="*.test.js"
 | 4b (UserContext 주입) | **단독 불가** | 4b 의 UserContext invariant (evaluator 필수 인자) 가 4a 의 evaluator 가용성에 의존. 4a 단독 revert 시 4b 가 throw — 4a + 4b 함께 revert |
 | 4a (server boot 통합) | **단독 불가** | 4b 가 4a 의 evaluator 에 invariant 로 의존 — 4a 단독 revert 시 4b throw. 4a + 4b 함께 revert |
 | 3 (audit.js) | **단독 불가** | 1 의 evaluator 가 audit 사용 → 3 revert 만 하면 evaluator 부팅 실패. 3 + 4a + 4b 함께 revert |
-| 2 (boot + 정책 + schema) | **단독 불가** | 1 의 evaluator 가 cedarInstance 의존 → 2 revert 시 evaluator 미부팅. 2~4b 묶음 revert |
+| 2 (boot + 정책 + schema) | **단독 불가** | 1 의 evaluator 가 boot 의 `{ cedar, schemaText, policiesText }` 출력 의존 → 2 revert 시 정적 자산/parse 경로 부재로 부팅 불가. 2~4b 묶음 revert |
 | 1 (wasm + evaluator) | **단독 불가** | 2~4b 가 1 의 evaluator 에 의존 (역방향). 1 revert 시 2~4b 모두 깨짐. 1~4b 묶음 revert |
 
 **모든 커밋이 단독 revert 불가** — Y' 인프라는 5 커밋 묶음으로 atomic. 부분 revert 시 항상 4b 의 invariant 가 깨짐 (evaluator 필수 인자, 4b commit 후 시점부터). 권장 운영 rollback 단위: **1~4b 전체 묶음 revert (5 커밋)**.
