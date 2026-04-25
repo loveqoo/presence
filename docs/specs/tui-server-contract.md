@@ -130,9 +130,9 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 
 ## 테스트 커버리지
 
-- INV-WD-CHAIN → `packages/server/test/server.test.js` S20b (명시 workingDir → 201 + 응답 effective 확인), S20c (경계 밖 workingDir → 400), `packages/infra/test/session.test.js` SD6 (명시 opts 우선), SD7 (fallback + pendingBackfill=true), SD8 (경계 밖 throw), SD9 (allowedDirs 빈 배열 throw)
-- INV-WD-BOUND → `packages/server/test/server.test.js` S20c (HTTP 400), `packages/infra/test/session.test.js` SD8 (session.create throw)
-- INV-WD-BACKFILL → `packages/server/test/server.test.js` S20d (WS join cwd backfill + init.workingDir 확인), `packages/infra/test/session.test.js` SD10 (persistence workingDir 복원 우선), `packages/infra/test/persistence.test.js` 5/6 (round-trip)
+- INV-WD-CHAIN → `packages/server/test/server.test.js` S20b (body의 workingDir 무시, 응답 effective workingDir = userDataPath 확인), `packages/infra/test/session.test.js` SD6 (opts.workingDir 무시 + workingDir = userDataPath 고정 + pendingBackfill 필드 없음 확인)
+- INV-WD-BOUND → (직접 테스트 없음) ⚠️ isWithinWorkspace 경계 밖 접근 시 throw 검증 단위 테스트 없음
+- INV-WD-BACKFILL → (제거됨) W1 리팩토링으로 backfill 메커니즘 자체가 삭제됨. 관련 테스트(SD7~SD10, S20c, S20d) 도 존재하지 않음
 - INV-WD-PROMPT → (직접 테스트 없음) ⚠️ workingDir 주입 시 WORKING_DIR 섹션 포함 여부를 검증하는 단위 테스트 없음
 - I1, I3 → `packages/server/test/server.test.js` (부팅 플로우, mustChangePassword WS 4002)
 - I5 → `packages/tui/test/remote.test.js` (401/refresh 성공/refresh 실패/onAuthFailed 호출/AUTH_FAILED throw/부트스트랩 vs runtime onAuthFailed 분기)
@@ -183,3 +183,4 @@ TUI 내부 렌더링/UX 구현은 이 스펙의 대상이 아니다.
 - 2026-04-20: Phase G 커버리지 갱신 — INV-RJT-SNAPSHOT 문구 교정 (적용 엔드포인트를 approve → chat 500 에러 응답으로, payload shape 명시, approve/cancel 은 snapshot 미포함 명시). INV-FSM-R1/INV-VER-MONOTONIC/INV-RFS-STALE 커버리지를 실제 테스트 경로로 교체. INV-FSM-SINGLE-WRITER 는 간접 커버 브리지 테스트 명시 후 ⚠️ 유지. INV-RJT-SNAPSHOT 은 간접 커버 후 단위 테스트 추가 권장 ⚠️ 유지.
 - 2026-04-20: INV-FSM-SINGLE-WRITER 정적 검사 + turn-controller legacy 제거, INV-RJT-SNAPSHOT 단위 assertion 추가. 5 항목 모두 직접 테스트 커버.
 - 2026-04-20: Phase 20 반영 — INV-WD-CHAIN/BOUND/BACKFILL/PROMPT 신규 추가. I4(POST /sessions 요청/응답 shape에 workingDir 명시), I7(WS join cwd 필드 + init workingDir 응답 명시), I10(WS 4004 WORKING_DIR_INVALID 분기 추가), I13(4004 배너 문구 추가). 4개 INV 모두 테스트 커버 추가 (INV-WD-PROMPT만 ⚠️ 미커버).
+- 2026-04-25: codex 검증 후 W1 잔재 테스트 매핑 정리 — INV-WD-CHAIN 커버리지에서 SD7/SD8/SD9(pendingBackfill, allowedDirs, 경계 밖 throw), S20c(HTTP 400), S20d(WS join cwd backfill) 제거. W1(cb6c59a)로 해당 테스트와 필드가 삭제됨. INV-WD-BOUND는 직접 테스트 없음 ⚠️ 로 정정. INV-WD-BACKFILL은 메커니즘 자체 삭제로 테스트 불필요 명시.

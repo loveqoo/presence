@@ -215,6 +215,8 @@ working / approve / disconnected 상태에서는 중복 방지를 위해 숨김 
 
 ### FP-63 WS close 4004 시 "서버 연결이 끊겼습니다" 기본 문구 노출 [심각도: high] — **resolved (2026-04-21)**
 
+> **W1 후 추가 메모 (2026-04-25)**: `cb6c59a refactor(identity): workingDir 단일 규칙` 이후 `WS_CLOSE.WORKING_DIR_INVALID`(4004) 자체가 `policies.js`에서 제거됨. 현재 close 코드는 4001/4002/4003만 존재한다. 4004 시나리오(TUI 실행 폴더가 allowedDirs 범위 밖)는 W1 규칙에 의해 workingDir이 `Config.userDataPath(userId)`로 고정되면서 발생 불가가 됐으므로 이 FP의 시나리오 자체가 소멸했다.
+
 **해소 확인**
 `App.js`의 `disconnectedReason` 분기에 `WS_CLOSE.WORKING_DIR_INVALID`(4004) 케이스가 추가되었다. 기존 분기도 하드코드 숫자(4001/4002/4003) 대신 `WS_CLOSE.*` 상수로 정리되었다.
 
@@ -254,7 +256,9 @@ i18n `ko.json`에 `sessions_cmd.error.working_dir_out_of_bounds` / `working_dir_
 
 ### 기존 FP 퇴행 없음
 
-FP-16~FP-28, FP-63, FP-64 전체 resolved 상태 유지 확인. `feature/agent-identity-model` 브랜치의 주요 변경(Session.agentId 강제 검증, workingDir W1 고정, WS_CLOSE 4004 분기)은 진입/연결/셸 흐름(main.js, remote.js, App.js의 인증·재연결 경로)을 건드리지 않는다.
+FP-16~FP-28, FP-63, FP-64 전체 resolved 상태 유지 확인. `feature/agent-identity-model` 브랜치의 주요 변경(Session.agentId 강제 검증, workingDir W1 고정)은 진입/연결/셸 흐름(main.js, remote.js, App.js의 인증·재연결 경로)을 건드리지 않는다.
+
+> **W1 후 추가 메모 (2026-04-25)**: `cb6c59a` 머지로 `WS_CLOSE.WORKING_DIR_INVALID`(4004) 및 `config.tools.allowedDirs` 검증 로직이 제거됨. allowedDirs 범위 이탈로 인한 4004 close 시나리오는 발생 불가 상태가 됐다. 진실의 원천: `docs/specs/agent-identity.md` I-WD (workingDir 단일 규칙).
 
 ### 관찰: POST /sessions body에 workingDir 잔존
 
@@ -273,3 +277,11 @@ FP-16~FP-28, FP-63, FP-64 전체 resolved 상태 유지 확인. `feature/agent-i
 | **high** | 0 | 3 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵), FP-63(4004 close 원인 미표시) |
 | **medium** | 0 | 7 | resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내), FP-64(/sessions new 400 영어 에러) |
 | **low** | 0 | 5 | resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |
+
+---
+
+## 변경 이력
+
+| 일자 | 내용 |
+|------|------|
+| 2026-04-25 | W1 리팩(`cb6c59a`) 후 `WS_CLOSE.WORKING_DIR_INVALID`(4004) 및 `config.tools.allowedDirs` 제거됨. FP-63·FP-64 관련 시나리오 소멸 반영 — 각 항목에 보충 메모 추가 |

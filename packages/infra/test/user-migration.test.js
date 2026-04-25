@@ -30,7 +30,7 @@ const readUserConfig = (dir, username) => {
   return JSON.parse(readFileSync(join(dir, 'users', username, 'config.json'), 'utf-8'))
 }
 
-// ensureAllowedDirs 패턴과 동일 — config 객체를 필요로 함. 실제 migration 은 파일 기반.
+// ensureUserDefaultAgent 는 file-based migration. dummyConfig 는 호출 시그니처 만족용.
 const dummyConfig = new Config({
   llm: { baseUrl: 'x', model: 'x', apiKey: null, responseFormat: 'json_schema', maxRetries: 0, timeoutMs: 1000 },
   embed: { provider: 'openai', baseUrl: null, apiKey: null, model: null, dimensions: 256 },
@@ -38,7 +38,6 @@ const dummyConfig = new Config({
   scheduler: { enabled: false, pollIntervalMs: 1000, todoReview: { enabled: false, cron: '' } },
   delegatePolling: { intervalMs: 1000 },
   agents: [], prompt: { maxContextTokens: 1000, reservedOutputTokens: 100, maxContextChars: null, reservedOutputChars: null },
-  tools: { allowedDirs: ['/tmp'] },
 })
 
 function run() {
@@ -85,7 +84,6 @@ function run() {
   {
     const dir = createTmpDir()
     writeUserConfig(dir, 'carol', {
-      tools: { allowedDirs: ['/Users/carol'] },
       locale: 'en',
       agents: [{ name: 'legacy', description: 'old', capabilities: [], archived: false }],
     })
@@ -95,7 +93,6 @@ function run() {
 
     const file = readUserConfig(dir, 'carol')
     assert(file.locale === 'en', 'UM3: locale 보존')
-    assert(file.tools.allowedDirs[0] === '/Users/carol', 'UM3: allowedDirs 보존')
     assert(file.agents.length === 2, 'UM3: legacy + default 둘 다')
     assert(file.agents.some(a => a.name === 'legacy'), 'UM3: legacy 유지')
     assert(file.agents.some(a => a.name === DEFAULT_AGENT_NAME), 'UM3: default 추가')

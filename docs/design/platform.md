@@ -47,7 +47,7 @@ A2A · Agent Card · discovery 는 이 "한 에이전트로 안 끝날 때" 의 
 | **FSM 대수 + sessionRuntime** (Phase G) | 멀티 클라이언트가 같은 상태를 동기화하는 기반 |
 | **stateVersion + snapshot + requestRefresh** (Phase G) | 여러 클라이언트가 깨지지 않고 붙는 계약 |
 | **메시지 아키텍처 SSoT** (FP-61) | 이중 출처 제거. 서버가 유일 진실 — WUI/TUI/A2A 가 같은 것을 본다 |
-| **세션별 workingDir** (Phase 20) | 한 유저가 여러 프로젝트를 별개로 다룰 기반. `allowedDirs` 가 capability 의 씨앗 |
+| **workingDir 단일 규칙** (Phase 20 → W1) | 모든 세션의 작업 폴더 = `~/.presence/users/{username}/`. agent 작업 공간이 유저별로 격리 — capability 모델 도입 시 폴더가 스코프 단위 |
 | **슬래시 커맨드 디스패치 테이블** (FP-42, 단수화 전환) | user-defined 커맨드가 얹힐 슬롯 |
 | **web_fetch Readability** (FP-62) | tool 결과 품질이 실제 LLM 사용 가능한 수준에 도달 |
 
@@ -107,7 +107,7 @@ AgentCard:
 
 **현재** — 여러 축이 분리되어 있다:
 - user/password + JWT (사람 인증)
-- `allowedDirs` (파일 경계)
+- workingDir (파일 경계 — `~/.presence/users/{username}/` 고정, `agent-identity.md` I-WD)
 - MCP credential (외부 서비스)
 - approve tool (위험 도구 승인)
 
@@ -119,7 +119,7 @@ AgentCard:
 
 **결과**
 - MCP 멀티유저 경계: credential 은 capability 로 user 에 묶임. 공용/개인 구분이 capability 스코프로 자연스럽게 표현
-- workingDir: 이미 allowedDirs 기반 → capability 로 재해석
+- workingDir: 현재 유저별 단일 폴더 고정 → capability 모델에서 `read:`/`write:` 스코프로 재해석 (예: `read:~/projects`, `write:~/reports`)
 - A2A 원격 호출: "내 에이전트가 친구 에이전트의 `read:calendar` capability 를 호출" 명확
 
 ### 4-4. Extension 3 축 — Skills · Commands · Hooks

@@ -39,7 +39,7 @@ const llm = new LLMClient({
 })
 
 const toolRegistry = createToolRegistry()
-const localTools = createLocalTools({ allowedDirs: [testDir] })
+const localTools = createLocalTools()
 for (const t of localTools) toolRegistry.register(t)
 
 const agentRegistry = createAgentRegistry()

@@ -32,7 +32,7 @@
 - Archived agent 판정 — identity model
 - Agent 식별 / AgentId 파싱 — identity model
 - Admin 접근 제한 — identity model
-- 에이전트 내부 Op 실행 권한 — 각 agent 의 persona.tools + `allowedDirs` + `approve` 메커니즘
+- 에이전트 내부 Op 실행 권한 — 각 agent 의 persona.tools + workingDir(`~/.presence/users/{username}/` 고정, `agent-identity.md` I-WD) + `approve` 메커니즘
 
 즉 **Cedar 는 "복합 조건 기반 의사결정" 이 필요한 지점** 에만. 단순 ownership 은 `canAccessAgent` 가 담당.
 
