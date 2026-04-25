@@ -315,6 +315,81 @@ const run = async () => {
     store.close(); rmSync(dir, { recursive: true, force: true })
   }
 
+  // --- 큐 상한 enforcement (S4 §6.5) ---
+
+  // AQ-cap1: maxPending=null 일 때 무제한 (기존 동작 보존)
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    for (let i = 0; i < 5; i++) {
+      const m = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: `p${i}` })
+      assert(m.status === TODO_STATUS.PENDING, `AQ-cap1: maxPending 미전달 ${i} pending`)
+    }
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ-cap2: maxPending 도달 시 다음 enqueue → row.status='failed', row.error='queue-full', row.id 발급
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    for (let i = 0; i < 3; i++) {
+      const m = store.enqueueRequestBounded({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: `p${i}` }, 3)
+      assert(m.status === TODO_STATUS.PENDING, `AQ-cap2: ${i}/3 pending`)
+    }
+    const overflow = store.enqueueRequestBounded({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'overflow' }, 3)
+    assert(overflow.id, 'AQ-cap2: overflow row.id 발급 (audit)')
+    assert(overflow.status === TODO_STATUS.FAILED, 'AQ-cap2: overflow row.status=failed')
+    assert(overflow.error === 'queue-full', 'AQ-cap2: overflow row.error=queue-full')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ-cap3: 다른 to_agent_id 영향 없음 (per-recipient 카운트)
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    for (let i = 0; i < 3; i++) store.enqueueRequestBounded({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: `b${i}` }, 3)
+    const otherRecv = store.enqueueRequestBounded({ fromAgentId: AGENT_A, toAgentId: 'alice/other', payload: 'o' }, 3)
+    assert(otherRecv.status === TODO_STATUS.PENDING, 'AQ-cap3: 다른 receiver 는 영향 없음')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ-cap4: 상한 경계 정확성 — 100 회 모두 pending, 101 번째만 failed (단일 프로세스 sync 라 진정한 race 시뮬은 불가, 트랜잭션 안 COUNT+INSERT 검증)
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    for (let i = 0; i < 100; i++) {
+      const m = store.enqueueRequestBounded({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: `p${i}` }, 100)
+      assert(m.status === TODO_STATUS.PENDING, `AQ-cap4: ${i} pending`)
+    }
+    const overflow = store.enqueueRequestBounded({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p100' }, 100)
+    assert(overflow.status === TODO_STATUS.FAILED && overflow.error === 'queue-full', 'AQ-cap4: 101번째만 failed/queue-full')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
+  // AQ-list1: listByStatus(status, { kind, limit }) 정확성
+  {
+    const dir = makeTmpDir()
+    const store = createA2aQueueStore(join(dir, 'a2a.db'))
+    const m1 = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p1' })
+    const m2 = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p2' })
+    const m3 = store.enqueueRequest({ fromAgentId: AGENT_A, toAgentId: AGENT_B, payload: 'p3' })
+    store.markProcessing(m2.id)
+    const r = store.enqueueResponse({
+      correlationId: m1.id, fromAgentId: AGENT_B, toAgentId: AGENT_A,
+      payload: 'r', status: TODO_STATUS.COMPLETED,
+    })
+
+    const pending = store.listByStatus(TODO_STATUS.PENDING)
+    assert(pending.length === 2, 'AQ-list1: pending 2 개 (m1, m3)')
+    const pendingReq = store.listByStatus(TODO_STATUS.PENDING, { kind: 'request' })
+    assert(pendingReq.length === 2, 'AQ-list1: pending + kind=request 동일')
+    const completed = store.listByStatus(TODO_STATUS.COMPLETED)
+    assert(completed.length === 1 && completed[0].id === r.id, 'AQ-list1: completed = response row 1 개')
+    const limited = store.listByStatus(TODO_STATUS.PENDING, { limit: 1 })
+    assert(limited.length === 1 && limited[0].id === m1.id, 'AQ-list1: limit=1 → 가장 오래된 1 개')
+    store.close(); rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

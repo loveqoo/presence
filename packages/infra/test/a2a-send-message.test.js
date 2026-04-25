@@ -37,6 +37,19 @@ const mockQueueStore = () => {
       rows.set(id, msg)
       return msg
     },
+    enqueueRequestBounded: (opts, maxPending) => {
+      const id = `msg-${++seq}`
+      let cnt = 0
+      for (const r of rows.values()) {
+        if (r.toAgentId === opts.toAgentId && r.status === 'pending' && (r.kind ?? 'request') === 'request') cnt++
+      }
+      if (cnt >= maxPending) {
+        const failed = { id, status: 'failed', error: 'queue-full', ...opts }
+        rows.set(id, failed); return failed
+      }
+      const msg = { id, status: 'pending', ...opts }
+      rows.set(id, msg); return msg
+    },
     markFailed: (id, error) => {
       const row = rows.get(id); if (!row) return false
       row.status = 'failed'; row.error = error; return true
@@ -281,6 +294,67 @@ const run = async () => {
     })
     assert(result.accepted === false, 'STx: a2a 미주입 → rejected')
     assert(result.error === SEND_A2A_ERROR.NOT_REGISTERED, 'STx: not-registered 로 통합')
+  }
+
+  // --- 큐 상한 enforcement (S4 §6.5) ---
+
+  // ST-qf2: receiver 의 pending 상한 (A2A.QUEUE_MAX_PER_AGENT) 도달 시
+  //   다음 SendA2aMessage → accepted=false, error='queue-full', requestId 발급, row.status='failed'
+  {
+    const store = mockQueueStore()
+    const enqueued = []
+    const receiverActor = mockEventActor(e => enqueued.push(e))
+    const session = mockSessionEntry(AGENT_B, receiverActor)
+    const env = {
+      a2aQueueStore: store,
+      agentRegistry: mockAgentRegistry({ [AGENT_B]: { agentId: AGENT_B, archived: false } }),
+      sessionManager: mockSessionManager({ [AGENT_B]: session }),
+      currentAgentId: AGENT_A,
+    }
+    // 100 회 정상 enqueue
+    for (let i = 0; i < 100; i++) {
+      const r = await runSendA2aMessage({ to: AGENT_B, payload: `p${i}`, env })
+      assert(r.accepted === true, `ST-qf2: ${i} 정상`)
+      // receiver 가 markProcessing 못하게 mock receiverActor 가 받기만 함 — pending 유지
+    }
+    // 101 번째는 거부
+    const overflow = await runSendA2aMessage({ to: AGENT_B, payload: 'overflow', env })
+    assert(overflow.accepted === false, 'ST-qf2: 101 번째 거부')
+    assert(overflow.error === SEND_A2A_ERROR.QUEUE_FULL, 'ST-qf2: error=queue-full')
+    assert(typeof overflow.requestId === 'string', 'ST-qf2: requestId 발급 (audit)')
+    const overflowRow = store.getMessage(overflow.requestId)
+    assert(overflowRow.status === 'failed', 'ST-qf2: row.status=failed')
+    assert(overflowRow.error === 'queue-full', 'ST-qf2: row.error=queue-full')
+    // receiver 의 eventActor 에 101 번째는 enqueue 안 됨
+    assert(enqueued.length === 100, 'ST-qf2: receiver 측 enqueue 는 정확히 100 회')
+  }
+
+  // ST-qf3: 같은 receiver 99 + 다른 receiver 100 → 다른 receiver 영향 없음
+  {
+    const store = mockQueueStore()
+    const enqueuedB = []
+    const enqueuedC = []
+    const sessionB = mockSessionEntry(AGENT_B, mockEventActor(e => enqueuedB.push(e)))
+    const AGENT_C = 'alice/c'
+    const sessionC = mockSessionEntry(AGENT_C, mockEventActor(e => enqueuedC.push(e)))
+    const env = {
+      a2aQueueStore: store,
+      agentRegistry: mockAgentRegistry({
+        [AGENT_B]: { agentId: AGENT_B, archived: false },
+        [AGENT_C]: { agentId: AGENT_C, archived: false },
+      }),
+      sessionManager: mockSessionManager({ [AGENT_B]: sessionB, [AGENT_C]: sessionC }),
+      currentAgentId: AGENT_A,
+    }
+    for (let i = 0; i < 99; i++) await runSendA2aMessage({ to: AGENT_B, payload: `b${i}`, env })
+    for (let i = 0; i < 100; i++) {
+      const r = await runSendA2aMessage({ to: AGENT_C, payload: `c${i}`, env })
+      assert(r.accepted === true, `ST-qf3: AGENT_C ${i} 정상 (independent)`)
+    }
+    assert(enqueuedC.length === 100, 'ST-qf3: AGENT_C 100 건 모두 enqueue')
+    // AGENT_B 는 99 → 다음도 정상 가능
+    const r = await runSendA2aMessage({ to: AGENT_B, payload: 'b99', env })
+    assert(r.accepted === true, 'ST-qf3: AGENT_B 100 번째도 정상 (한도 도달 직전)')
   }
 
   summary()

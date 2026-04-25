@@ -112,6 +112,40 @@ class A2aQueueStore {
     return this.getMessage(id)
   }
 
+  // S4 §6.5 — 큐 상한 enforcement. 트랜잭션 내부 COUNT + INSERT 원자화 (race-free).
+  //   초과 시 row 는 status='failed', error='queue-full' 로 INSERT — audit 보존.
+  //   caller (interpreter) 가 반환된 row.status 보고 분기.
+  enqueueRequestBounded(opts, maxPending) {
+    if (!opts.fromAgentId || !opts.toAgentId) {
+      throw new Error('enqueueRequestBounded: fromAgentId + toAgentId required')
+    }
+    if (typeof opts.payload !== 'string') {
+      throw new Error('enqueueRequestBounded: payload must be string')
+    }
+    const insertedId = this.#db.transaction(() => {
+      const now = Date.now()
+      const id = randomUUID()
+      const timeoutMs = opts.timeoutMs ?? null
+      const category = opts.category ?? 'todo'
+      const cnt = this.#db.prepare(
+        `SELECT COUNT(*) AS n FROM a2a_messages WHERE to_agent_id = ? AND status = ? AND kind = ?`,
+      ).get(opts.toAgentId, TODO_STATUS.PENDING, TODO_KIND.REQUEST).n
+      if (cnt >= maxPending) {
+        this.#db.prepare(`
+          INSERT INTO a2a_messages (id, from_agent_id, to_agent_id, kind, category, payload, status, error, created_at, timeout_ms)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, opts.fromAgentId, opts.toAgentId, TODO_KIND.REQUEST, category, opts.payload, TODO_STATUS.FAILED, 'queue-full', now, timeoutMs)
+        return id
+      }
+      this.#db.prepare(`
+        INSERT INTO a2a_messages (id, from_agent_id, to_agent_id, kind, category, payload, status, created_at, timeout_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, opts.fromAgentId, opts.toAgentId, TODO_KIND.REQUEST, category, opts.payload, TODO_STATUS.PENDING, now, timeoutMs)
+      return id
+    })()
+    return this.getMessage(insertedId)
+  }
+
   // --- 상태 전이 ---
 
   // pending → processing 전이. 성공 시 true.
@@ -215,6 +249,16 @@ class A2aQueueStore {
       : this.#db.prepare('SELECT * FROM a2a_messages WHERE to_agent_id = ? ORDER BY created_at ASC')
     const rows = status ? stmt.all(toAgentId, status) : stmt.all(toAgentId)
     return rows.map(A2aQueueStore.#rowToMessage)
+  }
+
+  // 전체 status 별 조회 (S4 recovery 용). bounded batch 위해 limit 옵션 제공 — 미전달 시 무제한.
+  listByStatus(status, { kind, limit } = {}) {
+    const params = [status]
+    let sql = 'SELECT * FROM a2a_messages WHERE status = ?'
+    if (kind) { sql += ' AND kind = ?'; params.push(kind) }
+    sql += ' ORDER BY created_at ASC'
+    if (typeof limit === 'number' && limit > 0) { sql += ' LIMIT ?'; params.push(limit) }
+    return this.#db.prepare(sql).all(...params).map(A2aQueueStore.#rowToMessage)
   }
 
   close() { this.#db.close() }

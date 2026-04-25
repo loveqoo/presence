@@ -1,7 +1,8 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { Interpreter } from '@presence/core/interpreter/compose.js'
 import { assertValidAgentId } from '@presence/core/core/agent-id.js'
-import { EVENT_TYPE } from '@presence/core/core/policies.js'
+import { EVENT_TYPE, A2A } from '@presence/core/core/policies.js'
+import { TODO_STATUS } from '../infra/a2a/a2a-queue-store.js'
 import { withEventMeta } from '../infra/events.js'
 
 const { Task, Reader } = fp
@@ -29,7 +30,7 @@ const { Task, Reader } = fp
 // Cedar `a2a-delegate` 액션으로 이관.
 // =============================================================================
 
-// 관측 계약 (외부에 노출되는 error 문자열, 8 종).
+// 관측 계약 (외부에 노출되는 error 문자열, 9 종 — S4 v9 에서 QUEUE_FULL 추가).
 const SEND_A2A_ERROR = Object.freeze({
   INVALID_AGENT_ID:   'invalid-agent-id',
   OWNERSHIP_DENIED:   'ownership-denied',
@@ -39,6 +40,7 @@ const SEND_A2A_ERROR = Object.freeze({
   ARCHIVED:           'target-archived',
   SESSION_NOT_FOUND:  'target-session-not-found',
   ENQUEUE_FAILED:     'queue-enqueue-failed',
+  QUEUE_FULL:         'queue-full',
 })
 
 const usernameOf = (agentId) => agentId.split('/')[0]
@@ -87,9 +89,10 @@ const forkToPromise = (task) => new Promise((resolve, reject) => {
   try { task.fork(reject, resolve) } catch (err) { reject(err) }
 })
 
-const sendA2aInterpreterR = Reader.asks(({
-  ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger,
-}) => new Interpreter(['SendA2aMessage'], (op) => {
+const sendA2aInterpreterR = Reader.asks((env) => {
+  const { ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId } = env
+  const logger = env.logger
+  return new Interpreter(['SendA2aMessage'], (op) => {
   const to = op.to
   const payload = op.payload
   const timeoutMs = op.timeoutMs ?? null
@@ -114,10 +117,15 @@ const sendA2aInterpreterR = Reader.asks(({
     return ST.of(op.next({ requestId: msg.id, accepted: false, error: SEND_A2A_ERROR.ARCHIVED }))
   }
 
-  // 정상 경로: pending row + 수신 event queue enqueue
-  const msg = a2aQueueStore.enqueueRequest({
-    fromAgentId: currentAgentId, toAgentId: to, payload, timeoutMs, category,
-  })
+  // 정상 경로: 큐 상한 enforcement (트랜잭션 내부 COUNT+INSERT, race-free).
+  //   초과 시 store 가 status='failed', error='queue-full' row 를 직접 INSERT — interpreter 는 row.status 보고 분기.
+  const msg = a2aQueueStore.enqueueRequestBounded(
+    { fromAgentId: currentAgentId, toAgentId: to, payload, timeoutMs, category },
+    A2A.QUEUE_MAX_PER_AGENT,
+  )
+  if (msg.status === TODO_STATUS.FAILED && msg.error === SEND_A2A_ERROR.QUEUE_FULL) {
+    return ST.of(op.next({ requestId: msg.id, accepted: false, error: SEND_A2A_ERROR.QUEUE_FULL }))
+  }
 
   const receiverSession = validation.entry?.session
   const receiverEventActor = receiverSession?.actors?.eventActor ?? receiverSession?.eventActor
@@ -146,6 +154,7 @@ const sendA2aInterpreterR = Reader.asks(({
     })
   return ST.lift(Task.fromPromise(() => enqueuePromise)())
     .map((outcome) => op.next({ requestId: msg.id, accepted: outcome.accepted, error: outcome.error }))
-}))
+  })
+})
 
 export { sendA2aInterpreterR, SEND_A2A_ERROR, validateTarget }
