@@ -65,7 +65,13 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
   - `markProcessing(id)` false 집합 (이미 processing/completed/failed/expired 이거나 row 없음) = "이미 처리된 상태, skip 안전" — `EventActor` 가 drain 경로에서 안전 skip.
   - `markCompleted(id)` / `markExpired(id)` 는 boolean 반환 — race 시 먼저 true 를 받은 쪽만 `dispatchResponse` 호출. `markOrphaned(id)` 는 response row 를 orphaned 로 재분류 (전이 제약 없음, sender session/eventActor 부재 시).
   - expire 클럭: `UserContext.startA2aExpireTick(A2A.EXPIRE_TICK_MS = 30000ms)` → `setInterval(...).unref()`. tick 마다 `listExpired(now)` → `markExpired` (false 면 receiver 가 먼저 완료한 race — skip) → `dispatchResponse(status='expired')`. `shutdown()` 에서 `clearInterval` + `await #expireInFlight` 후 store close.
-  - 큐 상한 agent 당 pending 100건 (`A2A.QUEUE_MAX_PER_AGENT`), 기본 타임아웃 5분 (`A2A.DEFAULT_TIMEOUT_MS = 300000`) — 단일 진원: `packages/core/src/core/policies.js` `A2A` 상수 객체.
+  - 큐 상한 agent 당 pending 100건 (`A2A.QUEUE_MAX_PER_AGENT`), 기본 타임아웃 5분 (`A2A.DEFAULT_TIMEOUT_MS = 300000`), 재시작 회복 배치 최대 1000건 (`A2A.RECOVER_BATCH_MAX = 1000`) — 단일 진원: `packages/core/src/core/policies.js` `A2A` 상수 객체.
+
+  **enqueueRequestBounded(opts, maxPending)**: `better-sqlite3` transaction 내부에서 `COUNT(pending) + INSERT` 원자화 (single-process race-free). 상한 초과 시 `status='failed'`, `error='queue-full'` 로 INSERT — 이력 보존 (silently drop 금지). 정상 삽입과 동일한 row 구조 유지.
+
+  **listByStatus(status, { kind, limit })**: recovery 의 bounded batch 용. `limit=1000`(기본값 `A2A.RECOVER_BATCH_MAX`)으로 호출 시 한 번 startup 처리량 상한. `listByRecipient` 는 orphaned 관측 경로 유지.
+
+  **큐 상한 race-free 불변식**: 동시 sender 가 같은 receiver 로 enqueue 해도 단일 프로세스 내에서는 `A2A.QUEUE_MAX_PER_AGENT` 초과 INSERT 불가 — `enqueueRequestBounded` 가 COUNT+INSERT 를 단일 transaction 으로 처리.
 
 ## 경계 조건 (Edge Cases)
 
@@ -125,3 +131,4 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - 2026-04-24: A2A Phase 1 S1 구현 반영 — I13 신규(A2aQueueStore 경로/schema/상태머신/멱등성/상한 계약). 파일 경로 트리에 `memory/a2a-queue.db` 삽입. 관련 코드에 a2a-queue-store.js 추가. 테스트 커버리지 I13 미커버 경고 등록.
 - 2026-04-24: A2A Phase 1 S2 구현 반영 — I13 확장: response row 계약(kind='response', final status 즉시, pending 없음), expire 클럭(UserContext setInterval/clearInterval/await in-flight), markCompleted/markExpired boolean race 방어, markOrphaned response row 재분류. 관련 코드에 a2a-response-dispatcher.js 추가. 테스트 커버리지 I13 미커버 시나리오 확장.
 - 2026-04-25: A2A 네이밍 범용화 반영 (v8) — I13 재작성: 테이블명 todo_messages → a2a_messages (schema v2), category 컬럼 추가, migration v1→v2 계약, A2A 프리미티브 범용성 불변식(금지 패턴 포함), enqueueResponse 시그니처 필수/옵션 분리. 파일 경로 트리 표기 갱신.
+- 2026-04-25: A2A Phase 1 S4 구현 반영 — I13 보강: `enqueueRequestBounded` 계약(COUNT+INSERT 원자화, 초과 시 failed+error='queue-full' audit row), `listByStatus({ kind, limit })` 계약(recovery bounded batch용), `A2A.RECOVER_BATCH_MAX = 1000` 상수 추가, 큐 상한 race-free 불변식 명시.
