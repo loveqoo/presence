@@ -20,6 +20,9 @@
 | [planner.md](planner.md) | Planner/Executor | Plan-Free 계층 분리, Executor 생명주기 계약, epoch 경합 방어 |
 | [tui-server-contract.md](tui-server-contract.md) | TUI-서버 계약 | 부팅 순서, REST 엔드포인트, WS 프로토콜, 세션 전환 |
 | [approve.md](approve.md) | 승인 플로우 | Approve Op 계약, 위험도 분류, 결정 기록, 경계 조건 |
+| [agent-identity.md](agent-identity.md) | 에이전트 정체성 | AgentId canonical form, canAccessAgent, governance quota, soft-delete, A2A 비활성 기본 |
+| [transcript.md](transcript.md) | Transcript 오버레이 | 5탭 계약, iterationHistory 구독, 멀티턴 중간 응답 가시성 |
+| [llm-client.md](llm-client.md) | LLM 클라이언트 | max_tokens 전달, finish_reason 구분, budget 상수 단일 출처 |
 
 ## 스펙 문서 구조
 
@@ -41,3 +44,5 @@
 
 - 2026-04-10: 초기 작성 — 실제 코드 기반 전 도메인 스펙화
 - 2026-04-11: approve.md 추가 — FP-02/FP-03 반영
+- 2026-04-12: agent-identity.md, transcript.md, llm-client.md 추가 (인덱스 누락 보정)
+- 2026-04-25: 인덱스 최신화 — 3개 파일 README 등재, server-ws.md E4 single-flight 해소, config.md a2a.recoverOnStart 추가

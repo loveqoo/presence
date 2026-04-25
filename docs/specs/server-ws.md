@@ -45,7 +45,7 @@ presence 서버의 Express HTTP 파이프라인, WebSocket 인증 플로우, 세
 - I4. **state broadcast는 WATCHED_PATHS만**: SessionBridge는 `constants.js`의 `WATCHED_PATHS`에 정의된 경로의 state 변경만 broadcast한다. 전체 snapshot을 매번 전송하지 않는다. `WATCHED_PATHS` 정의 경로만 변경 broadcast. `_debug.iterationHistory`는 `STATE_PATH.DEBUG_ITERATION_HISTORY`로 WATCHED_PATHS에 포함되어 변경 시 broadcast된다. watchSession 대상: `SCHEDULED` 세션 제외, `USER`/`AGENT` 포함 (`index.js:128`, `user-context-manager.js:34`). 에이전트 세션의 진행 상태도 WS 클라이언트에 broadcast된다.
 - I5. **WS 인증 실패 즉시 close**: 인증 실패 시 `ws.close(code, message)` 즉시 호출. 연결 유지 없음. 코드: 4001(인증 실패), 4002(비밀번호 변경 필요), 4003(origin 불허).
 - I6. **UserContextManager 지연 생성**: 인증된 유저의 첫 REST 요청 또는 WS join 시 해당 유저의 UserContext를 생성 (`getOrCreate`). 서버 시작 시 전체 유저의 UserContext를 미리 생성하지 않는다. 운영 환경은 `authEnabled=true` 고정이므로 모든 요청이 `UserContextManager` 경유로 유저별 `UserContext`를 사용한다. 단일 `#userContext` 필드는 테스트/레거시 브릿지 목적의 폴백 경로다.
-- I7. **WS 연결 해제 후 비활성 타임아웃**: 유저의 모든 WS 연결이 끊기면 `INACTIVITY_TIMEOUT_MS` (30분, `30 * 60 * 1000` ms — `constants.js:13`) 후 UserContext 자동 shutdown. 새 연결 도달 시 타이머 취소.
+- I7. **WS 연결 해제 후 비활성 타임아웃**: 유저의 모든 WS 연결이 끊기면 `INACTIVITY_TIMEOUT_MS` (30분, `30 * 60 * 1000` ms — `packages/server/src/server/constants.js`) 후 UserContext 자동 shutdown. 새 연결 도달 시 타이머 취소.
 - I8. **세션 소유권 WS에서도 강제**: WS `join` 처리 시에도 `entry.owner !== wsUsername` 조건으로 403 에러 메시지 전송. join 취소.
 - I9. **origin 검증 — REST와 WS 두 경로**: (1) REST/CORS: `corsMiddleware`는 origin hostname이 `localhost` 또는 `127.0.0.1`인 경우만 Access-Control 헤더 추가. 다른 origin은 헤더 없음. (2) WS `#checkOrigin`: `localhost`/`127.0.0.1`에 더해 생성자에서 주입된 `this.#host`(기본값 `127.0.0.1`)도 추가 허용. WS 쪽이 서버 리슨 주소(`opts.host`)를 추가 허용하는 이유는 동적 바인딩 호스트에서도 같은 머신 내 클라이언트 접근을 허용하기 위함이다.
 - I10. **서버 shutdown 순서**: SIGTERM/SIGINT → scheduler stop → UserContext.shutdown() → UserContextManager.shutdownAll() → wss.close() → httpServer.close().
@@ -68,7 +68,7 @@ presence 서버의 Express HTTP 파이프라인, WebSocket 인증 플로우, 세
 - E1. WS 연결 후 `join` 없이 다른 메시지 전송 → 무시 (type !== 'join' 조건).
 - E2. `join`에 존재하지 않는 `session_id` → `findOrCreateSession`에서 null 반환 → join 응답 없음 (클라이언트에게 명시적 에러 없음). ⚠️ 개선 여지
 - E3. auth middleware가 등록되기 전에 session API가 마운트될 경우 → 인증 없이 모든 세션 접근 가능 (파이프라인 순서 위반). I1이 이를 방지.
-- E4. UserContextManager.getOrCreate()가 동시에 같은 username으로 호출 → Map.has() 체크 후 create. 경합 조건 가능성 있음 (동기 Map 접근이지만 async 컨텍스트). ⚠️ 알려진 한계
+- E4. UserContextManager.getOrCreate()가 동시에 같은 username으로 호출 → `#pending` Map 기반 single-flight으로 차단됨 (A2A S4 해소). 첫 번째 호출이 Promise를 `#pending`에 등록하고 동시 호출은 같은 Promise를 반환한다. `UserContext.create` + recovery가 두 번 실행되지 않음이 보장된다. `session.md I16 UserContextManager single-flight 불변식` 참조.
 - E5. shutdown 중 새 HTTP 요청 도달 → `httpServer.close()` 후 새 연결 거부. 이미 처리 중인 요청은 완료 허용.
 - E6. WS broadcast 시 CLOSED 상태 클라이언트 존재 → `ws.readyState === 1` (OPEN) 조건으로 필터링. 에러 없음.
 - E7. `/api/instance` health endpoint는 `publicPaths`에 포함되어 토큰 없이 접근 가능. 테스트 AE11 (`packages/server/test/auth-e2e.test.js`) 이 미인증 200 응답을 검증.
@@ -84,7 +84,7 @@ presence 서버의 Express HTTP 파이프라인, WebSocket 인증 플로우, 세
 - I8 → `packages/server/test/server.test.js` (WS join 소유권 에러)
 - I7 → `packages/server/test/server.test.js` (비활성 타임아웃)
 - E2 → (미커버) ⚠️ join 후 응답 없음 케이스 테스트 없음
-- E4 → (미커버) ⚠️ 동시 getOrCreate 경합 테스트 없음
+- E4 → `packages/server/src/server/user-context-manager.js` `#pending` Map 구현 (코드 레벨 단일 진원). 동시 호출 시나리오 단위 테스트 없음 ⚠️
 - E7 → `packages/server/test/auth-e2e.test.js` AE11 (미인증 /api/instance 200 검증)
 
 ## 관련 코드
@@ -109,3 +109,4 @@ presence 서버의 Express HTTP 파이프라인, WebSocket 인증 플로우, 세
 - 2026-04-10: I4에 `_debug.iterationHistory` WATCHED_PATHS 미포함 명시 — 초기 snapshot만 전달, 이후 변경 broadcast 없음. I11 추가 — activity touch 3곳 호출(미들웨어/resolveUserContext/WS connection) 명시.
 - 2026-04-10: I4에 watchSession 세션 유형 필터 추가 — SCHEDULED 제외, USER/AGENT 포함 명시.
 - 2026-04-10: I4 `_debug.iterationHistory` WATCHED_PATHS 포함 확인 — STATE_PATH.DEBUG_ITERATION_HISTORY 추가됨, "미포함 개선 여지" 표기 제거.
+- 2026-04-25: E4 갱신 — A2A Phase 1 S4에서 UserContextManager.getOrCreate()에 `#pending` single-flight 보호 추가로 경합 조건 해소. 알려진 한계 제거.
