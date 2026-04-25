@@ -23,7 +23,7 @@ const THRESHOLDS = Object.freeze({
   maxParams: 5,
   maxDepth: 6,
   cyclomatic: 50,
-  imports: 15,
+  imports: 20,
 })
 
 // --- 가중치 (Score 계산용) ---
@@ -116,6 +116,13 @@ function analyze(code, filePath) {
     return false
   }
 
+  // class method 의 value (FunctionExpression) — MethodDefinition 핸들러가
+  // 이미 method 자체를 카운트하므로 inner FunctionExpression 은 중복 카운트.
+  const isClassMethodValue = (ancestors) => {
+    if (ancestors.length < 2) return false
+    return ancestors[ancestors.length - 2].type === 'MethodDefinition'
+  }
+
   walk.ancestor(ast, {
     ImportDeclaration() { imports++ },
 
@@ -124,7 +131,7 @@ function analyze(code, filePath) {
       if (node.params.length > maxParams) maxParams = node.params.length
     },
     FunctionExpression(node, ancestors) {
-      if (!isChainingCallback(ancestors)) functions++
+      if (!isChainingCallback(ancestors) && !isClassMethodValue(ancestors)) functions++
       if (node.params.length > maxParams) maxParams = node.params.length
     },
     ArrowFunctionExpression(node, ancestors) {

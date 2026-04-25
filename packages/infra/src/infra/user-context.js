@@ -5,8 +5,12 @@ import { createPersona, DEFAULT_PERSONA } from './persona.js'
 import { createLogger } from './logger.js'
 import { LLMClient } from './llm/llm-client.js'
 import { createAgentRegistry, registerSummarizer } from './agents/agent-registry.js'
+import { createListAgentsTool } from './agents/agent-tools.js'
 import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
+import { createA2aQueueStore, defaultA2aQueueDbPath } from './a2a/a2a-queue-store.js'
+import { dispatchResponse } from './a2a/a2a-response-dispatcher.js'
+import { A2A, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
 import { loadUserMerged } from './config-loader.js'
@@ -97,15 +101,127 @@ class UserContext {
     })
     userContext.agentRegistry = createAgentRegistry()
     registerSummarizer(userContext.agentRegistry, userContext.llm, { userId: username || 'default' })
+    // A2A Phase 1 S3 — agent discovery tool. registerAgentSessions 이후에
+    // config.agents 가 추가되어도 handler 호출 시점에 agentRegistry.list() 가 최신 값 반환.
+    userContext.toolRegistry.register(createListAgentsTool(userContext.agentRegistry))
 
-    // --- Job Store + User Data Store ---
+    // --- Job Store + User Data Store + A2A Queue Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))
     userContext.userDataStore = new UserDataStore(defaultUserDataDbPath(userContext.userDataPath))
+    userContext.a2aQueueStore = createA2aQueueStore(defaultA2aQueueDbPath(userContext.userDataPath))
 
     // --- Sessions (userContext 자기 참조) ---
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
 
+    // --- A2A expire tick (S2, a2a-internal.md §6.6) ---
+    userContext.a2aExpireInterval = null
+    userContext.a2aExpireInFlight = null
+    userContext.startA2aExpireTick(opts.a2aExpireTickMs ?? A2A.EXPIRE_TICK_MS)
+
     return userContext
+  }
+
+  // A2A Phase 1 S2 — pending/processing request 가 timeout 초과 시 expired 전이
+  // + sender 에게 expired response dispatch. unref() 로 프로세스 종료 방해 없음.
+  startA2aExpireTick(intervalMs) {
+    if (this.a2aExpireInterval) return
+    this.a2aExpireInterval = setInterval(() => this.#runA2aExpireTick(), intervalMs)
+    this.a2aExpireInterval.unref?.()
+  }
+
+  async #runA2aExpireTick() {
+    const p = this.#expireTickBody().catch(err => {
+      this.logger?.warn?.('A2A expire tick failed', { error: err?.message })
+    })
+    this.a2aExpireInFlight = p
+    try { await p } finally { this.a2aExpireInFlight = null }
+  }
+
+  async #expireTickBody() {
+    const now = Date.now()
+    const expired = this.a2aQueueStore.listExpired(now)
+    for (const request of expired) {
+      // markExpired=false → receiver 가 먼저 completed 한 race. dispatchResponse skip.
+      if (!this.a2aQueueStore.markExpired(request.id)) continue
+      await dispatchResponse({
+        a2aQueueStore: this.a2aQueueStore,
+        sessionManager: this.sessions,
+        logger: this.logger,
+        request,
+        status: 'expired',
+        payload: null,
+        error: `timeout-${request.timeoutMs ?? A2A.DEFAULT_TIMEOUT_MS}ms`,
+      })
+    }
+  }
+
+  // A2A Phase 1 S4 — 서버 재시작 회복 (a2a-internal.md §6.4 v9).
+  //   processing → markFailed('server-restart') + dispatchResponse
+  //   pending → receiver 등록 시 event queue 재진입; 부재/enqueue실패 시 markFailed + response
+  // bounded batch: A2A.RECOVER_BATCH_MAX 행 처리 후 종료. 잔여는 다음 startup 에서 처리.
+  // feature flag: opts.recoverOnStart === false 시 skip — 첫 배포 운영 rollback 경로.
+  // 호출 시점: server 가 sessions 등록 (registerAgentSessions) 후. start() 와 분리.
+  async recoverA2aQueue({ sessionManager, recoverOnStart = true } = {}) {
+    if (!recoverOnStart) return { skipped: true }
+    const limit = A2A.RECOVER_BATCH_MAX
+    const procRows = this.a2aQueueStore.listByStatus('processing', { kind: 'request', limit })
+    for (const row of procRows) {
+      if (!this.a2aQueueStore.markFailed(row.id, 'server-restart')) continue
+      await this.#dispatchRecoveryResponse(row, 'server-restart', sessionManager)
+    }
+    const pendingRows = this.a2aQueueStore.listByStatus('pending', { kind: 'request', limit })
+    for (const row of pendingRows) {
+      const routing = sessionManager.findAgentSession(row.toAgentId)
+      if (routing.kind === 'ok') {
+        const enqueued = await this.#tryReenqueueA2aRequest(row, routing)
+        if (!enqueued) {
+          if (this.a2aQueueStore.markFailed(row.id, 'server-restart-enqueue-failed')) {
+            await this.#dispatchRecoveryResponse(row, 'server-restart-enqueue-failed', sessionManager)
+          }
+        }
+      } else {
+        if (this.a2aQueueStore.markFailed(row.id, 'server-restart-target-missing')) {
+          await this.#dispatchRecoveryResponse(row, 'server-restart-target-missing', sessionManager)
+        }
+      }
+    }
+    return { processingCount: procRows.length, pendingCount: pendingRows.length }
+  }
+
+  async #tryReenqueueA2aRequest(row, routing) {
+    const receiverEventActor = routing.entry?.session?.actors?.eventActor ?? routing.entry?.session?.eventActor
+    if (!receiverEventActor) return false
+    // event meta 인라인 — withEventMeta 와 동일 (id 보존, receivedAt 부여).
+    const event = {
+      id: row.id,
+      type: EVENT_TYPE.A2A_REQUEST,
+      prompt: row.payload,
+      fromAgentId: row.fromAgentId,
+      toAgentId: row.toAgentId,
+      requestId: row.id,
+      category: row.category ?? 'todo',
+      receivedAt: Date.now(),
+    }
+    return await new Promise((resolve) => {
+      try {
+        receiverEventActor.enqueue(event).fork(
+          () => resolve(false),
+          () => resolve(true),
+        )
+      } catch (_err) { resolve(false) }
+    })
+  }
+
+  async #dispatchRecoveryResponse(row, errorCode, sessionManager) {
+    await dispatchResponse({
+      a2aQueueStore: this.a2aQueueStore,
+      sessionManager,
+      logger: this.logger,
+      request: row,
+      status: 'failed',
+      payload: null,
+      error: errorCode,
+    })
   }
 
   // primaryAgentId 가 가리키는 agent 반환 (없으면 null).
@@ -126,10 +242,19 @@ class UserContext {
   }
 
   // 세션 → 인프라 순서로 정리.
+  // A2A expire tick 우선 정리 (새 tick 차단 + in-flight 완료 대기) 후 store close.
   async shutdown() {
+    if (this.a2aExpireInterval) {
+      clearInterval(this.a2aExpireInterval)
+      this.a2aExpireInterval = null
+    }
+    if (this.a2aExpireInFlight) {
+      try { await this.a2aExpireInFlight } catch (_) {}
+    }
     await Promise.all(this.sessions.list().map(({ session }) => session.shutdown().catch(() => {})))
     this.jobStore.close()
     this.userDataStore.close()
+    this.a2aQueueStore.close()
     for (const conn of this.mcpConnections) {
       try { await conn.close() } catch (_) {}
     }

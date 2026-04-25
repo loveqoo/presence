@@ -166,5 +166,13 @@
   },
   "streaming": {
     "thinking": "thinking..."
+  },
+  "a2a": {
+    "error": {
+      "queue-full": "recipient queue is full",
+      "server-restart": "server restarted; in-flight message was interrupted",
+      "server-restart-target-missing": "recipient agent is not registered after server restart",
+      "server-restart-enqueue-failed": "failed to re-enqueue to recipient after server restart"
+    }
   }
 }

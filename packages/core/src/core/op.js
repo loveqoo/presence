@@ -18,6 +18,7 @@ const ExecuteTool   = makeOp('ExecuteTool')
 const Respond       = makeOp('Respond')
 const Approve       = makeOp('Approve')
 const Delegate      = makeOp('Delegate')
+const SendA2aMessage = makeOp('SendA2aMessage')
 const Observe       = makeOp('Observe')
 const UpdateState   = makeOp('UpdateState')
 const GetState      = makeOp('GetState')
@@ -36,6 +37,10 @@ const executeToolR = Reader.asks(({ name, args }) => Free.liftF(ExecuteTool({ na
 const respondR     = Reader.asks(({ message }) => Free.liftF(Respond({ message })))
 const approveR     = Reader.asks(({ description }) => Free.liftF(Approve({ description })))
 const delegateR    = Reader.asks(({ target, task }) => Free.liftF(Delegate({ target, task })))
+// SendA2aMessage: 같은 유저 agent 간 비동기 A2A 메시지 전달 (a2a-internal.md §4.4).
+// 반환: { requestId, accepted, error? } — accepted 와 requestId 는 독립. category 는 분류 필드 (기본 'todo').
+const sendA2aMessageR = Reader.asks(({ to, payload, timeoutMs, category }) =>
+  Free.liftF(SendA2aMessage({ to, payload, timeoutMs, category })))
 const observeR     = Reader.asks(({ source, data }) => Free.liftF(Observe({ source, data })))
 const updateStateR = Reader.asks(({ path, value }) => Free.liftF(UpdateState({ path, value })))
 const getStateR    = Reader.asks(({ path }) => Free.liftF(GetState({ path })))
@@ -56,9 +61,9 @@ const parallel     = (programs) => parallelR.run({ programs })
 const spawn        = (programs) => spawnR.run({ programs })
 
 export {
-  AskLLM, ExecuteTool, Respond, Approve, Delegate,
+  AskLLM, ExecuteTool, Respond, Approve, Delegate, SendA2aMessage,
   Observe, UpdateState, GetState, Parallel, Spawn,
-  askLLMR, executeToolR, respondR, approveR, delegateR,
+  askLLMR, executeToolR, respondR, approveR, delegateR, sendA2aMessageR,
   observeR, updateStateR, getStateR, parallelR, spawnR,
   askLLM, executeTool, respond, approve, delegate,
   observe, updateState, getState, parallel, spawn,

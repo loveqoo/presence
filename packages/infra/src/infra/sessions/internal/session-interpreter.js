@@ -22,6 +22,10 @@ const sessionInterpreterR =
       delegateRuntime: env.delegateRuntime,
       getWorkingDir: env.getWorkingDir,
       currentUserId: env.currentUserId,
+      currentAgentId: env.currentAgentId,
+      a2aQueueStore: env.a2aQueueStore,
+      sessionManager: env.sessionManager,
+      logger: env.logger,
     }),
     prodInterpreterR,
   ).chain(prod => Reader.asks(({ state, logger }) => {

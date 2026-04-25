@@ -174,3 +174,23 @@ export const PROMPT = Object.freeze({
   BUDGET_WARN_PCT: 90,
 })
 
+// EventActor event.type enum — scheduler/a2a 경로에서 공유.
+// 정의와 사용이 한 enum 을 참조해야 scheduled_job 콜백 회귀를 막을 수 있다.
+// EventActor event.type enum.
+// A2A 네이밍 범용화 (v8, 2026-04-24): TODO_REQUEST/TODO_RESPONSE → A2A_REQUEST/A2A_RESPONSE.
+// TODO 는 category 필드로 분류 (a2a-internal.md §4.1). TODO_REVIEW 는 별개 도메인 (UserDataStore) 이라 유지.
+export const EVENT_TYPE = Object.freeze({
+  SCHEDULED_JOB: 'scheduled_job',
+  TODO_REVIEW:   'todo_review',
+  A2A_REQUEST:   'a2a_request',
+  A2A_RESPONSE:  'a2a_response',
+})
+
+// A2A Phase 1 정책 상수. S4 enforcement/expire/recovery 에서 소비.
+export const A2A = Object.freeze({
+  QUEUE_MAX_PER_AGENT: 100,
+  DEFAULT_TIMEOUT_MS: 300000,
+  EXPIRE_TICK_MS: 30000,       // UserContext 의 a2a expire 스캔 주기 (S2)
+  RECOVER_BATCH_MAX: 1000,     // recovery 한 번 호출당 최대 처리 row 수 (S4 §6.4 — OOM 방어)
+})
+

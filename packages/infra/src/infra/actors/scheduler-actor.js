@@ -1,6 +1,6 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
-import { SCHEDULER } from '@presence/core/core/policies.js'
+import { SCHEDULER, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { calcNextRun } from '../jobs/job-tools.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
@@ -137,7 +137,7 @@ class SchedulerActor extends ActorWrapper {
   #buildJobEvent(job, runId, attempt) {
     return {
       id: runId,
-      type: 'scheduled_job',
+      type: EVENT_TYPE.SCHEDULED_JOB,
       jobId: job.id,
       jobName: job.name,
       prompt: job.prompt,

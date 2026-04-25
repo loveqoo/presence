@@ -13,6 +13,7 @@ import { registerAgentSessions } from './scheduler-factory.js'
 
 class UserContextManager {
   #contexts = new Map() // username → { userContext, wsConnections, lastActivity, shutdownTimer }
+  #pending = new Map()  // username → Promise<entry> — single-flight 보호 (S4)
   #bridge
   #serverConfig
   #memory
@@ -23,8 +24,17 @@ class UserContextManager {
     this.#memory = memory
   }
 
+  // S4: single-flight — 동시 첫 접근 (REST + WS) 시 UserContext.create 가 두 번 실행되어
+  //   DB 핸들 중복 open + recovery 가 두 번 도는 race window 차단.
   async getOrCreate(username) {
     if (this.#contexts.has(username)) return this.#contexts.get(username)
+    if (this.#pending.has(username)) return this.#pending.get(username)
+    const promise = this.#createInternal(username)
+    this.#pending.set(username, promise)
+    try { return await promise } finally { this.#pending.delete(username) }
+  }
+
+  async #createInternal(username) {
     // 런타임 서버 config를 base로 유저 config merge (disk server.json 재독 없음)
     const userConfig = mergeUserOver(this.#serverConfig, username)
     const userContext = await UserContext.create(userConfig, {
@@ -36,6 +46,11 @@ class UserContextManager {
     })
     // config.agents 기반 에이전트 세션 등록
     registerAgentSessions(userContext, username)
+    // S4: A2A 큐 재시작 회복 (sessions 등록 후, 첫 요청 처리 전)
+    await userContext.recoverA2aQueue({
+      sessionManager: userContext.sessions,
+      recoverOnStart: userContext.config?.a2a?.recoverOnStart !== false,
+    })
 
     const entry = { userContext, wsConnections: new Set(), lastActivity: Date.now(), shutdownTimer: null }
     this.#contexts.set(username, entry)

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import i18next from 'i18next'
 import fp from '@presence/core/lib/fun-fp.js'
 import { TODO } from '@presence/core/core/policies.js'
 
@@ -54,4 +55,26 @@ const syncTodosProjection = (state, userDataStore) => {
   state.set('todos', todos)
 }
 
-export { withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate, syncTodosProjection }
+// A2A Phase 1 S2 — a2a_response event 를 송신 agent 의 conversationHistory
+// SYSTEM entry 용 문자열로 변환 (a2a-internal.md §4.5). EventActor drain 이
+// turnLifecycle.appendSystemEntrySync 에 전달.
+//
+// S4 (v9) — failed 분기 의 error 코드를 i18n 매핑으로 사람 친화 메시지로 변환.
+//   알려지지 않은 코드는 raw fallback (현 동작 유지).
+const humanizeA2aError = (code) => {
+  if (typeof code !== 'string' || code.length === 0) return ''
+  const key = `a2a.error.${code}`
+  return i18next.isInitialized && i18next.exists(key) ? i18next.t(key) : code
+}
+
+const formatResponseMessage = (event) => {
+  const from = event.fromAgentId ?? 'unknown'
+  const status = event.status
+  if (status === 'completed') return `[A2A 응답 from ${from}] ${event.payload ?? ''}`
+  if (status === 'failed') return `[A2A 응답 실패 from ${from}] ${humanizeA2aError(event.error)}`
+  if (status === 'expired') return `[A2A 응답 타임아웃 from ${from}]`
+  // orphaned 는 sender 에게 event 전달 안 됨 — 이 경로 도달 없음
+  return `[A2A 응답 from ${from}] status=${status ?? 'unknown'}`
+}
+
+export { withEventMeta, eventToPrompt, buildTodoReviewPrompt, formatTodosAsLines, todoFromEvent, isDuplicate, syncTodosProjection, formatResponseMessage }

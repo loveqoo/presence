@@ -1,7 +1,7 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { fireAndForget, forkTask } from '@presence/core/lib/task.js'
-import { PHASE, STATE_PATH, TODO, TURN_SOURCE } from '@presence/core/core/policies.js'
-import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection } from '../events.js'
+import { PHASE, STATE_PATH, TODO, TURN_SOURCE, EVENT_TYPE } from '@presence/core/core/policies.js'
+import { withEventMeta, eventToPrompt, buildTodoReviewPrompt, isDuplicate, todoFromEvent, syncTodosProjection, formatResponseMessage } from '../events.js'
 import { ActorWrapper } from './actor-wrapper.js'
 
 const { Task, Maybe, Reader } = fp
@@ -18,9 +18,11 @@ class EventActor extends ActorWrapper {
   #logger
   #onEventDone
   #userDataStore
+  #a2aQueueStore
+  #turnLifecycle
 
   constructor(turnActor, state, opts = {}) {
-    const { logger, onEventDone, todoReviewJobName, userDataStore } = opts
+    const { logger, onEventDone, todoReviewJobName, userDataStore, a2aQueueStore, turnLifecycle } = opts
     const R = EventActor.RESULT
     // queue: 처리 대기 이벤트. inFlight: 현재 처리 중인 이벤트. deadLetter: 실패한 이벤트.
     super(
@@ -46,9 +48,35 @@ class EventActor extends ActorWrapper {
             if (!ts || ts.tag !== PHASE.IDLE) return [R.NO_OP_BUSY, actorState]
 
             const [head, ...rest] = actorState.queue
+
+            // A2A S2: a2a_response 는 turn 재발행 없이 SYSTEM entry 만 추가 + skip.
+            if (head.type === EVENT_TYPE.A2A_RESPONSE) {
+              if (this.#turnLifecycle?.appendSystemEntrySync) {
+                try {
+                  this.#turnLifecycle.appendSystemEntrySync(this.#state, { content: formatResponseMessage(head), tag: 'a2a-response' })
+                } catch (err) {
+                  ;(this.#logger || console).warn?.('A2A a2a_response SystemEntry 실패', { error: err?.message })
+                }
+              } else {
+                ;(this.#logger || console).warn?.('A2A a2a_response drop — turnLifecycle missing', { responseId: head.id, correlationId: head.correlationId })
+              }
+              return this.#skipAndDrain(actorState, rest)
+            }
+
             const todoResult = this.#resolveTodoReview(head, state, todoReviewJobName)
-            if (todoResult.skip) return this.#skipTodoReview(actorState, rest)
+            if (todoResult.skip) return this.#skipAndDrain(actorState, rest)
             const event = todoResult.event
+
+            // A2A S1: a2a_request 는 queue row 를 pending → processing 으로 전이.
+            //   markProcessing=false 집합 (이미 processing/completed/failed/expired 또는 row 없음)
+            //   은 모두 "이미 처리된 상태, skip 안전" — warn 로그 후 drain 계속.
+            if (event.type === EVENT_TYPE.A2A_REQUEST && this.#a2aQueueStore && event.requestId) {
+              const transitioned = this.#a2aQueueStore.markProcessing(event.requestId)
+              if (!transitioned) {
+                ;(this.#logger || console).warn?.('SendA2aMessage duplicate skip', { requestId: event.requestId, reason: 'markProcessing-false' })
+                return this.#skipAndDrain(actorState, rest)
+              }
+            }
 
             const draining = { ...actorState, queue: rest, inFlight: event }
             this.#projectEvents(draining)
@@ -58,8 +86,8 @@ class EventActor extends ActorWrapper {
             )
 
             return Task.fromPromise(runEvent)()
-              .map(result => [R.DRAINED, this.#handleDrainSuccess(draining, event, result)])
-              .catchError(err => Task.of([R.DEAD_LETTER, this.#handleDrainFailure(draining, event, err)]))
+              .map(result => [R.DRAINED, this.#finalizeDrain(draining, event, { success: true, result })])
+              .catchError(err => Task.of([R.DEAD_LETTER, this.#finalizeDrain(draining, event, { success: false, error: err })]))
           }
 
           default:
@@ -72,6 +100,8 @@ class EventActor extends ActorWrapper {
     this.#logger = logger
     this.#onEventDone = onEventDone
     this.#userDataStore = userDataStore
+    this.#a2aQueueStore = a2aQueueStore ?? null
+    this.#turnLifecycle = turnLifecycle ?? null
   }
 
   // --- Public 메시지 API ---
@@ -107,7 +137,7 @@ class EventActor extends ActorWrapper {
   }
 
   #resolveTodoReview(event, state, todoReviewJobName) {
-    const isTodoReview = event.type === 'todo_review' ||
+    const isTodoReview = event.type === EVENT_TYPE.TODO_REVIEW ||
       (todoReviewJobName && event.jobName === todoReviewJobName)
     if (!isTodoReview) return { event, skip: false }
     const pending = this.#userDataStore
@@ -117,35 +147,25 @@ class EventActor extends ActorWrapper {
     return { event: { ...event, prompt: buildTodoReviewPrompt(pending) }, skip: false }
   }
 
-  #handleDrainSuccess(draining, event, result) {
-    this.#applyTodo(event)
-    if (this.#onEventDone) this.#onEventDone(event, { success: true, result })
-    const done = { ...draining, queue: [...draining.queue], inFlight: null, lastProcessed: event }
-    this.#projectEvents(done)
-    if (done.queue.length > 0) fireAndForget(this.drain())
-    return done
+  // drain 성공/실패 공통 마무리 — outcome.success 에 따라 lastProcessed / deadLetter 분기.
+  #finalizeDrain(draining, event, outcome) {
+    const base = { ...draining, queue: [...draining.queue], inFlight: null }
+    const nextState = outcome.success
+      ? { ...base, lastProcessed: event }
+      : { ...base, deadLetter: [...draining.deadLetter, { ...event, error: outcome.error.message || String(outcome.error), failedAt: Date.now() }] }
+    if (outcome.success) this.#applyTodo(event)
+    this.#projectEvents(nextState)
+    if (this.#onEventDone) this.#onEventDone(event, outcome.success
+      ? { success: true, result: outcome.result }
+      : { success: false, error: outcome.error.message })
+    if (!outcome.success) (this.#logger || console).warn('Event processing failed', { eventId: event.id, error: outcome.error.message })
+    if (nextState.queue.length > 0) fireAndForget(this.drain())
+    return nextState
   }
 
-  #handleDrainFailure(draining, event, err) {
-    const deadLetterEntry = {
-      ...event,
-      error: err.message || String(err),
-      failedAt: Date.now(),
-    }
-    const failed = {
-      ...draining,
-      queue: [...draining.queue],
-      inFlight: null,
-      deadLetter: [...draining.deadLetter, deadLetterEntry],
-    }
-    this.#projectEvents(failed)
-    if (this.#onEventDone) this.#onEventDone(event, { success: false, error: err.message })
-    ;(this.#logger || console).warn('Event processing failed', { eventId: event.id, error: err.message })
-    if (failed.queue.length > 0) fireAndForget(this.drain())
-    return failed
-  }
-
-  #skipTodoReview(actorState, rest) {
+  // head 를 queue 에서 제거한 skip 상태 반환 + 남은 이벤트는 다음 drain 으로 진행.
+  //   todo_review pending=0, a2a_response drain 후, a2a_request markProcessing=false 모두 같은 형태.
+  #skipAndDrain(actorState, rest) {
     const skipped = { ...actorState, queue: rest }
     this.#projectEvents(skipped)
     if (rest.length > 0) fireAndForget(this.drain())
