@@ -160,6 +160,11 @@ class PresenceServer {
     })
     this.#defaultSession = defaultEntry.session
     registerAgentSessions(this.#userContext, this.#username)
+    // S4: A2A 큐 재시작 회복. config.a2a.recoverOnStart 기본 true.
+    await this.#userContext.recoverA2aQueue({
+      sessionManager: this.#userContext.sessions,
+      recoverOnStart: this.#userContext.config?.a2a?.recoverOnStart !== false,
+    })
 
     // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제
     const auth = createAuthSetup({

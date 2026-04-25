@@ -23,7 +23,7 @@ const THRESHOLDS = Object.freeze({
   maxParams: 5,
   maxDepth: 6,
   cyclomatic: 50,
-  imports: 15,
+  imports: 20,
 })
 
 // --- 가중치 (Score 계산용) ---

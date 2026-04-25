@@ -10,7 +10,7 @@ import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { createA2aQueueStore, defaultA2aQueueDbPath } from './a2a/a2a-queue-store.js'
 import { dispatchResponse } from './a2a/a2a-response-dispatcher.js'
-import { A2A } from '@presence/core/core/policies.js'
+import { A2A, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
 import { Config } from './config.js'
 import { loadUserMerged } from './config-loader.js'
@@ -153,6 +153,75 @@ class UserContext {
         error: `timeout-${request.timeoutMs ?? A2A.DEFAULT_TIMEOUT_MS}ms`,
       })
     }
+  }
+
+  // A2A Phase 1 S4 — 서버 재시작 회복 (a2a-internal.md §6.4 v9).
+  //   processing → markFailed('server-restart') + dispatchResponse
+  //   pending → receiver 등록 시 event queue 재진입; 부재/enqueue실패 시 markFailed + response
+  // bounded batch: A2A.RECOVER_BATCH_MAX 행 처리 후 종료. 잔여는 다음 startup 에서 처리.
+  // feature flag: opts.recoverOnStart === false 시 skip — 첫 배포 운영 rollback 경로.
+  // 호출 시점: server 가 sessions 등록 (registerAgentSessions) 후. start() 와 분리.
+  async recoverA2aQueue({ sessionManager, recoverOnStart = true } = {}) {
+    if (!recoverOnStart) return { skipped: true }
+    const limit = A2A.RECOVER_BATCH_MAX
+    const procRows = this.a2aQueueStore.listByStatus('processing', { kind: 'request', limit })
+    for (const row of procRows) {
+      if (!this.a2aQueueStore.markFailed(row.id, 'server-restart')) continue
+      await this.#dispatchRecoveryResponse(row, 'server-restart', sessionManager)
+    }
+    const pendingRows = this.a2aQueueStore.listByStatus('pending', { kind: 'request', limit })
+    for (const row of pendingRows) {
+      const routing = sessionManager.findAgentSession(row.toAgentId)
+      if (routing.kind === 'ok') {
+        const enqueued = await this.#tryReenqueueA2aRequest(row, routing)
+        if (!enqueued) {
+          if (this.a2aQueueStore.markFailed(row.id, 'server-restart-enqueue-failed')) {
+            await this.#dispatchRecoveryResponse(row, 'server-restart-enqueue-failed', sessionManager)
+          }
+        }
+      } else {
+        if (this.a2aQueueStore.markFailed(row.id, 'server-restart-target-missing')) {
+          await this.#dispatchRecoveryResponse(row, 'server-restart-target-missing', sessionManager)
+        }
+      }
+    }
+    return { processingCount: procRows.length, pendingCount: pendingRows.length }
+  }
+
+  async #tryReenqueueA2aRequest(row, routing) {
+    const receiverEventActor = routing.entry?.session?.actors?.eventActor ?? routing.entry?.session?.eventActor
+    if (!receiverEventActor) return false
+    // event meta 인라인 — withEventMeta 와 동일 (id 보존, receivedAt 부여).
+    const event = {
+      id: row.id,
+      type: EVENT_TYPE.A2A_REQUEST,
+      prompt: row.payload,
+      fromAgentId: row.fromAgentId,
+      toAgentId: row.toAgentId,
+      requestId: row.id,
+      category: row.category ?? 'todo',
+      receivedAt: Date.now(),
+    }
+    return await new Promise((resolve) => {
+      try {
+        receiverEventActor.enqueue(event).fork(
+          () => resolve(false),
+          () => resolve(true),
+        )
+      } catch (_err) { resolve(false) }
+    })
+  }
+
+  async #dispatchRecoveryResponse(row, errorCode, sessionManager) {
+    await dispatchResponse({
+      a2aQueueStore: this.a2aQueueStore,
+      sessionManager,
+      logger: this.logger,
+      request: row,
+      status: 'failed',
+      payload: null,
+      error: errorCode,
+    })
   }
 
   // primaryAgentId 가 가리키는 agent 반환 (없으면 null).

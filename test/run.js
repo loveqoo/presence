@@ -85,6 +85,7 @@ const tests = [
   'packages/infra/test/a2a-send-message.test.js',
   'packages/infra/test/a2a-response-dispatcher.test.js',
   'packages/infra/test/a2a-integration.test.js',
+  'packages/infra/test/a2a-recovery.test.js',
   'packages/infra/test/agent-tools.test.js',
   'packages/infra/test/mirror-state.test.js',
   'packages/infra/test/local-tools.test.js',
