@@ -7,6 +7,7 @@
  */
 
 import { createTestServer } from '../../../test/lib/mock-server.js'
+import { inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
@@ -34,8 +35,10 @@ async function run() {
 
   try {
     // SE1. 스케줄러가 due job 을 자동 감지 → 실행 → DB 에 completed 기록
+    // KG-18: 진입점 #4 (scheduler-factory) — onDispatch 콜백이 canAccessAgent 호출 spy 검증
     {
       const store = userContext.jobStore
+      resetAccessInvocations()
       // 과거 next_run 으로 job 삽입 → polling 이 즉시 due 로 감지
       const job = store.createJob({
         name: 'e2e-test-job',
@@ -60,6 +63,13 @@ async function run() {
         `SE1: run status=success (got ${last.status})`)
       assert(last.finishedAt && last.finishedAt >= last.startedAt,
         'SE1: finishedAt 기록')
+
+      // KG-18 spy: 진입점 #4 가 SCHEDULED_RUN intent 로 canAccessAgent 호출했는지 동적 검증
+      const calls = inspectAccessInvocations()
+      assert(
+        calls.some(c => c.intent === 'scheduled-run' && c.agentId === 'default/default' && c.jwtSub === 'default'),
+        'SE1 (KG-18): 진입점 #4 spy — SCHEDULED_RUN intent + agentId=default/default + jwtSub=default',
+      )
     }
 
     // SE2. cron 미래 설정 시 추가 실행 없음

@@ -42,7 +42,21 @@ const VALID_INTENTS = new Set(Object.values(INTENT))
 const deny = (reason) => ({ allow: false, reason })
 const allow = () => ({ allow: true })
 
+// KG-18 — 5 진입점 enforcement 검증용 inspector. 호출 자취를 ring 버퍼에 기록.
+// 통합 테스트가 reset → 진입점 트리거 → inspect 로 spy 검증. production 부수는
+// 호출당 작은 객체 push + cap 초과 시 단발 slice (cap=200, 30 분 가량 보관).
+const INVOCATION_LOG_CAP = 200
+let invocations = []
+
+const recordInvocation = (input) => {
+  invocations.push({ intent: input?.intent, jwtSub: input?.jwtSub, agentId: input?.agentId })
+  if (invocations.length > INVOCATION_LOG_CAP) invocations = invocations.slice(-INVOCATION_LOG_CAP)
+}
+const inspectAccessInvocations = () => invocations.slice()
+const resetAccessInvocations = () => { invocations = [] }
+
 function canAccessAgent(input) {
+  recordInvocation(input)
   const params = input || {}
   const jwtSub = params.jwtSub
   const agentId = params.agentId
@@ -75,4 +89,4 @@ function canAccessAgent(input) {
   return allow()
 }
 
-export { canAccessAgent, INTENT, REASON }
+export { canAccessAgent, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations }

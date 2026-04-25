@@ -3,6 +3,7 @@ import { createOriginState } from '@presence/infra/infra/states/origin-state.js'
 import { createToolRegistry } from '@presence/infra/infra/tools/tool-registry.js'
 import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { Delegation } from '@presence/infra/infra/agents/delegation.js'
+import { inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { delegate, respond } from '@presence/core/core/op.js'
 
@@ -28,6 +29,7 @@ async function run() {
 
   // ==========================================================================
   // 1. local agent run() 호출 → Delegation.completed
+  // KG-18: 진입점 #5 (delegate interpreter) — happy path 가 canAccessAgent 호출 spy 검증
   // ==========================================================================
   {
     const reg = createAgentRegistry()
@@ -38,6 +40,7 @@ async function run() {
       run: async (task) => `echoed: ${task}`,
     })
 
+    resetAccessInvocations()
     const { interpret, ST } = makeInterpreter(reg)
     const [result] = await runProg(interpret, ST)(delegate('echo', 'hello'))
 
@@ -45,6 +48,13 @@ async function run() {
     assert(result.target === 'echo', '1: target echo')
     assert(result.output === 'echoed: hello', '1: output correct')
     assert(result.mode === 'local', '1: mode local')
+
+    // KG-18 spy: 진입점 #5 가 DELEGATE intent 로 canAccessAgent 호출했는지 동적 검증
+    const calls = inspectAccessInvocations()
+    assert(
+      calls.some(c => c.intent === 'delegate' && c.agentId === 'test/echo' && c.jwtSub === 'test'),
+      '1 (KG-18): 진입점 #5 spy — DELEGATE intent + agentId=test/echo + jwtSub=test',
+    )
   }
 
   // ==========================================================================

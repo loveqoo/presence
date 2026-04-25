@@ -1,16 +1,25 @@
 /**
- * INV-AGENT-ACCESS 정적 검사.
+ * INV-AGENT-ACCESS 정적 + 동적 검사 (KG-18 강화).
  *
  * docs/design/agent-identity-model.md §9.4 의 5 개 진입점은 agent 실행 이전에
- * canAccessAgent 를 호출해야 한다. 각 진입점 파일이 해당 import / 호출을 포함하는지
- * grep 으로 검증 — 배선 누락을 조기 차단.
+ * canAccessAgent 를 호출해야 한다. 정적 grep + 동적 spy 이중 방어:
  *
- * 5 진입점:
- *   #1 HTTP /api/sessions/*     → packages/server/src/server/session-api.js
- *   #2 HTTP /a2a/*              → packages/server/src/server/a2a-router.js
- *   #3 WebSocket session join   → packages/server/src/server/ws-handler.js
- *   #4 Scheduler dispatch       → packages/server/src/server/scheduler-factory.js
- *   #5 Op.Delegate              → packages/infra/src/interpreter/delegate.js
+ * 1) 정적 grep (이 파일): 진입점 파일에 canAccessAgent import/호출 + INTENT 사용 확인.
+ *    배선 누락을 조기 차단. 다만 반환값 무시 같은 잠재 회귀는 잡지 못함.
+ *
+ * 2) 동적 spy (각 진입점 통합 테스트): canAccessAgent 의 invocation log
+ *    (`inspectAccessInvocations`) 로 happy path 가 실제로 호출했는지 검증. 호출 자체와
+ *    사용된 INTENT/agentId/jwtSub 까지 자취 확인.
+ *
+ * 진입점 → 동적 spy 검증 위치:
+ *   #1 session-api      → packages/server/test/server.test.js S1
+ *   #2 a2a-router       → packages/server/test/a2a-invoke.test.js AI1
+ *   #3 ws-handler       → packages/server/test/server.test.js S10
+ *   #4 scheduler-factory → packages/server/test/scheduler-e2e.test.js SE1
+ *   #5 delegate         → packages/core/test/interpreter/delegate.test.js #1
+ *
+ * spy infra: packages/infra/src/infra/authz/agent-access.js — `recordInvocation` 이
+ * `canAccessAgent` 첫 줄에서 ring 버퍼에 push. unit test AA17~AA19 (agent-access.test.js).
  */
 
 import { readFileSync } from 'node:fs'

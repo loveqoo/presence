@@ -17,6 +17,7 @@ import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { ensureSecret } from '@presence/infra/infra/auth/token.js'
 import { Config } from '@presence/infra/infra/config.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
+import { inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const createMockLLM = () => {
@@ -113,8 +114,10 @@ async function run() {
   console.log('A2A invocation tests')
 
   // AI1. message/send — happy path
+  // KG-18: 진입점 #2 (a2a-router) — happy path 가 canAccessAgent 호출 spy 검증
   {
     const ctx = await bootServer()
+    resetAccessInvocations()
     const res = await postJson(ctx.port, '/a2a/alice/echo',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'hello' }] } }),
       { 'x-presence-caller': 'alice' })
@@ -124,6 +127,13 @@ async function run() {
     assert(res.body.result?.status?.state === 'completed', 'AI1: completed')
     const text = res.body.result?.artifacts?.[0]?.parts?.[0]?.text
     assert(text === 'echo: hello', `AI1: artifact text round-trip (got ${text})`)
+
+    // KG-18 spy: 진입점 #2 가 DELEGATE intent 로 canAccessAgent 호출했는지 동적 검증
+    const calls = inspectAccessInvocations()
+    assert(
+      calls.some(c => c.intent === 'delegate' && c.agentId === 'alice/echo' && c.jwtSub === 'alice'),
+      'AI1 (KG-18): 진입점 #2 spy — DELEGATE intent + agentId=alice/echo + jwtSub=alice',
+    )
     await ctx.cleanup()
   }
 

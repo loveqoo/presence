@@ -30,6 +30,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createTestServer, request, connectWS, delay, waitFor } from '../../../test/lib/mock-server.js'
+import { inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -47,11 +48,20 @@ async function run() {
 
   try {
     // S1. 초기 상태
+    // KG-18: 진입점 #1 (session-api) — happy path 가 canAccessAgent 호출 spy 검증
     {
+      resetAccessInvocations()
       const res = await get(`/api/sessions/${sid}/state`)
       assert(res.status === 200, 'S1: GET state 200')
       assert(res.body.turnState?.tag === 'idle', 'S1: idle')
       assert(res.body.turn === 0, 'S1: turn 0')
+
+      // KG-18 spy: 진입점 #1 가 CONTINUE_SESSION intent 로 canAccessAgent 호출했는지 동적 검증
+      const calls = inspectAccessInvocations()
+      assert(
+        calls.some(c => c.intent === 'continue-session' && typeof c.agentId === 'string' && c.agentId.includes('/')),
+        'S1 (KG-18): 진입점 #1 spy — CONTINUE_SESSION intent + qualified agentId',
+      )
     }
 
     // S2. 도구 목록
@@ -116,12 +126,21 @@ async function run() {
     }
 
     // S10. WebSocket — init 메시지
+    // KG-18: 진입점 #3 (ws-handler) — WS join happy path 가 canAccessAgent 호출 spy 검증
     {
+      resetAccessInvocations()
       const { ws, messages } = await connectWS(port, { token, sessionId: sid })
       await delay(300)
       assert(messages.length >= 1, 'S10: received init')
       assert(messages[0].type === 'init', 'S10: type init')
       assert(messages[0].state.turnState?.tag === 'idle', 'S10: init idle')
+
+      // KG-18 spy: 진입점 #3 이 CONTINUE_SESSION intent 로 canAccessAgent 호출했는지 동적 검증
+      const calls = inspectAccessInvocations()
+      assert(
+        calls.some(c => c.intent === 'continue-session' && typeof c.agentId === 'string' && c.agentId.includes('/')),
+        'S10 (KG-18): 진입점 #3 spy — CONTINUE_SESSION intent + qualified agentId',
+      )
       ws.close()
     }
 

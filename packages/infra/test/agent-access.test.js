@@ -1,4 +1,4 @@
-import { canAccessAgent, INTENT, REASON } from '@presence/infra/infra/authz/agent-access.js'
+import { canAccessAgent, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -139,6 +139,33 @@ console.log('canAccessAgent tests')
     const r = canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent })
     assert(r.allow === true, `AA16: intent=${intent} allowed`)
   }
+}
+
+// AA17 ~ AA19. KG-18 spy infra — 5 진입점 enforcement 검증용 invocation log
+// AA17. canAccessAgent 호출 시 inspector 가 호출 자취 캡처 (intent / jwtSub / agentId)
+{
+  resetAccessInvocations()
+  canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.DELEGATE })
+  const calls = inspectAccessInvocations()
+  assert(calls.length === 1, 'AA17: 1 호출 기록')
+  assert(calls[0].intent === INTENT.DELEGATE, 'AA17: intent 캡처')
+  assert(calls[0].jwtSub === 'anthony', 'AA17: jwtSub 캡처')
+  assert(calls[0].agentId === 'anthony/default', 'AA17: agentId 캡처')
+}
+
+// AA18. resetAccessInvocations 가 자취를 비움
+{
+  canAccessAgent({ jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.NEW_SESSION })
+  resetAccessInvocations()
+  assert(inspectAccessInvocations().length === 0, 'AA18: reset 후 빈 자취')
+}
+
+// AA19. deny path 도 자취 기록 (호출 자체 검증 — enforcement 의무 spy)
+{
+  resetAccessInvocations()
+  const r = canAccessAgent({ jwtSub: 'alice', agentId: 'bob/daily', intent: INTENT.NEW_SESSION })
+  assert(r.allow === false, 'AA19: deny 결과')
+  assert(inspectAccessInvocations().length === 1, 'AA19: deny 도 호출 자취 기록')
 }
 
 summary()
