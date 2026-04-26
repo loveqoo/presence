@@ -11,7 +11,7 @@ const { Reader } = fp
 
 const AUDIT_LOG_FILENAME = 'authz-audit.log'
 
-const bootCedarSubsystemR = Reader.asks(({ presenceDir }) => async () => {
+const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () => {
   if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
     throw new Error('bootCedarSubsystem: presenceDir 부재')
   }
@@ -19,7 +19,10 @@ const bootCedarSubsystemR = Reader.asks(({ presenceDir }) => async () => {
     policiesDir: POLICIES_DIR,
     schemaPath:  SCHEMA_PATH,
   })
-  const auditWriter = createAuditWriter({ logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}` })
+  const auditWriter = createAuditWriter({
+    logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}`,
+    logger,
+  })
   return createEvaluator({ cedar, schemaText, policiesText, auditWriter })
 })
 
@@ -27,11 +30,14 @@ const bootCedarSubsystem = (deps) => bootCedarSubsystemR.run(deps)()
 
 // audit 만 필요한 경로 (예: agent approve 의 manual_approve 기록 — Cedar 호출 없이 감사 추적만).
 // boot 비용 (wasm 로딩 + parse 검증) 회피.
-const createSubsystemAuditWriterR = Reader.asks(({ presenceDir }) => {
+const createSubsystemAuditWriterR = Reader.asks(({ presenceDir, logger }) => {
   if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
     throw new Error('createSubsystemAuditWriter: presenceDir 부재')
   }
-  return createAuditWriter({ logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}` })
+  return createAuditWriter({
+    logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}`,
+    logger,
+  })
 })
 
 const createSubsystemAuditWriter = (deps) => createSubsystemAuditWriterR.run(deps)

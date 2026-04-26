@@ -130,7 +130,7 @@ class PresenceServer {
 
     // Cedar 인프라 부팅 — 정책/스키마 parse 검증 (boot fail-closed) + audit writer.
     // 의미론 호출처는 governance-cedar v2.1 phase 에서 박힘. 이 phase 는 evaluator 노출만.
-    this.#evaluator = await bootCedarSubsystem({ presenceDir })
+    this.#evaluator = await bootCedarSubsystem({ presenceDir, logger: console })
 
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 

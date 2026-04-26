@@ -59,7 +59,7 @@ const attachSessionMiddleware = (deps) => {
         registry: effectiveUserContext.agentRegistry,
       })
       if (!access.allow) {
-        return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })
+        return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED', reason: access.reason })
       }
     }
 
@@ -182,7 +182,7 @@ const mountSessionsCrud = (router, deps) => {
           findAdminSession: () => ctx.sessions.findAdminSession(),
         })
         if (!access.allow) {
-          return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })
+          return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED', reason: access.reason })
         }
       }
 

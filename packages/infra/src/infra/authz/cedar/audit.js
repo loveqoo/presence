@@ -17,7 +17,7 @@ import {
   appendFileSync, chmodSync, existsSync, mkdirSync,
   readFileSync, writeFileSync, renameSync, unlinkSync, statSync,
 } from 'fs'
-import { dirname } from 'path'
+import { basename, dirname } from 'path'
 import { gzipSync } from 'zlib'
 import fp from '@presence/core/lib/fun-fp.js'
 
@@ -60,15 +60,32 @@ const archiveCurrent = (logPath) => {
   unlinkSync(logPath)
 }
 
-const rotateIfNeeded = (logPath, maxBytes, maxBackups) => {
+const countBackups = (logPath, maxBackups) => {
+  let count = 0
+  for (let i = 1; i <= maxBackups; i += 1) {
+    if (existsSync(`${logPath}.${i}.gz`)) count += 1
+  }
+  return count
+}
+
+const formatMb = (bytes) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+
+// FP-70 — rotation 발생 시 운영자가 server.log 에서 grep 으로 추적할 수 있도록
+// 한 줄 알림. logger 는 .info(msg) 메서드만 가정. 부재 시 silent (test 호환).
+const rotateIfNeeded = (logPath, maxBytes, maxBackups, logger) => {
   if (!existsSync(logPath)) return
-  if (statSync(logPath).size < maxBytes) return
+  const sizeBefore = statSync(logPath).size
+  if (sizeBefore < maxBytes) return
   cascadeBackups(logPath, maxBackups)
   archiveCurrent(logPath)
+  if (logger && typeof logger.info === 'function') {
+    const backups = countBackups(logPath, maxBackups)
+    logger.info(`[cedar-audit] rotation: ${basename(logPath)} → .1.gz (size: ${formatMb(sizeBefore)}, backups: ${backups}/${maxBackups})`)
+  }
 }
 
 const createAuditWriterR = Reader.asks((env) => {
-  const { logPath, maxBytes, maxBackups } = env
+  const { logPath, maxBytes, maxBackups, logger } = env
   if (typeof logPath !== 'string' || logPath.length === 0) {
     throw new Error('createAuditWriter: logPath 부재')
   }
@@ -77,7 +94,7 @@ const createAuditWriterR = Reader.asks((env) => {
   ensureDir(logPath)
   return {
     append: (entry) => {
-      rotateIfNeeded(logPath, limitBytes, limitBackups)
+      rotateIfNeeded(logPath, limitBytes, limitBackups, logger)
       const line = JSON.stringify(entry) + '\n'
       appendFileSync(logPath, line, { mode: 0o600 })
       safeChmod(logPath, 0o600)

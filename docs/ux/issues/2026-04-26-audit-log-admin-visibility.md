@@ -2,7 +2,7 @@
 
 **영역**: infra (서버 운영 가시성)
 **심각도**: low
-**상태**: open
+**상태**: resolved (2026-04-26)
 **관련 코드**: `packages/infra/src/infra/authz/cedar/audit.js`, `packages/infra/src/infra/authz/cedar/index.js`
 
 > **FP-70** 으로 REGISTRY.md 등록 완료 (2026-04-26).
@@ -94,3 +94,33 @@ rotation 이 발생하면 서버가 이미 logger 를 보유하고 있으므로,
 현재 구현에서 두 가지 모두 운영자가 스스로 `ls -lh ~/.presence/logs/` 를 실행해야만 가능하다. rotation 발생 시 서버 로그에 한 줄 기록하는 것만으로도 1번 문제의 타임라인 재구성이 가능해진다.
 
 심각도가 low인 이유: KG-25 는 이미 resolved 되었고, 로그는 자동으로 올바르게 관리된다. 이 FP 는 "작동은 하지만 운영자가 알 방법이 없다"는 가시성 부재 문제로, 서비스 중단이나 데이터 손실을 유발하지 않는다.
+
+## 해소
+
+**적용 범위 (2026-04-26)**: 최우선 제안(server.log rotation 기록)만 적용. 중간 우선순위 제안(`/status` 라인, `.gz` 열람 안내)은 별도 후속 작업으로 유보.
+
+**구현 내용**
+
+`audit.js`의 `rotateIfNeeded` 함수가 선택적 `logger` 인자를 받도록 변경되었다(audit.js:75). rotation 발생 직후 `logger.info(...)` 를 호출하여 다음 형식으로 한 줄 기록한다:
+
+```
+[cedar-audit] rotation: authz-audit.log → .1.gz (size: 10.2 MB, backups: 1/5)
+```
+
+`logger` 가 주입되지 않으면 silent 처리(하위 호환).
+
+`bootCedarSubsystem` / `createSubsystemAuditWriter` (cedar/index.js:14, 33)에 `logger` 옵션이 추가되어 env를 통해 주입된다. `server/index.js`가 `bootCedarSubsystem({ presenceDir, logger: console })`로 호출하여 rotation 이력이 server.log에 기록된다.
+
+회귀 테스트:
+- CA12: rotation 발생 → logger 1회 호출 + 메시지 포맷 검증
+- CA13: logger 미주입 → silent 호환 (기존 동작 유지)
+
+**UX 마찰 해소 검증**
+
+이 이슈에서 최우선으로 지목한 마찰은 "rotation 무음 처리 — 운영자가 rotation 이력을 파악할 수 없다"였다. 적용 후 운영자는 `grep '[cedar-audit]' server.log` 한 줄로 rotation 발생 일시와 파일 크기, 현재 백업 수를 한눈에 파악할 수 있다.
+
+미해소 마찰:
+- "현재 로그 size 조회 불가" (rotation 전 실시간 크기) — `/status` 커맨드 연동 미적용
+- "`.gz` 백업 열람 방법 불명" — `/help` 안내 미적용
+
+이 두 항목은 이 이슈의 범위에서 제외되었고 별도 FP로 분리되지 않았으므로, 필요시 신규 이슈로 등록한다.

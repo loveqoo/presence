@@ -2,7 +2,7 @@
 
 **영역**: TUI
 **심각도**: medium
-**상태**: open
+**상태**: resolved (2026-04-26)
 **관련 코드**: `packages/tui/src/ui/slash-commands/sessions.js:20-26`, `packages/server/src/server/session-api.js:184-185`
 
 (REGISTRY: FP-68)
@@ -128,3 +128,27 @@ const formatCreateError = (resp) => {
 | `packages/infra/src/i18n/ko.json` | `sessions_cmd.error.admin_singleton` 키 추가 |
 | `packages/infra/src/i18n/en.json` | `sessions_cmd.error.admin_singleton` 키 추가 |
 | `packages/tui/src/ui/slash-commands/sessions.js:20-26` | `formatCreateError` 에 분기 추가 |
+
+## 해소
+
+**적용 경로 (2026-04-26)**
+
+서버(`session-api.js:185`)가 `reason: access.reason` 필드를 403 응답에 추가했다. 이로써 TUI가 `code === 'AGENT_ACCESS_DENIED' && reason === 'admin-singleton'` 조건으로 오탐 없이 분기할 수 있게 됐다.
+
+TUI `formatCreateError`(sessions.js:22–31)에 해당 분기가 구현되어 `t('sessions_cmd.error.admin_singleton')` 메시지를 반환한다.
+
+i18n 키:
+- ko: "이미 관리자 세션이 활성 상태입니다. 기존 세션을 종료한 뒤 다시 시도하세요."
+- en: "An admin session is already active. End the existing session before trying again."
+
+회귀 테스트: `packages/tui/test/session-commands.test.js` SC4c (한국어 메시지 검증).
+
+**UX 마찰 해소 검증**
+
+이 이슈의 핵심 마찰은 세 가지였다.
+
+1. `admin-singleton` 내부 코드가 한국어 유저 화면에 영문 원문으로 노출됨 — reason 분기 추가로 해소. 화면에는 한국어 안내문만 표시된다.
+2. "Access denied" + 영어 이유 혼합 언어 노출 — 동일하게 해소.
+3. 해소 방법(기존 세션을 닫으면 된다) 미안내 — "기존 세션을 종료한 뒤 다시 시도하세요"가 메시지에 포함되어 유저가 즉시 행동 가능.
+
+이 이슈의 제안과 구현 간 차이: 이슈에서 권장한 메시지("관리자 계정은 동시에 하나의 세션만 사용할 수 있습니다. 기존 세션을 삭제한 뒤…")와 실제 적용 메시지("이미 관리자 세션이 활성 상태입니다. 기존 세션을 종료한 뒤…")가 다소 다르다. 실제 적용 메시지가 더 간결하고 "이미 활성 상태"라는 현황 진술을 앞세워 직관적이므로 UX 관점에서 더 나은 선택이다.

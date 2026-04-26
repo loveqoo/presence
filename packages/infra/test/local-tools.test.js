@@ -61,6 +61,22 @@ async function run() {
     }
   }
 
+  // FP-69: file_not_found 메시지에 ctx.workingDir 포함 (LLM 에 워크스페이스 컨텍스트 전달)
+  {
+    const ctxWithWorkspace = {
+      resolvePath: (p) => resolveInWorkingDir(p, testDir),
+      workingDir: testDir,
+    }
+    try {
+      byName.file_read.handler({ path: 'nonexistent.txt' }, ctxWithWorkspace)
+      assert(false, 'FP-69: should throw')
+    } catch (e) {
+      assert(e.message.includes(testDir), `FP-69: error 메시지에 workspace 경로 포함 (${e.message})`)
+      assert(e.message.includes('workspace') || e.message.includes('워크스페이스'),
+        `FP-69: workspace 라벨 포함 (${e.message})`)
+    }
+  }
+
   {
     try {
       byName.file_read.handler({ path: '/etc/passwd' }, sessionCtx)

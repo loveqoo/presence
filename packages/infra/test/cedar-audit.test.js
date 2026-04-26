@@ -215,6 +215,45 @@ const run = () => {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // CA12 — FP-70: rotation 발생 시 logger.info 한 번 호출, rotation 안 일어나면 호출 없음
+  {
+    const dir = createTmpDir('ca12')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const lines = []
+    const logger = { info: (msg) => lines.push(msg) }
+    const writer = createAuditWriter({ logPath, maxBytes: 200, maxBackups: 5, logger })
+
+    // 첫 append: rotation 미발생 (size 0)
+    writer.append({ ...sampleEntry, n: 1, padding: 'x'.repeat(150) })
+    assert(lines.length === 0, `CA12: 첫 append (rotation 미발생) → logger 호출 없음 (got ${lines.length})`)
+
+    // 두 번째 append: 직전 size 가 200 초과 → rotation 발생
+    writer.append({ ...sampleEntry, n: 2, padding: 'x'.repeat(150) })
+    assert(lines.length === 1, `CA12: rotation 1 회 → logger 1 회 호출 (got ${lines.length})`)
+    assert(lines[0].includes('[cedar-audit] rotation'), `CA12: 메시지 prefix 일치 (got ${lines[0]})`)
+    assert(lines[0].includes('authz-audit.log'), `CA12: 파일명 포함 (got ${lines[0]})`)
+    assert(lines[0].includes('backups: 1/5'), `CA12: 백업 카운트 1/5 (got ${lines[0]})`)
+    assert(/size: \d+\.\d MB/.test(lines[0]), `CA12: size MB 포맷 (got ${lines[0]})`)
+
+    // 세 번째 append: 또 rotation → 백업 2/5
+    writer.append({ ...sampleEntry, n: 3, padding: 'x'.repeat(150) })
+    assert(lines.length === 2, `CA12: rotation 2 회 누적 (got ${lines.length})`)
+    assert(lines[1].includes('backups: 2/5'), `CA12: 두 번째 rotation 후 백업 2/5 (got ${lines[1]})`)
+
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA13 — logger 미주입 시 silent (기존 호출처 호환)
+  {
+    const dir = createTmpDir('ca13')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 200, maxBackups: 5 })
+    // throw 없이 진행되면 OK
+    for (let i = 0; i < 5; i += 1) writer.append({ ...sampleEntry, n: i, padding: 'x'.repeat(150) })
+    assert(existsSync(`${logPath}.1.gz`), 'CA13: logger 없어도 rotation 정상 작동')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

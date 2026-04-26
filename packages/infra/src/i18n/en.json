@@ -1,7 +1,7 @@
 {
   "error": {
     "access_denied": "Access denied: {{path}} is outside the workspace. The agent can only access files within {{workspace}}. Move the file into the workspace or request a path inside it.",
-    "file_not_found": "File not found: {{path}}",
+    "file_not_found": "File not found: {{path}} (workspace: {{workspace}})",
     "dir_not_found": "Directory not found: {{path}}",
     "arg_required": "{{tool}}: {{arg}} is required",
     "http_error": "HTTP {{status}} error",
@@ -191,7 +191,8 @@
     "usage_delete": "Usage: /session delete <id>",
     "error": {
       "working_dir_out_of_bounds": "Current folder is outside the server's allowed range. Move into an allowed folder and try again.",
-      "working_dir_not_resolvable": "No working directory configured on the server. Contact the administrator."
+      "working_dir_not_resolvable": "No working directory configured on the server. Contact the administrator.",
+      "admin_singleton": "An admin session is already active. End the existing session before trying again."
     }
   },
   "slash_cmd": {

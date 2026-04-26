@@ -182,6 +182,35 @@ const MOCK_SESSIONS = [
 }
 
 // ---------------------------------------------------------------------------
+// SC4c. FP-68: /session new 가 admin-singleton 거부 시 한국어 안내 표시
+// ---------------------------------------------------------------------------
+{
+  const state = makeState()
+  const { lastFrame, stdin, unmount } = render(h(App, {
+    state,
+    sessionId: 'user-default',
+    // 서버가 403 admin-singleton 응답을 resolve 로 돌려준 것처럼
+    onCreateSession: async () => ({
+      error: 'Access denied: admin-singleton',
+      code: 'AGENT_ACCESS_DENIED',
+      reason: 'admin-singleton',
+    }),
+    tools: [], agents: [], initialMessages: [],
+  }))
+  try {
+    await typeInput(stdin, '/session new')
+    await waitFor(() => lastFrame().includes('이미 관리자 세션이 활성 상태입니다'), { timeout: 2000 })
+    const frame = lastFrame()
+    assert(frame.includes('이미 관리자 세션이 활성 상태입니다'),
+      'SC4c: FP-68 한국어 admin-singleton 메시지')
+    assert(!frame.includes('admin-singleton'),
+      'SC4c: raw reason 코드가 노출되지 않음')
+    assert(!frame.includes('Access denied'),
+      'SC4c: 영어 원문이 노출되지 않음')
+  } finally { unmount() }
+}
+
+// ---------------------------------------------------------------------------
 // SC5. /session switch target-id → onSwitchSession('target-id') 호출
 // ---------------------------------------------------------------------------
 {
