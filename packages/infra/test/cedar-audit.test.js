@@ -4,6 +4,7 @@
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, chmodSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
+import { gunzipSync } from 'zlib'
 import { createAuditWriter, createAuditWriterR } from '@presence/infra/infra/authz/cedar/audit.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -132,6 +133,86 @@ const run = () => {
     assert(modeOf(pathA) === modeOf(pathB), 'CA6: 권한 동일')
     rmSync(dirA, { recursive: true, force: true })
     rmSync(dirB, { recursive: true, force: true })
+  }
+
+  // --- KG-25: size-based rotation ---
+
+  // CA7 — maxBytes 초과 시 회전 (현재 → .1.gz, 새 빈 파일에 append)
+  {
+    const dir = createTmpDir('ca7')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 200, maxBackups: 5 })
+    // 200 bytes 초과 누적
+    for (let i = 0; i < 10; i += 1) writer.append({ ...sampleEntry, n: i })
+    // .1.gz 가 생성되어야 함
+    assert(existsSync(`${logPath}.1.gz`), 'CA7: rotation 후 .1.gz 생성')
+    // 현재 로그도 존재 (rotation 직후 새 entry append)
+    assert(existsSync(logPath), 'CA7: rotation 후 새 로그 파일 존재')
+    // .1.gz 압축 해제 시 JSONL 복원 가능
+    const archived = gunzipSync(readFileSync(`${logPath}.1.gz`)).toString('utf-8')
+    assert(archived.split('\n').filter(l => l.length > 0).length > 0, 'CA7: archived 내용 복원 가능')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA8 — maxBackups 초과 시 가장 오래된 백업 삭제 + cascade
+  {
+    const dir = createTmpDir('ca8')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 100, maxBackups: 3 })
+    // 충분히 많이 append 하여 7회 이상 rotation 유도
+    for (let i = 0; i < 100; i += 1) writer.append({ ...sampleEntry, n: i, padding: 'x'.repeat(50) })
+    // .1.gz ~ .3.gz 만 존재, .4.gz 이상은 삭제됨
+    assert(existsSync(`${logPath}.1.gz`), 'CA8: .1.gz 존재')
+    assert(existsSync(`${logPath}.2.gz`), 'CA8: .2.gz 존재')
+    assert(existsSync(`${logPath}.3.gz`), 'CA8: .3.gz 존재')
+    assert(!existsSync(`${logPath}.4.gz`), 'CA8: .4.gz 미존재 (maxBackups=3 초과 삭제)')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA9 — 백업 파일도 0600 권한
+  {
+    const dir = createTmpDir('ca9')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 100, maxBackups: 5 })
+    for (let i = 0; i < 20; i += 1) writer.append({ ...sampleEntry, n: i })
+    assert(existsSync(`${logPath}.1.gz`), 'CA9: .1.gz 생성 사전 조건')
+    assert(modeOf(`${logPath}.1.gz`) === 0o600, `CA9: 백업 파일 0600 (got ${modeOf(`${logPath}.1.gz`).toString(8)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA10 — 기본값 사용 시 rotation 발생 안 함 (10MB 미만에서 정상 append)
+  {
+    const dir = createTmpDir('ca10')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath })
+    for (let i = 0; i < 5; i += 1) writer.append({ ...sampleEntry, n: i })
+    assert(!existsSync(`${logPath}.1.gz`), 'CA10: 기본 maxBytes(10MB) 미만에서 rotation 안 일어남')
+    const lines = readFileSync(logPath, 'utf-8').split('\n').filter(l => l.length > 0)
+    assert(lines.length === 5, `CA10: 5 줄 모두 보존 (got ${lines.length})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA11 — cascade 정확성: 회전마다 .1.gz 가 가장 새것이고 .(N).gz 가 가장 오래됨.
+  // A 세대 2 append (회전 1번) + B 세대 2 append (회전 2번 추가) 로 .1=B, .2=A 보존 확인.
+  {
+    const dir = createTmpDir('ca11')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 200, maxBackups: 3 })
+    // A1 append (size=0 → 회전 X), A2 append (size>=200 → 회전: .1.gz=A1, current=A2)
+    writer.append({ ...sampleEntry, gen: 'A', n: 1, padding: 'x'.repeat(100) })
+    writer.append({ ...sampleEntry, gen: 'A', n: 2, padding: 'x'.repeat(100) })
+    // B1 append (회전: .1.gz=A2, .2.gz=A1, current=B1)
+    writer.append({ ...sampleEntry, gen: 'B', n: 1, padding: 'x'.repeat(100) })
+    // B2 append (회전: .1.gz=B1, .2.gz=A2, .3.gz=A1, current=B2)
+    writer.append({ ...sampleEntry, gen: 'B', n: 2, padding: 'x'.repeat(100) })
+
+    const gen1 = gunzipSync(readFileSync(`${logPath}.1.gz`)).toString('utf-8')
+    const gen2 = gunzipSync(readFileSync(`${logPath}.2.gz`)).toString('utf-8')
+    const gen3 = gunzipSync(readFileSync(`${logPath}.3.gz`)).toString('utf-8')
+    assert(gen1.includes('"gen":"B"') && gen1.includes('"n":1'), 'CA11: .1.gz 가 가장 최근 (B1)')
+    assert(gen2.includes('"gen":"A"') && gen2.includes('"n":2'), 'CA11: .2.gz 가 이전 세대 (A2)')
+    assert(gen3.includes('"gen":"A"') && gen3.includes('"n":1'), 'CA11: .3.gz 가 가장 오래된 (A1)')
+    rmSync(dir, { recursive: true, force: true })
   }
 
   summary()

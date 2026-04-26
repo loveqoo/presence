@@ -740,6 +740,42 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - 후속의 두 옵션 (`ResolvedAgentId.__resolved` 마커 / resolver 진입 spy) 은 침습적 — 정적 grep 으로 회귀 방어 충분. 동적 spy 보강은 KG-18 가 이미 DELEGATE intent 의 agentId 자취를 캡처.
 
+## Phase P: KG-25 Cedar audit JSONL size-based rotation (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. cedar-infra.md §7 에서 "Audit 로그 무한 증가 — KG 등록 후 후속" 으로 미룬 작업을 KG-25 로 등록 후 즉시 구현. 1차 옵션 (size-based + gzip) 채택.
+
+### 변경
+
+- `packages/infra/src/infra/authz/cedar/audit.js` — size-based rotation 추가.
+  - `DEFAULT_MAX_BYTES = 10 * 1024 * 1024` (10MB), `DEFAULT_MAX_BACKUPS = 5`.
+  - `createAuditWriterR` 의 env 가 `maxBytes` / `maxBackups` 옵션 수용 (테스트에서 작은 값으로 override 가능).
+  - 매 `append` 호출 직전 `rotateIfNeeded(logPath, maxBytes, maxBackups)` 실행: `statSync` size 체크 → 초과 시 cascade rotation.
+  - Cascade: `.maxBackups.gz` 삭제 → `.N.gz → .(N+1).gz` (역순으로 shift, 덮어쓰기 방지) → 현재 파일을 gzip 압축하여 `.1.gz` 로 저장 + 0600 권한 + 원본 unlink.
+  - 새 파일에 새 entry append (rotation 직후 첫 entry 는 빈 파일에 쓰여 size=line.length).
+
+### 테스트
+
+`packages/infra/test/cedar-audit.test.js`:
+- CA7: maxBytes 초과 시 `.1.gz` 생성 + 새 로그 파일 존재 + gunzip 으로 archived 내용 복원 가능
+- CA8: maxBackups=3 일 때 `.1~3.gz` 만 보존, `.4.gz` 미존재 (cascade 시 삭제)
+- CA9: 백업 `.1.gz` 도 0600 권한
+- CA10: 기본 maxBytes (10MB) 미만에서 rotation 미트리거 (5 줄 모두 보존)
+- CA11: cascade 정확성 — A 세대 2 append (회전 1번) + B 세대 2 append (회전 2번) 후 `.1.gz=B1` (가장 최근), `.2.gz=A2`, `.3.gz=A1` (가장 오래된) 순서 보존
+
+총 cedar-audit.test.js 34 passed (기존 20 + CA7~CA11 신규 14).
+
+### 미적용
+
+- 멀티 프로세스 동시 append race — 두 프로세스가 동시에 append 호출 시 둘 다 size 체크 통과 후 동시 rotate 시도 가능. 이 시나리오는 단일 presence 서버 가정에서 불필요. 멀티 프로세스 시나리오 (예: load-balanced multi-instance) 진입 시 별도 작업.
+- 시간 기반 rotation (일 단위 + 30 일 보존) — 2차 옵션. size-based 만으로 디스크 압박은 차단되므로 미구현. 운영 빈도 데이터 쌓이면 재검토.
+- 자동 압축 해제 도구 — 운영자가 `gunzip` 같은 표준 도구로 처리. 별도 helper 불필요.
+
+### 핵심 효과
+
+- audit JSONL 파일이 단일 파일에서 10MB 도달 시 자동으로 gzip 압축된 백업으로 회전 → 디스크 무한 증가 차단.
+- 5 파일 보존 = 최근 50MB 분량 (압축 후 더 작음) 보존. 그 이전은 자동 삭제.
+- 백업 파일도 0600 권한 보장 (다른 사용자 읽기 차단 정책 일관).
+
 ## Phase O: KG-17 A2A JWT Bearer 인증 (2026-04-26)
 
 `feature/cedar-governance-v2` 브랜치 후속. A2A 라우터의 caller 인증을 stub (`X-Presence-Caller` 헤더) → JWT Bearer 토큰 서명 검증으로 교체. agent-identity.md I4 의 5 진입점 중 #2 (HTTP `/a2a/*`) 의 인증 미완성을 해소.
