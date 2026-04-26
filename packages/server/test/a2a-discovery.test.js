@@ -39,6 +39,23 @@ const get = (port, path) => new Promise((resolve, reject) => {
   }).on('error', reject)
 })
 
+const post = (port, path, jsonBody) => new Promise((resolve, reject) => {
+  const body = JSON.stringify(jsonBody)
+  const req = http.request({
+    hostname: '127.0.0.1', port, path, method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+  }, (res) => {
+    let buf = ''
+    res.on('data', d => { buf += d })
+    res.on('end', () => {
+      try { resolve({ status: res.statusCode, body: JSON.parse(buf) }) }
+      catch { resolve({ status: res.statusCode, body: buf }) }
+    })
+  })
+  req.on('error', reject)
+  req.end(body)
+})
+
 const buildConfig = (llmPort, overrides) => new Config({
   llm: { baseUrl: `http://127.0.0.1:${llmPort}/v1`, model: 'test', apiKey: 'k', responseFormat: 'json_object', maxRetries: 0, timeoutMs: 5000 },
   embed: { provider: 'none', baseUrl: null, apiKey: null, model: null, dimensions: 256 },
@@ -147,6 +164,7 @@ async function run() {
   }
 
   // AD4. enabled=false — /a2a/* 라우트 미존재 → 404 (정적 catch-all 로 이동)
+  // I11 검증: discovery / single card / invoke 세 라우트 모두 미등록.
   {
     const tmpDir = await setupDir()
     const mockLLM = createMockLLM()
@@ -160,11 +178,24 @@ async function run() {
     const { server, shutdown } = await startServer(config, { port: 0, persistenceCwd: tmpDir })
     const port = server.address().port
 
-    const res = await get(port, '/a2a/.well-known/agents')
-    // enabled=false 일 때 /a2a/* 라우트 미등록 → catch-all 정적 핸들러로 넘어가거나 404.
-    // agents JSON 응답이 아니어야 한다는 것만 확인.
-    const isAgentsResponse = typeof res.body === 'object' && Array.isArray(res.body.agents)
-    assert(!isAgentsResponse, `AD4: enabled=false 에서 agents JSON 응답 안됨`)
+    // AD4a: GET /a2a/.well-known/agents — agents JSON 미반환
+    const wellKnown = await get(port, '/a2a/.well-known/agents')
+    const hasAgentsArray = typeof wellKnown.body === 'object' && Array.isArray(wellKnown.body.agents)
+    assert(!hasAgentsArray, `AD4a: enabled=false 에서 agents JSON 응답 안됨`)
+
+    // AD4b: GET /a2a/admin/manager/card — card shape 미반환
+    const cardRes = await get(port, '/a2a/admin/manager/card')
+    const hasCardShape = typeof cardRes.body === 'object'
+      && (cardRes.body.name !== undefined || cardRes.body.url !== undefined || cardRes.body.capabilities !== undefined)
+    assert(!hasCardShape, `AD4b: enabled=false 에서 single card JSON 응답 안됨`)
+
+    // AD4c: POST /a2a/admin/manager — JSON-RPC envelope 미반환
+    const invokeRes = await post(port, '/a2a/admin/manager', {
+      jsonrpc: '2.0', id: 'x', method: 'message/send', params: { message: { parts: [{ kind: 'text', text: 'hi' }] } },
+    })
+    const hasJsonRpcEnvelope = typeof invokeRes.body === 'object'
+      && (invokeRes.body.jsonrpc === '2.0')
+    assert(!hasJsonRpcEnvelope, `AD4c: enabled=false 에서 JSON-RPC 응답 안됨 (router 핸들러 미실행)`)
 
     await shutdown()
     await mockLLM.close()

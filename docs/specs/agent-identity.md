@@ -101,7 +101,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - I7 → `packages/infra/test/agent-governance.test.js` GV4/GV5/GV6
 - I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
 - I10 → `packages/infra/test/resolve-delegate-target.test.js` RDT1~RDT9 (Parser→Resolver→Authz §3.6 전체 케이스) + `test/regression/delegate-order-enforcement.test.js` (Op.Delegate 인터프리터 호출 순서 정적 검사)
-- I11 → (a2a.enabled=false 라우트 미등록 테스트 없음) ⚠️
+- I11 → `packages/server/test/a2a-discovery.test.js` AD4a (`GET /a2a/.well-known/agents` — agents 배열 JSON 미반환) / AD4b (`GET /a2a/admin/manager/card` — card shape 미반환) / AD4c (`POST /a2a/admin/manager` — JSON-RPC envelope 미반환, router 핸들러 미실행). 세 케이스 모두 negation 검증으로 라우트 미등록 확인. enabled=true + publicUrl=null 부팅 거부는 E16 커버 (`packages/server/test/a2a-boot-guard.test.js`)
 - I13 → `packages/infra/test/auth-token.test.js` A2A1~A2A4 (sign/verify 정상 + 위조 거부 + access 토큰 misuse 거부 + malformed 거부), `packages/server/test/a2a-invoke.test.js` AI2 (AUTH_MISSING), AI10 (위조 서명 → AUTH_INVALID -32002), AI11 (access 토큰 오용 → 'not an a2a token')
 - I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
 - E6 → `packages/infra/test/agent-access.test.js` AA3
@@ -156,3 +156,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-26: KG-20 resolved — INV-AGENT-ID-VALIDATION 정적 검사 추가 (5 사이트 정적 grep). 기존 단위 테스트 (SD11~13, RDT1~9) 는 stale 했던 ⚠️ 표기 제거하며 매핑 정리.
 - 2026-04-26: KG-21 resolved — INV-DELEGATE-ORDER 정적 검사 추가. delegate.js 의 resolveDelegateTarget/canAccessAgent 호출 순서를 라인 번호 비교로 강제. 후속 두 옵션 (마커 / spy) 은 침습적이라 미적용 — 정적 grep 으로 회귀 방어 충분.
 - 2026-04-26: KG-17 resolved — feature/cedar-governance-v2. A2A 라우터 caller 인증을 `X-Presence-Caller` 헤더 stub 에서 JWT Bearer 서명 검증으로 교체. `signA2aToken` / `verifyA2aToken` (type='a2a' 분리) 추가. `AUTH.A2A_TOKEN_EXPIRY_S = 60`. `AUTH_INVALID(-32002)` 에러 코드 추가. I13 불변식 신규 등록. 테스트 커버리지 A2A1~A2A4 / AI10 / AI11 추가. 관련 코드에 token.js / policy.js / a2a-protocol.js / a2a-client.js 추가.
+- 2026-04-26: I11 테스트 매핑 갱신 — AD4 를 AD4a/b/c 로 확장하여 세 라우트 미등록 (agents 목록, card, JSON-RPC invoke) 을 모두 negation 검증으로 확인. ⚠️ 미커버 표기 해소.
