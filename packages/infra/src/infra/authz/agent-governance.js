@@ -34,6 +34,9 @@ const STATUS = Object.freeze({
   ALREADY_EXISTS: 'already-exists',
   ALREADY_APPLIED: 'already-applied',
   NOT_FOUND: 'not-found',
+  // Cedar evaluator deny — Y' minimal seed 에선 발생하지 않으나, 사용자가 50-custom.cedar 로 deny 정책
+  // 추가하면 enforcement point 가 작동. governance-cedar v2.1 §3.3 + §5.1 GV-Y4.
+  DENIED: 'denied',
 })
 
 // docs §8.3 — pending 요청의 원인 레이블.
@@ -140,11 +143,30 @@ const moveRequest = (presenceDir, reqId, fromSub, toSub, extras) => {
 // --- flows (Reader.asks 기반 DI 통일) ---
 
 // docs §8.3 — 승인 플로우. returns { status, reqId?, detail? }
-const submitUserAgentR = Reader.asks(({ requester, agentName, persona, basePath, presenceDir }) => () => {
+// governance-cedar v2.1 §3.3: Cedar evaluator 가 RBAC enforcement point.
+// Y' minimal seed 는 LocalUser create_agent 전부 allow → 의미론은 코드 분기 그대로.
+// 사용자가 50-custom.cedar 로 deny 정책을 추가하면 코드 분기 도달 전 차단.
+const submitUserAgentR = Reader.asks(({ requester, agentName, persona, basePath, presenceDir, evaluator }) => () => {
   if (!requester || !agentName) throw new Error('submitUserAgent: requester + agentName required')
+  if (typeof evaluator !== 'function') {
+    throw new Error('submitUserAgent: evaluator (function) required — Cedar invariant (governance-cedar v2.1 §3.3)')
+  }
   const nameCheck = validateAgentNamePart(agentName)
   if (Either.isLeft(nameCheck)) {
     throw new Error(`submitUserAgent: invalid agentName — ${Either.fold(err => err, () => '', nameCheck)}`)
+  }
+
+  // (0) Cedar enforcement point — RBAC 게이트. deny 시 코드 분기 미도달 (GV-Y4).
+  const decision = evaluator({
+    principal: { type: 'LocalUser', id: requester },
+    action:    'create_agent',
+    resource:  { type: 'User', id: requester },
+  })
+  if (decision.decision !== 'allow') {
+    return {
+      status: STATUS.DENIED,
+      detail: `cedar-deny: matched=${(decision.matchedPolicies ?? []).join(',')}`,
+    }
   }
 
   // (1) 중복 — config 에 이미 non-archived agent 있으면 skip

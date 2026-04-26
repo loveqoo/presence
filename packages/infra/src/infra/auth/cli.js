@@ -16,6 +16,7 @@ import {
   listPending,
   loadAgentPolicies,
 } from '../authz/agent-governance.js'
+import { bootCedarSubsystem } from '../authz/cedar/index.js'
 
 // =============================================================================
 // Auth CLI: 사용자 관리 도구
@@ -198,9 +199,11 @@ const defaultPersona = () => ({
 async function cmdAgentAdd(params) {
   const presenceDir = Config.presenceDir()
   const persona = params.personaPath ? loadPersonaFromFile(params.personaPath) : defaultPersona()
+  // governance-cedar v2.1: CLI 도 Cedar 부팅 필수 (PresenceServer 와 같은 invariant).
+  const evaluator = await bootCedarSubsystem({ presenceDir })
   const result = submitUserAgent({
     requester: params.requester, agentName: params.name, persona,
-    basePath: presenceDir, presenceDir,
+    basePath: presenceDir, presenceDir, evaluator,
   })
   switch (result.status) {
     case GV_STATUS.APPROVED:
@@ -213,6 +216,10 @@ async function cmdAgentAdd(params) {
       return
     case GV_STATUS.ALREADY_EXISTS:
       console.error(`Agent '${params.requester}/${params.name}' already exists.`)
+      process.exit(1)
+      return
+    case GV_STATUS.DENIED:
+      console.error(`Agent '${params.requester}/${params.name}' denied by Cedar policy. ${result.detail || ''}`)
       process.exit(1)
       return
   }
