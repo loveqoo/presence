@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Session } from './index.js'
 import { SESSION_TYPE } from '../constants.js'
+import { isReservedUsername } from '@presence/core/core/agent-id.js'
 
 // =============================================================================
 // SessionManager: UserContext 하위에서 세션 생명주기 관리.
@@ -76,7 +77,25 @@ const createSessionManager = (userContext, opts = {}) => {
     return { kind: 'not-registered', entry: null }
   }
 
-  return { create, get, list, destroy, findAgentSession, findSenderSession }
+  // KG-15 — Admin singleton session 강제 (agent-identity §9.3.5):
+  //   동시 admin TUI 접속을 차단. SESSION_TYPE.USER 중 agentId 의 username
+  //   파트가 reserved (admin) 인 entry 가 있으면 'present' 반환.
+  //   AGENT/SCHEDULED 는 위임/스케줄 경로라 UI 동시 접속과 무관 — USER 만 검사.
+  //
+  // tagged union 반환:
+  //   { kind: 'present', entry }  — 활성 admin USER session 존재
+  //   { kind: 'absent', entry: null } — 없음
+  const findAdminSession = () => {
+    const matches = [...sessions.values()].filter(entry => {
+      if (entry.type !== SESSION_TYPE.USER) return false
+      const ownerPart = entry.session?.agentId?.split('/')?.[0]
+      return ownerPart && isReservedUsername(ownerPart)
+    })
+    if (matches.length === 0) return { kind: 'absent', entry: null }
+    return { kind: 'present', entry: matches[0] }
+  }
+
+  return { create, get, list, destroy, findAgentSession, findSenderSession, findAdminSession }
 }
 
 export { createSessionManager }

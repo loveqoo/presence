@@ -174,9 +174,11 @@ const mountSessionsCrud = (router, deps) => {
       const agentId = `${effectiveUserId}/default`
 
       // docs §9.4 진입점 #1 — new-session intent. 인증 활성화 시에만 강제.
+      // KG-15 — admin singleton: findAdminSession callback 주입.
       if (deps.authEnabled && owner) {
         const access = canAccessAgent({
           jwtSub: owner, agentId, intent: INTENT.NEW_SESSION, registry: ctx.agentRegistry,
+          findAdminSession: () => ctx.sessions.findAdminSession(),
         })
         if (!access.allow) {
           return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED' })

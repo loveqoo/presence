@@ -64,13 +64,13 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - E14. admin bootstrap State 1: admin config.json이 손상되어 파싱 불가 → 빈 config로 fallback 후 덮어씀
 - E15. `submitUserAgent` 동일 agentName(non-archived) 재시도 → `ALREADY_EXISTS` 반환
 - E16. `a2a.enabled=true`이고 `publicUrl=null`이면 `createA2aRouter` 호출 시 throw (라우터 미생성)
-- E17. admin singleton session: `canAccessAgent({ agentId: 'admin/manager', intent: 'new-session' })` 호출 시 기존 active session 확인 — 있으면 deny. (설계 §9.3.5, v1 미구현 — KG-15 참조)
+- E17. admin singleton session: `canAccessAgent({ agentId: 'admin/manager', intent: 'new-session', findAdminSession: () => sessionManager.findAdminSession() })` 호출 시 기존 active USER 세션 확인 — `findAdminSession()` 결과가 `{ kind: 'present' }` 이면 deny (`reason=admin-singleton`). 회복은 `DELETE /api/sessions/:id` 명시 삭제 또는 서버 재시작. (KG-15 resolved)
 
 ---
 
 ## Known Gaps
 
-- **KG-15**: Admin singleton session 강제 미구현. 설계 §9.3.5에서 concurrent approve race 차단을 위해 admin 계정 단일 session 강제를 요구하나, `canAccessAgent`에 기존 session 확인 로직이 없다. 동시 approve race는 idempotent replay (I9)로 crash recovery에는 대응되나 concurrent race는 미차단. v2 대상.
+- **KG-15**: ~~Admin singleton session 강제 미구현. 설계 §9.3.5에서 concurrent approve race 차단을 위해 admin 계정 단일 session 강제를 요구하나, `canAccessAgent`에 기존 session 확인 로직이 없다. 동시 approve race는 idempotent replay (I9)로 crash recovery에는 대응되나 concurrent race는 미차단. v2 대상.~~ resolved by feature/cedar-governance-v2 (2026-04-26). 옵션 (a) 채택: takeover 제거, 활성 admin USER session 존재 시 새 session 거부. `SessionManager.findAdminSession()` 추가 (tagged union `{ kind: 'present'|'absent' }`), `canAccessAgent`가 옵션 콜백 `findAdminSession` 수용, `REASON.ADMIN_SINGLETON` 추가. TTL 자동 만료는 미구현 — UserSession idle monitor 후속 과제.
 - **KG-16**: M3 미완료. `config.primaryAgentId` 적용 없이 `{username}/default` hardcode (I12). M3 완료 전까지 `primaryAgentId` 변경 CLI 동작이 세션 생성에 반영되지 않는다.
 - **KG-17**: `canAccessAgent` 진입점 #2 (a2a-router) 의 A2A JWT 인증 미완성. 현재 `X-Presence-Caller` 헤더 stub 사용. 실제 JWT 서명 검증은 authz phase (P23-5) 구현 후 연결 예정.
 - **KG-18**: ~~5진입점 enforcement 테스트가 정적 grep 수준 (text 존재 여부). 실제 `canAccessAgent` 반환값을 무시하는 코드가 추가되어도 테스트가 통과할 수 있다.~~ resolved by 2026-04-25. `agent-access.js`에 ring 버퍼(cap 200) spy infra(`inspectAccessInvocations` / `resetAccessInvocations`) 도입. 5 진입점 각각에 동적 spy 검증 추가: #1 server.test.js S1, #2 a2a-invoke.test.js AI1, #3 server.test.js S10, #4 scheduler-e2e.test.js SE1, #5 delegate.test.js #1. spy unit 테스트는 agent-access.test.js AA17~AA19. 정적 grep(test/regression/agent-access-enforcement.test.js)은 1차 방어로 병존 유지.
@@ -99,6 +99,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - E7/E8 → `packages/infra/test/agent-access.test.js` AA5/AA6
 - E12 → `packages/infra/test/agent-access.test.js` AA14
 - E15 → `packages/infra/test/agent-governance.test.js` GV7
+- E17 → `packages/infra/test/agent-access.test.js` AS1~AS5, `packages/infra/test/session-manager-routing.test.js` SM-admin1~4
 
 ---
 
@@ -136,3 +137,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-24: data-scope-alignment 완료 반영 — Memory/Session 격리 단위 변경(docs/design/data-scope-alignment.md) 구현 완료. 관련 코드 목록에 memory.js / memory-actor.js / session-actors.js / remove-user.js / slash-commands.js / repl-commands.js 추가. session-api.js 설명에 agents/{agentName}/sessions/{sid}/ 경로 생성 명시.
 - 2026-04-25: KG-18 resolved — spy infra 도입 + 5진입점 동적 검증 완료. I4 테스트 커버리지 갱신.
 - 2026-04-25: KG-20 + KG-21 추가 — A2A Phase 1 S4 + KG-18 spy infra 마무리 후 진실의 원천 정합성 검증에서 발견된 branded type 런타임 강제 부재(KG-20) 및 Parser→Resolver→Authz 순서 런타임 검증 부재(KG-21).
+- 2026-04-26: KG-15 resolved — feature/cedar-governance-v2. admin singleton session 강제 구현 (옵션 a: takeover 제거, 활성 세션 존재 시 신규 거부). E17 callback 시그니처 갱신, 테스트 커버리지 E17 추가.

@@ -19,6 +19,9 @@ import { isReservedUsername } from '@presence/core/core/agent-id.js'
 //   2. 일반 agent → agentId 의 username prefix 가 jwtSub 와 일치해야 함
 //   3. Archived agent + (new-session | delegate | scheduled-run) → 거부
 //      (continue-session 은 허용 — §5.4 graceful retire)
+//   4. Admin singleton (KG-15, §9.3.5): NEW_SESSION + reserved owner +
+//      findAdminSession() === 'present' → 거부 (concurrent admin race 차단).
+//      callback 미전달 시 검사 skip (하위 호환).
 // =============================================================================
 
 const INTENT = Object.freeze({
@@ -35,6 +38,7 @@ const REASON = Object.freeze({
   MISSING_PRINCIPAL: 'missing-principal',
   INVALID_AGENT_ID: 'invalid-agent-id',
   INVALID_INTENT: 'invalid-intent',
+  ADMIN_SINGLETON: 'admin-singleton',
 })
 
 const VALID_INTENTS = new Set(Object.values(INTENT))
@@ -62,15 +66,17 @@ function canAccessAgent(input) {
   const agentId = params.agentId
   const intent = params.intent
   const registry = params.registry
+  const findAdminSession = params.findAdminSession
 
   if (!jwtSub || typeof jwtSub !== 'string') return deny(REASON.MISSING_PRINCIPAL)
   if (!agentId || typeof agentId !== 'string' || !agentId.includes('/')) return deny(REASON.INVALID_AGENT_ID)
   if (!VALID_INTENTS.has(intent)) return deny(REASON.INVALID_INTENT)
 
   const ownerPart = agentId.split('/')[0]
+  const ownerIsReserved = isReservedUsername(ownerPart)
 
   // 1. Reserved admin/* — jwtSub 가 admin 이어야 함.
-  if (isReservedUsername(ownerPart)) {
+  if (ownerIsReserved) {
     if (jwtSub !== ownerPart) return deny(REASON.ADMIN_ONLY)
   } else if (ownerPart !== jwtSub) {
     // 2. 일반 agent — owner 일치
@@ -84,6 +90,12 @@ function canAccessAgent(input) {
     if (entry && entry.archived && intent !== INTENT.CONTINUE_SESSION) {
       return deny(REASON.ARCHIVED)
     }
+  }
+
+  // 4. Admin singleton — NEW_SESSION + reserved owner + 활성 admin session 존재 시 거부
+  if (intent === INTENT.NEW_SESSION && ownerIsReserved && typeof findAdminSession === 'function') {
+    const existing = findAdminSession()
+    if (existing && existing.kind === 'present') return deny(REASON.ADMIN_SINGLETON)
   }
 
   return allow()

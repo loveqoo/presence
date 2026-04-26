@@ -647,3 +647,23 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 ### 주요 의존성 추가
 
 - `@cedar-policy/cedar-wasm` ^4.10.0 (infra) — AWS 공식, Apache-2.0, sync API
+
+## Phase J: KG-15 admin singleton session 강제 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치에 후속 작업으로 추가. 설계 §9.3.5 의 "admin 단일 session 강제" 요구를 옵션 (a) takeover 제거 형태로 구현. concurrent admin approve race 가 새 세션 진입 자체에서 차단됨.
+
+### 변경
+
+- `SessionManager.findAdminSession()` 추가 — SESSION_TYPE.USER 중 agentId 의 username 파트가 reserved 인 첫 entry 검색. tagged union `{ kind: 'present'|'absent', entry }`.
+- `canAccessAgent` 옵션 callback `findAdminSession` 수용 + `REASON.ADMIN_SINGLETON: 'admin-singleton'` 추가. `NEW_SESSION` + reserved owner + `present` 결과 → deny.
+- `session-api.js` POST `/sessions` 진입점에서 `findAdminSession: () => ctx.sessions.findAdminSession()` 주입.
+
+### 회복 경로
+
+명시 `DELETE /api/sessions/:id` 또는 서버 재시작 (in-memory sessions Map). TTL 자동 만료는 후속 — UserSession idle monitor 미지원 (현재 EphemeralSession 만 지원).
+
+### 테스트
+
+- `agent-access.test.js` AS1~AS5 (canAccessAgent decision)
+- `session-manager-routing.test.js` SM-admin1~4 (findAdminSession routing)
+- KG-18 spy infra 가 진입점 #1 의 NEW_SESSION 호출 자체는 이미 동적 검증 중이라 통합 테스트 추가 불필요
