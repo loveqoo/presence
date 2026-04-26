@@ -16,6 +16,7 @@ const NETWORK_TESTS = new Set([
   'packages/infra/test/mirror-state.test.js',
   'packages/infra/test/session.test.js',
   'packages/infra/test/supervisor-session.test.js',
+  'packages/infra/test/cedar-user-context.test.js',
   'test/e2e/tui-e2e.test.js',
   'packages/server/test/server.test.js',
   'packages/server/test/auth-e2e.test.js',
@@ -74,6 +75,10 @@ const tests = [
   'packages/infra/test/resolve-delegate-target.test.js',
   'packages/infra/test/agent-access.test.js',
   'packages/infra/test/agent-governance.test.js',
+  'packages/infra/test/cedar-evaluator.test.js',
+  'packages/infra/test/cedar-boot.test.js',
+  'packages/infra/test/cedar-audit.test.js',
+  'packages/infra/test/cedar-user-context.test.js',
   'packages/infra/test/agent-cli.test.js',
   'packages/infra/test/self-card.test.js',
   'packages/infra/test/a2a-client.test.js',
@@ -86,6 +91,7 @@ const tests = [
   'packages/infra/test/a2a-response-dispatcher.test.js',
   'packages/infra/test/a2a-integration.test.js',
   'packages/infra/test/a2a-recovery.test.js',
+  'packages/infra/test/check-access-interpreter.test.js',
   'packages/infra/test/agent-tools.test.js',
   'packages/infra/test/mirror-state.test.js',
   'packages/infra/test/local-tools.test.js',
@@ -121,6 +127,9 @@ const tests = [
   // Spec invariant static checks
   'test/regression/fsm-single-writer.test.js',
   'test/regression/agent-access-enforcement.test.js',
+  'test/regression/agent-id-validation-enforcement.test.js',
+  'test/regression/delegate-order-enforcement.test.js',
+  'test/regression/i18n-key-parity.test.js',
   // applyFinalState ordering + turn chaining
   'packages/core/test/core/apply-final-state.test.js',
   // Turn concurrency

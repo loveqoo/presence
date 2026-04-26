@@ -5,6 +5,7 @@ import {
   isReservedUsername,
   assertValidAgentId,
   RESERVED_USERNAMES,
+  resolvePrimaryAgent,
 } from '@presence/core/core/agent-id.js'
 import { assert, summary } from '../../../../test/lib/assert.js'
 
@@ -78,5 +79,46 @@ assert(thrown && /invalid agentId/.test(thrown.message), 'assertValidAgentId inv
 assert(validateAgentId(null).isLeft(), 'null → Left')
 assert(validateAgentId(undefined).isLeft(), 'undefined → Left')
 assert(validateAgentId(123).isLeft(), 'number → Left')
+
+// --- resolvePrimaryAgent (KG-16) ---
+
+// PA1. 정상 primaryAgentId → 그대로 사용
+{
+  const r = resolvePrimaryAgent({ primaryAgentId: 'admin/manager' }, 'admin')
+  assert(r.agentId === 'admin/manager', 'PA1: agentId')
+  assert(r.agentName === 'manager', 'PA1: agentName')
+}
+
+// PA2. primaryAgentId 없음 → fallback ${userId}/default
+{
+  const r = resolvePrimaryAgent({}, 'alice')
+  assert(r.agentId === 'alice/default', 'PA2: fallback agentId')
+  assert(r.agentName === 'default', 'PA2: fallback agentName')
+}
+
+// PA3. config null → fallback
+{
+  const r = resolvePrimaryAgent(null, 'bob')
+  assert(r.agentId === 'bob/default', 'PA3: null config fallback')
+}
+
+// PA4. invalid primaryAgentId (slash 없음) → fallback
+{
+  const r = resolvePrimaryAgent({ primaryAgentId: 'invalid' }, 'carol')
+  assert(r.agentId === 'carol/default', 'PA4: invalid → fallback')
+}
+
+// PA5. invalid primaryAgentId (uppercase) → fallback
+{
+  const r = resolvePrimaryAgent({ primaryAgentId: 'Alice/Default' }, 'alice')
+  assert(r.agentId === 'alice/default', 'PA5: uppercase → fallback')
+}
+
+// PA6. non-default agentName 보존
+{
+  const r = resolvePrimaryAgent({ primaryAgentId: 'anthony/daily-report' }, 'anthony')
+  assert(r.agentId === 'anthony/daily-report', 'PA6: non-default agentId')
+  assert(r.agentName === 'daily-report', 'PA6: non-default agentName')
+}
 
 summary()

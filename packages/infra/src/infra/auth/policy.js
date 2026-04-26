@@ -9,6 +9,9 @@ const { Either } = fp
 export const AUTH = Object.freeze({
   ACCESS_TOKEN_EXPIRY_S: 15 * 60,
   REFRESH_TOKEN_EXPIRY_S: 7 * 24 * 3600,
+  // KG-17 — A2A 호출용 짧은 만료 토큰. self-A2A 는 발신/수신 동일 머신이므로
+  // 클럭 드리프트 무시 가능, 60 초로 충분.
+  A2A_TOKEN_EXPIRY_S: 60,
   REFRESH_COOKIE_MAX_AGE_MS: 7 * 24 * 60 * 60 * 1000,
   ISSUER: 'presence',
   AUDIENCE: 'presence',

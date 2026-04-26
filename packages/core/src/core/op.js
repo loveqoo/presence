@@ -24,6 +24,10 @@ const UpdateState   = makeOp('UpdateState')
 const GetState      = makeOp('GetState')
 const Parallel      = makeOp('Parallel')
 const Spawn         = makeOp('Spawn')
+// KG-23 — Cedar 권한 평가의 도메인 어휘. 서비스 레이어와 (미래) LLM 트리거
+// 시나리오가 같은 Op data 를 통해 evaluator 를 호출하도록 채널 통일.
+// 결과: { decision: 'allow'|'deny', matchedPolicies: string[], errors: string[] }
+const CheckAccess   = makeOp('CheckAccess')
 
 // --- DSL Reader (Op → Free, Reader 기반 합성 가능) ---
 
@@ -46,6 +50,8 @@ const updateStateR = Reader.asks(({ path, value }) => Free.liftF(UpdateState({ p
 const getStateR    = Reader.asks(({ path }) => Free.liftF(GetState({ path })))
 const parallelR    = Reader.asks(({ programs }) => Free.liftF(Parallel({ programs })))
 const spawnR       = Reader.asks(({ programs }) => Free.liftF(Spawn({ programs })))
+const checkAccessR = Reader.asks(({ principal, action, resource, context }) =>
+  Free.liftF(CheckAccess({ principal, action, resource, context: context ?? {} })))
 
 // --- 레거시 브릿지 (기존 호출처 호환, 단일 라인 위임) ---
 
@@ -59,12 +65,13 @@ const updateState  = (path, value) => updateStateR.run({ path, value })
 const getState     = (path) => getStateR.run({ path })
 const parallel     = (programs) => parallelR.run({ programs })
 const spawn        = (programs) => spawnR.run({ programs })
+const checkAccess  = (params) => checkAccessR.run(params)
 
 export {
   AskLLM, ExecuteTool, Respond, Approve, Delegate, SendA2aMessage,
-  Observe, UpdateState, GetState, Parallel, Spawn,
+  Observe, UpdateState, GetState, Parallel, Spawn, CheckAccess,
   askLLMR, executeToolR, respondR, approveR, delegateR, sendA2aMessageR,
-  observeR, updateStateR, getStateR, parallelR, spawnR,
+  observeR, updateStateR, getStateR, parallelR, spawnR, checkAccessR,
   askLLM, executeTool, respond, approve, delegate,
-  observe, updateState, getState, parallel, spawn,
+  observe, updateState, getState, parallel, spawn, checkAccess,
 }

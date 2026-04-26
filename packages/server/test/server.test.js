@@ -78,6 +78,11 @@ async function run() {
       const res = await get(`/api/sessions/${sid}/config`)
       assert(res.status === 200, 'S3: GET config 200')
       assert(res.body.llm.apiKey === undefined, 'S3: apiKey excluded')
+      // FP-71 — personaConfigured 가 boolean 으로 노출 (TUI 첫 진입 안내용)
+      assert(typeof res.body.personaConfigured === 'boolean',
+        `S3: personaConfigured boolean (got ${typeof res.body.personaConfigured})`)
+      assert(res.body.personaConfigured === false,
+        `S3: 신규 testuser 는 systemPrompt unset → false (got ${res.body.personaConfigured})`)
       assert(res.body.llm.model === 'test', 'S3: model present')
     }
 
@@ -110,6 +115,40 @@ async function run() {
       const state = await get(`/api/sessions/${sid}/state`)
       const historyLen = state.body.context?.conversationHistory?.length || 0
       assert(historyLen === 0, 'S7: history cleared')
+    }
+
+    // S7b. FP-71 — /persona 슬래시 커맨드 (show/set/reset)
+    {
+      // show: 초기 unset 표시
+      const showRes = await post(`/api/sessions/${sid}/chat`, { input: '/persona show' })
+      assert(showRes.status === 200, 'S7b: /persona show 200')
+      assert(showRes.body.type === 'system', 'S7b: type system')
+      assert(showRes.body.content.includes('unset'), `S7b: 초기 unset 표시 (got: ${showRes.body.content})`)
+
+      // set: systemPrompt 갱신
+      const setRes = await post(`/api/sessions/${sid}/chat`, { input: '/persona set 코드 멘토 역할' })
+      assert(setRes.status === 200, 'S7b: /persona set 200')
+      assert(setRes.body.content.includes('updated'), `S7b: 갱신 안내 (got: ${setRes.body.content})`)
+
+      // show: 갱신된 systemPrompt 표시
+      const showAfter = await post(`/api/sessions/${sid}/chat`, { input: '/persona' })
+      assert(showAfter.body.content.includes('코드 멘토 역할'),
+        `S7b: 갱신된 systemPrompt 노출 (got: ${showAfter.body.content})`)
+
+      // reset: null 로 환원
+      const resetRes = await post(`/api/sessions/${sid}/chat`, { input: '/persona reset' })
+      assert(resetRes.status === 200, 'S7b: /persona reset 200')
+
+      const showFinal = await post(`/api/sessions/${sid}/chat`, { input: '/persona show' })
+      assert(showFinal.body.content.includes('unset'), 'S7b: reset 후 다시 unset')
+
+      // 잘못된 사용법 — set 없이
+      const badRes = await post(`/api/sessions/${sid}/chat`, { input: '/persona set' })
+      assert(badRes.body.content.includes('Usage'), 'S7b: 빈 set → Usage 안내')
+
+      // 알 수 없는 서브커맨드
+      const unknownRes = await post(`/api/sessions/${sid}/chat`, { input: '/persona xyz' })
+      assert(unknownRes.body.content.includes('Usage'), 'S7b: 알 수 없는 서브커맨드 → Usage')
     }
 
     // S8. input 누락 → 400
@@ -288,6 +327,27 @@ async function run() {
       assert(res.body.workingDir === Config.userDataPath('testuser'),
         `S20b: workingDir = userDataPath (got ${res.body.workingDir})`)
       await request(port, 'DELETE', `/api/sessions/${newId}`, null, { token })
+    }
+
+    // SC-Y1a. Cedar evaluator 가용성 — 부팅 후 ctx.evaluator 함수 (CI-Y3 통합 검증).
+    {
+      assert(typeof ctx.evaluator === 'function', 'SC-Y1a: ctx.evaluator 함수 가용')
+    }
+
+    // SC-Y3. 정상 부팅 후 evaluator 1 회 호출 → audit log 파일에 entry 1 줄 추가.
+    {
+      const { join: joinPath } = await import('node:path')
+      const { existsSync: exists, readFileSync: readFile } = await import('node:fs')
+      const auditPath = joinPath(ctx.tmpDir, 'logs', 'authz-audit.log')
+      const before = exists(auditPath) ? readFile(auditPath, 'utf-8').split('\n').filter(Boolean).length : 0
+      const r = ctx.evaluator({
+        principal: { type: 'LocalUser', id: 'admin' },
+        action:    'create_agent',
+        resource:  { type: 'User', id: 'admin' },
+      })
+      assert(r.decision === 'allow', `SC-Y3: 실 자산으로 admin allow (got ${r.decision})`)
+      const after = readFile(auditPath, 'utf-8').split('\n').filter(Boolean).length
+      assert(after === before + 1, `SC-Y3: audit entry 1 줄 추가 (${before} → ${after})`)
     }
 
     // S21. INV-RJT-SNAPSHOT — chat 500 응답은 snapshot + stateVersion 동반

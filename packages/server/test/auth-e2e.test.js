@@ -27,6 +27,7 @@ import { startServer } from '@presence/server'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { createTokenService, sign } from '@presence/infra/infra/auth/token.js'
 import { ensureSecret } from '@presence/infra/infra/auth/token.js'
+import { inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
@@ -547,6 +548,44 @@ async function run() {
       assert(adminAfter.passwordHash === hashBefore, 'AE17: passwordHash 변경 없음 (재생성 안됨)')
     } finally {
       await result.shutdown()
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  }
+
+  // =========================================================================
+  // AE18 (KG-16). admin POST /sessions 가 config.primaryAgentId 사용
+  //               — 'admin/manager' (hardcode 'admin/default' 가 아님)
+  // =========================================================================
+  {
+    const { server, shutdown, tmpDir } = await setupAuthServer(llmPort)
+    const port = server.address().port
+    try {
+      const { existsSync, readFileSync } = await import('fs')
+      const pwdFile = join(tmpDir, 'admin-initial-password.txt')
+      assert(existsSync(pwdFile), 'AE18: admin-initial-password.txt 존재')
+      const initialPassword = readFileSync(pwdFile, 'utf-8').trim()
+
+      // admin 로그인 + 비밀번호 변경 (mustChangePassword 해제)
+      const loginRes = await request(port, 'POST', '/api/auth/login', { username: 'admin', password: initialPassword })
+      assert(loginRes.status === 200, `AE18: admin login (got ${loginRes.status})`)
+      await request(port, 'POST', '/api/auth/change-password', {
+        currentPassword: initialPassword, newPassword: 'admin-new-password-789',
+      }, { token: loginRes.body.accessToken })
+
+      const re = await request(port, 'POST', '/api/auth/login', { username: 'admin', password: 'admin-new-password-789' })
+      const token = re.body.accessToken
+
+      // KG-16 verification: POST /sessions 가 admin/manager 로 canAccessAgent 호출
+      resetAccessInvocations()
+      const createRes = await request(port, 'POST', '/api/sessions', { type: 'user' }, { token })
+      assert(createRes.status === 201, `AE18: POST /sessions 201 (got ${createRes.status} ${JSON.stringify(createRes.body)})`)
+
+      const calls = inspectAccessInvocations()
+      const newSession = calls.find(c => c.intent === 'new-session')
+      assert(newSession, 'AE18 (KG-16): new-session intent invocation 존재')
+      assert(newSession?.agentId === 'admin/manager', `AE18 (KG-16): agentId = admin/manager (got ${newSession?.agentId})`)
+    } finally {
+      await shutdown()
       rmSync(tmpDir, { recursive: true, force: true })
     }
   }

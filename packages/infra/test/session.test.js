@@ -6,6 +6,7 @@ import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Session as SessionModule } from '@presence/infra/infra/sessions/index.js'
 import { TurnState, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { assert, summary } from '../../../test/lib/assert.js'
+import { createMockEvaluator } from '../../../test/lib/cedar-mock.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -63,7 +64,7 @@ async function run() {
   )
   const llmPort = await mockLLM.start()
   const config = createTestConfig(llmPort, tmpDir)
-  const userContext = await UserContext.create(config)
+  const userContext = await UserContext.create(config, { evaluator: createMockEvaluator() })
 
   try {
     // SD1. user 세션: 정상 동작
@@ -135,7 +136,7 @@ async function run() {
       }
 
       // allowedTools를 사용하는 session: USER로 만들어야 job 툴 포함
-      const freshCtx = await UserContext.create(config)
+      const freshCtx = await UserContext.create(config, { evaluator: createMockEvaluator() })
       const sd3bSession = Session.create(freshCtx, {
         type: 'user',
         onScheduledJobDone: (event, outcome) => done.push({ event, outcome }),

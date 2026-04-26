@@ -122,6 +122,17 @@ async function run() {
     assert(config.agents.some(a => a.name === 'report'), 'AC4: config 에 report agent')
     // pending → approved 이동 확인
     assert(readdirSync(join(dir, 'users', 'admin', 'pending')).length === 0, 'AC4: pending 비어있음')
+
+    // AC4b — governance-cedar v2.1 GC3: manual_approve audit 기록
+    const auditPath = join(dir, 'logs', 'authz-audit.log')
+    assert(existsSync(auditPath), 'AC4b: audit log 파일 생성')
+    const auditLines = readFileSync(auditPath, 'utf-8').split('\n').filter(l => l.length > 0)
+    const approveEntries = auditLines.map(l => JSON.parse(l)).filter(e => e.action === 'manual_approve')
+    assert(approveEntries.length === 1, `AC4b: manual_approve 1건 (got ${approveEntries.length})`)
+    const ent = approveEntries[0]
+    assert(ent.caller === 'admin' && ent.resource === 'dave', 'AC4b: caller=admin / resource=dave')
+    assert(ent.decision === 'allow' && ent.reqId === reqId, 'AC4b: decision=allow + reqId 동봉')
+    assert(ent.agentName === 'report' && ent.idempotent === false, 'AC4b: agentName + idempotent=false')
     rmSync(dir, { recursive: true, force: true })
   }
 

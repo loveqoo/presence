@@ -1560,6 +1560,33 @@ await (async () => {
   assert(help.includes('/mcp list'), 'help: /mcp list 예시')
 }
 
+// --- FP-71: /persona 슬래시 커맨드 + /help 노출 ---
+
+// 81b. /help 출력에 /persona 행 포함
+{
+  const { t } = await import('@presence/infra/i18n')
+  const help = t('help.commands')
+  assert(help.includes('/persona'), 'help: /persona 커맨드 포함 (FP-71)')
+  assert(help.includes('/persona set'), 'help: /persona set 예시')
+}
+
+// 81c. /persona 디스패치는 onInput 으로 서버 위임 + 응답을 system 메시지로 노출
+await (async () => {
+  const msgs = []
+  let captured = null
+  const ctx = {
+    addMessage: (m) => msgs.push(m),
+    onInput: async (input) => { captured = input; return 'Persona: Presence\n(unset)' },
+  }
+  const handled = await dispatchSlashCommand('/persona show', ctx)
+  assert(handled === true, '/persona dispatch: handled=true')
+  assert(captured === '/persona show', '/persona dispatch: input 그대로 서버로 전달')
+  // onInput 은 비동기 — Promise resolve 후 메시지 추가됨. await 가 필요.
+  await new Promise(resolve => setImmediate(resolve))
+  assert(msgs.length === 1, `/persona dispatch: 시스템 메시지 1개 (got ${msgs.length})`)
+  assert(msgs[0].content.includes('unset'), `/persona dispatch: 서버 응답 표시 (got: ${msgs[0].content})`)
+})()
+
 // --- FP-44: /session list 에 name 표시 ---
 
 // 82a. name 이 id 와 다르면 함께 표시

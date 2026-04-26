@@ -15,18 +15,11 @@ import {
   denyUserAgent,
   listPending,
   loadAgentPolicies,
+  readPendingRequest,
 } from '../authz/agent-governance.js'
+import { bootCedarSubsystem, createSubsystemAuditWriter, getSubsystemAuditStatus } from '../authz/cedar/index.js'
 
-// =============================================================================
-// Auth CLI: 사용자 관리 도구
-//
-// 사용법:
-//   npm run user -- init --username <name>
-//   npm run user -- add --username <name>
-//   npm run user -- remove --username <name>
-//   npm run user -- list
-//   npm run user -- passwd --username <name>
-// =============================================================================
+// Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
 
 const promptPassword = (prompt = 'Password: ') => new Promise((resolve) => {
   const rl = createInterface({ input: process.stdin, output: process.stdout })
@@ -198,9 +191,11 @@ const defaultPersona = () => ({
 async function cmdAgentAdd(params) {
   const presenceDir = Config.presenceDir()
   const persona = params.personaPath ? loadPersonaFromFile(params.personaPath) : defaultPersona()
+  // governance-cedar v2.1: CLI 도 Cedar 부팅 필수 (PresenceServer 와 같은 invariant).
+  const evaluator = await bootCedarSubsystem({ presenceDir })
   const result = submitUserAgent({
     requester: params.requester, agentName: params.name, persona,
-    basePath: presenceDir, presenceDir,
+    basePath: presenceDir, presenceDir, evaluator,
   })
   switch (result.status) {
     case GV_STATUS.APPROVED:
@@ -213,6 +208,10 @@ async function cmdAgentAdd(params) {
       return
     case GV_STATUS.ALREADY_EXISTS:
       console.error(`Agent '${params.requester}/${params.name}' already exists.`)
+      process.exit(1)
+      return
+    case GV_STATUS.DENIED:
+      console.error(`Agent '${params.requester}/${params.name}' denied by Cedar policy. ${result.detail || ''}`)
       process.exit(1)
       return
   }
@@ -243,7 +242,17 @@ function cmdAgentReview() {
 
 function cmdAgentApprove(params) {
   const presenceDir = Config.presenceDir()
+  // governance-cedar v2.1 §1.4: admin override 는 Cedar 호출 없음, audit 만 기록.
+  // 요청 정보는 approve 전 캡처 (파일 이동 후엔 pending 에서 사라짐).
+  const req = readPendingRequest(presenceDir, params.id)
   const result = approveUserAgent(params.id, { presenceDir, basePath: presenceDir })
+  if (result.status === GV_STATUS.APPROVED || result.status === GV_STATUS.ALREADY_APPLIED) {
+    createSubsystemAuditWriter({ presenceDir }).append({
+      ts: new Date().toISOString(), caller: 'admin', action: 'manual_approve', resource: req?.requester ?? 'unknown',
+      decision: 'allow', matchedPolicies: [], errors: [], reqId: params.id, agentName: req?.agentName ?? null,
+      idempotent: result.status === GV_STATUS.ALREADY_APPLIED,
+    })
+  }
   switch (result.status) {
     case GV_STATUS.APPROVED:
       console.log(`Request ${params.id} approved.`)
@@ -270,6 +279,30 @@ function cmdAgentDeny(params) {
       console.error(`Request ${params.id} not found in pending.`)
       process.exit(1)
       return
+  }
+}
+
+// FP-70 — admin audit log 가시성. size / 백업 개수 / 백업별 size + .gz 열람 안내.
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function cmdAuditStatus() {
+  const presenceDir = Config.presenceDir()
+  const status = getSubsystemAuditStatus({ presenceDir })
+  const pct = status.maxBytes > 0 ? Math.round((status.currentSize / status.maxBytes) * 100) : 0
+  console.log(`Audit log: ${status.logPath}`)
+  console.log(`  Current size: ${formatBytes(status.currentSize)} / ${formatBytes(status.maxBytes)} (${pct}%)`)
+  console.log(`  Backups: ${status.backups.length}/${status.maxBackups}`)
+  if (status.backups.length > 0) {
+    console.log('  Backup files:')
+    for (const b of status.backups) {
+      console.log(`    ${b.path}  (${formatBytes(b.size)})`)
+    }
+    console.log('')
+    console.log('  Tip: gunzip <file>.gz | jq . — 압축 백업 열람')
   }
 }
 
@@ -312,6 +345,9 @@ const main = async () => {
     console.log('  npm run user -- agent review')
     console.log('  npm run user -- agent approve --id <reqId>')
     console.log('  npm run user -- agent deny --id <reqId> --reason "<text>"')
+    console.log('')
+    console.log('Audit:')
+    console.log('  npm run user -- audit-status')
     process.exit(0)
   }
 
@@ -332,6 +368,8 @@ const main = async () => {
         process.exit(1)
       }
       return dispatchAgent(action, flags)
+    case 'audit-status':
+      return cmdAuditStatus()
     default:
       console.error(`Unknown command: ${command}`)
       process.exit(1)

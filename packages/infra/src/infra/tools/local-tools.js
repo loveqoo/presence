@@ -135,7 +135,7 @@ const createLocalTools = () => {
         const { path, maxLines, tailLines } = parseArgs(FileReadArgs, rawArgs, 'file_read')
         // ctx.resolvePath 우선 (세션 workingDir 기준). 없으면 legacy resolvePath (호환성).
         const resolved = resolveWithCtx(path, ctx)
-        if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path }))
+        if (!existsSync(resolved)) throw new Error(t('error.file_not_found', { path, workspace: ctx?.workingDir ?? '?' }))
         const content = readFileSync(resolved, 'utf-8')
         const lines = content.split('\n')
         if (tailLines != null) return lines.slice(-tailLines).join('\n')

@@ -1,9 +1,9 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import {
   AskLLM, ExecuteTool, Respond, Approve, Delegate,
-  Observe, UpdateState, GetState, Parallel, Spawn,
+  Observe, UpdateState, GetState, Parallel, Spawn, CheckAccess,
   askLLM, executeTool, respond, approve, delegate,
-  observe, updateState, getState, parallel, spawn,
+  observe, updateState, getState, parallel, spawn, checkAccess,
 } from '@presence/core/core/op.js'
 
 const { Free, Task } = fp
@@ -26,6 +26,7 @@ const ops = [
   ['GetState',     GetState({ path: 'a.b' })],
   ['Parallel',     Parallel({ programs: [] })],
   ['Spawn',        Spawn({ programs: [] })],
+  ['CheckAccess',  CheckAccess({ principal: { type: 'LocalUser', id: 'alice' }, action: 'create_agent', resource: { type: 'User', id: 'alice' }, context: {} })],
 ]
 
 for (const [tag, op] of ops) {
@@ -61,6 +62,7 @@ const dslFns = [
   ['getState',     getState('a')],
   ['parallel',     parallel([])],
   ['spawn',        spawn([])],
+  ['checkAccess',  checkAccess({ principal: { type: 'LocalUser', id: 'alice' }, action: 'create_agent', resource: { type: 'User', id: 'alice' } })],
 ]
 
 for (const [name, free] of dslFns) {

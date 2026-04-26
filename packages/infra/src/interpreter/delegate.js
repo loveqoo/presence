@@ -12,7 +12,7 @@ const { Task, Maybe, Reader, Either } = fp
 // f.target → resolveDelegateTarget(currentUserId) → canAccessAgent(DELEGATE) → registry.get
 // docs/design/agent-identity-model.md §9.4 진입점 #5.
 
-const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId }) => {
+const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId, a2aSigner }) => {
   const a2a = new A2AClient({ fetchFn })
   return new Interpreter(['Delegate'], (f) => {
     const resolved = resolveDelegateTarget(f.target, { currentUserId })
@@ -43,9 +43,12 @@ const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetch
           .catch(e => Delegation.failed(f.target, e.message || String(e), DelegationMode.LOCAL))
       )()).map(r => f.next(r))
 
+    // KG-17: a2aSigner 가 있으면 currentUserId 로 짧은 만료 token sign 후 첨부.
+    // self-A2A scope — 같은 머신의 receiver 가 같은 secret 으로 verifyA2aToken.
     const runRemote = (entry) =>
       ST.lift(Task.fromPromise(async () => {
-        const result = await a2a.sendTask(f.target, entry.endpoint, f.task)
+        const callerToken = (a2aSigner && currentUserId) ? a2aSigner(currentUserId) : null
+        const result = await a2a.sendTask(f.target, entry.endpoint, f.task, { callerToken })
         if (result.isPending()) {
           delegateUi.addPending({
             target: f.target,     // user 원본 (UI 표시용)

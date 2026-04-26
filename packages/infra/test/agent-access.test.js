@@ -168,4 +168,53 @@ console.log('canAccessAgent tests')
   assert(inspectAccessInvocations().length === 1, 'AA19: deny 도 호출 자취 기록')
 }
 
+// --- KG-15: Admin singleton session 강제 ---
+
+// AS1. NEW_SESSION + admin/manager + 활성 admin session 존재 → deny ADMIN_SINGLETON
+{
+  const findAdminSession = () => ({ kind: 'present', entry: { id: 'admin-default' } })
+  const r = canAccessAgent({
+    jwtSub: 'admin', agentId: 'admin/manager', intent: INTENT.NEW_SESSION, findAdminSession,
+  })
+  assert(r.allow === false, 'AS1: 활성 admin 존재 → deny')
+  assert(r.reason === REASON.ADMIN_SINGLETON, 'AS1: reason=admin-singleton')
+}
+
+// AS2. NEW_SESSION + admin/manager + admin session 부재 → allow
+{
+  const findAdminSession = () => ({ kind: 'absent', entry: null })
+  const r = canAccessAgent({
+    jwtSub: 'admin', agentId: 'admin/manager', intent: INTENT.NEW_SESSION, findAdminSession,
+  })
+  assert(r.allow === true, 'AS2: admin session 부재 → allow')
+}
+
+// AS3. CONTINUE_SESSION + admin/manager + 활성 admin session 존재 → allow
+//      (singleton 은 NEW_SESSION 만 차단; 기존 세션 유지는 무관)
+{
+  const findAdminSession = () => ({ kind: 'present', entry: { id: 'admin-default' } })
+  const r = canAccessAgent({
+    jwtSub: 'admin', agentId: 'admin/manager', intent: INTENT.CONTINUE_SESSION, findAdminSession,
+  })
+  assert(r.allow === true, 'AS3: continue-session 은 singleton 무관')
+}
+
+// AS4. NEW_SESSION + 일반 user agent + 활성 admin session 존재 → allow
+//      (singleton 은 reserved owner 만 적용)
+{
+  const findAdminSession = () => ({ kind: 'present', entry: { id: 'admin-default' } })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.NEW_SESSION, findAdminSession,
+  })
+  assert(r.allow === true, 'AS4: 일반 user 는 singleton 영향 없음')
+}
+
+// AS5. NEW_SESSION + admin/manager + findAdminSession 미전달 → allow (하위 호환)
+{
+  const r = canAccessAgent({
+    jwtSub: 'admin', agentId: 'admin/manager', intent: INTENT.NEW_SESSION,
+  })
+  assert(r.allow === true, 'AS5: callback 미전달 시 검사 skip')
+}
+
 summary()

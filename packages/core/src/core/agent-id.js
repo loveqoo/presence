@@ -37,6 +37,21 @@ const validateAgentId = (id) => {
 
 const isReservedUsername = (username) => RESERVED_USERNAMES.includes(username)
 
+// USER 세션 생성 시 agentId / agent dir 결정. config.primaryAgentId 가
+// canonical form 이면 그대로 사용, 아니면 ${fallbackUserId}/default 로 fallback.
+// (KG-16 — M3 hardcode 이관)
+const resolvePrimaryAgent = (config, fallbackUserId) => {
+  const primaryId = config?.primaryAgentId
+  if (typeof primaryId === 'string') {
+    const result = validateAgentId(primaryId)
+    if (!Either.isLeft(result)) {
+      const [, agentName] = primaryId.split('/')
+      return { agentId: primaryId, agentName }
+    }
+  }
+  return { agentId: `${fallbackUserId}/default`, agentName: 'default' }
+}
+
 // 호환 — session.js 내 동등 정규식 교체 용도.
 // validateAgentId 는 Either 반환이지만, legacy 검증은 throw 패턴.
 const assertValidAgentId = (id) => {
@@ -53,4 +68,5 @@ export {
   validateAgentId,
   isReservedUsername,
   assertValidAgentId,
+  resolvePrimaryAgent,
 }

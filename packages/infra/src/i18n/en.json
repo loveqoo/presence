@@ -1,7 +1,7 @@
 {
   "error": {
     "access_denied": "Access denied: {{path}} is outside the workspace. The agent can only access files within {{workspace}}. Move the file into the workspace or request a path inside it.",
-    "file_not_found": "File not found: {{path}}",
+    "file_not_found": "File not found: {{path}} (workspace: {{workspace}})",
     "dir_not_found": "Directory not found: {{path}}",
     "arg_required": "{{tool}}: {{arg}} is required",
     "http_error": "HTTP {{status}} error",
@@ -19,7 +19,9 @@
   "status": {
     "thinking": "thinking...",
     "retry": "retry {{attempt}}/{{max}}...",
-    "retry_truncated": "retry {{attempt}}/{{max}} — response truncated"
+    "retry_truncated": "retry {{attempt}}/{{max}} — response truncated",
+    "streaming": "responding...",
+    "reconnecting": "reconnecting..."
   },
   "repl": {
     "no_tools": "No tools registered.",
@@ -29,7 +31,7 @@
     "memory_unavailable": "Memory not available."
   },
   "help": {
-    "commands": "── Conversation ──\n/clear        Clear conversation history (memory is kept)\n\n── Info ──\n/status       Current status (turn, mode, last result)\n/tool list    List registered tools\n/todo list    Show TODO list\n\n── Settings ──\n/models       List or switch model (e.g. /models gpt-4)\n/memory       Memory management (e.g. /memory list, /memory clear 7d)\n/statusline   Configure status bar items (e.g. /statusline +turn)\n\n── Sessions ──\n/session list           List sessions\n/session new [name]     Create a new session\n/session switch <id>    Switch to session\n/session delete <id>    Delete session\n\n── Display ──\n/panel        Toggle side panel\n/report       Save debug report\n/copy         Copy last response to clipboard\n\n/quit         Exit\n\n── Shortcuts ──\nCtrl+T  Transcript      Ctrl+O  Tool details\n↑↓      Input history\nESC     Cancel turn / Dismiss help"
+    "commands": "── Conversation ──\n/clear        Clear conversation history (memory is kept)\n\n── Info ──\n/status       Current status (turn, mode, last result)\n/tool list    List registered tools\n/todo list    Show TODO list\n\n── Settings ──\n/models       List or switch model (e.g. /models gpt-4)\n/memory       Memory management (e.g. /memory list, /memory clear 7d)\n/persona      Show or change agent persona (e.g. /persona show, /persona set code mentor)\n/statusline   Configure status bar items (e.g. /statusline +turn)\n\n── Sessions ──\n/session list           List sessions\n/session new [name]     Create a new session\n/session switch <id>    Switch to session\n/session delete <id>    Delete session\n\n── Display ──\n/panel        Toggle side panel\n/report       Save debug report\n/copy         Copy last response to clipboard\n\n/quit         Exit\n\n── Shortcuts ──\nCtrl+T  Transcript      Ctrl+O  Tool details\n↑↓      Input history\nESC     Cancel turn / Dismiss help"
   },
   "copy_cmd": {
     "copied": "Last response copied to clipboard",
@@ -88,6 +90,7 @@
     "not_available": "memory not available",
     "not_found": "no memories found",
     "cleared": "cleared {{count}} nodes{{desc}}",
+    "cleared_with_age": "cleared {{count}} nodes (older than {{age}})",
     "unknown_arg": "unknown argument: {{arg}}\nuse: /memory help",
     "unknown_sub": "unknown subcommand. use: /memory help",
     "help": "/memory              — summary (node count)\n/memory list         — show all nodes\n/memory clear        — delete all nodes\n/memory clear <age>  — delete older than age (e.g. 7d, 24h, 30m)"
@@ -125,7 +128,8 @@
     "disabled": "{{group}} disabled",
     "unknown_id": "Unknown MCP id: {{group}}",
     "usage_sub": "Usage: /mcp {{sub}} <id>  (e.g. mcp0)",
-    "usage": "Usage: /mcp [list | enable <id> | disable <id>]"
+    "usage": "Usage: /mcp [list | enable <id> | disable <id>]",
+    "public_readonly": "{{group}} is a shared MCP — only admins can change it"
   },
   "report_cmd": {
     "saved": "Report saved: {{path}}",
@@ -171,6 +175,126 @@
       "server-restart": "Please resend the message if needed.",
       "server-restart-target-missing": "Verify the recipient agent is registered, then try again.",
       "server-restart-enqueue-failed": "Try again in a moment."
+    }
+  },
+  "persona_cmd": {
+    "not_available": "Persona command is unavailable in standalone mode."
+  },
+  "persona_onboarding": {
+    "hint": "Your agent's role is not defined yet. Run /persona set <description> to set one, or /persona show to inspect the current state."
+  },
+  "sessions_cmd": {
+    "list_header": "Sessions:",
+    "current_marker": "(current)",
+    "created": "Session created: {{id}}",
+    "deleted": "Session deleted: {{id}}",
+    "switched": "Switched to session: {{id}}",
+    "switching": "Switching to session: {{id}}...",
+    "cannot_delete_current": "Cannot delete the current session.",
+    "not_available": "Session management is not available.",
+    "usage": "Usage: /session [list | new [name] | switch <id> | delete <id>]",
+    "usage_switch": "Usage: /session switch <id>",
+    "usage_delete": "Usage: /session delete <id>",
+    "error": {
+      "working_dir_out_of_bounds": "Current folder is outside the server's allowed range. Move into an allowed folder and try again.",
+      "working_dir_not_resolvable": "No working directory configured on the server. Contact the administrator.",
+      "admin_singleton": "An admin session is already active. End the existing session before trying again."
+    }
+  },
+  "slash_cmd": {
+    "unknown": "Unknown command: {{name}}\nRun /help for the full list",
+    "error": "Error: {{message}}"
+  },
+  "input_hint": {
+    "working": "Waiting for response · ESC to cancel",
+    "approve": "Approval required · y / n",
+    "disconnected": "Disconnected · Ctrl+C to restart"
+  },
+  "slash_hint": {
+    "tip": "Run /help to see all commands"
+  },
+  "key_hint": {
+    "idle": "/help commands · Ctrl+T transcript · Ctrl+O tool detail",
+    "transient": "Esc dismiss"
+  },
+  "statusline_cmd": {
+    "label": {
+      "status": "status (working/idle/error)",
+      "session": "session name",
+      "turn": "turn number",
+      "mem": "memory node count",
+      "tools": "tool count",
+      "budget": "prompt budget usage",
+      "model": "LLM model name",
+      "dir": "workspace (agent working directory)",
+      "branch": "git branch"
+    }
+  },
+  "plan_op": {
+    "exec": "Run tool: {{tool}}({{args}})",
+    "exec_no_args": "Run tool: {{tool}}",
+    "ask_llm": "AI analysis: \"{{prompt}}…\"",
+    "respond": "Generate response",
+    "respond_ref": "Generate response (step {{ref}})",
+    "approve": "Approval requested: {{description}}",
+    "delegate": "Delegate to sub-agent → {{target}}",
+    "lookup_memory": "Memory lookup: \"{{query}}\""
+  },
+  "op_phase": {
+    "turn": "Turn",
+    "context": "Context load",
+    "llm": "LLM call",
+    "tool": "Tool run",
+    "respond": "Send response",
+    "approve": "Awaiting approval",
+    "delegate": "Delegation",
+    "debug": "Debug save",
+    "finish": "Finish turn",
+    "state": "State update",
+    "other": "Other"
+  },
+  "op_label": {
+    "load_memories": "Load memories",
+    "load_history": "Load history",
+    "load_generic": "Load {{detail}}",
+    "call_llm": "Call LLM ({{detail}})",
+    "run_tool": "Run {{detail}}",
+    "reply": "Reply",
+    "reply_with": "Reply: \"{{detail}}\"",
+    "ask_approval": "Request approval: {{detail}}",
+    "await_approval": "Await approval: {{detail}}",
+    "execute_tool": "Execute tool — {{detail}}",
+    "delegate_to": "Delegate to {{detail}}",
+    "state_idle": "Transition to idle",
+    "state_streaming_clear": "End streaming",
+    "state_last_turn": "Record result",
+    "state_retry": "Retry",
+    "state_history": "Save history",
+    "state_debug": "Debug save ({{detail}})",
+    "state_generic": "Save {{detail}}",
+    "delegate_completed": "{{label}} → completed",
+    "delegate_failed": "{{label}} ✗ failed: {{error}}",
+    "delegate_submitted": "{{label}} → submitted",
+    "delegate_preview": "{{label}} → {{preview}}"
+  },
+  "side_panel": {
+    "agents": "Agents",
+    "tools": "Tools",
+    "memory": "Memory",
+    "todos": "TODOs",
+    "events": "Events",
+    "none": "(none)",
+    "nodes": "{{count}} nodes",
+    "more": "+{{count}} more",
+    "tools_more": "+{{count}} more · run /tool list to see all",
+    "queue_empty": "(queue empty)",
+    "queue_count": "queue: {{queue}}",
+    "queue_with_dead": "queue: {{queue}} · failed: {{dead}}",
+    "todo_status": {
+      "ready": "○",
+      "done": "✓",
+      "blocked": "⊘",
+      "unknown": "·"
     }
   }
 }

@@ -17,11 +17,17 @@ const cmdList = (sessionId, onListSessions, addMessage) => {
 }
 
 // FP-64: 서버 400 응답의 code 필드 기반으로 i18n 메시지 선택. code 없으면 원문 표시.
+// FP-68: AGENT_ACCESS_DENIED 의 reason 별 분기. raw 코드 (`admin-singleton`) 가
+// 사용자에게 노출되던 결함 해소.
 const formatCreateError = (resp) => {
   const msg = resp?.error || ''
   const code = resp?.code
+  const reason = resp?.reason
   if (code === 'WORKING_DIR_OUT_OF_BOUNDS') return t('sessions_cmd.error.working_dir_out_of_bounds')
   if (code === 'WORKING_DIR_NOT_RESOLVABLE') return t('sessions_cmd.error.working_dir_not_resolvable')
+  if (code === 'AGENT_ACCESS_DENIED' && reason === 'admin-singleton') {
+    return t('sessions_cmd.error.admin_singleton')
+  }
   return t('slash_cmd.error', { message: msg })
 }
 

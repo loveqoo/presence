@@ -1,4 +1,5 @@
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
+import { isReservedUsername } from '@presence/core/core/agent-id.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 // =============================================================================
@@ -29,6 +30,17 @@ const makeFindSenderSession = (entries) => (agentId) => {
   if (users.length > 1) return { kind: 'ambiguous', entry: null }
   if (users.length === 1) return { kind: 'ok', entry: users[0] }
   return { kind: 'not-registered', entry: null }
+}
+
+// KG-15: findAdminSession — SESSION_TYPE.USER 중 reserved username prefix
+const makeFindAdminSession = (entries) => () => {
+  const matches = entries.filter(entry => {
+    if (entry.type !== SESSION_TYPE.USER) return false
+    const ownerPart = entry.session?.agentId?.split('/')?.[0]
+    return ownerPart && isReservedUsername(ownerPart)
+  })
+  if (matches.length === 0) return { kind: 'absent', entry: null }
+  return { kind: 'present', entry: matches[0] }
 }
 
 const run = () => {
@@ -115,6 +127,47 @@ const run = () => {
     const result = find('alice/default')
     assert(result.kind === 'not-registered', 'SM7: 둘 다 없음 → not-registered')
     assert(result.entry === null, 'SM7: entry null')
+  }
+
+  // --- KG-15: findAdminSession ---
+
+  // SM-admin1. USER session 1 개 (admin/manager) 존재 → present
+  {
+    const entries = [
+      { id: 'admin-default', type: SESSION_TYPE.USER, session: { agentId: 'admin/manager' } },
+    ]
+    const find = makeFindAdminSession(entries)
+    const result = find()
+    assert(result.kind === 'present', 'SM-admin1: present')
+    assert(result.entry.session.agentId === 'admin/manager', 'SM-admin1: entry agentId')
+  }
+
+  // SM-admin2. 일반 user USER session 만 존재 → absent
+  {
+    const entries = [
+      { id: 'alice-default', type: SESSION_TYPE.USER, session: { agentId: 'alice/default' } },
+    ]
+    const find = makeFindAdminSession(entries)
+    const result = find()
+    assert(result.kind === 'absent', 'SM-admin2: absent')
+    assert(result.entry === null, 'SM-admin2: entry null')
+  }
+
+  // SM-admin3. AGENT session 으로 admin/manager (delegate 경로) → absent (USER 만 검사)
+  {
+    const entries = [
+      { id: 'agent-admin', type: SESSION_TYPE.AGENT, session: { agentId: 'admin/manager' } },
+    ]
+    const find = makeFindAdminSession(entries)
+    const result = find()
+    assert(result.kind === 'absent', 'SM-admin3: AGENT 타입은 무시 — UI 동시접속 아님')
+  }
+
+  // SM-admin4. 빈 entries → absent
+  {
+    const find = makeFindAdminSession([])
+    const result = find()
+    assert(result.kind === 'absent', 'SM-admin4: 빈 sessions → absent')
   }
 
   summary()

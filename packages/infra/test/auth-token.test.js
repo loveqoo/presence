@@ -135,6 +135,76 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // --- KG-17: A2A token sign/verify ---
+
+  // A2A1. sign + verify happy path
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const token = service.signA2aToken('alice')
+    const result = service.verifyA2aToken(token)
+    assert(isRight(result), 'A2A1: verifyA2aToken Right')
+    const payload = getRight(result)
+    assert(payload.sub === 'alice', 'A2A1: sub=alice')
+    assert(payload.type === 'a2a', 'A2A1: type=a2a')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A2. access token 을 verifyA2aToken 으로 검증 → not an a2a token
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const accessToken = service.signAccessToken({ sub: 'alice', roles: ['user'] })
+    const result = service.verifyA2aToken(accessToken)
+    assert(isLeft(result), 'A2A2: access token → Left')
+    assert(getLeft(result) === 'not an a2a token', 'A2A2: type 분리 메시지')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A3. A2A token 을 verifyAccessToken 으로 검증 → 'not an access token' (type 분리 강화).
+  //       이전엔 verifyAccessToken 이 type 검사를 안 해서 A2A 토큰이 access 경로로 우회 가능했음.
+  //       이번에 verifyAccessToken 도 payload.type === 'access' 검사 추가 — 세 토큰 type 분리 완전.
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const a2aToken = service.signA2aToken('bob')
+    const result = service.verifyAccessToken(a2aToken)
+    assert(isLeft(result), 'A2A3: A2A token → verifyAccessToken Left (type=a2a 거부)')
+    assert(getLeft(result) === 'not an access token', 'A2A3: type 분리 메시지')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A5. refresh token 을 verifyAccessToken 으로 검증 → 'not an access token'
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const { token: refreshToken } = service.signRefreshToken({ sub: 'carol', tokenVersion: 0 })
+    const result = service.verifyAccessToken(refreshToken)
+    assert(isLeft(result), 'A2A5: refresh token → verifyAccessToken Left')
+    assert(getLeft(result) === 'not an access token', 'A2A5: type 분리 메시지')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A6. access token payload 에 type='access' 박혀있는지 확인
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const accessToken = service.signAccessToken({ sub: 'dave', roles: ['user'] })
+    const payload = getRight(service.verifyAccessToken(accessToken))
+    assert(payload && payload.type === 'access', 'A2A6: access token payload 에 type=access')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A4. malformed token → Left
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    assert(isLeft(service.verifyA2aToken('not.a.token')), 'A2A4: malformed → Left')
+    assert(isLeft(service.verifyA2aToken('')), 'A2A4: empty → Left')
+    assert(isLeft(service.verifyA2aToken(null)), 'A2A4: null → Left')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

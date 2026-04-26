@@ -9,6 +9,8 @@ import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { Config } from '@presence/infra/infra/config.js'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { runAdminBootstrap, deleteInitialPasswordFile, ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
+import { bootCedarSubsystem } from '@presence/infra/infra/authz/cedar/index.js'
+import { resolvePrimaryAgent } from '@presence/core/core/agent-id.js'
 import { createServerScheduler, registerAgentSessions } from './scheduler-factory.js'
 import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
@@ -38,6 +40,7 @@ class PresenceServer {
   #port
   #host
   #username
+  #evaluator
 
   static async create(configOverride, opts = {}) {
     const instance = new PresenceServer(opts)
@@ -61,6 +64,7 @@ class PresenceServer {
   get server() { return this.#httpServer }
   get wss() { return this.#wss }
   get userContext() { return this.#userContext }
+  get evaluator() { return this.#evaluator }
 
   get app() {
     return {
@@ -124,6 +128,10 @@ class PresenceServer {
       throw new Error(`Admin bootstrap failed: ${err.message}. Recovery: check ${presenceDir} write permissions or delete partial files.`)
     }
 
+    // Cedar 인프라 부팅 — 정책/스키마 parse 검증 (boot fail-closed) + audit writer.
+    // 의미론 호출처는 governance-cedar v2.1 phase 에서 박힘. 이 phase 는 evaluator 노출만.
+    this.#evaluator = await bootCedarSubsystem({ presenceDir, logger: console })
+
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
     // 서버 레벨 Memory — 모든 유저 공유
@@ -132,9 +140,21 @@ class PresenceServer {
       return null
     })
 
+    // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제.
+    // KG-17: tokenService 가 UserContext (a2aSigner) / a2a-router (verify) 양쪽에서 사용되므로
+    // UserContext.create 전에 미리 부팅.
+    const auth = createAuthSetup({
+      onPasswordChanged: (username) => {
+        if (username === ADMIN_USERNAME) deleteInitialPasswordFile(presenceDir)
+      },
+    })
+    this.#authEnabled = true
+
     this.#userContext = await UserContext.create(config, {
       username: this.#username,
       memory: this.#memory,
+      evaluator: this.#evaluator,
+      a2aSigner: (sub) => auth.tokenService.signA2aToken(sub),
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },
@@ -144,18 +164,18 @@ class PresenceServer {
 
     // 기본 세션 + 에이전트 세션
     const defaultUserId = this.#username || 'default'
-    // agentId: M1 단계 runtime hardcode `${userId}/default`.
-    // M3 에서 config.primaryAgentId 로 이관 (docs/design/agent-identity-model.md §12).
-    // 세션 경로에 agent 디렉토리 삽입 — opts.persistenceCwd 가 주어진 경우에만
-    // agent 계층 조립. 프로덕션 cli.js 는 persistenceCwd 없이 호출 → persistence no-op.
-    // 테스트 mock-server.js 는 tmpDir 주입 → tmpDir/agents/default/sessions/user-default/.
+    // KG-16: agentId / agent dir 모두 config.primaryAgentId 경유 (identity §12).
+    // 부재 시 ${userId}/default fallback. 세션 경로에 agent 디렉토리 삽입 —
+    // opts.persistenceCwd 가 주어진 경우에만 조립. 프로덕션 cli.js 는 persistenceCwd
+    // 없이 호출 → persistence no-op. 테스트 mock-server.js 는 tmpDir 주입.
+    const { agentId: defaultAgentId, agentName: defaultAgentName } = resolvePrimaryAgent(this.#userContext.config, defaultUserId)
     const defaultPersistenceCwd = persistenceCwd
-      ? join(persistenceCwd, 'agents', 'default', 'sessions', 'user-default')
+      ? join(persistenceCwd, 'agents', defaultAgentName, 'sessions', 'user-default')
       : undefined
     const defaultEntry = this.#userContext.sessions.create({
       id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd: defaultPersistenceCwd,
       userId: defaultUserId,
-      agentId: `${defaultUserId}/default`,
+      agentId: defaultAgentId,
       onScheduledJobDone: Function.prototype,
     })
     this.#defaultSession = defaultEntry.session
@@ -166,14 +186,11 @@ class PresenceServer {
       recoverOnStart: this.#userContext.config?.a2a?.recoverOnStart !== false,
     })
 
-    // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제
-    const auth = createAuthSetup({
-      onPasswordChanged: (username) => {
-        if (username === ADMIN_USERNAME) deleteInitialPasswordFile(presenceDir)
-      },
+    // UserContextManager — auth 는 위에서 이미 부팅됨 (KG-17 순서 변경).
+    this.#userContextManager = new UserContextManager({
+      bridge: this.#bridge, serverConfig: config, memory: this.#memory,
+      evaluator: this.#evaluator, tokenService: auth.tokenService,
     })
-    this.#authEnabled = true
-    this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory })
     const getUserContextManager = () => this.#userContextManager
 
     // Express 라우트 마운트 (순서 중요)
@@ -234,11 +251,12 @@ class PresenceServer {
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
     }))
     // 8. /a2a — docs/design/agent-identity-model.md §11. enabled=true 에서만 마운트.
-    // JSON-RPC 메시지 처리 + A2A JWT 는 authz phase — 현재 discovery 엔드포인트만.
+    // KG-17 resolved: POST 라우트가 Authorization Bearer A2A JWT 검증.
     if (this.#userContext.config.a2a?.enabled) {
       app.use('/a2a', createA2aRouter({
         userContext: this.#userContext,
         config: this.#userContext.config,
+        tokenService: auth.tokenService,
       }))
     }
     // 9. Static web UI (catch-all — 반드시 마지막)
@@ -249,7 +267,7 @@ class PresenceServer {
 
 }
 
-// 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, shutdown }
+// 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, evaluator, shutdown }
 const startServer = async (configOverride, opts = {}) => {
   const instance = await PresenceServer.create(configOverride, opts)
   return {
@@ -257,6 +275,7 @@ const startServer = async (configOverride, opts = {}) => {
     wss: instance.wss,
     app: instance.app,
     userContext: instance.userContext,
+    evaluator: instance.evaluator,
     shutdown: instance.shutdown.bind(instance),
   }
 }

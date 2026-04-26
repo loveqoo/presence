@@ -6,6 +6,7 @@ import { UserContext } from '@presence/infra/infra/user-context.js'
 import { Session as SessionModule } from '@presence/infra/infra/sessions/index.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { assert, summary } from '../../../test/lib/assert.js'
+import { createMockEvaluator } from '../../../test/lib/cedar-mock.js'
 
 const delay = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -59,7 +60,7 @@ async function run() {
   const mockLLM = createMockLLM()
   const llmPort = await mockLLM.start()
   const config = baseConfig(llmPort, tmpDir)
-  const userContext = await UserContext.create(config)
+  const userContext = await UserContext.create(config, { evaluator: createMockEvaluator() })
 
   try {
 
@@ -94,7 +95,7 @@ async function run() {
     // job/todo 도구는 전역 registry에 등록 — 모든 세션 타입에서 접근 가능
     // ========================================================================
     {
-      const freshGlobalCtx = await UserContext.create(config)
+      const freshGlobalCtx = await UserContext.create(config, { evaluator: createMockEvaluator() })
 
       // USER 세션 먼저 생성 (job 도구 전역 등록)
       const userSession = Session.create(freshGlobalCtx, { type: SESSION_TYPE.USER })
@@ -147,7 +148,7 @@ async function run() {
     // persistenceCwd를 명시해 restore 영향 제거, turn 증분으로 검증
     // ========================================================================
     {
-      const freshCtx = await UserContext.create(config)
+      const freshCtx = await UserContext.create(config, { evaluator: createMockEvaluator() })
       const sa6Dir = join(tmpDir, 'sa6')
       try {
         const userSession = Session.create(freshCtx, { type: SESSION_TYPE.USER, persistenceCwd: sa6Dir })
@@ -180,7 +181,7 @@ async function run() {
     // SA7. AGENT 세션을 agentRegistry에 등록 후 run() 직접 호출
     // ========================================================================
     {
-      const freshCtx = await UserContext.create(config)
+      const freshCtx = await UserContext.create(config, { evaluator: createMockEvaluator() })
       try {
         const agentSession = Session.create(freshCtx, { type: SESSION_TYPE.AGENT })
         freshCtx.agentRegistry.register({

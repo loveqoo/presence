@@ -6,7 +6,7 @@ import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access
 import { Method, TaskState, JsonRpcErrorCode } from '@presence/infra/infra/agents/a2a-protocol.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 
-const { Reader } = fp
+const { Reader, Either } = fp
 
 // =============================================================================
 // /a2a 라우터 — docs/design/agent-identity-model.md §11
@@ -16,20 +16,19 @@ const { Reader } = fp
 //   GET  /a2a/:userId/:agentName/card  — 단일 카드
 //   POST /a2a/:userId/:agentName        — JSON-RPC 2.0 (message/send, tasks/get)
 //
-// 인증 모델:
-//   A2A JWT 완성은 authz phase (§13 위임). 그 전까지 POST 호출자는
-//   `X-Presence-Caller: {username}` 헤더로 stub 제공. 로컬 dev / CI 용.
-//   canAccessAgent (INTENT.DELEGATE) 게이트는 이미 활성 — caller 가
-//   자신의 prefix 바깥 agent 에 접근하면 403.
+// 인증 (KG-17 resolved):
+//   POST 호출자는 `Authorization: Bearer <a2a-jwt>` 헤더로 자기 identity 를
+//   증명. tokenService.verifyA2aToken 으로 서명/만료/audience/type 검증 후
+//   payload.sub 를 caller 로 사용. self-A2A scope (같은 머신 = 같은 secret)
+//   에서 작동. 멀티 머신 간 검증은 v2 (peer key registry / mTLS).
+//   canAccessAgent (INTENT.DELEGATE) 게이트는 검증 통과 후 적용.
 // =============================================================================
 
-const A2A_CALLER_HEADER = 'x-presence-caller'
-
-const parseCaller = (req) => {
-  // TODO(authz): JWT 기반 identity 로 교체. 이후 이 함수는 res.locals.caller 로 대체.
-  const raw = req.headers[A2A_CALLER_HEADER]
-  if (typeof raw !== 'string' || raw.length === 0) return null
-  return raw
+const parseBearerToken = (req) => {
+  const raw = req.headers.authorization
+  if (typeof raw !== 'string') return null
+  const match = raw.match(/^Bearer\s+(.+)$/)
+  return match ? match[1] : null
 }
 
 const jsonRpcError = (id, code, message) => ({
@@ -131,18 +130,30 @@ const dispatchRpcMethod = async (entry, body, id, res) => {
     `method not found: ${method || '(missing)'}`))
 }
 
-const mountInvokeRoute = (router, userContext) => {
+const mountInvokeRoute = (router, userContext, tokenService) => {
   // POST /a2a/:userId/:agentName — JSON-RPC 2.0 entry point
-  // stub 인증 (X-Presence-Caller) → canAccessAgent (DELEGATE) → dispatch
+  // Bearer JWT 검증 → canAccessAgent (DELEGATE) → dispatch
   router.post('/:userId/:agentName', express.json(), async (req, res) => {
     const id = req.body?.id ?? null
     const agentId = agentIdFromParams(req)
     if (!agentId) return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS, 'invalid agent path'))
 
-    const caller = parseCaller(req)
-    if (!caller) {
+    const token = parseBearerToken(req)
+    if (!token) {
       return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_MISSING,
-        `missing ${A2A_CALLER_HEADER} header (stub auth pending authz phase)`))
+        'missing Authorization Bearer A2A token'))
+    }
+
+    const verified = tokenService.verifyA2aToken(token)
+    if (Either.isLeft(verified)) {
+      const reason = Either.fold(e => e, () => '', verified)
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
+        `A2A token invalid: ${reason}`))
+    }
+    const caller = Either.fold(() => null, p => p.sub, verified)
+    if (!caller) {
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
+        'A2A token missing sub claim'))
     }
 
     const access = canAccessAgent({
@@ -166,7 +177,7 @@ const mountInvokeRoute = (router, userContext) => {
   })
 }
 
-const a2aRouterR = Reader.asks(({ userContext, config }) => {
+const a2aRouterR = Reader.asks(({ userContext, config, tokenService }) => {
   const router = express.Router()
   const publicUrl = config.a2a?.publicUrl
 
@@ -176,9 +187,12 @@ const a2aRouterR = Reader.asks(({ userContext, config }) => {
   if (!publicUrl) {
     throw new Error('createA2aRouter: publicUrl required')
   }
+  if (!tokenService || typeof tokenService.verifyA2aToken !== 'function') {
+    throw new Error('createA2aRouter: tokenService with verifyA2aToken required (KG-17)')
+  }
 
   mountDiscoveryRoutes(router, userContext, publicUrl)
-  mountInvokeRoute(router, userContext)
+  mountInvokeRoute(router, userContext, tokenService)
   return router
 })
 

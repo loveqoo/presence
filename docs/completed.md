@@ -595,3 +595,273 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - `@mozilla/readability` ^0.6.0 (infra)
 - `jsdom` ^29.0.2 (infra)
+
+## Phase I: Cedar 권한 엔진 도입 — 옵션 Y' 최소 + governance v2.2 (2026-04-26)
+
+설계 + 플랜 + 구현이 모두 `feature/cedar-governance-v2` 브랜치에서 atomic 묶음. v1 governance-cedar 의 무한 plan-reviewer 회귀를 메타 결정 명문화 (governance §1.0, cedar-infra §1.0) 로 사전 차단. KG-23 (Op ADT wrapping 부재) 만 명시적 KG 로 연기, KG-24 (호출 정합성) 는 phase 종료와 함께 resolved.
+
+### I-1. 디자인 — 메타 결정 분리
+
+- `governance-cedar.md` v2 → v2.1 → v2.2 — §1.0 메타 결정 (의미론 집중도 = Y "최소") 신설, sub-결정 §1.1~1.3 자동 도출
+- `cedar-infra.md` v1 → v1.1 → v1.2 — §1.0 메타 결정 (Y' "최소 인프라") 신설, sub-결정 §1.1~1.9 자동 도출
+- 두 문서 모두 codex single-round 리뷰 결함 흡수 후 박힘 (governance 3건, cedar-infra 7건 + KG-23)
+
+### I-2. 플랜 — Pre-1 가용성 + 5 커밋 + 2 회 plan-reviewer 흡수
+
+- `cedar-infra-y-prime.md` v1 → v1.2 → v1.3 — plan-reviewer round 1 (6건) + round 2 (4건 + KG-24) 흡수 + 실제 wasm API 의사코드 정정
+- Pre-1 PASS — `@cedar-policy/cedar-wasm@4.10.0` (AWS 공식, sync API, nodejs export, deps 0)
+
+### I-3. 인프라 5 커밋 (CI-Y1~Y7 + UC-Y1/Y2 + SC-Y1a/Y3)
+
+- 커밋 1 (`270a38c`) — wasm dep + `evaluator.js` (Reader.asks DI, stateless cedar.isAuthorized + answer.type 분기 + 런타임 fail-closed)
+- 커밋 2 (`e0918f6`) — `boot.js` (3중 parse fail-closed: checkParseSchema/PolicySet/validate) + `policies/00-base.cedar` minimal RBAC seed + `schema.cedarschema`
+- 커밋 3 (`b652155`) — `audit.js` JSONL append + 디렉토리 0700 + 파일 0600 자동 보정
+- 커밋 4a (`f001622`) — `paths.js` (import.meta.url) + `bootCedarSubsystem` public entry + `PresenceServer.#evaluator` 필드 + admin bootstrap 직후 부팅
+- 커밋 4b (`52ef096`) — `UserContext.create` + `UserContextManager` evaluator 필수 인자 (invariant), `test/lib/cedar-mock.js` helper 신규
+
+### I-4. 의미론 통합 2 커밋 (GV-Y1/Y2/Y4/Y5 + AC4b)
+
+- GC1 (`cce021b`) — `submitUserAgent` Cedar enforcement point + STATUS.DENIED + cli.js cmdAgentAdd Cedar boot 통합. GV-Y1.1~1.8 (8 케이스 allow), GV-Y2 (호출 횟수 정합, validate 실패 시 미호출), GV-Y4 (mock deny → 코드 분기 미도달), GV-Y5 (evaluator invariant)
+- GC3 (`b114399`) — cli.js `cmdAgentApprove` manual_approve audit (Cedar evaluate 호출 *없음*, 디자인 §1.4 admin override 정합) + `createSubsystemAuditWriter` helper
+
+### 검증 매트릭스 (옵션 Y' enforcement 완전성)
+
+| 항목 | 위치 | 검증 |
+|---|---|---|
+| CI-Y1/Y2 (RBAC allow) | `cedar-evaluator.test.js` CE1/CE2 | 인프라 |
+| CI-Y3 (boot 후 가용) | `server.test.js` SC-Y1a + `cedar-boot.test.js` CB1 | 인프라 |
+| CI-Y4 (audit JSONL) | `cedar-audit.test.js` CA1 | 인프라 |
+| CI-Y5 (boot fail-closed) | `cedar-boot.test.js` CB2/CB3 | 인프라 |
+| CI-Y6 (deny-path 정책 측) | `cedar-boot.test.js` CB4 | 인프라 |
+| CI-Y7 (런타임 fail-closed) | `cedar-evaluator.test.js` CE4 | 인프라 |
+| GV-Y1 (8 케이스 호출) | `agent-governance.test.js` GV-Y1.1~1.8 | 의미론 |
+| GV-Y2 (호출 횟수) | `agent-governance.test.js` GV-Y2 | 의미론 |
+| GV-Y3 (의미론 회귀) | `agent-governance.test.js` GV1~GV15 (mock evaluator) | 의미론 |
+| GV-Y4 (deny → 분기 미도달) | `agent-governance.test.js` GV-Y4 | 의미론 |
+| AC4b (manual_approve audit) | `agent-cli.test.js` AC4b | CLI |
+
+### 후속 KG
+
+- **KG-23** (low/infra, open): Cedar evaluate 가 Op ADT 로 wrapping 안 됨. Y' phase 호출처가 서비스 레이어 (LLM 경계 밖) 라 즉시 위험 0. LLM 이 직접 권한 조회를 트리거하는 시나리오 발생 시 Op 도입.
+
+### 주요 의존성 추가
+
+- `@cedar-policy/cedar-wasm` ^4.10.0 (infra) — AWS 공식, Apache-2.0, sync API
+
+## Phase J: KG-15 admin singleton session 강제 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치에 후속 작업으로 추가. 설계 §9.3.5 의 "admin 단일 session 강제" 요구를 옵션 (a) takeover 제거 형태로 구현. concurrent admin approve race 가 새 세션 진입 자체에서 차단됨.
+
+### 변경
+
+- `SessionManager.findAdminSession()` 추가 — SESSION_TYPE.USER 중 agentId 의 username 파트가 reserved 인 첫 entry 검색. tagged union `{ kind: 'present'|'absent', entry }`.
+- `canAccessAgent` 옵션 callback `findAdminSession` 수용 + `REASON.ADMIN_SINGLETON: 'admin-singleton'` 추가. `NEW_SESSION` + reserved owner + `present` 결과 → deny.
+- `session-api.js` POST `/sessions` 진입점에서 `findAdminSession: () => ctx.sessions.findAdminSession()` 주입.
+
+### 회복 경로
+
+명시 `DELETE /api/sessions/:id` 또는 서버 재시작 (in-memory sessions Map). TTL 자동 만료는 후속 — UserSession idle monitor 미지원 (현재 EphemeralSession 만 지원).
+
+### 테스트
+
+- `agent-access.test.js` AS1~AS5 (canAccessAgent decision)
+- `session-manager-routing.test.js` SM-admin1~4 (findAdminSession routing)
+- KG-18 spy infra 가 진입점 #1 의 NEW_SESSION 호출 자체는 이미 동적 검증 중이라 통합 테스트 추가 불필요
+
+## Phase K: KG-16 M3 primaryAgentId 적용 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속 작업. 모든 USER 세션 agentId 결정이 `config.primaryAgentId` 기반으로 통일됨. 이전엔 4 곳에서 `${userId}/default` 와 `agents/default` 디렉토리가 hardcode 되어 있어, admin 의 `primaryAgentId='admin/manager'` 가 세션 생성에 반영되지 않던 M1 표기를 해소.
+
+### 변경
+
+- `packages/core/src/core/agent-id.js` — `resolvePrimaryAgent(config, fallbackUserId) → { agentId, agentName }` 헬퍼 추가. `config.primaryAgentId` 가 valid canonical form 이면 그대로, 아니면 `${fallbackUserId}/default` fallback (validateAgentId 검증 경유).
+- `packages/infra/src/infra/config.js` — `Config.Schema` 에 `primaryAgentId: z.string().optional()` 추가. 이전엔 zod strip 동작으로 admin 의 `primaryAgentId='admin/manager'` 가 런타임 Config 객체에서 제거되던 잠재 버그 동시 해결.
+- 4 진입점 hardcode 제거 (모두 `resolvePrimaryAgent` 결과로 agentId + persistence path 결정):
+  - `server/index.js` — boot 기본 user-default USER 세션
+  - `session-api.js` findOrCreateSession — `{username}-default` lazy 생성
+  - `session-api.js` POST `/sessions` — 신규 세션 생성
+  - `scheduler-factory.js` onDispatch — legacy null-owner fallback
+
+### 핵심 효과
+
+- admin USER 세션이 정확히 `admin/manager` agentId 사용 (이전: hardcode `admin/default` 로 archived/registry 검사 우회).
+- 사용자 정의 primaryAgentId (예: `alice/research`) 가 세션 생성에 반영됨.
+- persistence 경로 일관: `users/{username}/agents/{primaryAgentName}/sessions/{sid}/`.
+
+### 테스트
+
+- `packages/core/test/core/agent-id.test.js` PA1~PA6 (resolvePrimaryAgent 단위)
+- `packages/server/test/auth-e2e.test.js` AE18 (admin 로그인 + POST `/sessions` → KG-18 spy 로 agentId='admin/manager' 검증)
+
+## Phase L: KG-20 validateAgentId 회귀 정적 검사 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. KG-20 의 우려 ("validateAgentId 미경유 raw 문자열 주입 회귀 검증 부재") 를 KG-18 패턴 미러로 해소.
+
+### 실사 결과 (이미 존재한 방어)
+
+- Session 생성자 — `assertValidAgentId(opts.agentId)` 호출 (`session.js:29`)
+- AgentRegistry.register — 동일 호출 (`agent-registry.js:20`)
+- resolveDelegateTarget — `validateAgentId` 경유 (Parser→Resolver→Authz §3.6)
+- Op.SendA2aMessage 인터프리터 — `assertValidAgentId(to)` 호출
+- A2A self card — `validateAgentId(agentId)` 호출
+- 단위 테스트: SD11~13 (Session 생성자 throw), RDT1~9 (resolveDelegateTarget) 이미 존재
+
+부족했던 것: **검증 호출 라인이 회귀로 삭제되어도 catch 못 함**.
+
+### 변경
+
+- `test/regression/agent-id-validation-enforcement.test.js` 신규 — INV-AGENT-ID-VALIDATION 정적 검사. 5 사이트가 `agent-id` 모듈 import + `assertValidAgentId`/`validateAgentId` 호출을 모두 가지고 있는지 정적 grep. 누락 시 fail.
+- `test/run.js` — Spec invariant static checks 섹션에 신규 테스트 등록.
+- `agent-identity.md` — I3 / I10 stale ⚠️ 제거 (이미 단위 테스트 커버), I1 에 회귀 검사 매핑 추가, KG-20 resolved.
+
+### 미적용
+
+- 동적 spy 강화 (validateAgentId 호출 자취 트레이스) — 정적 grep + 단위 테스트 조합으로 회귀 방어 충분. spy 추가는 후속 가치 검토 시.
+
+## Phase M: KG-21 Parser→Resolver→Authz 순서 정적 강제 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. KG-21 의 우려 ("resolver 우회 raw target 이 canAccessAgent 에 직접 들어와도 탐지 불가") 를 KG-18 / KG-20 패턴 미러로 해소.
+
+### 실사 결과
+
+`packages/infra/src/interpreter/delegate.js` 가 정확히 Parser→Resolver→Authz 순서로 호출:
+- line 18: `resolveDelegateTarget(f.target, { currentUserId })` (Resolver)
+- line 27: `canAccessAgent({ jwtSub, agentId, intent: DELEGATE, ... })` (Authz)
+
+부족했던 것: **호출 순서가 회귀로 뒤바뀌거나 resolveDelegateTarget 이 누락되어도 catch 못 함**.
+
+### 변경
+
+- `test/regression/delegate-order-enforcement.test.js` 신규 — INV-DELEGATE-ORDER 정적 검사. (1) resolveDelegateTarget / canAccessAgent import 존재, (2) 두 함수 호출 존재, (3) resolveDelegateTarget 첫 호출 라인 < canAccessAgent 첫 호출 라인. 주석 라인은 strip 하여 false-positive 차단.
+- `test/run.js` — Spec invariant static checks 섹션에 등록.
+- `agent-identity.md` — I10 커버리지에 정적 검사 매핑 추가, KG-21 resolved.
+
+### 미적용
+
+- 후속의 두 옵션 (`ResolvedAgentId.__resolved` 마커 / resolver 진입 spy) 은 침습적 — 정적 grep 으로 회귀 방어 충분. 동적 spy 보강은 KG-18 가 이미 DELEGATE intent 의 agentId 자취를 캡처.
+
+## Phase Q: KG-23 Op.CheckAccess 도메인 어휘 통일 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. 옵션 1 (형식 일관성) 채택. cedar-infra.md §7 의 "Op ADT wrapping 부재로 인한 finite 공간 약화" 위험을 해소. LLM 경계 밖이라 즉시 보호 효과는 0이지만, 호출 경로를 도메인 어휘 (Op data) 로 통일하여 향후 LLM 트리거 시나리오 진입 시 즉시 사용 가능.
+
+### 변경
+
+- `packages/core/src/core/op.js` — `CheckAccess` Op constructor + `checkAccessR` Reader + `checkAccess` legacy bridge.
+  - 결과 shape: `{ decision: 'allow'|'deny', matchedPolicies: string[], errors: string[] }` (cedar evaluator 와 동일).
+- `packages/infra/src/infra/authz/cedar/op-runner.js` (신규) — `runCheckAccess(evaluator, op)` standalone runner. evaluator 부재 또는 잘못된 op tag → throw.
+- `packages/infra/src/interpreter/check-access.js` (신규) — `checkAccessInterpreterR`. evaluator 부재 시 deny + `'evaluator-unavailable'` 에러 (interpreter 시그니처는 throw 금지).
+- `packages/infra/src/interpreter/prod.js` — Reader env 에 `evaluator` 추가, composed 에 `checkAccessInterpreterR` 등록.
+- `packages/infra/src/infra/sessions/internal/session-interpreter.js` + `ephemeral-inits.js` — env 에 evaluator 전파 (UserContext.evaluator → prod 인터프리터).
+- `packages/infra/src/infra/authz/agent-governance.js` — `submitUserAgentR` 의 evaluator 직접 호출을 `Op.CheckAccess` build + `runCheckAccess(evaluator, op)` 위임으로 변경. 의미론 동일, 형식 통일.
+
+### 테스트
+
+- `packages/core/test/core/op.test.js` — CheckAccess constructor + checkAccess DSL 검증.
+- `packages/infra/test/check-access-interpreter.test.js` (신규) — CK1~CK8:
+  - CK1: runCheckAccess 가 evaluator 호출 + 결과 전파
+  - CK2: evaluator 부재 → throw
+  - CK3: 잘못된 op tag → throw
+  - CK4: context 부재 → {} 보정
+  - CK5: 인터프리터 통합 — Free.liftF → evaluator → decision 반환
+  - CK6: 인터프리터에서 evaluator 미주입 → deny + evaluator-unavailable
+  - CK7: deny decision (cedar 50-custom 정책) 그대로 전파
+  - CK8: 서비스 레이어 직접 호출 vs 인터프리터 경유 — 같은 evaluator 면 동일 결과 (호출 경로 통일 검증)
+
+전체 4370 passed (이전 4349 + 21).
+
+### 미적용
+
+- 기존 `agent-governance.js` 외의 cedar evaluate 호출처는 현재 0건. 향후 다른 enforcement point 추가 시 같은 패턴 적용.
+- LLM 이 권한 조회를 트리거하는 실제 시나리오는 미신설 — 형식 채널만 준비. 시나리오 진입은 별도 작업.
+
+### 핵심 효과
+
+- Cedar 권한 평가가 도메인 어휘 (`Op.CheckAccess`) 로 단일화. evaluator 직접 호출 패턴 회귀 시 정적/동적 검증 가능 (인터프리터 등록 + standalone runner 강제).
+- LLM 시나리오 진입 시 `Free.liftF(CheckAccess(...))` 만 yield 하면 즉시 작동 — Op ADT 의 finite 선택 공간 강제 활성화.
+- agent-governance 의 enforcement 의미론 동일 — 회귀 0건 (기존 GV 테스트 전부 통과).
+
+## Phase P: KG-25 Cedar audit JSONL size-based rotation (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. cedar-infra.md §7 에서 "Audit 로그 무한 증가 — KG 등록 후 후속" 으로 미룬 작업을 KG-25 로 등록 후 즉시 구현. 1차 옵션 (size-based + gzip) 채택.
+
+### 변경
+
+- `packages/infra/src/infra/authz/cedar/audit.js` — size-based rotation 추가.
+  - `DEFAULT_MAX_BYTES = 10 * 1024 * 1024` (10MB), `DEFAULT_MAX_BACKUPS = 5`.
+  - `createAuditWriterR` 의 env 가 `maxBytes` / `maxBackups` 옵션 수용 (테스트에서 작은 값으로 override 가능).
+  - 매 `append` 호출 직전 `rotateIfNeeded(logPath, maxBytes, maxBackups)` 실행: `statSync` size 체크 → 초과 시 cascade rotation.
+  - Cascade: `.maxBackups.gz` 삭제 → `.N.gz → .(N+1).gz` (역순으로 shift, 덮어쓰기 방지) → 현재 파일을 gzip 압축하여 `.1.gz` 로 저장 + 0600 권한 + 원본 unlink.
+  - 새 파일에 새 entry append (rotation 직후 첫 entry 는 빈 파일에 쓰여 size=line.length).
+
+### 테스트
+
+`packages/infra/test/cedar-audit.test.js`:
+- CA7: maxBytes 초과 시 `.1.gz` 생성 + 새 로그 파일 존재 + gunzip 으로 archived 내용 복원 가능
+- CA8: maxBackups=3 일 때 `.1~3.gz` 만 보존, `.4.gz` 미존재 (cascade 시 삭제)
+- CA9: 백업 `.1.gz` 도 0600 권한
+- CA10: 기본 maxBytes (10MB) 미만에서 rotation 미트리거 (5 줄 모두 보존)
+- CA11: cascade 정확성 — A 세대 2 append (회전 1번) + B 세대 2 append (회전 2번) 후 `.1.gz=B1` (가장 최근), `.2.gz=A2`, `.3.gz=A1` (가장 오래된) 순서 보존
+
+총 cedar-audit.test.js 34 passed (기존 20 + CA7~CA11 신규 14).
+
+### 미적용
+
+- 멀티 프로세스 동시 append race — 두 프로세스가 동시에 append 호출 시 둘 다 size 체크 통과 후 동시 rotate 시도 가능. 이 시나리오는 단일 presence 서버 가정에서 불필요. 멀티 프로세스 시나리오 (예: load-balanced multi-instance) 진입 시 별도 작업.
+- 시간 기반 rotation (일 단위 + 30 일 보존) — 2차 옵션. size-based 만으로 디스크 압박은 차단되므로 미구현. 운영 빈도 데이터 쌓이면 재검토.
+- 자동 압축 해제 도구 — 운영자가 `gunzip` 같은 표준 도구로 처리. 별도 helper 불필요.
+
+### 핵심 효과
+
+- audit JSONL 파일이 단일 파일에서 10MB 도달 시 자동으로 gzip 압축된 백업으로 회전 → 디스크 무한 증가 차단.
+- 5 파일 보존 = 최근 50MB 분량 (압축 후 더 작음) 보존. 그 이전은 자동 삭제.
+- 백업 파일도 0600 권한 보장 (다른 사용자 읽기 차단 정책 일관).
+
+## Phase O: KG-17 A2A JWT Bearer 인증 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. A2A 라우터의 caller 인증을 stub (`X-Presence-Caller` 헤더) → JWT Bearer 토큰 서명 검증으로 교체. agent-identity.md I4 의 5 진입점 중 #2 (HTTP `/a2a/*`) 의 인증 미완성을 해소.
+
+### 변경
+
+- `packages/infra/src/infra/auth/policy.js` — `AUTH.A2A_TOKEN_EXPIRY_S = 60`. self-A2A scope (같은 머신 / 같은 secret) 에서 클럭 드리프트 무시 가능, 짧은 만료로 충분.
+- `packages/infra/src/infra/auth/token.js` — `createTokenService` 에 `signA2aToken(sub)` / `verifyA2aToken(token)` 추가. 기존 `verify` 헬퍼 (HS256 + exp/iss/aud) 재사용. payload 에 `type: 'a2a'` 박아서 access/refresh 토큰과 분리 — `verifyA2aToken` 은 `payload.type !== 'a2a'` 일 때 `Either.Left('not an a2a token')`.
+- `packages/infra/src/infra/agents/a2a-protocol.js` — `JsonRpcErrorCode.AUTH_INVALID = -32002` 추가 (기존 AUTH_MISSING -32000, ACCESS_DENIED -32001 와 정렬).
+- `packages/infra/src/infra/agents/a2a-client.js` — `sendTask(target, endpoint, taskText, { callerToken })` 시그니처. callerToken 있으면 `Authorization: Bearer ${callerToken}` 자동 첨부.
+- `packages/server/src/server/a2a-router.js` — `mountInvokeRoute` 가 Bearer 토큰 파싱 → `tokenService.verifyA2aToken` (서명/만료/audience/type) → `payload.sub` 를 caller 로 추출 → `canAccessAgent({ jwtSub: caller, intent: DELEGATE })`. 헤더 누락 → 401 AUTH_MISSING. 검증 실패 → 401 AUTH_INVALID. 라우터 부팅 시 `verifyA2aToken` 부재 → throw (fail-closed).
+- `packages/server/src/server/index.js` — boot 순서 재배치: `createAuthSetup` 가 `UserContext.create` 보다 먼저 실행 (a2aSigner 주입). `auth.tokenService.signA2aToken` 을 UserContext 에 주입. `createA2aRouter` 호출에 `tokenService` 인자 전달.
+- `packages/server/src/server/auth-setup.js` — return shape 에 `tokenService` 노출.
+- `packages/server/src/server/user-context-manager.js` — constructor `tokenService` 수용. `getOrCreate` 가 lazy 부트 시 `a2aSigner = (sub) => tokenService.signA2aToken(sub)` 를 새 UserContext 에 주입.
+- `packages/infra/src/infra/user-context.js` — `userContext.a2aSigner = opts.a2aSigner ?? null`.
+- `packages/infra/src/interpreter/delegate.js` — Reader env 에 `a2aSigner` + `currentUserId` 추가. `runRemote` 가 `a2aSigner(currentUserId)` 로 caller 토큰 발급 → `a2a.sendTask(..., { callerToken })` 첨부.
+- `packages/infra/src/interpreter/prod.js` + `session-interpreter.js` + `ephemeral-inits.js` — Reader env 에 a2aSigner 전파 (DI 체인).
+- 테스트 A2A1~A2A4 (`auth-token.test.js`): sign/verify 정상 + access 토큰 misuse 거부 + verifyAccessToken 의 type 검사 부재 명시 + malformed.
+- 테스트 AI1~AI11 (`a2a-invoke.test.js`): 기존 8 케이스 모두 `'x-presence-caller'` → `Authorization: Bearer ${a2aToken(caller)}` 로 교체. AI2 (헤더 누락 → AUTH_MISSING). AI10 (위조 서명 → AUTH_INVALID). AI11 (access 토큰 오용 → 'not an a2a token').
+
+### 미적용
+
+- `verifyAccessToken` 의 type 검사 미강제 — A2A 토큰을 access 경로로 우회 사용은 별도 보호 (auth middleware 의 roles/mustChangePassword 검증) 에 의존. 향후 강화 옵션. A2A3 테스트로 명시.
+- 멀티 머신 간 검증 (peer key registry / mTLS) 은 Phase 2. 현재 self-A2A scope (같은 머신 = 같은 secret) 만 작동.
+
+### 핵심 효과
+
+- A2A 라우터 caller identity 가 stub 헤더에서 위조 불가능한 JWT 서명 검증으로 격상. agent-identity.md I4 5 진입점 중 #2 의 stub 결함 해소.
+- access/refresh/A2A 세 토큰 type 의 명시적 분리로 토큰 우회 차단 (type='a2a' 가 아닌 토큰의 A2A 라우터 호출 거부).
+- 짧은 만료 (60s) 로 토큰 유출 시 영향 최소화.
+
+## Phase N: KG-22 i18n EN 키 일괄 보강 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. ko.json 223 키 / en.json 132 키였던 91 키 누락을 옵션 (a) (일괄 영어 번역 추가) 로 해소. locale=en 사용자가 동적 humanize 경로에서 받던 한국어 잔재 / raw key 표시 제거.
+
+### 변경
+
+- `packages/infra/src/i18n/en.json` — 91 missing 키 영어 번역 추가. namespace 그룹: `status`, `memory_cmd`, `mcp_cmd`, `sessions_cmd`, `slash_cmd`, `input_hint`, `slash_hint`, `key_hint`, `statusline_cmd`, `plan_op`, `op_phase`, `op_label`, `side_panel`. 기존 KO/EN 키 변경 없음 — 추가만.
+- `test/regression/i18n-key-parity.test.js` 신규 — INV-I18N-PARITY 정적 검사. ko.json / en.json flat key 집합 동등성 강제. KO/EN 모두 223 키. missing 발생 시 fail.
+- `test/run.js` — Spec invariant static checks 섹션에 등록.
+
+### 미적용
+
+- 옵션 (b) (locale=en dev 로그로 missing 노출) — 정적 parity 검사가 test 단계에서 강제하므로 dev 로그보다 강한 방어. 컴파일 타임 (== test 단계) 차단으로 갈음.
+
+### 핵심 효과
+
+- locale=en 사용자가 동적 prefix 호출 (`a2a.error.${code}`, `op_label.*`, `sessions_cmd.*` 등) 에서 영어 응답을 받음.
+- 새 KO 키 추가 시 EN 미갱신 회귀가 INV-I18N-PARITY 로 즉시 catch.

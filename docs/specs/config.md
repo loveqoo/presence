@@ -78,7 +78,7 @@ Config.DEFAULTS
 
 ## Known Gaps
 
-- **KG-22** (REGISTRY: KG-22): i18n 동적 호출 namespace EN 미정의. 현황: `packages/infra/src/i18n/ko.json` 223 키, `en.json` 132 키. KO 에만 있는 91 키 중 다수가 동적 prefix 호출 대상 (`a2a.error.${code}`, `a2a.advice.${code}`, `op_label.*`, `op_phase.*`, `sessions_cmd.*`, `side_panel.*`, `statusline_cmd.label.*`, `input_hint.*`, `slash_cmd.*` 등). 영향: `locale='en'` 설정 시 `i18nLookup(key, fallback)` 의 `i18next.exists(key)` 가 false 반환 → fallback 값 (대부분 한국어 또는 raw key) 표시. 영어 사용자가 설정으로 EN 을 선택하면 부분 한글 잔재. 현재 안전망: `formatResponseMessage` (events.js) 와 같은 humanize 경로는 fallback 으로 한국어 라벨을 가져 silent regression 은 아님. 다만 EN locale 약속이 깨짐. 후속: (a) EN missing 키 일괄 추가, 또는 (b) `locale=en` 시점에 missing 키를 dev 로그로 노출하는 검증 모드 도입.
+- ~~**KG-22** (REGISTRY: KG-22): i18n 동적 호출 namespace EN 미정의. 현황: `packages/infra/src/i18n/ko.json` 223 키, `en.json` 132 키. KO 에만 있는 91 키 중 다수가 동적 prefix 호출 대상 (`a2a.error.${code}`, `a2a.advice.${code}`, `op_label.*`, `op_phase.*`, `sessions_cmd.*`, `side_panel.*`, `statusline_cmd.label.*`, `input_hint.*`, `slash_cmd.*` 등). 영향: `locale='en'` 설정 시 `i18nLookup(key, fallback)` 의 `i18next.exists(key)` 가 false 반환 → fallback 값 (대부분 한국어 또는 raw key) 표시. 영어 사용자가 설정으로 EN 을 선택하면 부분 한글 잔재. 현재 안전망: `formatResponseMessage` (events.js) 와 같은 humanize 경로는 fallback 으로 한국어 라벨을 가져 silent regression 은 아님. 다만 EN locale 약속이 깨짐. 후속: (a) EN missing 키 일괄 추가, 또는 (b) `locale=en` 시점에 missing 키를 dev 로그로 노출하는 검증 모드 도입.~~ resolved by `feature/cedar-governance-v2` (2026-04-26). 옵션 (a) 채택 — 91 missing 키 일괄 영어 번역 추가, KO/EN 모두 223 키 동등. 옵션 (b) (dev 로그) 보다 정적 parity 검사 (`test/regression/i18n-key-parity.test.js`) 가 더 강한 방어 — ko.json / en.json flat key 집합 동등성을 빌드 시점 (== test 단계) 에 강제, 새 KO 키 추가 시 EN 미갱신 회귀를 즉시 차단.
 
 ## 테스트 커버리지
 
@@ -105,6 +105,7 @@ Config.DEFAULTS
 - 2026-04-22: agents 항목 확장 — entry schema 요약 + primaryAgentId/a2a.enabled/a2a.publicUrl 추가 (agent identity 도입 반영). KG-16 참조 추가.
 - 2026-04-25: a2a.recoverOnStart 항목 추가 — A2A Phase 1 S4 구현 반영. 서버 시작 시 큐 재시작 회복 feature flag (기본 true).
 - 2026-04-25: a2a.recoverOnStart Config.Schema/DEFAULTS 정식 등록 — `z.boolean().default(true)` 로 schema 검증 대상에 포함. DEFAULTS 에도 명시. 코드의 옵셔널 체이닝은 legacy config 안전망으로 유지.
+- 2026-04-26: KG-22 resolved — `feature/cedar-governance-v2` 후속. en.json 에 91 missing 키 영어 번역 추가 (KO/EN 모두 223 키). INV-I18N-PARITY 정적 검사 (`test/regression/i18n-key-parity.test.js`) 도입으로 미래 회귀 차단.
 - 2026-04-25: KG-22 추가 — A2A Phase 1 + FP-67 humanize 마무리 후 정합성 검증에서 발견. en.json 91 키 누락으로 locale=en 설정 시 부분 한글 잔재.
 - 2026-04-10: 실제 코드 기반 설정 항목 전체 갱신 — embed/locale/scheduler/delegatePolling/agents/memory/prompt 추가, I10(resolveDir 우선순위), I11(embed.dimensions 이중 기본값 위험), E10/E11 추가
 - 2026-04-10: I10 falsy 폴백 명시 — basePath가 빈 문자열 포함 falsy이면 PRESENCE_DIR로 폴백하는 || 체인 동작 기술

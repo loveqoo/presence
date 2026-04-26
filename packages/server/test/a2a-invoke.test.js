@@ -5,7 +5,8 @@
  *   message/send → entry.run(text) → completed/failed task result
  *   tasks/get    → 501 (로컬 sync agent 에는 적용 X)
  *
- * 인증: stub (X-Presence-Caller 헤더). canAccessAgent 의 DELEGATE intent.
+ * 인증 (KG-17 resolved): Authorization: Bearer <a2a-jwt>. tokenService.signA2aToken(sub)
+ * 으로 발급된 JWT 만 통과. canAccessAgent 의 DELEGATE intent 가 verify 후 적용.
  */
 
 import http from 'node:http'
@@ -14,7 +15,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { startServer } from '@presence/server'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
-import { ensureSecret } from '@presence/infra/infra/auth/token.js'
+import { createTokenService, ensureSecret } from '@presence/infra/infra/auth/token.js'
 import { Config } from '@presence/infra/infra/config.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
@@ -96,8 +97,13 @@ const bootServer = async () => {
     run: async (task) => `echo: ${task}`,
   })
 
+  // KG-17: 테스트가 같은 secret 으로 A2A token 발급 — server 가 signA2aToken,
+  // 같은 tmpDir 의 server.secret.json 으로 verify. 테스트는 주소 동등.
+  const tokenService = createTokenService({ basePath: tmpDir })
+  const a2aToken = (sub) => tokenService.signA2aToken(sub)
+
   return {
-    port, tmpDir, mockLLM, origDir,
+    port, tmpDir, mockLLM, origDir, a2aToken,
     userContext: serverInst.userContext,
     cleanup: async () => {
       await serverInst.shutdown()
@@ -107,6 +113,8 @@ const bootServer = async () => {
     },
   }
 }
+
+const bearer = (token) => ({ authorization: `Bearer ${token}` })
 
 const rpcRequest = (method, params, id = 'req-1') => ({ jsonrpc: '2.0', id, method, params })
 
@@ -120,7 +128,7 @@ async function run() {
     resetAccessInvocations()
     const res = await postJson(ctx.port, '/a2a/alice/echo',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'hello' }] } }),
-      { 'x-presence-caller': 'alice' })
+      bearer(ctx.a2aToken('alice')))
     assert(res.status === 200, `AI1: 200 OK (got ${res.status})`)
     assert(res.body.jsonrpc === '2.0', 'AI1: jsonrpc envelope')
     assert(res.body.id === 'req-1', 'AI1: id 보존')
@@ -137,14 +145,14 @@ async function run() {
     await ctx.cleanup()
   }
 
-  // AI2. caller header 누락 → 401
+  // AI2. Authorization 누락 → 401 missing
   {
     const ctx = await bootServer()
     const res = await postJson(ctx.port, '/a2a/alice/echo',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }))
     assert(res.status === 401, `AI2: 401 (got ${res.status})`)
-    assert(res.body.error?.code === -32000, 'AI2: JSON-RPC error code')
-    assert(/caller/i.test(res.body.error?.message || ''), 'AI2: error message')
+    assert(res.body.error?.code === -32000, 'AI2: AUTH_MISSING code')
+    assert(/Bearer/i.test(res.body.error?.message || ''), 'AI2: error message mentions Bearer')
     await ctx.cleanup()
   }
 
@@ -153,7 +161,7 @@ async function run() {
     const ctx = await bootServer()
     const res = await postJson(ctx.port, '/a2a/alice/echo',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'intrude' }] } }),
-      { 'x-presence-caller': 'bob' })
+      bearer(ctx.a2aToken('bob')))
     assert(res.status === 403, `AI3: 403 (got ${res.status})`)
     assert(/not-owner|admin-only/.test(res.body.error?.message || ''), 'AI3: access denied reason')
     await ctx.cleanup()
@@ -164,7 +172,7 @@ async function run() {
     const ctx = await bootServer()
     const res = await postJson(ctx.port, '/a2a/alice/ghost',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }),
-      { 'x-presence-caller': 'alice' })
+      bearer(ctx.a2aToken('alice')))
     assert(res.status === 404, `AI4: 404 (got ${res.status})`)
     await ctx.cleanup()
   }
@@ -179,7 +187,7 @@ async function run() {
     })
     const res = await postJson(ctx.port, '/a2a/alice/crasher',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }),
-      { 'x-presence-caller': 'alice' })
+      bearer(ctx.a2aToken('alice')))
     assert(res.status === 200, 'AI5: 200 OK (JSON-RPC success envelope)')
     assert(res.body.result?.status?.state === 'failed', 'AI5: failed task state')
     const text = res.body.result?.status?.message?.parts?.[0]?.text
@@ -192,7 +200,7 @@ async function run() {
     const ctx = await bootServer()
     const res = await postJson(ctx.port, '/a2a/alice/echo',
       rpcRequest('tasks/get', { id: 'some-task' }),
-      { 'x-presence-caller': 'alice' })
+      bearer(ctx.a2aToken('alice')))
     assert(res.status === 501, `AI6: 501 (got ${res.status})`)
     assert(res.body.error?.code === -32601, 'AI6: method not found')
     await ctx.cleanup()
@@ -203,7 +211,7 @@ async function run() {
     const ctx = await bootServer()
     const res = await postJson(ctx.port, '/a2a/alice/echo',
       rpcRequest('tasks/cancel', {}),
-      { 'x-presence-caller': 'alice' })
+      bearer(ctx.a2aToken('alice')))
     assert(res.status === 400, `AI7: 400 (got ${res.status})`)
     assert(/method not found/.test(res.body.error?.message || ''), 'AI7: method not found msg')
     await ctx.cleanup()
@@ -219,7 +227,7 @@ async function run() {
     })
     const res = await postJson(ctx.port, '/a2a/admin/helper',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'hi' }] } }),
-      { 'x-presence-caller': 'admin' })
+      bearer(ctx.a2aToken('admin')))
     assert(res.status === 200, 'AI8: 200')
     assert(res.body.result?.status?.state === 'completed', 'AI8: completed')
     await ctx.cleanup()
@@ -235,9 +243,40 @@ async function run() {
     })
     const res = await postJson(ctx.port, '/a2a/admin/helper',
       rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }),
-      { 'x-presence-caller': 'alice' })
+      bearer(ctx.a2aToken('alice')))
     assert(res.status === 403, 'AI9: 403')
     assert(/admin-only/.test(res.body.error?.message || ''), 'AI9: admin-only reason')
+    await ctx.cleanup()
+  }
+
+  // AI10 (KG-17). 위조된 JWT (다른 secret 으로 sign) → 401 invalid signature
+  {
+    const ctx = await bootServer()
+    // 다른 tmpDir 로 별도 secret 생성 → 다른 토큰으로 sign
+    const fakeDir = mkdtempSync(join(tmpdir(), 'a2a-fake-'))
+    ensureSecret({ basePath: fakeDir })
+    const fakeService = createTokenService({ basePath: fakeDir })
+    const forged = fakeService.signA2aToken('alice')
+    const res = await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }),
+      bearer(forged))
+    assert(res.status === 401, `AI10: 401 (got ${res.status})`)
+    assert(res.body.error?.code === -32002, 'AI10: AUTH_INVALID code')
+    assert(/invalid signature|invalid|signature/i.test(res.body.error?.message || ''), 'AI10: signature error')
+    rmSync(fakeDir, { recursive: true, force: true })
+    await ctx.cleanup()
+  }
+
+  // AI11 (KG-17). access token 을 A2A 경로로 우회 사용 → 401 not an a2a token
+  {
+    const ctx = await bootServer()
+    const accessToken = createTokenService({ basePath: ctx.tmpDir }).signAccessToken({ sub: 'alice', roles: ['user'] })
+    const res = await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }),
+      bearer(accessToken))
+    assert(res.status === 401, `AI11: 401 (got ${res.status})`)
+    assert(res.body.error?.code === -32002, 'AI11: AUTH_INVALID code')
+    assert(/not an a2a token/i.test(res.body.error?.message || ''), 'AI11: type 분리 메시지')
     await ctx.cleanup()
   }
 

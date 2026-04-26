@@ -1,7 +1,7 @@
 {
   "error": {
     "access_denied": "접근 거부: {{path}}는 워크스페이스 밖입니다. 에이전트는 {{workspace}} 안에서만 파일에 접근할 수 있습니다. 파일을 워크스페이스로 옮기거나 워크스페이스 내부 경로로 요청하세요.",
-    "file_not_found": "파일을 찾을 수 없습니다: {{path}}",
+    "file_not_found": "파일을 찾을 수 없습니다: {{path}} (워크스페이스: {{workspace}})",
     "dir_not_found": "디렉토리를 찾을 수 없습니다: {{path}}",
     "arg_required": "{{tool}}: {{arg}}은(는) 필수입니다.",
     "http_error": "HTTP {{status}} 오류",
@@ -31,7 +31,7 @@
     "memory_unavailable": "메모리를 사용할 수 없습니다."
   },
   "help": {
-    "commands": "── 대화 ──\n/clear        대화 이력 초기화 (메모리는 유지됩니다)\n\n── 정보 ──\n/status       현재 상태 (턴, 모드, 마지막 결과)\n/tool list    등록된 도구 목록\n/todo list    TODO 목록\n\n── 설정 ──\n/models       모델 조회 및 전환 (예: /models gpt-4)\n/memory       메모리 관리 (예: /memory list, /memory clear 7d)\n/mcp          MCP 서버 관리 (예: /mcp list, /mcp enable mcp0)\n/statusline   상태바 표시 항목 설정 (예: /statusline +turn)\n\n── 세션 ──\n/session list           세션 목록\n/session new [name]     새 세션 생성\n/session switch <id>    세션 전환\n/session delete <id>    세션 삭제\n\n── 화면 ──\n/panel        사이드 패널 토글\n/report       디버그 리포트 저장\n/copy         마지막 응답 클립보드 복사\n\n/quit         종료\n\n── 단축키 ──\nCtrl+T  트랜스크립트    Ctrl+O  상세 보기\n↑↓      입력 히스토리\nESC     턴 취소 / 도움말 닫기"
+    "commands": "── 대화 ──\n/clear        대화 이력 초기화 (메모리는 유지됩니다)\n\n── 정보 ──\n/status       현재 상태 (턴, 모드, 마지막 결과)\n/tool list    등록된 도구 목록\n/todo list    TODO 목록\n\n── 설정 ──\n/models       모델 조회 및 전환 (예: /models gpt-4)\n/memory       메모리 관리 (예: /memory list, /memory clear 7d)\n/mcp          MCP 서버 관리 (예: /mcp list, /mcp enable mcp0)\n/persona      에이전트 페르소나 조회/변경 (예: /persona show, /persona set 코드 멘토)\n/statusline   상태바 표시 항목 설정 (예: /statusline +turn)\n\n── 세션 ──\n/session list           세션 목록\n/session new [name]     새 세션 생성\n/session switch <id>    세션 전환\n/session delete <id>    세션 삭제\n\n── 화면 ──\n/panel        사이드 패널 토글\n/report       디버그 리포트 저장\n/copy         마지막 응답 클립보드 복사\n\n/quit         종료\n\n── 단축키 ──\nCtrl+T  트랜스크립트    Ctrl+O  상세 보기\n↑↓      입력 히스토리\nESC     턴 취소 / 도움말 닫기"
   },
   "copy_cmd": {
     "copied": "마지막 응답이 클립보드에 복사되었습니다",
@@ -108,6 +108,12 @@
     "approve_notice": "승인됨: {{description}}",
     "reject_notice": "거절됨: {{description}}"
   },
+  "persona_cmd": {
+    "not_available": "페르소나 명령은 단독 모드에서 사용할 수 없습니다."
+  },
+  "persona_onboarding": {
+    "hint": "에이전트의 역할이 아직 정의되지 않았습니다. /persona set <설명> 으로 설정하거나 /persona show 로 현재 상태를 확인하세요."
+  },
   "sessions_cmd": {
     "list_header": "세션 목록:",
     "current_marker": "(현재)",
@@ -122,7 +128,8 @@
     "usage_delete": "사용법: /session delete <id>",
     "error": {
       "working_dir_out_of_bounds": "현재 폴더가 서버의 허용 범위를 벗어났습니다. 허용된 폴더에서 다시 시도하세요.",
-      "working_dir_not_resolvable": "서버에 작업 디렉토리 설정이 없습니다. 관리자에게 문의하세요."
+      "working_dir_not_resolvable": "서버에 작업 디렉토리 설정이 없습니다. 관리자에게 문의하세요.",
+      "admin_singleton": "이미 관리자 세션이 활성 상태입니다. 기존 세션을 종료한 뒤 다시 시도하세요."
     }
   },
   "slash_cmd": {

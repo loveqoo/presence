@@ -54,6 +54,9 @@ class Config {
       archived: z.boolean().default(false),
       archivedAt: z.string().nullable().optional(),
     })).default([]),
+    // docs/design/agent-identity-model.md §12 — USER 세션 생성 시 사용할 agent.
+    // 부재 시 ${userId}/default fallback (KG-16 resolvePrimaryAgent).
+    primaryAgentId: z.string().optional(),
     prompt: z.object({
       maxContextTokens: z.number().int().positive(),
       reservedOutputTokens: z.number().int().positive(),

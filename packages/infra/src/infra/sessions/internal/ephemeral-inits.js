@@ -100,6 +100,10 @@ const ephemeralInits = {
       currentAgentId: this.agentId,
       a2aQueueStore: userContext.a2aQueueStore,
       sessionManager: userContext.sessions,
+      // KG-17 — Op.Delegate remote 경로가 Authorization Bearer A2A 토큰 첨부.
+      a2aSigner: userContext.a2aSigner,
+      // KG-23 — Op.CheckAccess 인터프리터가 Cedar evaluator 호출.
+      evaluator: userContext.evaluator,
     })
   },
 

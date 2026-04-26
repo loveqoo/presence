@@ -25,23 +25,23 @@ class A2AClient {
     this.fetchFn = opts.fetchFn || globalThis.fetch
   }
 
-  // 새 task 전송 — message/send 메서드
-  async sendTask(target, endpoint, taskText) {
+  // 새 task 전송 — message/send 메서드. KG-17: callerToken 전달 (A2A JWT).
+  async sendTask(target, endpoint, taskText, { callerToken } = {}) {
     const taskId = randomUUID()
     const request = JsonRpc.request(Method.SEND, { id: taskId, message: Message.userText(taskText) })
-    return this.call(target, endpoint, request, taskId, SEND_TIMEOUT_MS)
+    return this.call(target, endpoint, request, taskId, SEND_TIMEOUT_MS, callerToken)
   }
 
-  // 기존 task 상태 조회 — tasks/get 메서드 (폴링용)
-  async getTaskStatus(target, endpoint, taskId) {
+  // 기존 task 상태 조회 — tasks/get 메서드 (폴링용).
+  async getTaskStatus(target, endpoint, taskId, { callerToken } = {}) {
     const request = JsonRpc.request(Method.GET, { id: taskId })
-    return this.call(target, endpoint, request, taskId, POLL_TIMEOUT_MS)
+    return this.call(target, endpoint, request, taskId, POLL_TIMEOUT_MS, callerToken)
   }
 
   // 공통 호출 파이프라인 (override 가능).
-  async call(target, endpoint, request, taskId, timeoutMs) {
+  async call(target, endpoint, request, taskId, timeoutMs, callerToken) {
     try {
-      const res = await this.post(endpoint, request, timeoutMs)
+      const res = await this.post(endpoint, request, timeoutMs, callerToken)
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
         return Delegation.failed(target, `A2A HTTP ${res.status}: ${errText}`, DelegationMode.REMOTE)
@@ -53,14 +53,16 @@ class A2AClient {
     }
   }
 
-  // HTTP transport (override 가능).
-  async post(endpoint, body, timeoutMs) {
+  // HTTP transport (override 가능). KG-17: callerToken 있으면 Authorization 첨부.
+  async post(endpoint, body, timeoutMs, callerToken) {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const headers = { 'Content-Type': 'application/json' }
+    if (callerToken) headers.Authorization = `Bearer ${callerToken}`
     try {
       return await this.fetchFn(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
         signal: controller.signal,
       })

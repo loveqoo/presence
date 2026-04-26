@@ -1,0 +1,131 @@
+// Cedar audit writer — JSONL append + 0600 권한 보정 + 디렉토리 0700 + size-based rotation (KG-25).
+// evaluator 가 매 호출마다 audit.append(entry) 호출. entry 는 plain object.
+//
+// 권한 정책 (plan §357 + cedar-infra.md §7):
+//   - 디렉토리: 신규 생성 시 0700 (다른 사용자 접근 차단)
+//   - 파일: append 시 mode 0o600 + chmodSync 보정 (기존 파일이 0644 인 경우 0600 으로 강제)
+//   - Windows POSIX 권한 의미 차이는 운영 가정 (macOS/Linux) 으로 범위 밖
+//
+// Rotation 정책 (KG-25, cedar-infra.md §7 1차 옵션):
+//   - size 가 maxBytes 초과 시 회전. 기본 10MB.
+//   - 현재 파일 → `.1.gz` (gzip 압축, 0600). 기존 `.1.gz` 부터 `.(N).gz` 까지 cascade shift.
+//   - `.maxBackups.gz` 초과분은 삭제. 기본 5 파일 보존.
+//   - 매 append 직전 statSync 한 번 → microsecond 비용, 동기 처리.
+//   - 단일 프로세스 가정 — 멀티 프로세스 동시 append 시 race 가능 (Y' 단계 범위 밖).
+
+import {
+  appendFileSync, chmodSync, existsSync, mkdirSync,
+  readFileSync, writeFileSync, renameSync, unlinkSync, statSync,
+} from 'fs'
+import { basename, dirname } from 'path'
+import { gzipSync } from 'zlib'
+import fp from '@presence/core/lib/fun-fp.js'
+
+const { Reader } = fp
+
+const DEFAULT_MAX_BYTES = 10 * 1024 * 1024
+const DEFAULT_MAX_BACKUPS = 5
+
+const ensureDir = (logPath) => {
+  const dir = dirname(logPath)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 })
+}
+
+const safeChmod = (path, mode) => {
+  try { chmodSync(path, mode) } catch { /* best effort — Windows / 권한 없음 */ }
+}
+
+const safeUnlink = (path) => {
+  try { if (existsSync(path)) unlinkSync(path) } catch { /* best effort */ }
+}
+
+// .N.gz → .(N+1).gz cascade. 역순 순회로 덮어쓰기 방지.
+// .maxBackups.gz 는 cascade 전에 삭제 (없을 수도 있음).
+const cascadeBackups = (logPath, maxBackups) => {
+  safeUnlink(`${logPath}.${maxBackups}.gz`)
+  for (let i = maxBackups - 1; i >= 1; i -= 1) {
+    const src = `${logPath}.${i}.gz`
+    const dst = `${logPath}.${i + 1}.gz`
+    if (existsSync(src)) renameSync(src, dst)
+  }
+}
+
+// 현재 로그 → .1.gz. 압축 후 원본 삭제.
+const archiveCurrent = (logPath) => {
+  const content = readFileSync(logPath)
+  const gz = gzipSync(content)
+  const dest = `${logPath}.1.gz`
+  writeFileSync(dest, gz, { mode: 0o600 })
+  safeChmod(dest, 0o600)
+  unlinkSync(logPath)
+}
+
+const countBackups = (logPath, maxBackups) => {
+  let count = 0
+  for (let i = 1; i <= maxBackups; i += 1) {
+    if (existsSync(`${logPath}.${i}.gz`)) count += 1
+  }
+  return count
+}
+
+const formatMb = (bytes) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+
+// FP-70 — rotation 발생 시 운영자가 server.log 에서 grep 으로 추적할 수 있도록
+// 한 줄 알림. logger 는 .info(msg) 메서드만 가정. 부재 시 silent (test 호환).
+const rotateIfNeeded = (logPath, maxBytes, maxBackups, logger) => {
+  if (!existsSync(logPath)) return
+  const sizeBefore = statSync(logPath).size
+  if (sizeBefore < maxBytes) return
+  cascadeBackups(logPath, maxBackups)
+  archiveCurrent(logPath)
+  if (logger && typeof logger.info === 'function') {
+    const backups = countBackups(logPath, maxBackups)
+    logger.info(`[cedar-audit] rotation: ${basename(logPath)} → .1.gz (size: ${formatMb(sizeBefore)}, backups: ${backups}/${maxBackups})`)
+  }
+}
+
+const createAuditWriterR = Reader.asks((env) => {
+  const { logPath, maxBytes, maxBackups, logger } = env
+  if (typeof logPath !== 'string' || logPath.length === 0) {
+    throw new Error('createAuditWriter: logPath 부재')
+  }
+  const limitBytes = maxBytes ?? DEFAULT_MAX_BYTES
+  const limitBackups = maxBackups ?? DEFAULT_MAX_BACKUPS
+  ensureDir(logPath)
+  return {
+    append: (entry) => {
+      rotateIfNeeded(logPath, limitBytes, limitBackups, logger)
+      const line = JSON.stringify(entry) + '\n'
+      appendFileSync(logPath, line, { mode: 0o600 })
+      safeChmod(logPath, 0o600)
+    },
+  }
+})
+
+const createAuditWriter = (deps) => createAuditWriterR.run(deps)
+
+// FP-70 — 운영자 가시성. 현재 로그 size + 백업 개수 + 백업별 size 를 plain object 로.
+// 호출처 (CLI `audit-status`) 가 사람이 읽기 좋게 포맷.
+const getAuditStatusR = Reader.asks((env) => {
+  const { logPath, maxBytes, maxBackups } = env
+  if (typeof logPath !== 'string' || logPath.length === 0) {
+    throw new Error('getAuditStatus: logPath 부재')
+  }
+  const limitBytes = maxBytes ?? DEFAULT_MAX_BYTES
+  const limitBackups = maxBackups ?? DEFAULT_MAX_BACKUPS
+  const currentSize = existsSync(logPath) ? statSync(logPath).size : 0
+  const backups = []
+  for (let i = 1; i <= limitBackups; i += 1) {
+    const path = `${logPath}.${i}.gz`
+    if (existsSync(path)) backups.push({ path, size: statSync(path).size })
+  }
+  return { logPath, currentSize, maxBytes: limitBytes, maxBackups: limitBackups, backups }
+})
+
+const getAuditStatus = (deps) => getAuditStatusR.run(deps)
+
+export {
+  createAuditWriter, createAuditWriterR,
+  getAuditStatus, getAuditStatusR,
+  DEFAULT_MAX_BYTES, DEFAULT_MAX_BACKUPS,
+}

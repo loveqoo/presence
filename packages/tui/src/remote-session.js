@@ -43,6 +43,11 @@ class RemoteSession {
     this.#currentSessionId = defaultSessionId(opts.username)
     this.#disconnected = null
     this.#pendingInitialMessages = []
+    // FP-71 — primary agent 페르소나 미설정 시 첫 진입에 한 번 안내.
+    // 서버가 personaConfigured=false 로 알려줌. systemPrompt 비어있으면 false.
+    if (opts.config?.personaConfigured === false) {
+      this.#pendingInitialMessages.push({ role: 'system', content: t('persona_onboarding.hint'), transient: true })
+    }
     this.#remoteState = this.#createMirrorState(this.#currentSessionId)
     this.#rerender = null
   }
