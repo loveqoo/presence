@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
+import { atomicWriteJson } from './fs-utils.js'
 import { createToolRegistry } from './tools/tool-registry.js'
 import { createLocalTools } from './tools/local-tools.js'
 import { initMcpIntegration } from './tools/mcp-tools.js'
@@ -54,6 +57,7 @@ class UserContext {
       throw new Error('UserContext.create: opts.evaluator (function) 필수 — Cedar 인프라가 부팅된 상태가 invariant')
     }
     const userContext = new UserContext()
+    userContext.username = username || null
     userContext.evaluator = evaluator
     // KG-17 — Op.Delegate remote 경로가 caller token 첨부 시 사용. server 부트가
     // tokenService.signA2aToken 을 주입. 부재 시 callerToken=null (legacy / 테스트).
@@ -250,6 +254,29 @@ class UserContext {
   getPrimaryPersona() {
     const agent = this.getPrimaryAgent()
     return { ...DEFAULT_PERSONA, ...(agent?.persona || {}) }
+  }
+
+  // FP-71 — primary agent 의 persona 갱신 + config.json 영속화 + in-memory 동기화.
+  // 부분 갱신: 호출자가 { systemPrompt: '...' } 만 줘도 다른 필드는 보존.
+  // username 부재 시 (legacy 단독 모드 등) throw — config 영속 path 결정 불가.
+  updatePrimaryPersona(updates) {
+    if (!this.username) throw new Error('updatePrimaryPersona: username 부재 (단독 모드에서는 영속 불가)')
+    const primary = this.getPrimaryAgent()
+    if (!primary) throw new Error('updatePrimaryPersona: primary agent 미설정')
+    const configPath = join(Config.resolveDir(), 'users', this.username, 'config.json')
+    if (!existsSync(configPath)) throw new Error(`updatePrimaryPersona: config 부재 ${configPath}`)
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
+    const agents = Array.isArray(raw.agents) ? raw.agents : []
+    const idx = agents.findIndex(a => a.name === primary.name)
+    if (idx < 0) throw new Error(`updatePrimaryPersona: primary agent (${primary.name}) 가 config.json 에 없음`)
+    const nextPersona = { ...(agents[idx].persona || {}), ...updates }
+    const nextAgents = [...agents]
+    nextAgents[idx] = { ...agents[idx], persona: nextPersona }
+    const nextRaw = { ...raw, agents: nextAgents }
+    atomicWriteJson(configPath, nextRaw)
+    this.config = new Config({ ...this.config, agents: nextAgents })
+    this.personaConfig = this.getPrimaryPersona()
+    return this.personaConfig
   }
 
   // 세션 → 인프라 순서로 정리.

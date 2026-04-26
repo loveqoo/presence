@@ -92,6 +92,7 @@ const mountSessionEndpoints = (router, deps) => {
         state: session.state, tools: session.tools,
         memory: effectiveCtx.memory, toolRegistry: effectiveCtx.toolRegistry,
         agentId: req.presenceSession.session.agentId,
+        userContext: effectiveCtx,
       })
       if (cmd.handled) {
         // state 변경 커맨드(/clear 등) 후 persistence flush
@@ -121,7 +122,9 @@ const mountSessionEndpoints = (router, deps) => {
     const ctx = req.presenceUserContext || userContext
     const { llm, ...rest } = ctx.config
     const { apiKey, ...safeLlm } = llm
-    res.json({ ...rest, llm: safeLlm })
+    // FP-71 — TUI 첫 진입 시 페르소나 미설정 안내용. systemPrompt 가 비어있으면 false.
+    const personaConfigured = (ctx.getPrimaryPersona().systemPrompt || '').trim().length > 0
+    res.json({ ...rest, llm: safeLlm, personaConfigured })
   })
   router.post('/sessions/:sessionId/approve', (req, res) => {
     const { session } = req.presenceSession

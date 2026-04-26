@@ -215,6 +215,16 @@ const commandMap = new Map([
   ['/session',    handleSessions],
   ['/statusline', handleStatusline],
   ['/copy',       handleCopy],
+  ['/persona',    (input, ctx) => {
+    // FP-71 — 서버에 위임. 응답은 system 메시지로 표시.
+    if (!ctx.onInput) {
+      ctx.addMessage({ role: 'system', content: t('persona_cmd.not_available'), transient: true })
+      return
+    }
+    ctx.onInput(input).then(content => {
+      if (content) ctx.addMessage({ role: 'system', content, transient: true })
+    }).catch(() => {})
+  }],
 ])
 
 // Returns Promise<boolean> — true if input was (or looked like) a slash command.

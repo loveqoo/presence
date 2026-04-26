@@ -72,6 +72,30 @@ const SLASH_COMMANDS = {
     const summary = nodes.slice(0, 20).map(node => node.label).join('\n')
     return { type: 'system', content: `${nodes.length} nodes:\n${summary}` }
   },
+
+  // FP-71 — primary agent 의 persona 조회/변경.
+  // show: 현재 name + systemPrompt (없으면 unset). set <text>: systemPrompt 갱신. reset: null 로.
+  persona: (args, { userContext }) => {
+    if (!userContext) return { type: 'system', content: 'Persona command unavailable in this context.' }
+    const sub = args[0] || 'show'
+    if (sub === 'show') {
+      const persona = userContext.getPrimaryPersona()
+      const prompt = persona.systemPrompt
+      const body = prompt && prompt.length > 0 ? prompt : '(unset — using default role definition)'
+      return { type: 'system', content: `Persona: ${persona.name}\n${body}` }
+    }
+    if (sub === 'set') {
+      const text = args.slice(1).join(' ').trim()
+      if (!text) return { type: 'system', content: 'Usage: /persona set <text>' }
+      userContext.updatePrimaryPersona({ systemPrompt: text })
+      return { type: 'system', content: 'Persona updated. Takes effect next turn.' }
+    }
+    if (sub === 'reset') {
+      userContext.updatePrimaryPersona({ systemPrompt: null })
+      return { type: 'system', content: 'Persona reset (default role definition).' }
+    }
+    return { type: 'system', content: 'Usage: /persona [show | set <text> | reset]' }
+  },
 }
 
 export const handleSlashCommand = async (input, ctx) => {

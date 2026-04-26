@@ -275,8 +275,22 @@ FP-16~FP-28, FP-63, FP-64 전체 resolved 상태 유지 확인. `feature/agent-i
 | 심각도 | open | resolved | 항목 |
 |--------|------|----------|------|
 | **high** | 0 | 3 | resolved: FP-16(서버 연결 실패 원인 불명), FP-22(WS 복구 불가 침묵), FP-63(4004 close 원인 미표시) |
-| **medium** | 0 | 7 | resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내), FP-64(/sessions new 400 영어 에러) |
+| **medium** | 0 | 8 | resolved: FP-17(서버 URL 미표시), FP-18(마스킹 불완전), FP-19(로그인 횟수), FP-21(무피드백 대기), FP-23(재연결 상태 미표시), FP-24(인증 만료 안내), FP-64(/sessions new 400 영어 에러), FP-71(첫 진입 페르소나 안내 부재) |
 | **low** | 0 | 5 | resolved: FP-20(변경 횟수), FP-25(Esc 힌트), FP-26(단축키 미노출), FP-27(깜박임), FP-28(Dead code) |
+
+---
+
+## 신규 가입자 진입 UX 감사 (2026-04-26)
+
+감사 범위: `feature/cedar-governance-v2` 브랜치 기준. 신규 유저의 첫 로그인 이후 온보딩 흐름.
+
+### [FP-71] 첫 진입 시 에이전트 페르소나 미설정 안내 부재 [심각도: medium] — **resolved (2026-04-26)**
+
+(상세: `docs/ux/issues/2026-04-26-persona-onboarding-missing.md`)
+
+신규 유저가 첫 로그인 후 TUI에 진입했을 때, 에이전트의 역할(페르소나)이 비어 있다는 사실을 인지할 수 없었다.
+
+**해소**: `/persona` 슬래시 커맨드 추가(show / set \<text\> / reset) + 서버 config 응답에 `personaConfigured` 필드 추가 + TUI 첫 진입 시 `personaConfigured === false`이면 설정 안내 메시지 1회 표시(transient) + `/help`에 `/persona` 항목 추가.
 
 ---
 
@@ -284,4 +298,6 @@ FP-16~FP-28, FP-63, FP-64 전체 resolved 상태 유지 확인. `feature/agent-i
 
 | 일자 | 내용 |
 |------|------|
+| 2026-04-26 | FP-71 resolved — `/persona` 커맨드 + 첫 진입 1회 안내 + `/help` 갱신으로 3단계 해소 |
+| 2026-04-26 | FP-71 추가 (open, medium) — 신규 가입자 첫 진입 시 페르소나 미설정 안내 부재 |
 | 2026-04-25 | W1 리팩(`cb6c59a`) 후 `WS_CLOSE.WORKING_DIR_INVALID`(4004) 및 `config.tools.allowedDirs` 제거됨. FP-63·FP-64 관련 시나리오 소멸 반영 — 각 항목에 보충 메모 추가 |
