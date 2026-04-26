@@ -743,8 +743,38 @@ FP-44 방식(URL 패턴 사전 차단)은:
 
 ---
 
+---
+
+### [FP-69] 빈 워크스페이스에서 외부 파일 요청 시 LLM 응답이 도움이 되지 않음 [심각도: medium] — **open (2026-04-26)**
+
+**소스**: `docs/ux/issues/2026-04-26-empty-workspace-external-file-request.md`
+
+신규 가입 직후 빈 워크스페이스 상태에서 유저가 "package.json 파일 읽어줘"처럼 워크스페이스 밖의 파일을 요청하면 LLM이 `file_not_found`("파일을 찾을 수 없습니다: package.json")를 받고 재시도 루프에 빠진다. 유저는 120초 대기 후 실패만 받으며, 왜 실패했는지("에이전트는 `~/.presence/users/{username}/` 안에서만 파일에 접근 가능")를 안내받지 못한다.
+
+FP-65(allowedDirs 안내 오류, resolved), FP-66(StatusBar dir 불일치, resolved)과 패턴이 다르다. 이 FP는 `file_not_found` 에러 메시지에 워크스페이스 컨텍스트가 없어 유저가 원인을 이해할 수 없다는 문제다.
+
+**제안 요약**: `error.file_not_found` i18n 메시지에 `workspace` 파라미터를 추가해 경로가 함께 표시되도록 한다. (상세 제안: 이슈 파일 참조)
+
+---
+
+### [FP-70] audit log rotation 상태를 운영자가 인지할 수 없음 [심각도: low] — **open (2026-04-26)**
+
+**소스**: `docs/ux/issues/2026-04-26-audit-log-admin-visibility.md`
+
+> ID 미확정. 메인 에이전트가 `scripts/tickets.sh next-id fp` 실행 후 `FP-70` 를 실제 번호로 교체하고 REGISTRY.md 에 등록 필요.
+
+KG-25 rotation 구현(size-based, 10MB/5 파일/gzip) 자체는 올바르게 작동한다. 그러나 rotation 발생 시 서버 로그에 어떤 기록도 남지 않고, 운영자(admin)가 현재 audit log 크기·백업 수를 조회하는 TUI/CLI 경로가 없으며, `.gz` 백업 열람 방법 안내도 없다.
+
+결과: 운영자는 `ls -lh ~/.presence/logs/` 를 직접 실행하지 않으면 rotation 이력, 현재 디스크 사용량, 백업 존재 여부를 알 수 없다. 보안 감사가 필요한 시점에 과거 이벤트 타임라인 재구성이 지연될 수 있다.
+
+**제안 핵심**: rotation 발생 시 서버 로그에 한 줄(`[cedar-audit] rotation: ... size: 10.2 MB, backups: 1/5`) 기록. 이것만으로 타임라인 재구성이 가능해진다.
+
+---
+
 ## 변경 이력
 
 | 일자 | 내용 |
 |------|------|
+| 2026-04-26 | FP-70 추가 (open) — KG-25 rotation 구현 후속 UX 감사. rotation 무음 처리 + 상태 조회 경로 부재 + .gz 안내 없음. 심각도 low. |
+| 2026-04-26 | FP-69 추가 — 빈 워크스페이스에서 외부 파일 요청 시 LLM 수렴 루프 + 안내 부재. FP-65/66 과 분리되는 신규 패턴 |
 | 2026-04-25 | W1 리팩(`cb6c59a`) 후 `config.tools.allowedDirs` 스키마/DEFAULTS 제거됨. FP-65 관련 시나리오 소멸 반영 — 본문 헤딩을 "W1 이전 동작(역사적 기록)"으로 명시하고 보충 메모 추가 |
