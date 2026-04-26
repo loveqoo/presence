@@ -294,7 +294,7 @@ const evaluator = createEvaluator({ cedarInstance, auditWriter })
 
 - **Cedar wasm 패키지 비활성**: `@cedar-policy/cedar-wasm` 가 maintained 가 아니면 직접 빌드 (Rust → wasm-pack) 필요 — 1~2 일 추가. 완화: §3.4 검증을 인프라 플랜 첫 단계에 두고, 비활성이면 옵션 Y' 자체를 재검토 (X' 보다 작은 추가 옵션 Y'' = pure-JS Cedar port 등 검토)
 - **Hot reload 부재의 운영 부담**: 정책 변경 = 서버 재시작. minimal 단계에선 정책 변경 자체가 드물지만, governance v2.1 후속에서 정책 추가가 늘면 부담. 완화: 빈도 모니터링 후 X' 마이그레이션 트리거
-- **Audit 로그 무한 증가**: JSONL 파일 크기 무제한. 완화: rotation policy 별도 작업 (logrotate 또는 자체 helper) — Y' 범위 밖, KG 등록 후 후속
+- **Audit 로그 무한 증가** (KG-25): JSONL 파일 크기 무제한. 완화: rotation policy 별도 작업 (logrotate 또는 자체 helper) — Y' 범위 밖, KG-25 로 등록. 운영 빈도 (정책 평가 분당 호출 수) × 보존 기간 합산이 디스크 압박 임계 도달 시 처리. 1차 옵션: size-based rotation (10MB / 5 파일) + gzip. 2차 옵션: time-based rotation (일 단위) + retention 30 일.
 - **Cedar 평가 latency**: 첫 호출 (wasm 부팅) + 매 evaluate 호출 비용. 완화: 인프라 구현 후 latency 벤치 (목표 < 5ms p99)
 - **Op ADT wrapping 부재로 인한 finite 공간 약화**: Cedar evaluate 호출이 Op 으로 표현되지 않으면 LLM 이 자유 텍스트로 우회 가능 — 그러나 이 phase 에선 호출이 인프라 코드 (서비스 레이어) 에서만 발생, LLM 경계 밖. 향후 LLM 이 직접 권한 조회를 트리거하는 시나리오가 생기면 그때 Op 으로 wrapping. KG-23 으로 등록
 - **Minimal seed 의 "전부 allow" 가 보안상 의도적 감수 위험**: Y' phase 의 `00-base.cedar` 는 `LocalUser create_agent` 를 *role 무관 전부 허용* (§2.2). 이는 governance-cedar v2.1 의 옵션 Y (의미론은 코드 분기에서 quota / autoApprove / hard limit 처리) 와 정합되도록 설계된 의도된 결과지만, **인프라 phase 단독 시점** (governance-cedar 후속 phase 미적용 상태) 에선 의미론 게이트가 부재할 수 있음. 완화: 인프라 phase 의 PR 머지는 governance-cedar v2.1 phase 와 *함께* 진행 (인프라 단독 머지 금지, 또는 머지 직후 즉시 governance phase 진행). 실제 호출처 (`agent-governance.js`) 에 Cedar 호출이 추가되기 전까지는 evaluator 가 가용하지만 어디에서도 호출되지 않는 상태로 유지 — 이 상태는 의미론 우회 위험이 없음 (호출 부재 = enforcement 부재 = 기존 코드 분기 그대로 작동)
