@@ -179,11 +179,38 @@ const createTokenService = ({ basePath } = {}) => {
       verify(token, secret, { audience }),
     )
 
+  // KG-17 — A2A 호출용 짧은 만료 토큰. self-A2A scope (같은 머신, 같은 secret).
+  // type='a2a' 로 access/refresh 와 명확히 분리 — access token 을 A2A 경로로
+  // 우회 사용하거나 그 반대를 차단.
+  const signA2aToken = (sub) => {
+    const now = Math.floor(Date.now() / 1000)
+    return sign({
+      sub,
+      type: 'a2a',
+      iss: AUTH.ISSUER,
+      aud: audience,
+      iat: now,
+      exp: now + AUTH.A2A_TOKEN_EXPIRY_S,
+    }, secret)
+  }
+
+  // Either.Right(payload) | Either.Left(error)
+  const verifyA2aToken = (token) =>
+    Either.fold(
+      err => Either.Left(err),
+      payload => payload.type !== 'a2a'
+        ? Either.Left('not an a2a token')
+        : Either.Right(payload),
+      verify(token, secret, { audience }),
+    )
+
   return {
     signAccessToken,
     signRefreshToken,
     verifyAccessToken,
     verifyRefreshToken,
+    signA2aToken,
+    verifyA2aToken,
     secret, // 테스트용 노출
   }
 }

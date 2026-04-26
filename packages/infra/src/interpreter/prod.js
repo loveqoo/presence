@@ -65,7 +65,7 @@ const createUiHelpers = (reactiveState, delegateRuntime) => {
 // --- Prod Interpreter ---
 // 7개 단일 관심사 인터프리터를 합성.
 
-const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, currentUserId, currentAgentId, a2aQueueStore, sessionManager, logger } = {}) => {
+const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reactiveState, agentRegistry, fetchFn, onApprove, getAbortSignal, delegateRuntime, getWorkingDir, currentUserId, currentAgentId, a2aQueueStore, sessionManager, logger, a2aSigner } = {}) => {
   const ui = createUiHelpers(reactiveState, delegateRuntime)
   // Tool handler 가 받을 resolvePath — 호출 시점의 workingDir 기준 해석 + 경계 검증.
   const resolvePath = getWorkingDir
@@ -88,7 +88,7 @@ const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reacti
     stateInterpreterR.run({ ST }),
     llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
     toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi, getWorkingDir, resolvePath }),
-    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId }),
+    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId, a2aSigner }),
     sendA2aInterpreterR.run({ ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger }),
     approvalInterpreterR.run({ ST, onApprove }),
     controlInterpreterR.run({ ST }),

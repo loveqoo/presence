@@ -135,6 +135,55 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // --- KG-17: A2A token sign/verify ---
+
+  // A2A1. sign + verify happy path
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const token = service.signA2aToken('alice')
+    const result = service.verifyA2aToken(token)
+    assert(isRight(result), 'A2A1: verifyA2aToken Right')
+    const payload = getRight(result)
+    assert(payload.sub === 'alice', 'A2A1: sub=alice')
+    assert(payload.type === 'a2a', 'A2A1: type=a2a')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A2. access token 을 verifyA2aToken 으로 검증 → not an a2a token
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const accessToken = service.signAccessToken({ sub: 'alice', roles: ['user'] })
+    const result = service.verifyA2aToken(accessToken)
+    assert(isLeft(result), 'A2A2: access token → Left')
+    assert(getLeft(result) === 'not an a2a token', 'A2A2: type 분리 메시지')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A3. A2A token 을 verifyAccessToken 으로 검증 → 통과 (audience 같음).
+  //       *type='a2a'* 분리는 verifyA2aToken 에서만 강제 — verifyAccessToken 은 type 검사 안 함.
+  //       이는 access path 보호가 access middleware 의 mustChangePassword 등 별도 검증이라
+  //       단독으로 보안 의미 없음. 그러나 향후 강화 시 verifyAccessToken 에도 type 분리 추가 가능.
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const a2aToken = service.signA2aToken('bob')
+    const result = service.verifyAccessToken(a2aToken)
+    assert(isRight(result), 'A2A3: A2A token 도 verifyAccessToken 으론 Right (audience 같음, type 검사 안 함)')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A4. malformed token → Left
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    assert(isLeft(service.verifyA2aToken('not.a.token')), 'A2A4: malformed → Left')
+    assert(isLeft(service.verifyA2aToken('')), 'A2A4: empty → Left')
+    assert(isLeft(service.verifyA2aToken(null)), 'A2A4: null → Left')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

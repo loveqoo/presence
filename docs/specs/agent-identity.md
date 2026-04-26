@@ -40,6 +40,12 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - I11. **A2A 비활성 기본**: `config.a2a.enabled` 기본 `false`. false이면 `/a2a/*` 라우트 미등록, self card 미생성. `true`이면 `publicUrl` 필수 — 없으면 라우터 생성 실패.
 
+- I13. **A2A 토큰 type 분리 + Bearer 강제 + fail-closed 부팅** (KG-17 resolved):
+  - `signA2aToken(sub)` 은 payload `type: 'a2a'` 를 포함. `verifyA2aToken` 은 `type !== 'a2a'` 이면 `Either.Left('not an a2a token')` 반환 — access/refresh 토큰의 A2A 경로 우회를 차단.
+  - POST `/a2a/*` 는 `Authorization: Bearer <a2a-jwt>` 헤더 필수. 헤더 없으면 `AUTH_MISSING(-32000)`, 검증 실패이면 `AUTH_INVALID(-32002)` 반환.
+  - `createA2aRouter` 부팅 시 `tokenService.verifyA2aToken` 함수 부재이면 throw — 의존성 누락 fail-closed.
+  - scope: self-A2A (같은 머신 = 같은 secret). 멀티 머신 간 검증 (peer key registry / mTLS) 은 Phase 2.
+
 - I12. **USER 세션 agentId = config.primaryAgentId**: 모든 USER 타입 세션의 agentId 는 `config.primaryAgentId` 에서 결정. 부재 시 `${userId}/default` fallback. persistence path 의 agent 디렉토리도 동일 규칙. `resolvePrimaryAgent` 헬퍼 (`packages/core/src/core/agent-id.js`) 가 단일 진실의 원천. 4 진입점 (boot 기본 세션 / lazy 접근 / POST /sessions / scheduler legacy fallback) 모두 헬퍼 경유. (KG-16 resolved)
 
 - I-WD. **workingDir = Config.userDataPath(userId) 고정**: 모든 세션의 `workingDir`은 생성 시 `Config.userDataPath(userId)`로 자동 결정된다. 외부 입력(`opts.workingDir`, TUI `cwd`, `POST /sessions` body `workingDir`)은 무시된다. 런타임 변경 불가. 세션 유형(USER/SCHEDULED/AGENT)과 무관하게 동일 규칙이 적용된다. `workingDir`은 persistence에 저장하지 않으며 복원 시에도 `userId` 기반으로 재계산한다. tool 경계 검증(`isWithinWorkspace`), `shell_exec` cwd, system prompt `WORKING_DIR` 섹션의 유일 기준점.
@@ -72,7 +78,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - **KG-15**: ~~Admin singleton session 강제 미구현. 설계 §9.3.5에서 concurrent approve race 차단을 위해 admin 계정 단일 session 강제를 요구하나, `canAccessAgent`에 기존 session 확인 로직이 없다. 동시 approve race는 idempotent replay (I9)로 crash recovery에는 대응되나 concurrent race는 미차단. v2 대상.~~ resolved by feature/cedar-governance-v2 (2026-04-26). 옵션 (a) 채택: takeover 제거, 활성 admin USER session 존재 시 새 session 거부. `SessionManager.findAdminSession()` 추가 (tagged union `{ kind: 'present'|'absent' }`), `canAccessAgent`가 옵션 콜백 `findAdminSession` 수용, `REASON.ADMIN_SINGLETON` 추가. TTL 자동 만료는 미구현 — UserSession idle monitor 후속 과제.
 - **KG-16**: ~~M3 미완료. `config.primaryAgentId` 적용 없이 `{username}/default` hardcode (I12). M3 완료 전까지 `primaryAgentId` 변경 CLI 동작이 세션 생성에 반영되지 않는다.~~ resolved by feature/cedar-governance-v2 (2026-04-26). `resolvePrimaryAgent` 헬퍼 추가 (core/agent-id.js). Config.Schema 에 `primaryAgentId` 추가로 admin 의 `admin/manager` 가 런타임에 보존됨. 4 진입점 (boot 기본 세션 / lazy /api/sessions/:id 접근 / POST /api/sessions / scheduler legacy null-owner fallback) 모두 헬퍼 경유.
-- **KG-17**: `canAccessAgent` 진입점 #2 (a2a-router) 의 A2A JWT 인증 미완성. 현재 `X-Presence-Caller` 헤더 stub 사용. 실제 JWT 서명 검증은 authz phase (P23-5) 구현 후 연결 예정.
+- **KG-17**: ~~`canAccessAgent` 진입점 #2 (a2a-router) 의 A2A JWT 인증 미완성. 현재 `X-Presence-Caller` 헤더 stub 사용. 실제 JWT 서명 검증은 authz phase (P23-5) 구현 후 연결 예정.~~ resolved by feature/cedar-governance-v2 (2026-04-26). `X-Presence-Caller` 헤더 stub 완전 제거. `Authorization: Bearer <a2a-jwt>` 파싱 → `tokenService.verifyA2aToken` (서명/만료/audience/type) → `payload.sub` 를 caller 로 추출. `AUTH.A2A_TOKEN_EXPIRY_S = 60` 으로 짧은 만료. self-A2A scope (같은 머신 = 같은 secret). 멀티 머신 간 검증은 Phase 2. I13 으로 불변식 승격.
 - **KG-18**: ~~5진입점 enforcement 테스트가 정적 grep 수준 (text 존재 여부). 실제 `canAccessAgent` 반환값을 무시하는 코드가 추가되어도 테스트가 통과할 수 있다.~~ resolved by 2026-04-25. `agent-access.js`에 ring 버퍼(cap 200) spy infra(`inspectAccessInvocations` / `resetAccessInvocations`) 도입. 5 진입점 각각에 동적 spy 검증 추가: #1 server.test.js S1, #2 a2a-invoke.test.js AI1, #3 server.test.js S10, #4 scheduler-e2e.test.js SE1, #5 delegate.test.js #1. spy unit 테스트는 agent-access.test.js AA17~AA19. 정적 grep(test/regression/agent-access-enforcement.test.js)은 1차 방어로 병존 유지.
 - **KG-19**: ~~JobStore 소유권 필터링 누락.~~ resolved by fix/kg-19-job-owner-filter (2026-04-24, tool boundary 봉합 범위). `listJobs` / `getJob` / `updateJob` / `deleteJob` / `getRunHistory` 5 메서드에 `{ ownerAgentId }` 옵션 추가. `JobToolFactory` 가 고정 전달해 agent tool 경로는 자기 소유 job 만 관리 가능. 시스템 스케줄러 경로(`getDueJobs` / `startRun` 등)는 owner 무시 유지. Legacy owner-null row 는 tool 경로에서 조회 불가. 미해소 범위: 관측성 분리, TODO_REVIEW agent-per-instance 정책, 시스템 경로 자동 drift 탐지. M3 복수 agent 허용 시 재검토 필요.
 
@@ -96,6 +102,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
 - I10 → `packages/infra/test/resolve-delegate-target.test.js` RDT1~RDT9 (Parser→Resolver→Authz §3.6 전체 케이스) + `test/regression/delegate-order-enforcement.test.js` (Op.Delegate 인터프리터 호출 순서 정적 검사)
 - I11 → (a2a.enabled=false 라우트 미등록 테스트 없음) ⚠️
+- I13 → `packages/infra/test/auth-token.test.js` A2A1~A2A4 (sign/verify 정상 + 위조 거부 + access 토큰 misuse 거부 + malformed 거부), `packages/server/test/a2a-invoke.test.js` AI2 (AUTH_MISSING), AI10 (위조 서명 → AUTH_INVALID -32002), AI11 (access 토큰 오용 → 'not an a2a token')
 - I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
 - E6 → `packages/infra/test/agent-access.test.js` AA3
 - E7/E8 → `packages/infra/test/agent-access.test.js` AA5/AA6
@@ -116,7 +123,11 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - `packages/infra/src/infra/agents/agent-registry.js` — createAgentRegistry
 - `packages/infra/src/infra/sessions/session.js` — Session 생성자 (agentId 필수 검증)
 - `packages/server/src/server/session-api.js` — 진입점 #1 (NEW_SESSION/CONTINUE_SESSION), agents/{agentName}/sessions/{sid}/ 경로 생성
-- `packages/server/src/server/a2a-router.js` — 진입점 #2 (DELEGATE, stub auth)
+- `packages/server/src/server/a2a-router.js` — 진입점 #2 (DELEGATE, Bearer JWT 검증)
+- `packages/infra/src/infra/auth/token.js` — `createTokenService`: `signA2aToken` / `verifyA2aToken` (type='a2a' 분리)
+- `packages/infra/src/infra/auth/policy.js` — `AUTH.A2A_TOKEN_EXPIRY_S` (현재 60s)
+- `packages/infra/src/infra/agents/a2a-protocol.js` — `JsonRpcErrorCode.AUTH_INVALID = -32002`
+- `packages/infra/src/infra/agents/a2a-client.js` — `sendTask(..., { callerToken })`: callerToken 있으면 Bearer 헤더 자동 첨부
 - `packages/server/src/server/ws-handler.js` — 진입점 #3 (CONTINUE_SESSION)
 - `packages/server/src/server/scheduler-factory.js` — 진입점 #4 (SCHEDULED_RUN)
 - `packages/infra/src/interpreter/delegate.js` — 진입점 #5 (DELEGATE)
@@ -144,3 +155,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-26: KG-15 resolved — feature/cedar-governance-v2. admin singleton session 강제 구현 (옵션 a: takeover 제거, 활성 세션 존재 시 신규 거부). E17 callback 시그니처 갱신, 테스트 커버리지 E17 추가.
 - 2026-04-26: KG-20 resolved — INV-AGENT-ID-VALIDATION 정적 검사 추가 (5 사이트 정적 grep). 기존 단위 테스트 (SD11~13, RDT1~9) 는 stale 했던 ⚠️ 표기 제거하며 매핑 정리.
 - 2026-04-26: KG-21 resolved — INV-DELEGATE-ORDER 정적 검사 추가. delegate.js 의 resolveDelegateTarget/canAccessAgent 호출 순서를 라인 번호 비교로 강제. 후속 두 옵션 (마커 / spy) 은 침습적이라 미적용 — 정적 grep 으로 회귀 방어 충분.
+- 2026-04-26: KG-17 resolved — feature/cedar-governance-v2. A2A 라우터 caller 인증을 `X-Presence-Caller` 헤더 stub 에서 JWT Bearer 서명 검증으로 교체. `signA2aToken` / `verifyA2aToken` (type='a2a' 분리) 추가. `AUTH.A2A_TOKEN_EXPIRY_S = 60`. `AUTH_INVALID(-32002)` 에러 코드 추가. I13 불변식 신규 등록. 테스트 커버리지 A2A1~A2A4 / AI10 / AI11 추가. 관련 코드에 token.js / policy.js / a2a-protocol.js / a2a-client.js 추가.

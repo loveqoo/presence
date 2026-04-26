@@ -26,6 +26,7 @@ const sessionInterpreterR =
       a2aQueueStore: env.a2aQueueStore,
       sessionManager: env.sessionManager,
       logger: env.logger,
+      a2aSigner: env.a2aSigner,
     }),
     prodInterpreterR,
   ).chain(prod => Reader.asks(({ state, logger }) => {

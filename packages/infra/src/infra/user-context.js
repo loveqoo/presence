@@ -55,6 +55,9 @@ class UserContext {
     }
     const userContext = new UserContext()
     userContext.evaluator = evaluator
+    // KG-17 — Op.Delegate remote 경로가 caller token 첨부 시 사용. server 부트가
+    // tokenService.signA2aToken 을 주입. 부재 시 callerToken=null (legacy / 테스트).
+    userContext.a2aSigner = opts.a2aSigner ?? null
 
     // --- Config + logger ---
     // configOverride 는 plain object 가능 → Config 인스턴스 보장

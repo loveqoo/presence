@@ -25,6 +25,7 @@ const JsonRpcErrorCode = Object.freeze({
   // Presence A2A 전용 (server-defined 범위 -32000 ~ -32099)
   AUTH_MISSING: -32000,
   ACCESS_DENIED: -32001,
+  AUTH_INVALID: -32002,
 })
 
 const JsonRpc = {

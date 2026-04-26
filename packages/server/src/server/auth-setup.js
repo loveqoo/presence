@@ -50,6 +50,7 @@ const createAuthSetup = (opts = {}) => {
     authMiddleware: httpAuth.authMiddleware(), // mount at /api
     protectedRouter,           // mount at /api/auth — after authMiddleware
     wsAuth,
+    tokenService,              // KG-17: A2A router / delegate interpreter 가 signA2aToken/verifyA2aToken 사용
   }
 }
 

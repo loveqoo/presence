@@ -740,6 +740,37 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - 후속의 두 옵션 (`ResolvedAgentId.__resolved` 마커 / resolver 진입 spy) 은 침습적 — 정적 grep 으로 회귀 방어 충분. 동적 spy 보강은 KG-18 가 이미 DELEGATE intent 의 agentId 자취를 캡처.
 
+## Phase O: KG-17 A2A JWT Bearer 인증 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. A2A 라우터의 caller 인증을 stub (`X-Presence-Caller` 헤더) → JWT Bearer 토큰 서명 검증으로 교체. agent-identity.md I4 의 5 진입점 중 #2 (HTTP `/a2a/*`) 의 인증 미완성을 해소.
+
+### 변경
+
+- `packages/infra/src/infra/auth/policy.js` — `AUTH.A2A_TOKEN_EXPIRY_S = 60`. self-A2A scope (같은 머신 / 같은 secret) 에서 클럭 드리프트 무시 가능, 짧은 만료로 충분.
+- `packages/infra/src/infra/auth/token.js` — `createTokenService` 에 `signA2aToken(sub)` / `verifyA2aToken(token)` 추가. 기존 `verify` 헬퍼 (HS256 + exp/iss/aud) 재사용. payload 에 `type: 'a2a'` 박아서 access/refresh 토큰과 분리 — `verifyA2aToken` 은 `payload.type !== 'a2a'` 일 때 `Either.Left('not an a2a token')`.
+- `packages/infra/src/infra/agents/a2a-protocol.js` — `JsonRpcErrorCode.AUTH_INVALID = -32002` 추가 (기존 AUTH_MISSING -32000, ACCESS_DENIED -32001 와 정렬).
+- `packages/infra/src/infra/agents/a2a-client.js` — `sendTask(target, endpoint, taskText, { callerToken })` 시그니처. callerToken 있으면 `Authorization: Bearer ${callerToken}` 자동 첨부.
+- `packages/server/src/server/a2a-router.js` — `mountInvokeRoute` 가 Bearer 토큰 파싱 → `tokenService.verifyA2aToken` (서명/만료/audience/type) → `payload.sub` 를 caller 로 추출 → `canAccessAgent({ jwtSub: caller, intent: DELEGATE })`. 헤더 누락 → 401 AUTH_MISSING. 검증 실패 → 401 AUTH_INVALID. 라우터 부팅 시 `verifyA2aToken` 부재 → throw (fail-closed).
+- `packages/server/src/server/index.js` — boot 순서 재배치: `createAuthSetup` 가 `UserContext.create` 보다 먼저 실행 (a2aSigner 주입). `auth.tokenService.signA2aToken` 을 UserContext 에 주입. `createA2aRouter` 호출에 `tokenService` 인자 전달.
+- `packages/server/src/server/auth-setup.js` — return shape 에 `tokenService` 노출.
+- `packages/server/src/server/user-context-manager.js` — constructor `tokenService` 수용. `getOrCreate` 가 lazy 부트 시 `a2aSigner = (sub) => tokenService.signA2aToken(sub)` 를 새 UserContext 에 주입.
+- `packages/infra/src/infra/user-context.js` — `userContext.a2aSigner = opts.a2aSigner ?? null`.
+- `packages/infra/src/interpreter/delegate.js` — Reader env 에 `a2aSigner` + `currentUserId` 추가. `runRemote` 가 `a2aSigner(currentUserId)` 로 caller 토큰 발급 → `a2a.sendTask(..., { callerToken })` 첨부.
+- `packages/infra/src/interpreter/prod.js` + `session-interpreter.js` + `ephemeral-inits.js` — Reader env 에 a2aSigner 전파 (DI 체인).
+- 테스트 A2A1~A2A4 (`auth-token.test.js`): sign/verify 정상 + access 토큰 misuse 거부 + verifyAccessToken 의 type 검사 부재 명시 + malformed.
+- 테스트 AI1~AI11 (`a2a-invoke.test.js`): 기존 8 케이스 모두 `'x-presence-caller'` → `Authorization: Bearer ${a2aToken(caller)}` 로 교체. AI2 (헤더 누락 → AUTH_MISSING). AI10 (위조 서명 → AUTH_INVALID). AI11 (access 토큰 오용 → 'not an a2a token').
+
+### 미적용
+
+- `verifyAccessToken` 의 type 검사 미강제 — A2A 토큰을 access 경로로 우회 사용은 별도 보호 (auth middleware 의 roles/mustChangePassword 검증) 에 의존. 향후 강화 옵션. A2A3 테스트로 명시.
+- 멀티 머신 간 검증 (peer key registry / mTLS) 은 Phase 2. 현재 self-A2A scope (같은 머신 = 같은 secret) 만 작동.
+
+### 핵심 효과
+
+- A2A 라우터 caller identity 가 stub 헤더에서 위조 불가능한 JWT 서명 검증으로 격상. agent-identity.md I4 5 진입점 중 #2 의 stub 결함 해소.
+- access/refresh/A2A 세 토큰 type 의 명시적 분리로 토큰 우회 차단 (type='a2a' 가 아닌 토큰의 A2A 라우터 호출 거부).
+- 짧은 만료 (60s) 로 토큰 유출 시 영향 최소화.
+
 ## Phase N: KG-22 i18n EN 키 일괄 보강 (2026-04-26)
 
 `feature/cedar-governance-v2` 브랜치 후속. ko.json 223 키 / en.json 132 키였던 91 키 누락을 옵션 (a) (일괄 영어 번역 추가) 로 해소. locale=en 사용자가 동적 humanize 경로에서 받던 한국어 잔재 / raw key 표시 제거.

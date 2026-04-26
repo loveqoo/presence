@@ -140,10 +140,21 @@ class PresenceServer {
       return null
     })
 
+    // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제.
+    // KG-17: tokenService 가 UserContext (a2aSigner) / a2a-router (verify) 양쪽에서 사용되므로
+    // UserContext.create 전에 미리 부팅.
+    const auth = createAuthSetup({
+      onPasswordChanged: (username) => {
+        if (username === ADMIN_USERNAME) deleteInitialPasswordFile(presenceDir)
+      },
+    })
+    this.#authEnabled = true
+
     this.#userContext = await UserContext.create(config, {
       username: this.#username,
       memory: this.#memory,
       evaluator: this.#evaluator,
+      a2aSigner: (sub) => auth.tokenService.signA2aToken(sub),
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },
@@ -175,14 +186,11 @@ class PresenceServer {
       recoverOnStart: this.#userContext.config?.a2a?.recoverOnStart !== false,
     })
 
-    // Auth + UserContextManager — admin 비밀번호 변경 성공 시 initial-password 파일 삭제
-    const auth = createAuthSetup({
-      onPasswordChanged: (username) => {
-        if (username === ADMIN_USERNAME) deleteInitialPasswordFile(presenceDir)
-      },
+    // UserContextManager — auth 는 위에서 이미 부팅됨 (KG-17 순서 변경).
+    this.#userContextManager = new UserContextManager({
+      bridge: this.#bridge, serverConfig: config, memory: this.#memory,
+      evaluator: this.#evaluator, tokenService: auth.tokenService,
     })
-    this.#authEnabled = true
-    this.#userContextManager = new UserContextManager({ bridge: this.#bridge, serverConfig: config, memory: this.#memory, evaluator: this.#evaluator })
     const getUserContextManager = () => this.#userContextManager
 
     // Express 라우트 마운트 (순서 중요)
@@ -243,11 +251,12 @@ class PresenceServer {
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
     }))
     // 8. /a2a — docs/design/agent-identity-model.md §11. enabled=true 에서만 마운트.
-    // JSON-RPC 메시지 처리 + A2A JWT 는 authz phase — 현재 discovery 엔드포인트만.
+    // KG-17 resolved: POST 라우트가 Authorization Bearer A2A JWT 검증.
     if (this.#userContext.config.a2a?.enabled) {
       app.use('/a2a', createA2aRouter({
         userContext: this.#userContext,
         config: this.#userContext.config,
+        tokenService: auth.tokenService,
       }))
     }
     // 9. Static web UI (catch-all — 반드시 마지막)
