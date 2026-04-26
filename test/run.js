@@ -127,6 +127,7 @@ const tests = [
   'test/regression/fsm-single-writer.test.js',
   'test/regression/agent-access-enforcement.test.js',
   'test/regression/agent-id-validation-enforcement.test.js',
+  'test/regression/delegate-order-enforcement.test.js',
   // applyFinalState ordering + turn chaining
   'packages/core/test/core/apply-final-state.test.js',
   // Turn concurrency

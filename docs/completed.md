@@ -717,3 +717,25 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 ### 미적용
 
 - 동적 spy 강화 (validateAgentId 호출 자취 트레이스) — 정적 grep + 단위 테스트 조합으로 회귀 방어 충분. spy 추가는 후속 가치 검토 시.
+
+## Phase M: KG-21 Parser→Resolver→Authz 순서 정적 강제 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. KG-21 의 우려 ("resolver 우회 raw target 이 canAccessAgent 에 직접 들어와도 탐지 불가") 를 KG-18 / KG-20 패턴 미러로 해소.
+
+### 실사 결과
+
+`packages/infra/src/interpreter/delegate.js` 가 정확히 Parser→Resolver→Authz 순서로 호출:
+- line 18: `resolveDelegateTarget(f.target, { currentUserId })` (Resolver)
+- line 27: `canAccessAgent({ jwtSub, agentId, intent: DELEGATE, ... })` (Authz)
+
+부족했던 것: **호출 순서가 회귀로 뒤바뀌거나 resolveDelegateTarget 이 누락되어도 catch 못 함**.
+
+### 변경
+
+- `test/regression/delegate-order-enforcement.test.js` 신규 — INV-DELEGATE-ORDER 정적 검사. (1) resolveDelegateTarget / canAccessAgent import 존재, (2) 두 함수 호출 존재, (3) resolveDelegateTarget 첫 호출 라인 < canAccessAgent 첫 호출 라인. 주석 라인은 strip 하여 false-positive 차단.
+- `test/run.js` — Spec invariant static checks 섹션에 등록.
+- `agent-identity.md` — I10 커버리지에 정적 검사 매핑 추가, KG-21 resolved.
+
+### 미적용
+
+- 후속의 두 옵션 (`ResolvedAgentId.__resolved` 마커 / resolver 진입 spy) 은 침습적 — 정적 grep 으로 회귀 방어 충분. 동적 spy 보강은 KG-18 가 이미 DELEGATE intent 의 agentId 자취를 캡처.

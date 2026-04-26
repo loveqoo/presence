@@ -78,7 +78,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - **KG-20** (REGISTRY: KG-20): ~~AgentId branded type 런타임 강제 부재. 설계 (`docs/design/agent-identity-model.md` §14.2): JS 환경에서 `string & { __brand }` 타입 시뮬레이션은 컴파일 타임 방어이며, 실제 `makeAgentId` 팩토리 호출 discipline 강제는 통합 테스트에 의존. 그러나 `validateAgentId` 미경유 raw 문자열을 `Session({ agentId })` 등에 직접 주입하는 경로의 회귀 검증 부재. 영향: M3 다중 agent 도입 시 raw `${user}/${name}` 조립 코드가 늘어나면 검증 우회 위험. 후속: KG-18 spy infra 패턴 확장 (validateAgentId 호출 trace) 또는 Session 생성자가 매번 `validateAgentId.either(opts.agentId)` 검증.~~ resolved by feature/cedar-governance-v2 (2026-04-26). 후속의 두 옵션 중 후자(Session 생성자 항상 검증)는 이미 `assertValidAgentId(opts.agentId)` 로 시행 중임을 실사로 확인 — 누락된 건 회귀 방어. KG-18 의 INV-AGENT-ACCESS 정적 grep 패턴을 미러한 INV-AGENT-ID-VALIDATION 정적 검사 (`test/regression/agent-id-validation-enforcement.test.js`) 도입으로 5 핵심 사이트 (Session 생성자, AgentRegistry.register, resolveDelegateTarget, Op.SendA2aMessage 인터프리터, A2A self card) 의 validateAgentId/assertValidAgentId 호출 라인 회귀를 정적으로 차단. 동적 spy 강화는 미적용 — 정적 grep + 단위 테스트 (SD11~13, RDT1~9) 조합으로 회귀 검증 부재 해소.
 
-- **KG-21** (REGISTRY: KG-21): Parser→Resolver→Authz 순서 런타임 검증 부재. 설계 (`docs/design/agent-identity-model.md` §14.2 item 2): `UnresolvedTarget` / `ResolvedAgentId` shape 분리로 컴파일 타임 방어 (TypeScript 였다면). JS 환경에선 `resolveDelegateTarget` 결과 (`ResolvedAgentId`) 를 거치지 않고 raw target 을 `canAccessAgent` 에 직접 넣는 경로가 회귀로 들어와도 탐지 불가. 영향: I10 (Parser→Resolver→Authz 순서) 의 런타임 보장 없음. KG-18 spy 가 `agentId` 캡처는 하지만 "이 값이 resolver 를 거쳤는가" 는 모름. 후속: ResolvedAgentId 에 `__resolved: true` 마커 추가 + `canAccessAgent` 가 마커 없는 입력 거부, 또는 resolver 진입 spy 와 authz spy 의 호출 순서 검증.
+- **KG-21** (REGISTRY: KG-21): ~~Parser→Resolver→Authz 순서 런타임 검증 부재. 설계 (`docs/design/agent-identity-model.md` §14.2 item 2): `UnresolvedTarget` / `ResolvedAgentId` shape 분리로 컴파일 타임 방어 (TypeScript 였다면). JS 환경에선 `resolveDelegateTarget` 결과 (`ResolvedAgentId`) 를 거치지 않고 raw target 을 `canAccessAgent` 에 직접 넣는 경로가 회귀로 들어와도 탐지 불가. 영향: I10 (Parser→Resolver→Authz 순서) 의 런타임 보장 없음. KG-18 spy 가 `agentId` 캡처는 하지만 "이 값이 resolver 를 거쳤는가" 는 모름. 후속: ResolvedAgentId 에 `__resolved: true` 마커 추가 + `canAccessAgent` 가 마커 없는 입력 거부, 또는 resolver 진입 spy 와 authz spy 의 호출 순서 검증.~~ resolved by feature/cedar-governance-v2 (2026-04-26). 후속의 두 옵션 (ResolvedAgentId 마커 / 호출 순서 spy) 모두 침습적 — 실사 결과 `delegate.js` 가 이미 Parser→Resolver→Authz 순서로 호출하고 있음 (line 18 resolveDelegateTarget, line 27 canAccessAgent). 부족했던 건 회귀 방어. KG-18 INV-AGENT-ACCESS / KG-20 INV-AGENT-ID-VALIDATION 패턴을 미러한 INV-DELEGATE-ORDER 정적 검사 (`test/regression/delegate-order-enforcement.test.js`) 도입으로 호출 라인 순서 회귀를 정적으로 차단. 동적 spy 보강은 미적용 — KG-18 spy 가 이미 DELEGATE intent 의 agentId 자취를 캡처.
 
 ---
 
@@ -94,7 +94,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - I6 → `packages/infra/test/agent-governance.test.js` (runAdminBootstrap 통합)
 - I7 → `packages/infra/test/agent-governance.test.js` GV4/GV5/GV6
 - I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
-- I10 → `packages/infra/test/resolve-delegate-target.test.js` RDT1~RDT9 (Parser→Resolver→Authz §3.6 전체 케이스)
+- I10 → `packages/infra/test/resolve-delegate-target.test.js` RDT1~RDT9 (Parser→Resolver→Authz §3.6 전체 케이스) + `test/regression/delegate-order-enforcement.test.js` (Op.Delegate 인터프리터 호출 순서 정적 검사)
 - I11 → (a2a.enabled=false 라우트 미등록 테스트 없음) ⚠️
 - I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
 - E6 → `packages/infra/test/agent-access.test.js` AA3
@@ -143,3 +143,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-26: KG-16 resolved — feature/cedar-governance-v2 (2026-04-26). M3 primaryAgentId 적용 완료. Config.Schema 에 `primaryAgentId` 추가로 admin 의 'admin/manager' 가 런타임에 보존됨. `resolvePrimaryAgent` 헬퍼 신규 (core/agent-id.js). 4 진입점이 헬퍼 경유로 통일. I12 텍스트 개정, 테스트 커버리지 PA1~PA6 / AE18 추가.
 - 2026-04-26: KG-15 resolved — feature/cedar-governance-v2. admin singleton session 강제 구현 (옵션 a: takeover 제거, 활성 세션 존재 시 신규 거부). E17 callback 시그니처 갱신, 테스트 커버리지 E17 추가.
 - 2026-04-26: KG-20 resolved — INV-AGENT-ID-VALIDATION 정적 검사 추가 (5 사이트 정적 grep). 기존 단위 테스트 (SD11~13, RDT1~9) 는 stale 했던 ⚠️ 표기 제거하며 매핑 정리.
+- 2026-04-26: KG-21 resolved — INV-DELEGATE-ORDER 정적 검사 추가. delegate.js 의 resolveDelegateTarget/canAccessAgent 호출 순서를 라인 번호 비교로 강제. 후속 두 옵션 (마커 / spy) 은 침습적이라 미적용 — 정적 grep 으로 회귀 방어 충분.
