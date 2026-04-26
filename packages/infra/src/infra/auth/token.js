@@ -139,11 +139,13 @@ const createTokenService = ({ basePath } = {}) => {
   const secret = ensureSecret({ basePath })
   const audience = AUTH.AUDIENCE
 
-  const signAccessToken = ({ sub, roles, mustChangePassword }) => {
+  const signAccessToken = (opts) => {
     const now = Math.floor(Date.now() / 1000)
     return sign({
-      sub, roles,
-      mustChangePassword: mustChangePassword || false,
+      sub: opts.sub,
+      roles: opts.roles,
+      type: 'access',
+      mustChangePassword: opts.mustChangePassword || false,
       iss: AUTH.ISSUER,
       aud: audience,
       iat: now,
@@ -166,8 +168,16 @@ const createTokenService = ({ basePath } = {}) => {
     return { token, jti }
   }
 
+  // 세 verify 모두 동일 패턴 — payload.type 분리로 토큰 우회 사용 차단.
   // Either.Right(payload) | Either.Left(error)
-  const verifyAccessToken = (token) => verify(token, secret, { audience })
+  const verifyAccessToken = (token) =>
+    Either.fold(
+      err => Either.Left(err),
+      payload => payload.type !== 'access'
+        ? Either.Left('not an access token')
+        : Either.Right(payload),
+      verify(token, secret, { audience }),
+    )
 
   // Either.Right(payload) | Either.Left(error)
   const verifyRefreshToken = (token) =>

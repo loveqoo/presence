@@ -40,8 +40,12 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - I11. **A2A 비활성 기본**: `config.a2a.enabled` 기본 `false`. false이면 `/a2a/*` 라우트 미등록, self card 미생성. `true`이면 `publicUrl` 필수 — 없으면 라우터 생성 실패.
 
-- I13. **A2A 토큰 type 분리 + Bearer 강제 + fail-closed 부팅** (KG-17 resolved):
-  - `signA2aToken(sub)` 은 payload `type: 'a2a'` 를 포함. `verifyA2aToken` 은 `type !== 'a2a'` 이면 `Either.Left('not an a2a token')` 반환 — access/refresh 토큰의 A2A 경로 우회를 차단.
+- I13. **세 토큰 type 완전 분리 + Bearer 강제 + fail-closed 부팅** (KG-17 resolved, 2026-04-26 강화):
+  - 세 토큰 type 이 sign/verify 양쪽에서 명시 강제됨:
+    - `signAccessToken` payload `type: 'access'` 포함. `verifyAccessToken` 은 `type !== 'access'` 이면 `Either.Left('not an access token')` 반환.
+    - `signRefreshToken` payload `type: 'refresh'` 포함. `verifyRefreshToken` 은 `type !== 'refresh'` 이면 `Either.Left('not a refresh token')` 반환.
+    - `signA2aToken(sub)` payload `type: 'a2a'` 포함. `verifyA2aToken` 은 `type !== 'a2a'` 이면 `Either.Left('not an a2a token')` 반환.
+  - 토큰 교차 사용(misuse) 은 세 verify 함수 모두에서 거부됨 — 어느 토큰도 다른 경로로 우회 불가.
   - POST `/a2a/*` 는 `Authorization: Bearer <a2a-jwt>` 헤더 필수. 헤더 없으면 `AUTH_MISSING(-32000)`, 검증 실패이면 `AUTH_INVALID(-32002)` 반환.
   - `createA2aRouter` 부팅 시 `tokenService.verifyA2aToken` 함수 부재이면 throw — 의존성 누락 fail-closed.
   - scope: self-A2A (같은 머신 = 같은 secret). 멀티 머신 간 검증 (peer key registry / mTLS) 은 Phase 2.
@@ -102,7 +106,14 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
 - I10 → `packages/infra/test/resolve-delegate-target.test.js` RDT1~RDT9 (Parser→Resolver→Authz §3.6 전체 케이스) + `test/regression/delegate-order-enforcement.test.js` (Op.Delegate 인터프리터 호출 순서 정적 검사)
 - I11 → `packages/server/test/a2a-discovery.test.js` AD4a (`GET /a2a/.well-known/agents` — agents 배열 JSON 미반환) / AD4b (`GET /a2a/admin/manager/card` — card shape 미반환) / AD4c (`POST /a2a/admin/manager` — JSON-RPC envelope 미반환, router 핸들러 미실행). 세 케이스 모두 negation 검증으로 라우트 미등록 확인. enabled=true + publicUrl=null 부팅 거부는 E16 커버 (`packages/server/test/a2a-boot-guard.test.js`)
-- I13 → `packages/infra/test/auth-token.test.js` A2A1~A2A4 (sign/verify 정상 + 위조 거부 + access 토큰 misuse 거부 + malformed 거부), `packages/server/test/a2a-invoke.test.js` AI2 (AUTH_MISSING), AI10 (위조 서명 → AUTH_INVALID -32002), AI11 (access 토큰 오용 → 'not an a2a token')
+- I13 → `packages/infra/test/auth-token.test.js`:
+  - A2A1 (sign + verify 정상, payload.type='a2a' 확인)
+  - A2A2 (access 토큰 → verifyA2aToken Left 'not an a2a token')
+  - A2A3 (A2A 토큰 → verifyAccessToken Left 'not an access token' — 이전 Right에서 의미 반전)
+  - A2A4 (malformed/empty/null → Left)
+  - A2A5 (refresh 토큰 → verifyAccessToken Left 'not an access token' — 신규)
+  - A2A6 (access 토큰 payload.type='access' 확인 — 신규)
+  - `packages/server/test/a2a-invoke.test.js` AI2 (AUTH_MISSING), AI10 (위조 서명 → AUTH_INVALID -32002), AI11 (access 토큰 오용 → 'not an a2a token')
 - I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
 - E6 → `packages/infra/test/agent-access.test.js` AA3
 - E7/E8 → `packages/infra/test/agent-access.test.js` AA5/AA6
@@ -157,3 +168,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-26: KG-21 resolved — INV-DELEGATE-ORDER 정적 검사 추가. delegate.js 의 resolveDelegateTarget/canAccessAgent 호출 순서를 라인 번호 비교로 강제. 후속 두 옵션 (마커 / spy) 은 침습적이라 미적용 — 정적 grep 으로 회귀 방어 충분.
 - 2026-04-26: KG-17 resolved — feature/cedar-governance-v2. A2A 라우터 caller 인증을 `X-Presence-Caller` 헤더 stub 에서 JWT Bearer 서명 검증으로 교체. `signA2aToken` / `verifyA2aToken` (type='a2a' 분리) 추가. `AUTH.A2A_TOKEN_EXPIRY_S = 60`. `AUTH_INVALID(-32002)` 에러 코드 추가. I13 불변식 신규 등록. 테스트 커버리지 A2A1~A2A4 / AI10 / AI11 추가. 관련 코드에 token.js / policy.js / a2a-protocol.js / a2a-client.js 추가.
 - 2026-04-26: I11 테스트 매핑 갱신 — AD4 를 AD4a/b/c 로 확장하여 세 라우트 미등록 (agents 목록, card, JSON-RPC invoke) 을 모두 negation 검증으로 확인. ⚠️ 미커버 표기 해소.
+- 2026-04-26: I13 강화 — verifyAccessToken 도 type 분리 검사 적용. 세 토큰 type 모두 명시 분리 (access/refresh/a2a 모두 sign + verify 양쪽 강제). 테스트 A2A3 의미 반전 (Right → Left) + A2A5/A2A6 신규 추가 (총 36 passed). 배포 영향: 기존 access token 1회 401 후 자동 refresh.

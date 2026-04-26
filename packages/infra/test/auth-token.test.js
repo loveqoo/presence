@@ -161,16 +161,37 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // A2A3. A2A token 을 verifyAccessToken 으로 검증 → 통과 (audience 같음).
-  //       *type='a2a'* 분리는 verifyA2aToken 에서만 강제 — verifyAccessToken 은 type 검사 안 함.
-  //       이는 access path 보호가 access middleware 의 mustChangePassword 등 별도 검증이라
-  //       단독으로 보안 의미 없음. 그러나 향후 강화 시 verifyAccessToken 에도 type 분리 추가 가능.
+  // A2A3. A2A token 을 verifyAccessToken 으로 검증 → 'not an access token' (type 분리 강화).
+  //       이전엔 verifyAccessToken 이 type 검사를 안 해서 A2A 토큰이 access 경로로 우회 가능했음.
+  //       이번에 verifyAccessToken 도 payload.type === 'access' 검사 추가 — 세 토큰 type 분리 완전.
   {
     const dir = createTmpDir()
     const service = createTokenService({ basePath: dir })
     const a2aToken = service.signA2aToken('bob')
     const result = service.verifyAccessToken(a2aToken)
-    assert(isRight(result), 'A2A3: A2A token 도 verifyAccessToken 으론 Right (audience 같음, type 검사 안 함)')
+    assert(isLeft(result), 'A2A3: A2A token → verifyAccessToken Left (type=a2a 거부)')
+    assert(getLeft(result) === 'not an access token', 'A2A3: type 분리 메시지')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A5. refresh token 을 verifyAccessToken 으로 검증 → 'not an access token'
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const { token: refreshToken } = service.signRefreshToken({ sub: 'carol', tokenVersion: 0 })
+    const result = service.verifyAccessToken(refreshToken)
+    assert(isLeft(result), 'A2A5: refresh token → verifyAccessToken Left')
+    assert(getLeft(result) === 'not an access token', 'A2A5: type 분리 메시지')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // A2A6. access token payload 에 type='access' 박혀있는지 확인
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const accessToken = service.signAccessToken({ sub: 'dave', roles: ['user'] })
+    const payload = getRight(service.verifyAccessToken(accessToken))
+    assert(payload && payload.type === 'access', 'A2A6: access token payload 에 type=access')
     rmSync(dir, { recursive: true, force: true })
   }
 
