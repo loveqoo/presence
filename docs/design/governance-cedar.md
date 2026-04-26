@@ -1,6 +1,6 @@
 # Governance Cedar 연결 — 설계 결정 필요 과제
 
-**Status**: 2026-04-25 v2.1 (codex single-round 리뷰 결함 3 건 흡수). §1.0 메타 결정 신설 (의미론 집중도 = 옵션 Y "최소"). §1.1~1.3 sub-결정은 Y 에서 자동 도출 (1.1-A / 1.2-B / 1.3-B). §2 seed 를 minimal 로 단순화. §3~§4 구현 범위 축소. v1 (2026-04-23) 의 무한 리뷰 원인 — 메타 결정이 implicit 한 채 sub-결정 3 개 동시 토론 — 을 메타 결정 명문화로 차단.
+**Status**: 2026-04-26 v2.2 (Phase 구현 완료, GC1 + GC3 머지 대기). 이전 v2.1 (2026-04-25): codex single-round 리뷰 결함 3 건 흡수. §1.0 메타 결정 신설 (의미론 집중도 = 옵션 Y "최소"). §1.1~1.3 sub-결정은 Y 에서 자동 도출 (1.1-A / 1.2-B / 1.3-B). §2 seed 를 minimal 로 단순화. §3~§4 구현 범위 축소. v1 (2026-04-23) 의 무한 리뷰 원인 — 메타 결정이 implicit 한 채 sub-결정 3 개 동시 토론 — 을 메타 결정 명문화로 차단.
 
 **Owner**: Presence core.
 
@@ -242,6 +242,7 @@ action "create_agent" appliesTo {
 
 ## Changelog
 
+- **v2.2 (2026-04-26)**: Phase 구현 완료. `feature/cedar-governance-v2` 브랜치 14 커밋 (디자인 4 + 플랜 3 + 인프라 5 + 의미론 통합 2). GC1 (`cce021b`) `submitUserAgent` 에 Cedar enforcement point + STATUS.DENIED + cli.js cmdAgentAdd Cedar boot. GC3 (`b114399`) `cmdAgentApprove` manual_approve audit (Cedar evaluate 호출 없음, §1.4 admin override 정합). GV-Y1.1~1.8 (8 케이스 allow), GV-Y2 (호출 횟수 정합), GV-Y4 (mock deny → 코드 분기 미도달), GV-Y5 (evaluator invariant) 자동화 완료. GV-Y3 는 기존 GV1~GV15 가 mock evaluator 주입 후 그대로 통과 — 의미론 회귀 0건. AC4b (cli.js manual_approve audit JSONL) 추가. 전체 4270 passed.
 - **v2.1 (2026-04-25)**: codex single-round 리뷰 결함 3 건 (a) 흡수.
   - Q1: §1.0 Y 단점에 "Cedar evaluate latency" 추가, §7 위험 항목과 정합. §3.3 제목/본문 정합화 — 제목을 "enforcement point 확정 phase" 로 갱신, 본문에 *이 phase 산출물 자체* 의 즉시 검증 가치 (Cedar 호출 / audit 로그 / 의미론 회귀 통과) 3 항목 명시. 마이그레이션 비용 추정 근거 (grep 결과) 추가.
   - Q3: §3.1 변경 파일 경로를 grep 검증된 실제 경로로 정정 (`packages/infra/src/infra/authz/agent-governance.js`, `packages/infra/test/agent-governance.test.js`). Cedar 인프라 산출물 (`00-base.cedar`, `schema.cedarschema`) 은 "선결조건 §6 의 별도 플랜에서 생성, 정확한 경로는 그 플랜에서 확정" 명시. §1.2 라인 인용 (GV6) 도 실제 경로로 갱신.

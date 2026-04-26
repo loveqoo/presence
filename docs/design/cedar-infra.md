@@ -1,6 +1,6 @@
 # Cedar 인프라 — 도입의 최소 표면 결정
 
-**Status**: 2026-04-25 v1.1 (codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록). Y' (최소) 메타 결정 확정. governance-cedar.md v2.1 의 §6 선결조건 충족 목적.
+**Status**: 2026-04-26 v1.2 (Y' 인프라 구현 완료, governance v2.2 의미론 통합과 머지 대기). 이전 v1.1 (2026-04-25): codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록.
 
 **Owner**: Presence core.
 
@@ -304,6 +304,7 @@ const evaluator = createEvaluator({ cedarInstance, auditWriter })
 
 ## Changelog
 
+- **v1.2 (2026-04-26)**: Y' 인프라 구현 완료. `feature/cedar-governance-v2` 브랜치 5 커밋 (270a38c~52ef096). evaluator (Reader.asks) + boot (3중 parse fail-closed) + audit (JSONL 0600) + paths.js + bootCedarSubsystem + PresenceServer/UserContext invariant 주입. CI-Y1/Y2 (CE1~CE3), CI-Y3 (SC-Y1a + CB1), CI-Y4 (CA1), CI-Y5 (CB2/CB3), CI-Y6 (CB4 — KG-24 호출 정합성은 governance phase 의 GV-Y1~Y4 가 담당), CI-Y7 (CE4) 자동화 완료. Pre-1 wasm 가용성 PASS (`@cedar-policy/cedar-wasm@4.10.0`, AWS 공식, sync API). 87 신규 assertions.
 - **v1.1 (2026-04-25)**: codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록.
   - Q1: §1.0 Y' 단점에 latency + audit 무한 증가 + Op wrapping 부재 추가 (§7 와 정합)
   - Q2: §1.4 entity 모델 출처를 a2a-authorization.md (CallerIdentity 정의) 로 정정. Y' phase 산출물 (LocalUser/User/create_agent) vs 후속 phase (LocalAgent/PeerAgent/추가 action) 분리 명시 — §2.3 schema 와 정합. 1.5 Op wrapping 부재는 KG-23 으로 등록 (b 분류)

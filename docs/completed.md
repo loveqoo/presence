@@ -595,3 +595,55 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - `@mozilla/readability` ^0.6.0 (infra)
 - `jsdom` ^29.0.2 (infra)
+
+## Phase I: Cedar 권한 엔진 도입 — 옵션 Y' 최소 + governance v2.2 (2026-04-26)
+
+설계 + 플랜 + 구현이 모두 `feature/cedar-governance-v2` 브랜치에서 atomic 묶음. v1 governance-cedar 의 무한 plan-reviewer 회귀를 메타 결정 명문화 (governance §1.0, cedar-infra §1.0) 로 사전 차단. KG-23 (Op ADT wrapping 부재) 만 명시적 KG 로 연기, KG-24 (호출 정합성) 는 phase 종료와 함께 resolved.
+
+### I-1. 디자인 — 메타 결정 분리
+
+- `governance-cedar.md` v2 → v2.1 → v2.2 — §1.0 메타 결정 (의미론 집중도 = Y "최소") 신설, sub-결정 §1.1~1.3 자동 도출
+- `cedar-infra.md` v1 → v1.1 → v1.2 — §1.0 메타 결정 (Y' "최소 인프라") 신설, sub-결정 §1.1~1.9 자동 도출
+- 두 문서 모두 codex single-round 리뷰 결함 흡수 후 박힘 (governance 3건, cedar-infra 7건 + KG-23)
+
+### I-2. 플랜 — Pre-1 가용성 + 5 커밋 + 2 회 plan-reviewer 흡수
+
+- `cedar-infra-y-prime.md` v1 → v1.2 → v1.3 — plan-reviewer round 1 (6건) + round 2 (4건 + KG-24) 흡수 + 실제 wasm API 의사코드 정정
+- Pre-1 PASS — `@cedar-policy/cedar-wasm@4.10.0` (AWS 공식, sync API, nodejs export, deps 0)
+
+### I-3. 인프라 5 커밋 (CI-Y1~Y7 + UC-Y1/Y2 + SC-Y1a/Y3)
+
+- 커밋 1 (`270a38c`) — wasm dep + `evaluator.js` (Reader.asks DI, stateless cedar.isAuthorized + answer.type 분기 + 런타임 fail-closed)
+- 커밋 2 (`e0918f6`) — `boot.js` (3중 parse fail-closed: checkParseSchema/PolicySet/validate) + `policies/00-base.cedar` minimal RBAC seed + `schema.cedarschema`
+- 커밋 3 (`b652155`) — `audit.js` JSONL append + 디렉토리 0700 + 파일 0600 자동 보정
+- 커밋 4a (`f001622`) — `paths.js` (import.meta.url) + `bootCedarSubsystem` public entry + `PresenceServer.#evaluator` 필드 + admin bootstrap 직후 부팅
+- 커밋 4b (`52ef096`) — `UserContext.create` + `UserContextManager` evaluator 필수 인자 (invariant), `test/lib/cedar-mock.js` helper 신규
+
+### I-4. 의미론 통합 2 커밋 (GV-Y1/Y2/Y4/Y5 + AC4b)
+
+- GC1 (`cce021b`) — `submitUserAgent` Cedar enforcement point + STATUS.DENIED + cli.js cmdAgentAdd Cedar boot 통합. GV-Y1.1~1.8 (8 케이스 allow), GV-Y2 (호출 횟수 정합, validate 실패 시 미호출), GV-Y4 (mock deny → 코드 분기 미도달), GV-Y5 (evaluator invariant)
+- GC3 (`b114399`) — cli.js `cmdAgentApprove` manual_approve audit (Cedar evaluate 호출 *없음*, 디자인 §1.4 admin override 정합) + `createSubsystemAuditWriter` helper
+
+### 검증 매트릭스 (옵션 Y' enforcement 완전성)
+
+| 항목 | 위치 | 검증 |
+|---|---|---|
+| CI-Y1/Y2 (RBAC allow) | `cedar-evaluator.test.js` CE1/CE2 | 인프라 |
+| CI-Y3 (boot 후 가용) | `server.test.js` SC-Y1a + `cedar-boot.test.js` CB1 | 인프라 |
+| CI-Y4 (audit JSONL) | `cedar-audit.test.js` CA1 | 인프라 |
+| CI-Y5 (boot fail-closed) | `cedar-boot.test.js` CB2/CB3 | 인프라 |
+| CI-Y6 (deny-path 정책 측) | `cedar-boot.test.js` CB4 | 인프라 |
+| CI-Y7 (런타임 fail-closed) | `cedar-evaluator.test.js` CE4 | 인프라 |
+| GV-Y1 (8 케이스 호출) | `agent-governance.test.js` GV-Y1.1~1.8 | 의미론 |
+| GV-Y2 (호출 횟수) | `agent-governance.test.js` GV-Y2 | 의미론 |
+| GV-Y3 (의미론 회귀) | `agent-governance.test.js` GV1~GV15 (mock evaluator) | 의미론 |
+| GV-Y4 (deny → 분기 미도달) | `agent-governance.test.js` GV-Y4 | 의미론 |
+| AC4b (manual_approve audit) | `agent-cli.test.js` AC4b | CLI |
+
+### 후속 KG
+
+- **KG-23** (low/infra, open): Cedar evaluate 가 Op ADT 로 wrapping 안 됨. Y' phase 호출처가 서비스 레이어 (LLM 경계 밖) 라 즉시 위험 0. LLM 이 직접 권한 조회를 트리거하는 시나리오 발생 시 Op 도입.
+
+### 주요 의존성 추가
+
+- `@cedar-policy/cedar-wasm` ^4.10.0 (infra) — AWS 공식, Apache-2.0, sync API
