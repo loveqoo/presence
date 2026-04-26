@@ -5,7 +5,7 @@ import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, c
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import { gunzipSync } from 'zlib'
-import { createAuditWriter, createAuditWriterR } from '@presence/infra/infra/authz/cedar/audit.js'
+import { createAuditWriter, createAuditWriterR, getAuditStatus, getAuditStatusR } from '@presence/infra/infra/authz/cedar/audit.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
 const createTmpDir = (label) => {
@@ -251,6 +251,63 @@ const run = () => {
     // throw 없이 진행되면 OK
     for (let i = 0; i < 5; i += 1) writer.append({ ...sampleEntry, n: i, padding: 'x'.repeat(150) })
     assert(existsSync(`${logPath}.1.gz`), 'CA13: logger 없어도 rotation 정상 작동')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA14 — getAuditStatus: 파일 부재 시 currentSize=0, backups=[]
+  {
+    const dir = createTmpDir('ca14')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    // 디렉토리도 없는 상태에서 호출 — throw 없이 0 반환
+    const status = getAuditStatus({ logPath })
+    assert(status.currentSize === 0, `CA14: 파일 부재 → currentSize=0 (got ${status.currentSize})`)
+    assert(status.backups.length === 0, `CA14: 백업 없음 (got ${status.backups.length})`)
+    assert(status.maxBytes === 10 * 1024 * 1024, 'CA14: 기본 maxBytes')
+    assert(status.maxBackups === 5, 'CA14: 기본 maxBackups')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA15 — getAuditStatus: 활성 로그 + rotation 후 백업 size 보고
+  {
+    const dir = createTmpDir('ca15')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 200, maxBackups: 3 })
+    // 회전 2 회 유도
+    for (let i = 0; i < 6; i += 1) writer.append({ ...sampleEntry, n: i, padding: 'x'.repeat(120) })
+
+    const status = getAuditStatus({ logPath, maxBytes: 200, maxBackups: 3 })
+    assert(status.logPath === logPath, 'CA15: logPath 보존')
+    assert(status.currentSize > 0, `CA15: currentSize > 0 (got ${status.currentSize})`)
+    assert(status.backups.length >= 1 && status.backups.length <= 3, `CA15: backups 1~3 (got ${status.backups.length})`)
+    for (const b of status.backups) {
+      assert(b.size > 0, `CA15: 백업 size > 0 (got ${b.size})`)
+      assert(b.path.endsWith('.gz'), `CA15: 백업 경로 .gz (got ${b.path})`)
+    }
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CA16 — getAuditStatus: logPath 빈문자열 → throw
+  {
+    let threw = false
+    try { getAuditStatus({ logPath: '' }) } catch (_) { threw = true }
+    assert(threw, 'CA16: logPath 빈문자열 → throw')
+
+    threw = false
+    try { getAuditStatus({}) } catch (_) { threw = true }
+    assert(threw, 'CA16: logPath 부재 → throw')
+  }
+
+  // CA17 — getAuditStatus Reader 브릿지 동치
+  {
+    const dir = createTmpDir('ca17')
+    const logPath = join(dir, 'logs', 'authz-audit.log')
+    const writer = createAuditWriter({ logPath, maxBytes: 200, maxBackups: 3 })
+    for (let i = 0; i < 4; i += 1) writer.append({ ...sampleEntry, n: i, padding: 'x'.repeat(120) })
+
+    const direct = getAuditStatus({ logPath, maxBytes: 200, maxBackups: 3 })
+    const viaReader = getAuditStatusR.run({ logPath, maxBytes: 200, maxBackups: 3 })
+    assert(direct.currentSize === viaReader.currentSize, 'CA17: currentSize 동치')
+    assert(direct.backups.length === viaReader.backups.length, 'CA17: backups 개수 동치')
     rmSync(dir, { recursive: true, force: true })
   }
 

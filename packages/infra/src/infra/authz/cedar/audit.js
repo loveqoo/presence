@@ -104,4 +104,28 @@ const createAuditWriterR = Reader.asks((env) => {
 
 const createAuditWriter = (deps) => createAuditWriterR.run(deps)
 
-export { createAuditWriter, createAuditWriterR, DEFAULT_MAX_BYTES, DEFAULT_MAX_BACKUPS }
+// FP-70 — 운영자 가시성. 현재 로그 size + 백업 개수 + 백업별 size 를 plain object 로.
+// 호출처 (CLI `audit-status`) 가 사람이 읽기 좋게 포맷.
+const getAuditStatusR = Reader.asks((env) => {
+  const { logPath, maxBytes, maxBackups } = env
+  if (typeof logPath !== 'string' || logPath.length === 0) {
+    throw new Error('getAuditStatus: logPath 부재')
+  }
+  const limitBytes = maxBytes ?? DEFAULT_MAX_BYTES
+  const limitBackups = maxBackups ?? DEFAULT_MAX_BACKUPS
+  const currentSize = existsSync(logPath) ? statSync(logPath).size : 0
+  const backups = []
+  for (let i = 1; i <= limitBackups; i += 1) {
+    const path = `${logPath}.${i}.gz`
+    if (existsSync(path)) backups.push({ path, size: statSync(path).size })
+  }
+  return { logPath, currentSize, maxBytes: limitBytes, maxBackups: limitBackups, backups }
+})
+
+const getAuditStatus = (deps) => getAuditStatusR.run(deps)
+
+export {
+  createAuditWriter, createAuditWriterR,
+  getAuditStatus, getAuditStatusR,
+  DEFAULT_MAX_BYTES, DEFAULT_MAX_BACKUPS,
+}

@@ -4,12 +4,14 @@
 import fp from '@presence/core/lib/fun-fp.js'
 import { bootCedar } from './boot.js'
 import { createEvaluator } from './evaluator.js'
-import { createAuditWriter } from './audit.js'
+import { createAuditWriter, getAuditStatus } from './audit.js'
 import { POLICIES_DIR, SCHEMA_PATH } from './paths.js'
 
 const { Reader } = fp
 
 const AUDIT_LOG_FILENAME = 'authz-audit.log'
+
+const auditLogPath = (presenceDir) => `${presenceDir}/logs/${AUDIT_LOG_FILENAME}`
 
 const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () => {
   if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
@@ -20,7 +22,7 @@ const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () =>
     schemaPath:  SCHEMA_PATH,
   })
   const auditWriter = createAuditWriter({
-    logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}`,
+    logPath: auditLogPath(presenceDir),
     logger,
   })
   return createEvaluator({ cedar, schemaText, policiesText, auditWriter })
@@ -35,15 +37,26 @@ const createSubsystemAuditWriterR = Reader.asks(({ presenceDir, logger }) => {
     throw new Error('createSubsystemAuditWriter: presenceDir 부재')
   }
   return createAuditWriter({
-    logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}`,
+    logPath: auditLogPath(presenceDir),
     logger,
   })
 })
 
 const createSubsystemAuditWriter = (deps) => createSubsystemAuditWriterR.run(deps)
 
+// FP-70 — admin CLI 가 호출. presenceDir 만 받아 audit log 상태 조회.
+const getSubsystemAuditStatusR = Reader.asks(({ presenceDir }) => {
+  if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
+    throw new Error('getSubsystemAuditStatus: presenceDir 부재')
+  }
+  return getAuditStatus({ logPath: auditLogPath(presenceDir) })
+})
+
+const getSubsystemAuditStatus = (deps) => getSubsystemAuditStatusR.run(deps)
+
 export {
   bootCedarSubsystem, bootCedarSubsystemR,
   createSubsystemAuditWriter, createSubsystemAuditWriterR,
+  getSubsystemAuditStatus, getSubsystemAuditStatusR,
   AUDIT_LOG_FILENAME,
 }

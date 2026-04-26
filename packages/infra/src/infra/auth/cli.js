@@ -17,7 +17,7 @@ import {
   loadAgentPolicies,
   readPendingRequest,
 } from '../authz/agent-governance.js'
-import { bootCedarSubsystem, createSubsystemAuditWriter } from '../authz/cedar/index.js'
+import { bootCedarSubsystem, createSubsystemAuditWriter, getSubsystemAuditStatus } from '../authz/cedar/index.js'
 
 // Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
 
@@ -282,6 +282,30 @@ function cmdAgentDeny(params) {
   }
 }
 
+// FP-70 — admin audit log 가시성. size / 백업 개수 / 백업별 size + .gz 열람 안내.
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function cmdAuditStatus() {
+  const presenceDir = Config.presenceDir()
+  const status = getSubsystemAuditStatus({ presenceDir })
+  const pct = status.maxBytes > 0 ? Math.round((status.currentSize / status.maxBytes) * 100) : 0
+  console.log(`Audit log: ${status.logPath}`)
+  console.log(`  Current size: ${formatBytes(status.currentSize)} / ${formatBytes(status.maxBytes)} (${pct}%)`)
+  console.log(`  Backups: ${status.backups.length}/${status.maxBackups}`)
+  if (status.backups.length > 0) {
+    console.log('  Backup files:')
+    for (const b of status.backups) {
+      console.log(`    ${b.path}  (${formatBytes(b.size)})`)
+    }
+    console.log('')
+    console.log('  Tip: gunzip <file>.gz | jq . — 압축 백업 열람')
+  }
+}
+
 const dispatchAgent = (action, flags) => {
   switch (action) {
     case 'add':
@@ -321,6 +345,9 @@ const main = async () => {
     console.log('  npm run user -- agent review')
     console.log('  npm run user -- agent approve --id <reqId>')
     console.log('  npm run user -- agent deny --id <reqId> --reason "<text>"')
+    console.log('')
+    console.log('Audit:')
+    console.log('  npm run user -- audit-status')
     process.exit(0)
   }
 
@@ -341,6 +368,8 @@ const main = async () => {
         process.exit(1)
       }
       return dispatchAgent(action, flags)
+    case 'audit-status':
+      return cmdAuditStatus()
     default:
       console.error(`Unknown command: ${command}`)
       process.exit(1)

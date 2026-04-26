@@ -97,9 +97,7 @@ rotation 이 발생하면 서버가 이미 logger 를 보유하고 있으므로,
 
 ## 해소
 
-**적용 범위 (2026-04-26)**: 최우선 제안(server.log rotation 기록)만 적용. 중간 우선순위 제안(`/status` 라인, `.gz` 열람 안내)은 별도 후속 작업으로 유보.
-
-**구현 내용**
+### 1차 적용 (2026-04-26): 최우선 — rotation 알림
 
 `audit.js`의 `rotateIfNeeded` 함수가 선택적 `logger` 인자를 받도록 변경되었다(audit.js:75). rotation 발생 직후 `logger.info(...)` 를 호출하여 다음 형식으로 한 줄 기록한다:
 
@@ -109,18 +107,71 @@ rotation 이 발생하면 서버가 이미 logger 를 보유하고 있으므로,
 
 `logger` 가 주입되지 않으면 silent 처리(하위 호환).
 
-`bootCedarSubsystem` / `createSubsystemAuditWriter` (cedar/index.js:14, 33)에 `logger` 옵션이 추가되어 env를 통해 주입된다. `server/index.js`가 `bootCedarSubsystem({ presenceDir, logger: console })`로 호출하여 rotation 이력이 server.log에 기록된다.
+`bootCedarSubsystem` / `createSubsystemAuditWriter` (cedar/index.js:16, 35)에 `logger` 옵션이 추가되어 env를 통해 주입된다. `server/index.js`가 `bootCedarSubsystem({ presenceDir, logger: console })`로 호출하여 rotation 이력이 server.log에 기록된다.
 
 회귀 테스트:
 - CA12: rotation 발생 → logger 1회 호출 + 메시지 포맷 검증
 - CA13: logger 미주입 → silent 호환 (기존 동작 유지)
 
-**UX 마찰 해소 검증**
+**UX 마찰 해소 검증 (1차)**
 
-이 이슈에서 최우선으로 지목한 마찰은 "rotation 무음 처리 — 운영자가 rotation 이력을 파악할 수 없다"였다. 적용 후 운영자는 `grep '[cedar-audit]' server.log` 한 줄로 rotation 발생 일시와 파일 크기, 현재 백업 수를 한눈에 파악할 수 있다.
+운영자는 `grep '[cedar-audit]' server.log` 한 줄로 rotation 발생 일시와 파일 크기, 현재 백업 수를 파악할 수 있다.
 
-미해소 마찰:
-- "현재 로그 size 조회 불가" (rotation 전 실시간 크기) — `/status` 커맨드 연동 미적용
-- "`.gz` 백업 열람 방법 불명" — `/help` 안내 미적용
+---
 
-이 두 항목은 이 이슈의 범위에서 제외되었고 별도 FP로 분리되지 않았으므로, 필요시 신규 이슈로 등록한다.
+### 2차 적용 (2026-04-26): 중간 우선순위 — 상태 조회 + `.gz` 열람 안내
+
+**구현 내용**
+
+`audit.js`에 `getAuditStatus({ logPath, maxBytes, maxBackups })` 함수가 추가되었다 (audit.js:109–125). 반환 형식:
+
+```javascript
+{ logPath, currentSize, maxBytes, backups: [{ path, size }], maxBackups }
+```
+
+`cedar/index.js`에 `getSubsystemAuditStatus({ presenceDir })` 가 추가되었다 (index.js:48–55). `presenceDir` 만 받아 `auditLogPath`를 내부에서 해소하므로 호출자는 경로를 직접 조립할 필요가 없다.
+
+`auth/cli.js`에 `audit-status` 서브커맨드가 추가되었다 (cli.js:292–307). 출력 형식:
+
+```
+Audit log: ~/.presence/logs/authz-audit.log
+  Current size: 8.3 MB / 10.0 MB (83%)
+  Backups: 2/5
+  Backup files:
+    ~/.presence/logs/authz-audit.log.1.gz  (2.1 MB)
+    ~/.presence/logs/authz-audit.log.2.gz  (2.0 MB)
+
+  Tip: gunzip <file>.gz | jq . — 압축 백업 열람
+```
+
+`Tip` 라인은 백업 파일이 1개 이상 존재할 때만 표시된다.
+
+`npm run user` 무인자 호출 시 usage에 `Audit:` 섹션으로 `audit-status`가 노출된다 (cli.js:348–350).
+
+회귀 테스트:
+- CA14: 파일 부재 시 `currentSize: 0`, `backups: []`
+- CA15: 활성 로그 + rotation 후 size 보고
+- CA16: `logPath` 부재 시 throw
+- CA17: Reader 브릿지 동치
+
+**진입 경로 선택 근거 — TUI `/status` 대신 admin CLI**
+
+원래 제안은 TUI의 `/status` 커맨드에 라인을 추가하는 것이었다. 그러나 TUI 연동에는 다음 비용이 따른다:
+
+1. admin role 식별 — 현재 TUI는 세션 내 role을 렌더링 조건에 반영하는 경로가 없다
+2. 서버 REST 엔드포인트 — TUI가 클라이언트이므로 서버 API를 통해 데이터를 받아야 한다
+3. i18n — TUI 문자열은 ko.json/en.json을 통해 관리된다
+
+admin CLI(`npm run user -- audit-status`)는 운영자가 이미 사용하는 도구다(`init`, `agent review`, `agent approve` 등이 모두 같은 진입점). 새 서브커맨드 하나를 추가하는 비용으로 동일한 UX 개선 효과를 달성할 수 있어 비용/가치 균형이 더 좋다.
+
+**UX 마찰 해소 검증 (2차)**
+
+이 이슈에서 지목한 세 가지 마찰은 모두 해소되었다.
+
+| 마찰 포인트 | 해소 방법 | 상태 |
+|-------------|-----------|------|
+| rotation 무음 처리 | server.log에 `[cedar-audit]` 한 줄 기록 (1차) | 해소 |
+| 현재 로그 size 조회 불가 | `audit-status` 명령 — `currentSize / maxBytes (%)` 출력 | 해소 |
+| `.gz` 백업 열람 방법 불명 | `audit-status` 명령 — 백업 존재 시 `Tip:` 라인 표시 | 해소 |
+
+운영자는 `npm run user -- audit-status` 한 번 호출로 세 가지 질문("곧 rotation이 일어나는가?", "백업이 몇 개 쌓였는가?", ".gz를 어떻게 여는가?")에 모두 답을 얻을 수 있다.
