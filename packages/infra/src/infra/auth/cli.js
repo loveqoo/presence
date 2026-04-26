@@ -15,19 +15,11 @@ import {
   denyUserAgent,
   listPending,
   loadAgentPolicies,
+  readPendingRequest,
 } from '../authz/agent-governance.js'
-import { bootCedarSubsystem } from '../authz/cedar/index.js'
+import { bootCedarSubsystem, createSubsystemAuditWriter } from '../authz/cedar/index.js'
 
-// =============================================================================
-// Auth CLI: 사용자 관리 도구
-//
-// 사용법:
-//   npm run user -- init --username <name>
-//   npm run user -- add --username <name>
-//   npm run user -- remove --username <name>
-//   npm run user -- list
-//   npm run user -- passwd --username <name>
-// =============================================================================
+// Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
 
 const promptPassword = (prompt = 'Password: ') => new Promise((resolve) => {
   const rl = createInterface({ input: process.stdin, output: process.stdout })
@@ -250,7 +242,17 @@ function cmdAgentReview() {
 
 function cmdAgentApprove(params) {
   const presenceDir = Config.presenceDir()
+  // governance-cedar v2.1 §1.4: admin override 는 Cedar 호출 없음, audit 만 기록.
+  // 요청 정보는 approve 전 캡처 (파일 이동 후엔 pending 에서 사라짐).
+  const req = readPendingRequest(presenceDir, params.id)
   const result = approveUserAgent(params.id, { presenceDir, basePath: presenceDir })
+  if (result.status === GV_STATUS.APPROVED || result.status === GV_STATUS.ALREADY_APPLIED) {
+    createSubsystemAuditWriter({ presenceDir }).append({
+      ts: new Date().toISOString(), caller: 'admin', action: 'manual_approve', resource: req?.requester ?? 'unknown',
+      decision: 'allow', matchedPolicies: [], errors: [], reqId: params.id, agentName: req?.agentName ?? null,
+      idempotent: result.status === GV_STATUS.ALREADY_APPLIED,
+    })
+  }
   switch (result.status) {
     case GV_STATUS.APPROVED:
       console.log(`Request ${params.id} approved.`)

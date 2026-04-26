@@ -25,4 +25,19 @@ const bootCedarSubsystemR = Reader.asks(({ presenceDir }) => async () => {
 
 const bootCedarSubsystem = (deps) => bootCedarSubsystemR.run(deps)()
 
-export { bootCedarSubsystem, bootCedarSubsystemR, AUDIT_LOG_FILENAME }
+// audit 만 필요한 경로 (예: agent approve 의 manual_approve 기록 — Cedar 호출 없이 감사 추적만).
+// boot 비용 (wasm 로딩 + parse 검증) 회피.
+const createSubsystemAuditWriterR = Reader.asks(({ presenceDir }) => {
+  if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
+    throw new Error('createSubsystemAuditWriter: presenceDir 부재')
+  }
+  return createAuditWriter({ logPath: `${presenceDir}/logs/${AUDIT_LOG_FILENAME}` })
+})
+
+const createSubsystemAuditWriter = (deps) => createSubsystemAuditWriterR.run(deps)
+
+export {
+  bootCedarSubsystem, bootCedarSubsystemR,
+  createSubsystemAuditWriter, createSubsystemAuditWriterR,
+  AUDIT_LOG_FILENAME,
+}
