@@ -692,3 +692,28 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - `packages/core/test/core/agent-id.test.js` PA1~PA6 (resolvePrimaryAgent 단위)
 - `packages/server/test/auth-e2e.test.js` AE18 (admin 로그인 + POST `/sessions` → KG-18 spy 로 agentId='admin/manager' 검증)
+
+## Phase L: KG-20 validateAgentId 회귀 정적 검사 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. KG-20 의 우려 ("validateAgentId 미경유 raw 문자열 주입 회귀 검증 부재") 를 KG-18 패턴 미러로 해소.
+
+### 실사 결과 (이미 존재한 방어)
+
+- Session 생성자 — `assertValidAgentId(opts.agentId)` 호출 (`session.js:29`)
+- AgentRegistry.register — 동일 호출 (`agent-registry.js:20`)
+- resolveDelegateTarget — `validateAgentId` 경유 (Parser→Resolver→Authz §3.6)
+- Op.SendA2aMessage 인터프리터 — `assertValidAgentId(to)` 호출
+- A2A self card — `validateAgentId(agentId)` 호출
+- 단위 테스트: SD11~13 (Session 생성자 throw), RDT1~9 (resolveDelegateTarget) 이미 존재
+
+부족했던 것: **검증 호출 라인이 회귀로 삭제되어도 catch 못 함**.
+
+### 변경
+
+- `test/regression/agent-id-validation-enforcement.test.js` 신규 — INV-AGENT-ID-VALIDATION 정적 검사. 5 사이트가 `agent-id` 모듈 import + `assertValidAgentId`/`validateAgentId` 호출을 모두 가지고 있는지 정적 grep. 누락 시 fail.
+- `test/run.js` — Spec invariant static checks 섹션에 신규 테스트 등록.
+- `agent-identity.md` — I3 / I10 stale ⚠️ 제거 (이미 단위 테스트 커버), I1 에 회귀 검사 매핑 추가, KG-20 resolved.
+
+### 미적용
+
+- 동적 spy 강화 (validateAgentId 호출 자취 트레이스) — 정적 grep + 단위 테스트 조합으로 회귀 방어 충분. spy 추가는 후속 가치 검토 시.
