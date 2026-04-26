@@ -10,6 +10,7 @@ import { Config } from '@presence/infra/infra/config.js'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
 import { runAdminBootstrap, deleteInitialPasswordFile, ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
 import { bootCedarSubsystem } from '@presence/infra/infra/authz/cedar/index.js'
+import { resolvePrimaryAgent } from '@presence/core/core/agent-id.js'
 import { createServerScheduler, registerAgentSessions } from './scheduler-factory.js'
 import { sessionBridgeR, WsHandler } from './ws-handler.js'
 import { UserContextManager } from './user-context-manager.js'
@@ -152,18 +153,18 @@ class PresenceServer {
 
     // 기본 세션 + 에이전트 세션
     const defaultUserId = this.#username || 'default'
-    // agentId: M1 단계 runtime hardcode `${userId}/default`.
-    // M3 에서 config.primaryAgentId 로 이관 (docs/design/agent-identity-model.md §12).
-    // 세션 경로에 agent 디렉토리 삽입 — opts.persistenceCwd 가 주어진 경우에만
-    // agent 계층 조립. 프로덕션 cli.js 는 persistenceCwd 없이 호출 → persistence no-op.
-    // 테스트 mock-server.js 는 tmpDir 주입 → tmpDir/agents/default/sessions/user-default/.
+    // KG-16: agentId / agent dir 모두 config.primaryAgentId 경유 (identity §12).
+    // 부재 시 ${userId}/default fallback. 세션 경로에 agent 디렉토리 삽입 —
+    // opts.persistenceCwd 가 주어진 경우에만 조립. 프로덕션 cli.js 는 persistenceCwd
+    // 없이 호출 → persistence no-op. 테스트 mock-server.js 는 tmpDir 주입.
+    const { agentId: defaultAgentId, agentName: defaultAgentName } = resolvePrimaryAgent(this.#userContext.config, defaultUserId)
     const defaultPersistenceCwd = persistenceCwd
-      ? join(persistenceCwd, 'agents', 'default', 'sessions', 'user-default')
+      ? join(persistenceCwd, 'agents', defaultAgentName, 'sessions', 'user-default')
       : undefined
     const defaultEntry = this.#userContext.sessions.create({
       id: 'user-default', type: SESSION_TYPE.USER, persistenceCwd: defaultPersistenceCwd,
       userId: defaultUserId,
-      agentId: `${defaultUserId}/default`,
+      agentId: defaultAgentId,
       onScheduledJobDone: Function.prototype,
     })
     this.#defaultSession = defaultEntry.session

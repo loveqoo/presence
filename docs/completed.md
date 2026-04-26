@@ -667,3 +667,28 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 - `agent-access.test.js` AS1~AS5 (canAccessAgent decision)
 - `session-manager-routing.test.js` SM-admin1~4 (findAdminSession routing)
 - KG-18 spy infra 가 진입점 #1 의 NEW_SESSION 호출 자체는 이미 동적 검증 중이라 통합 테스트 추가 불필요
+
+## Phase K: KG-16 M3 primaryAgentId 적용 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속 작업. 모든 USER 세션 agentId 결정이 `config.primaryAgentId` 기반으로 통일됨. 이전엔 4 곳에서 `${userId}/default` 와 `agents/default` 디렉토리가 hardcode 되어 있어, admin 의 `primaryAgentId='admin/manager'` 가 세션 생성에 반영되지 않던 M1 표기를 해소.
+
+### 변경
+
+- `packages/core/src/core/agent-id.js` — `resolvePrimaryAgent(config, fallbackUserId) → { agentId, agentName }` 헬퍼 추가. `config.primaryAgentId` 가 valid canonical form 이면 그대로, 아니면 `${fallbackUserId}/default` fallback (validateAgentId 검증 경유).
+- `packages/infra/src/infra/config.js` — `Config.Schema` 에 `primaryAgentId: z.string().optional()` 추가. 이전엔 zod strip 동작으로 admin 의 `primaryAgentId='admin/manager'` 가 런타임 Config 객체에서 제거되던 잠재 버그 동시 해결.
+- 4 진입점 hardcode 제거 (모두 `resolvePrimaryAgent` 결과로 agentId + persistence path 결정):
+  - `server/index.js` — boot 기본 user-default USER 세션
+  - `session-api.js` findOrCreateSession — `{username}-default` lazy 생성
+  - `session-api.js` POST `/sessions` — 신규 세션 생성
+  - `scheduler-factory.js` onDispatch — legacy null-owner fallback
+
+### 핵심 효과
+
+- admin USER 세션이 정확히 `admin/manager` agentId 사용 (이전: hardcode `admin/default` 로 archived/registry 검사 우회).
+- 사용자 정의 primaryAgentId (예: `alice/research`) 가 세션 생성에 반영됨.
+- persistence 경로 일관: `users/{username}/agents/{primaryAgentName}/sessions/{sid}/`.
+
+### 테스트
+
+- `packages/core/test/core/agent-id.test.js` PA1~PA6 (resolvePrimaryAgent 단위)
+- `packages/server/test/auth-e2e.test.js` AE18 (admin 로그인 + POST `/sessions` → KG-18 spy 로 agentId='admin/manager' 검증)

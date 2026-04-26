@@ -2,6 +2,7 @@ import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
 import { createSchedulerActor } from '@presence/infra/infra/actors/scheduler-actor.js'
 import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
+import { resolvePrimaryAgent } from '@presence/core/core/agent-id.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 
 // =============================================================================
@@ -17,7 +18,9 @@ const createServerScheduler = (userContext, opts = {}) => {
       const sessionId = `scheduled-${jobEvent.runId}`
       // docs §4.3 — job 생성 시 owner 가 확정되어 있으므로 event 에서 직접 사용.
       // legacy row (owner null) 는 scheduler-actor 가 null 로 전파 → fallback 으로 막음.
-      const agentId = jobEvent.ownerAgentId || `${defaultUserId}/default`
+      // KG-16: fallback agentId 도 primaryAgentId 경유 (admin/manager 등 반영).
+      const { agentId: primaryAgentId } = resolvePrimaryAgent(userContext.config, defaultUserId)
+      const agentId = jobEvent.ownerAgentId || primaryAgentId
       const userId = jobEvent.ownerUserId || defaultUserId
 
       // docs §9.4 진입점 #4 — scheduled-run intent 로 canAccessAgent.

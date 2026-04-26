@@ -4,6 +4,7 @@ import express from 'express'
 import { Config } from '@presence/infra/infra/config.js'
 import { SESSION_TYPE } from '@presence/infra/infra/constants.js'
 import { canAccessAgent, INTENT } from '@presence/infra/infra/authz/agent-access.js'
+import { resolvePrimaryAgent } from '@presence/core/core/agent-id.js'
 import { handleSlashCommand } from './slash-commands.js'
 
 // =============================================================================
@@ -21,10 +22,10 @@ const findOrCreateSession = (sessionId, username, effectiveUserContext) => {
   if (!entry && username && sessionId === `${username}-default`) {
     const userDir = join(Config.resolveDir(), 'users', username)
     // 세션 경로에 agent 디렉토리 삽입 (docs/design/data-scope-alignment.md §3.2).
-    // agent name 'default' 는 M1 하드코딩 — M3 에서 config.primaryAgentId 로 이관.
-    const persistenceCwd = join(userDir, 'agents', 'default', 'sessions', sessionId)
-    // agentId: M1 runtime hardcode. M3 에서 config.primaryAgentId 경유 (identity §12)
-    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username, agentId: `${username}/default` })
+    // KG-16: config.primaryAgentId 경유 (identity §12). 부재 시 ${username}/default fallback.
+    const { agentId, agentName } = resolvePrimaryAgent(effectiveUserContext.config, username)
+    const persistenceCwd = join(userDir, 'agents', agentName, 'sessions', sessionId)
+    entry = effectiveUserContext.sessions.create({ id: sessionId, type: SESSION_TYPE.USER, persistenceCwd, owner: username, userId: username, agentId })
   }
 
   return entry
@@ -166,12 +167,12 @@ const mountSessionsCrud = (router, deps) => {
     }
     const owner = req.user?.username ?? null
     const sessionId = id ?? (owner ? `${owner}-${randomUUID()}` : undefined)
-    // 세션 경로에 agent 디렉토리 삽입. agent name 'default' 는 M1 하드코딩.
-    const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'agents', 'default', 'sessions', sessionId) : undefined
     try {
-      // agentId: M1 runtime hardcode. M3 이후 config.primaryAgentId / type 별 결정 로직 이관.
+      // KG-16: agentId / agent dir 모두 config.primaryAgentId 경유 (identity §12).
       const effectiveUserId = owner || 'default'
-      const agentId = `${effectiveUserId}/default`
+      const { agentId, agentName } = resolvePrimaryAgent(ctx.config, effectiveUserId)
+      // 세션 경로에 agent 디렉토리 삽입 (docs/design/data-scope-alignment.md §3.2).
+      const persistenceCwd = owner ? join(Config.resolveDir(), 'users', owner, 'agents', agentName, 'sessions', sessionId) : undefined
 
       // docs §9.4 진입점 #1 — new-session intent. 인증 활성화 시에만 강제.
       // KG-15 — admin singleton: findAdminSession callback 주입.
