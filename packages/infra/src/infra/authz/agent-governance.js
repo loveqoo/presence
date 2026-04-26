@@ -5,6 +5,8 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { Config } from '../config.js'
 import { ADMIN_USERNAME, DEFAULT_POLICIES } from '../admin-bootstrap.js'
 import { validateAgentNamePart } from '@presence/core/core/agent-id.js'
+import { CheckAccess } from '@presence/core/core/op.js'
+import { runCheckAccess } from './cedar/op-runner.js'
 import { atomicWriteJson } from '../fs-utils.js'
 
 const { Either, Reader } = fp
@@ -157,11 +159,13 @@ const submitUserAgentR = Reader.asks(({ requester, agentName, persona, basePath,
   }
 
   // (0) Cedar enforcement point — RBAC 게이트. deny 시 코드 분기 미도달 (GV-Y4).
-  const decision = evaluator({
+  // KG-23 — Op.CheckAccess 도메인 어휘 경유. LLM 시나리오의 인터프리터도 같은 op-runner 위임.
+  const checkAccessOp = CheckAccess({
     principal: { type: 'LocalUser', id: requester },
     action:    'create_agent',
     resource:  { type: 'User', id: requester },
   })
+  const decision = runCheckAccess(evaluator, checkAccessOp)
   if (decision.decision !== 'allow') {
     return {
       status: STATUS.DENIED,

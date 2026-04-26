@@ -740,6 +740,46 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - 후속의 두 옵션 (`ResolvedAgentId.__resolved` 마커 / resolver 진입 spy) 은 침습적 — 정적 grep 으로 회귀 방어 충분. 동적 spy 보강은 KG-18 가 이미 DELEGATE intent 의 agentId 자취를 캡처.
 
+## Phase Q: KG-23 Op.CheckAccess 도메인 어휘 통일 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. 옵션 1 (형식 일관성) 채택. cedar-infra.md §7 의 "Op ADT wrapping 부재로 인한 finite 공간 약화" 위험을 해소. LLM 경계 밖이라 즉시 보호 효과는 0이지만, 호출 경로를 도메인 어휘 (Op data) 로 통일하여 향후 LLM 트리거 시나리오 진입 시 즉시 사용 가능.
+
+### 변경
+
+- `packages/core/src/core/op.js` — `CheckAccess` Op constructor + `checkAccessR` Reader + `checkAccess` legacy bridge.
+  - 결과 shape: `{ decision: 'allow'|'deny', matchedPolicies: string[], errors: string[] }` (cedar evaluator 와 동일).
+- `packages/infra/src/infra/authz/cedar/op-runner.js` (신규) — `runCheckAccess(evaluator, op)` standalone runner. evaluator 부재 또는 잘못된 op tag → throw.
+- `packages/infra/src/interpreter/check-access.js` (신규) — `checkAccessInterpreterR`. evaluator 부재 시 deny + `'evaluator-unavailable'` 에러 (interpreter 시그니처는 throw 금지).
+- `packages/infra/src/interpreter/prod.js` — Reader env 에 `evaluator` 추가, composed 에 `checkAccessInterpreterR` 등록.
+- `packages/infra/src/infra/sessions/internal/session-interpreter.js` + `ephemeral-inits.js` — env 에 evaluator 전파 (UserContext.evaluator → prod 인터프리터).
+- `packages/infra/src/infra/authz/agent-governance.js` — `submitUserAgentR` 의 evaluator 직접 호출을 `Op.CheckAccess` build + `runCheckAccess(evaluator, op)` 위임으로 변경. 의미론 동일, 형식 통일.
+
+### 테스트
+
+- `packages/core/test/core/op.test.js` — CheckAccess constructor + checkAccess DSL 검증.
+- `packages/infra/test/check-access-interpreter.test.js` (신규) — CK1~CK8:
+  - CK1: runCheckAccess 가 evaluator 호출 + 결과 전파
+  - CK2: evaluator 부재 → throw
+  - CK3: 잘못된 op tag → throw
+  - CK4: context 부재 → {} 보정
+  - CK5: 인터프리터 통합 — Free.liftF → evaluator → decision 반환
+  - CK6: 인터프리터에서 evaluator 미주입 → deny + evaluator-unavailable
+  - CK7: deny decision (cedar 50-custom 정책) 그대로 전파
+  - CK8: 서비스 레이어 직접 호출 vs 인터프리터 경유 — 같은 evaluator 면 동일 결과 (호출 경로 통일 검증)
+
+전체 4370 passed (이전 4349 + 21).
+
+### 미적용
+
+- 기존 `agent-governance.js` 외의 cedar evaluate 호출처는 현재 0건. 향후 다른 enforcement point 추가 시 같은 패턴 적용.
+- LLM 이 권한 조회를 트리거하는 실제 시나리오는 미신설 — 형식 채널만 준비. 시나리오 진입은 별도 작업.
+
+### 핵심 효과
+
+- Cedar 권한 평가가 도메인 어휘 (`Op.CheckAccess`) 로 단일화. evaluator 직접 호출 패턴 회귀 시 정적/동적 검증 가능 (인터프리터 등록 + standalone runner 강제).
+- LLM 시나리오 진입 시 `Free.liftF(CheckAccess(...))` 만 yield 하면 즉시 작동 — Op ADT 의 finite 선택 공간 강제 활성화.
+- agent-governance 의 enforcement 의미론 동일 — 회귀 0건 (기존 GV 테스트 전부 통과).
+
 ## Phase P: KG-25 Cedar audit JSONL size-based rotation (2026-04-26)
 
 `feature/cedar-governance-v2` 브랜치 후속. cedar-infra.md §7 에서 "Audit 로그 무한 증가 — KG 등록 후 후속" 으로 미룬 작업을 KG-25 로 등록 후 즉시 구현. 1차 옵션 (size-based + gzip) 채택.
