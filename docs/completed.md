@@ -739,3 +739,22 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 ### 미적용
 
 - 후속의 두 옵션 (`ResolvedAgentId.__resolved` 마커 / resolver 진입 spy) 은 침습적 — 정적 grep 으로 회귀 방어 충분. 동적 spy 보강은 KG-18 가 이미 DELEGATE intent 의 agentId 자취를 캡처.
+
+## Phase N: KG-22 i18n EN 키 일괄 보강 (2026-04-26)
+
+`feature/cedar-governance-v2` 브랜치 후속. ko.json 223 키 / en.json 132 키였던 91 키 누락을 옵션 (a) (일괄 영어 번역 추가) 로 해소. locale=en 사용자가 동적 humanize 경로에서 받던 한국어 잔재 / raw key 표시 제거.
+
+### 변경
+
+- `packages/infra/src/i18n/en.json` — 91 missing 키 영어 번역 추가. namespace 그룹: `status`, `memory_cmd`, `mcp_cmd`, `sessions_cmd`, `slash_cmd`, `input_hint`, `slash_hint`, `key_hint`, `statusline_cmd`, `plan_op`, `op_phase`, `op_label`, `side_panel`. 기존 KO/EN 키 변경 없음 — 추가만.
+- `test/regression/i18n-key-parity.test.js` 신규 — INV-I18N-PARITY 정적 검사. ko.json / en.json flat key 집합 동등성 강제. KO/EN 모두 223 키. missing 발생 시 fail.
+- `test/run.js` — Spec invariant static checks 섹션에 등록.
+
+### 미적용
+
+- 옵션 (b) (locale=en dev 로그로 missing 노출) — 정적 parity 검사가 test 단계에서 강제하므로 dev 로그보다 강한 방어. 컴파일 타임 (== test 단계) 차단으로 갈음.
+
+### 핵심 효과
+
+- locale=en 사용자가 동적 prefix 호출 (`a2a.error.${code}`, `op_label.*`, `sessions_cmd.*` 등) 에서 영어 응답을 받음.
+- 새 KO 키 추가 시 EN 미갱신 회귀가 INV-I18N-PARITY 로 즉시 catch.
