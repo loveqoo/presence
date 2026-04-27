@@ -19,3 +19,11 @@ action access_agent appliesTo {
     archived: Bool,
   }
 };
+action archive_agent appliesTo {
+  principal: [LocalUser],
+  resource:  [Agent],
+  context: {
+    isAdmin:        Bool,
+    reservedOwner:  Bool,
+  }
+};
