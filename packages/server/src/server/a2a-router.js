@@ -130,7 +130,7 @@ const dispatchRpcMethod = async (entry, body, id, res) => {
     `method not found: ${method || '(missing)'}`))
 }
 
-const mountInvokeRoute = (router, userContext, tokenService) => {
+const mountInvokeRoute = (router, userContext, tokenService, evaluator) => {
   // POST /a2a/:userId/:agentName — JSON-RPC 2.0 entry point
   // Bearer JWT 검증 → canAccessAgent (DELEGATE) → dispatch
   router.post('/:userId/:agentName', express.json(), async (req, res) => {
@@ -158,6 +158,7 @@ const mountInvokeRoute = (router, userContext, tokenService) => {
 
     const access = canAccessAgent({
       jwtSub: caller, agentId, intent: INTENT.DELEGATE, registry: userContext.agentRegistry,
+      evaluator,
     })
     if (!access.allow) {
       return res.status(403).json(jsonRpcError(id, JsonRpcErrorCode.ACCESS_DENIED, `access denied: ${access.reason}`))
@@ -177,7 +178,7 @@ const mountInvokeRoute = (router, userContext, tokenService) => {
   })
 }
 
-const a2aRouterR = Reader.asks(({ userContext, config, tokenService }) => {
+const a2aRouterR = Reader.asks(({ userContext, config, tokenService, evaluator }) => {
   const router = express.Router()
   const publicUrl = config.a2a?.publicUrl
 
@@ -192,7 +193,7 @@ const a2aRouterR = Reader.asks(({ userContext, config, tokenService }) => {
   }
 
   mountDiscoveryRoutes(router, userContext, publicUrl)
-  mountInvokeRoute(router, userContext, tokenService)
+  mountInvokeRoute(router, userContext, tokenService, evaluator)
   return router
 })
 

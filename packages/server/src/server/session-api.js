@@ -57,6 +57,7 @@ const attachSessionMiddleware = (deps) => {
         agentId: entry.session.agentId,
         intent: INTENT.CONTINUE_SESSION,
         registry: effectiveUserContext.agentRegistry,
+        evaluator: deps.evaluator,
       })
       if (!access.allow) {
         return res.status(403).json({ error: `Access denied: ${access.reason}`, code: 'AGENT_ACCESS_DENIED', reason: access.reason })
@@ -182,6 +183,7 @@ const mountSessionsCrud = (router, deps) => {
       if (deps.authEnabled && owner) {
         const access = canAccessAgent({
           jwtSub: owner, agentId, intent: INTENT.NEW_SESSION, registry: ctx.agentRegistry,
+          evaluator: deps.evaluator,
           findAdminSession: () => ctx.sessions.findAdminSession(),
         })
         if (!access.allow) {

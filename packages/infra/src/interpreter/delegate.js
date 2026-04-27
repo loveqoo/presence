@@ -12,7 +12,7 @@ const { Task, Maybe, Reader, Either } = fp
 // f.target → resolveDelegateTarget(currentUserId) → canAccessAgent(DELEGATE) → registry.get
 // docs/design/agent-identity-model.md §9.4 진입점 #5.
 
-const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId, a2aSigner }) => {
+const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId, a2aSigner, evaluator }) => {
   const a2a = new A2AClient({ fetchFn })
   return new Interpreter(['Delegate'], (f) => {
     const resolved = resolveDelegateTarget(f.target, { currentUserId })
@@ -26,6 +26,7 @@ const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetch
     if (currentUserId) {
       const access = canAccessAgent({
         jwtSub: currentUserId, agentId, intent: INTENT.DELEGATE, registry: agentRegistry,
+        evaluator,
       })
       if (!access.allow) {
         return ST.of(f.next(Delegation.failed(f.target, `Access denied: ${access.reason} (agent=${agentId})`)))

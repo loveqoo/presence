@@ -28,6 +28,7 @@ const createServerScheduler = (userContext, opts = {}) => {
       // 실효 게이트는 archived 체크 (§5.4 — archived agent 는 새 scheduled run 차단).
       const access = canAccessAgent({
         jwtSub: userId, agentId, intent: INTENT.SCHEDULED_RUN, registry: userContext.agentRegistry,
+        evaluator: userContext.evaluator,
       })
       if (!access.allow) {
         userContext.logger?.warn?.(`Scheduler: dispatch denied for ${agentId} (${access.reason}) — job ${jobEvent.jobId} skipped`)

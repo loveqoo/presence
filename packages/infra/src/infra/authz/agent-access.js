@@ -1,4 +1,6 @@
 import { isReservedUsername } from '@presence/core/core/agent-id.js'
+import { CheckAccess } from '@presence/core/core/op.js'
+import { runCheckAccess } from './cedar/op-runner.js'
 
 // =============================================================================
 // canAccessAgent — docs/design/agent-identity-model.md §9.4
@@ -8,17 +10,21 @@ import { isReservedUsername } from '@presence/core/core/agent-id.js'
 //
 // 시그니처: canAccessAgent(input) → { allow, reason? }
 //
-//   input: { jwtSub, agentId, intent, registry? }
-//     jwtSub    — 호출자 username (JWT sub claim 또는 CLI context)
-//     agentId   — qualified agent ID ('{user}/{name}')
-//     intent    — 아래 INTENT enum 중 하나
-//     registry  — AgentRegistry (archived 판정용, optional)
+//   input: { jwtSub, agentId, intent, registry?, evaluator?, findAdminSession? }
+//     jwtSub     — 호출자 username (JWT sub claim 또는 CLI context)
+//     agentId    — qualified agent ID ('{user}/{name}')
+//     intent     — 아래 INTENT enum 중 하나
+//     registry   — AgentRegistry (archived 판정용, optional)
+//     evaluator  — Cedar evaluator (governance-cedar v2.5 §X). 있으면 archived 판정을
+//                  20-archived.cedar 정책으로 위임. 없으면 코드 분기 fallback (호환).
 //
 // 정책 (코드 순서 = 우선순위):
 //   1. Reserved admin/* → jwtSub 가 'admin' 이 아니면 거부
 //   2. 일반 agent → agentId 의 username prefix 가 jwtSub 와 일치해야 함
 //   3. Archived agent + (new-session | delegate | scheduled-run) → 거부
 //      (continue-session 은 허용 — §5.4 graceful retire)
+//      governance-cedar v2.5: evaluator 있으면 Cedar 정책 (20-archived.cedar) 으로 평가.
+//      Cedar deny → REASON.ARCHIVED.
 //   4. Admin singleton (KG-15, §9.3.5): NEW_SESSION + reserved owner +
 //      findAdminSession() === 'present' → 거부 (concurrent admin race 차단).
 //      callback 미전달 시 검사 skip (하위 호환).
@@ -66,6 +72,7 @@ function canAccessAgent(input) {
   const agentId = params.agentId
   const intent = params.intent
   const registry = params.registry
+  const evaluator = params.evaluator
   const findAdminSession = params.findAdminSession
 
   if (!jwtSub || typeof jwtSub !== 'string') return deny(REASON.MISSING_PRINCIPAL)
@@ -83,12 +90,25 @@ function canAccessAgent(input) {
     return deny(REASON.NOT_OWNER)
   }
 
-  // 3. Archived — continue-session 만 허용
+  // 3. Archived — continue-session 만 허용. evaluator 있으면 Cedar 정책 (20-archived.cedar)
+  //    위임. 없으면 코드 분기 fallback (호환). registry 부재면 archived 판정 불가 → skip.
   if (registry) {
     const maybeEntry = registry.get(agentId)
     const entry = maybeEntry && maybeEntry.isJust && maybeEntry.isJust() ? maybeEntry.value : null
-    if (entry && entry.archived && intent !== INTENT.CONTINUE_SESSION) {
-      return deny(REASON.ARCHIVED)
+    if (entry) {
+      const archived = !!entry.archived
+      if (typeof evaluator === 'function') {
+        const op = CheckAccess({
+          principal: { type: 'LocalUser', id: jwtSub },
+          action:    'access_agent',
+          resource:  { type: 'Agent', id: agentId },
+          context:   { intent, archived },
+        })
+        const decision = runCheckAccess(evaluator, op)
+        if (decision.decision !== 'allow') return deny(REASON.ARCHIVED)
+      } else if (archived && intent !== INTENT.CONTINUE_SESSION) {
+        return deny(REASON.ARCHIVED)
+      }
     }
   }
 

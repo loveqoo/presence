@@ -89,7 +89,7 @@ const prodInterpreterR = Reader.asks(({ llm, toolRegistry, userDataStore, reacti
     stateInterpreterR.run({ ST }),
     llmInterpreterR.run({ ST, llm, streamingUi: ui.streamingUi, getAbortSignal }),
     toolInterpreterR.run({ ST, toolRegistry, userDataStore, toolResultUi: ui.toolResultUi, getWorkingDir, resolvePath }),
-    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId, a2aSigner }),
+    delegateInterpreterR.run({ ST, agentRegistry, delegateUi: ui.delegateUi, fetchFn, currentUserId, a2aSigner, evaluator }),
     sendA2aInterpreterR.run({ ST, a2aQueueStore, agentRegistry, sessionManager, currentAgentId, logger }),
     checkAccessInterpreterR.run({ ST, evaluator }),
     approvalInterpreterR.run({ ST, onApprove }),
