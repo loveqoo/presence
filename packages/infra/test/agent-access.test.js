@@ -31,58 +31,8 @@ console.log('canAccessAgent tests')
   assert(r.reason === REASON.NOT_OWNER, 'AA4: reason=not-owner')
 }
 
-// AA5. archived + new-session → deny 'archived'
-{
-  const reg = createAgentRegistry()
-  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
-  const r = canAccessAgent({
-    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.NEW_SESSION, registry: reg,
-  })
-  assert(r.allow === false, 'AA5: archived + new-session denied')
-  assert(r.reason === REASON.ARCHIVED, 'AA5: reason=archived')
-}
-
-// AA6. archived + continue-session → allow (graceful retire §5.4)
-{
-  const reg = createAgentRegistry()
-  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
-  const r = canAccessAgent({
-    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.CONTINUE_SESSION, registry: reg,
-  })
-  assert(r.allow === true, 'AA6: archived + continue-session allowed')
-}
-
-// AA7. archived + delegate → deny
-{
-  const reg = createAgentRegistry()
-  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
-  const r = canAccessAgent({
-    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.DELEGATE, registry: reg,
-  })
-  assert(r.allow === false, 'AA7: archived + delegate denied')
-  assert(r.reason === REASON.ARCHIVED, 'AA7: reason=archived')
-}
-
-// AA7b. archived + scheduled-run → deny (§5.4 — archived agent 는 새 scheduled run 차단)
-{
-  const reg = createAgentRegistry()
-  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
-  const r = canAccessAgent({
-    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.SCHEDULED_RUN, registry: reg,
-  })
-  assert(r.allow === false, 'AA7b: archived + scheduled-run denied')
-  assert(r.reason === REASON.ARCHIVED, 'AA7b: reason=archived')
-}
-
-// AA8. non-archived agent + registry → allow
-{
-  const reg = createAgentRegistry()
-  reg.register({ agentId: 'anthony/default', type: 'local', archived: false })
-  const r = canAccessAgent({
-    jwtSub: 'anthony', agentId: 'anthony/default', intent: INTENT.NEW_SESSION, registry: reg,
-  })
-  assert(r.allow === true, 'AA8: non-archived allowed')
-}
+// AA5~AA8 archived/non-archived semantics: governance-cedar v2.6 §X1 invariant 강제로
+// AA-X1/AA-X2/AA-X3/AA-X5 가 evaluator 경로로 대체. legacy fallback 제거됨.
 
 // AA9. agent 등록 없는 registry (unknown agent) — archived check 는 skip, ownership 만
 {
@@ -261,14 +211,16 @@ console.log('canAccessAgent tests')
   assert(captured.context.intent === 'delegate', `AA-X3: context.intent=delegate (got ${captured.context.intent})`)
 }
 
-// AA-X4 — evaluator 미전달 (legacy 경로) — 기존 코드 분기 그대로
+// AA-X4 — governance-cedar v2.6 §X1: evaluator invariant 강제 — registry+entry 있는데
+// evaluator 미전달 시 fail-closed (REASON.MISSING_EVALUATOR). legacy fallback 제거.
 {
   const reg = createAgentRegistry()
   reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
   const r = canAccessAgent({
     jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.NEW_SESSION, registry: reg,
   })
-  assert(r.allow === false && r.reason === REASON.ARCHIVED, 'AA-X4: legacy 경로 archived deny')
+  assert(r.allow === false, 'AA-X4: evaluator 미전달 → deny')
+  assert(r.reason === REASON.MISSING_EVALUATOR, `AA-X4: reason=missing-evaluator (got ${r.reason})`)
 }
 
 // AA-X5 — evaluator 전달 + non-archived agent → 평가 호출되어도 allow

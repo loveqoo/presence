@@ -1,6 +1,6 @@
 # Governance Cedar 연결 — 설계 결정 필요 과제
 
-**Status**: 2026-04-28 v2.5 (P2 archived → Cedar 흡수). v2.4 (admin 면제) 위에 archived agent 의미론 (canAccessAgent §3 분기) 도 Cedar 정책으로 이관. `20-archived.cedar` 신규 — `context.archived && context.intent != "continue-session"` 일 때 forbid. `00-base.cedar` 가 `access_agent` permit 추가 (entity Agent 신규). canAccessAgent 시그니처에 옵션 evaluator — 있으면 Cedar 위임, 없으면 코드 분기 fallback. 5 진입점 (session-api / a2a-router / ws-handler / scheduler-factory / delegate.js) 모두 evaluator 전달. 잔여 코드 의미론은 `manual-review` (autoApprove=false) 1 항목.
+**Status**: 2026-04-28 v2.6 (P3 C1 — evaluator invariant 강제). v2.5 의 hybrid phase 종료. registry+entry 있을 때 evaluator 필수 — 미전달 시 `REASON.MISSING_EVALUATOR` fail-closed. legacy fallback 제거. 5 진입점은 이미 evaluator 전달 → 무영향. 외부에서 `canAccessAgent` 직접 호출하는 caller 만 영향 (테스트 등). 잔여 코드 의미론은 `manual-review` (autoApprove=false) 1 항목.
 
 **Owner**: Presence core.
 
@@ -281,8 +281,37 @@ v2.3 시점에서 `agent-identity-model.md §8.3` + `agent-identity.md I8` 의 a
 
 ---
 
+## §X1 — evaluator invariant 강제 (P3 C1, v2.6)
+
+v2.5 까지 `canAccessAgent` 가 evaluator 옵션이었다 — 미전달 시 archived 분기에서 코드 fallback (`archived && intent !== CONTINUE_SESSION`) 으로 deny. 호환 phase 의 산출물.
+
+문제: registry+entry 가 있는데 evaluator 가 누락되면 silent fail-open 위험. 새 진입점 추가 시 evaluator 전달을 잊으면 archived 판정은 지나가지만 Cedar audit JSONL 도 미작성 → 결정과 추적이 동시에 사라진다.
+
+해소 (v2.6): registry+entry 있을 때 evaluator 필수. 미전달 시 `REASON.MISSING_EVALUATOR` fail-closed.
+
+```js
+// agent-access.js — v2.6 §X1
+if (registry) {
+  const entry = ...
+  if (entry) {
+    if (typeof evaluator !== 'function') return deny(REASON.MISSING_EVALUATOR)
+    // Cedar 위임 (20-archived.cedar)
+  }
+}
+```
+
+영향:
+- 5 진입점 (session-api / ws-handler / a2a-router / scheduler-factory / delegate.js) 은 v2.5 부터 이미 evaluator 전달 → 무영향
+- 외부 caller (테스트 등) 가 evaluator 누락하면 deny — 명시적 fail-closed
+- `AA5/AA6/AA7/AA7b/AA8` (legacy fallback 의존) 는 `AA-X1/AA-X2/AA-X3/AA-X5` (evaluator 경로) 로 대체. `AA-X4` 는 의미 변경 — 이전 = legacy fallback, 현재 = MISSING_EVALUATOR fail-closed
+
+`REASON.MISSING_EVALUATOR = 'missing-evaluator'` 신규.
+
+---
+
 ## Changelog
 
+- **v2.6 (2026-04-28)**: P3 C1 — evaluator invariant 강제. `canAccessAgent` archived 분기의 legacy fallback 제거. registry+entry 있을 때 evaluator 미전달 시 `REASON.MISSING_EVALUATOR` fail-closed. 5 진입점은 v2.5 부터 이미 evaluator 전달 → 무영향. v2.5 hybrid phase 종료. 의도: silent fail-open + audit 누락 위험 → 명시적 fail-closed. `AA5/AA6/AA7/AA7b/AA8` 삭제 (legacy fallback 의존, `AA-X1/X2/X3/X5` 가 evaluator 경로로 대체). `AA-X4` 의미 변경 (legacy fallback → MISSING_EVALUATOR). `delegate.test.js` / `prod.test.js` 가 `prodInterpreterR.run({...evaluator: createMockEvaluator()})` 추가. agent-identity.md I-CEDAR-EVALUATOR-INVARIANT 신규 + I5 / I-CEDAR-ARCHIVED 갱신. 4502 passed.
 - **v2.5 (2026-04-28)**: P2 archived agent → Cedar 흡수. `20-archived.cedar` 신규 (`forbid ... when context.archived && context.intent != "continue-session"`). `00-base.cedar` 가 `access_agent` permit 추가. schema 에 entity `Agent` + action `access_agent` (context: `{ intent: String, archived: Bool }`) 추가. `canAccessAgent` 시그니처에 옵션 `evaluator` — Cedar 위임 / 코드 분기 fallback 양립. 5 진입점 (session-api new/continue, a2a-router DELEGATE, ws-handler CONTINUE, scheduler-factory SCHEDULED_RUN, delegate interpreter) 모두 evaluator 전달. cedar-mock.js default 도 archived 의미론 모사. AA-X1~X6 (agent-access), CE12 (실 cedar archived 매트릭스), CB10 (실 자산 정책 통합), INV-CEDAR-ARCHIVED-POLICY + INV-ACCESS-AGENT-CALLERS 정적 회귀 추가. 4509 passed. evaluator invariant 강제 (필수화) 는 P3 와 함께 — 현재는 옵션으로 호환.
 - **v2.4 (2026-04-27)**: KG-26 admin 면제 갭 해소 — admin 면제 + hardLimit 을 Cedar 정책으로 흡수. `11-admin-limit.cedar` 신규 (`forbid ... when context.isAdmin && context.currentCount >= context.hardLimit`). `10-quota.cedar` 에 `!context.isAdmin` 조건 추가. schema.context 가 `{ currentCount, maxAgents, isAdmin, hardLimit }` 4 필드. `agent-governance.js submitUserAgent` 가 isAdmin (requester === ADMIN_USERNAME) + hardLimit (PRESENCE_ADMIN_AGENT_HARD_LIMIT env, 기본 50) 첨부. cedar-mock.js 의 default decisionFn 도 admin 면제 모사. GV-X11 (admin under hardLimit), GV-X12 (admin over hardLimit), GV-X13 (non-admin 은 admin hardLimit 무관), GV-X14 (context isAdmin/hardLimit 첨부 검증), CE10 (admin 면제 실 cedar), CE11 (admin hardLimit 실 cedar), CB7 갱신 (admin 정책 동작), INV-CEDAR-ADMIN-EXEMPT 정적 회귀 추가. 잔여 코드 의미론은 manual-review (autoApprove=false) 1 항목.
 - **v2.3 (2026-04-26)**: Phase 1 quota 의미론 → Cedar 정책 흡수 (옵션 Y' hybrid). `10-quota.cedar` 추가 — `currentCount >= maxAgents` 일 때 forbid. schema 에 context `{ currentCount, maxAgents }` 추가. `interpretCedarDecision` 순수 함수로 Cedar 결과 → governance 4-state 매핑. `submitUserAgent` 호출 순서 재배치 (validate → duplicate → count → Cedar → mapping). `boot.js` 가 50-* 운영자 정책 슬롯을 P4 까지 차단 — cedar-wasm 4.10.0 의 `matchedPolicies` 가 정책 파일 식별 불가 (실측 `policy0` 만 반환) → 50-* 가 quota 와 분리되지 않음. autoApprove=false manual_review (third state, Cedar 표현 한계) + admin 면제 (별도 KG-26) 는 코드 잔류. cedar-mock.js 에 decisionFn 시그니처 + 기본 quota-aware 추가. GV-X1~X10 (governance) + CE7~9 (실 cedar-wasm) + CB7~9 (50-* boot throw) + CK4 갱신 (context 셰이프). 이전 GV-Y1/Y4 는 Y' 흡수로 의미가 바뀌어 GV-X 로 대체. 잔여 의미론 (admin 면제) 은 KG-26 등록.

@@ -12,6 +12,7 @@ import {
 const { Free } = fp
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { assert, summary } from '../../../../test/lib/assert.js'
+import { createMockEvaluator } from '../../../../test/lib/cedar-mock.js'
 
 const msg = (text) => [{ role: 'user', content: text }]
 
@@ -235,7 +236,7 @@ async function run() {
       run: async (task) => `reviewed: ${task}`,
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test',
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test', evaluator: createMockEvaluator(),
     })
     const [result] = await runProg(interpret, ST)(delegate('reviewer', 'check PR'))
     assert(result.status === 'completed', 'Delegate local: completed')
@@ -262,7 +263,7 @@ async function run() {
       run: async () => { throw new Error('agent crash') },
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test',
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test', evaluator: createMockEvaluator(),
     })
     const [result] = await runProg(interpret, ST)(delegate('crasher', 'task'))
     assert(result.status === 'failed', 'Delegate crash: failed (not exception)')
@@ -291,7 +292,7 @@ async function run() {
       }),
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test',
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test', evaluator: createMockEvaluator(),
     })
     const [result] = await runProg(interpret, ST)(delegate('remote-helper', 'task'))
     assert(result.status === 'completed', 'Delegate remote completed: status')
@@ -310,7 +311,7 @@ async function run() {
     })
     const mockFetch = async () => { throw new Error('ECONNREFUSED') }
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test',
+      llm: mockLLM(''), toolRegistry: registry, reactiveState, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test', evaluator: createMockEvaluator(),
     })
     const [result] = await runProg(interpret, ST)(delegate('remote-down', 'task'))
     assert(result.status === 'failed', 'Delegate remote fail: returns failed')
@@ -335,7 +336,7 @@ async function run() {
       }),
     })
     const { interpret, ST } = prodInterpreterR.run({
-      llm: mockLLM(''), toolRegistry: registry, reactiveState: testReactive, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test',
+      llm: mockLLM(''), toolRegistry: registry, reactiveState: testReactive, agentRegistry: agentReg, fetchFn: mockFetch, currentUserId: 'test', evaluator: createMockEvaluator(),
     })
     const [result] = await runProg(interpret, ST)(delegate('slow-agent', 'long task'))
     assert(result.status === 'submitted', 'Delegate submitted: status')
@@ -382,7 +383,7 @@ async function run() {
       }
     }
 
-    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test' })
+    const { interpret, ST } = prodInterpreterR.run({ llm, toolRegistry: registry, reactiveState, agentRegistry: agentReg, currentUserId: 'test', evaluator: createMockEvaluator() })
 
     const { Agent } = await import('@presence/core/core/agent.js')
     const agent = new Agent({ resolveTools: () => [], resolveAgents: () => agentReg.list(), interpret, ST })
