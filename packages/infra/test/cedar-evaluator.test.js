@@ -41,6 +41,19 @@ const ARCHIVED_POLICIES =
   'permit (principal is LocalUser, action == Action::"access_agent", resource is Agent);\n' +
   'forbid (principal is LocalUser, action == Action::"access_agent", resource is Agent) when { context.archived && context.intent != "continue-session" };'
 
+// governance-cedar v2.7 §X — archive_agent + 30-protect-admin.
+const SCHEMA_WITH_ARCHIVE_GUARD = `entity LocalUser = { id: String, role: String };
+entity Agent = { id: String };
+action "archive_agent" appliesTo {
+  principal: [LocalUser],
+  resource: [Agent],
+  context: { isAdmin: Bool, reservedOwner: Bool }
+};`
+
+const ARCHIVE_GUARD_POLICIES =
+  'permit (principal is LocalUser, action == Action::"archive_agent", resource is Agent);\n' +
+  'forbid (principal is LocalUser, action == Action::"archive_agent", resource is Agent) when { context.reservedOwner };'
+
 const PERMIT_ALL = 'permit (principal is LocalUser, action == Action::"create_agent", resource is User);'
 
 const PERMIT_PLUS_FORBID_BLOCKED =
@@ -272,6 +285,92 @@ const run = () => {
     // archived=false × 任 intent → allow (forbid 미적용)
     const r5 = evaluate({ principal, action: 'access_agent', resource, context: { archived: false, intent: 'new-session' } })
     assert(r5.decision === 'allow', `CE12.5: !archived + new-session → allow (got ${r5.decision})`)
+  }
+
+  // ==========================================================================
+  // CE13 — governance-cedar v2.7 §X (archive_agent + 30-protect-admin 정책 동작)
+  // ==========================================================================
+
+  // CE13.1 — reservedOwner=false (일반 user agent) → allow
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVE_GUARD, policiesText: ARCHIVE_GUARD_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'archive_agent',
+      resource:  { type: 'Agent', id: 'alice/old' },
+      context:   { isAdmin: false, reservedOwner: false },
+    })
+    assert(r.decision === 'allow', `CE13.1: reservedOwner=false → allow (got ${r.decision})`)
+  }
+
+  // CE13.2 — reservedOwner=true (admin/manager) → deny (admin 본인이 시도해도 차단)
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVE_GUARD, policiesText: ARCHIVE_GUARD_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'archive_agent',
+      resource:  { type: 'Agent', id: 'admin/manager' },
+      context:   { isAdmin: true, reservedOwner: true },
+    })
+    assert(r.decision === 'deny', `CE13.2: reservedOwner=true → deny (got ${r.decision})`)
+    assert(r.errors.length === 0, 'CE13.2: errors 없음')
+  }
+
+  // CE14 — governance-cedar v2.9 §X4 (set_persona + 31-protect-persona)
+  {
+    const SCHEMA_WITH_PERSONA = `entity LocalUser = { id: String, role: String };
+entity Agent = { id: String };
+action "set_persona" appliesTo {
+  principal: [LocalUser],
+  resource: [Agent],
+  context: { isAdmin: Bool, reservedOwner: Bool }
+};`
+    const PERSONA_POLICIES =
+      'permit (principal is LocalUser, action == Action::"set_persona", resource is Agent);\n' +
+      'forbid (principal is LocalUser, action == Action::"set_persona", resource is Agent) when { context.reservedOwner && !context.isAdmin };'
+
+    // CE14.1 — !reservedOwner → allow (일반 user agent)
+    {
+      const auditWriter = createCaptureAuditor()
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const r = evaluate({
+        principal: { type: 'LocalUser', id: 'alice' },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: 'alice/default' },
+        context:   { isAdmin: false, reservedOwner: false },
+      })
+      assert(r.decision === 'allow', `CE14.1: !reservedOwner → allow (got ${r.decision})`)
+      assert(auditWriter.entries.length === 1, 'CE14.1: audit 1건 기록')
+    }
+
+    // CE14.2 — reservedOwner + isAdmin → allow (admin 본인은 admin/* persona 변경 가능)
+    {
+      const auditWriter = createCaptureAuditor()
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const r = evaluate({
+        principal: { type: 'LocalUser', id: 'admin' },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: 'admin/manager' },
+        context:   { isAdmin: true, reservedOwner: true },
+      })
+      assert(r.decision === 'allow', `CE14.2: reservedOwner+isAdmin → allow (got ${r.decision})`)
+    }
+
+    // CE14.3 — reservedOwner + !isAdmin → deny (non-admin 의 admin/* persona 차단)
+    {
+      const auditWriter = createCaptureAuditor()
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const r = evaluate({
+        principal: { type: 'LocalUser', id: 'alice' },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: 'admin/manager' },
+        context:   { isAdmin: false, reservedOwner: true },
+      })
+      assert(r.decision === 'deny', `CE14.3: reservedOwner+!isAdmin → deny (got ${r.decision})`)
+      assert(auditWriter.entries[0].decision === 'deny', 'CE14.3: audit decision=deny')
+    }
   }
 
   // CE6 — Reader 브릿지 동치: createEvaluator(deps) === createEvaluatorR.run(deps) 동일 입력 → 동일 결과

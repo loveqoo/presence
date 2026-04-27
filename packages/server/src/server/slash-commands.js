@@ -1,6 +1,10 @@
 import { clearDebugState } from '@presence/core/core/state-commit.js'
 import { STATE_PATH } from '@presence/core/core/policies.js'
 import { formatStatusR } from '@presence/core/core/format-status.js'
+import { CheckAccess } from '@presence/core/core/op.js'
+import { runCheckAccess } from '@presence/infra/infra/authz/cedar/op-runner.js'
+import { isReservedUsername } from '@presence/core/core/agent-id.js'
+import { ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
 
 // --- Slash commands (테이블 디스패치) ---
 
@@ -75,7 +79,11 @@ const SLASH_COMMANDS = {
 
   // FP-71 — primary agent 의 persona 조회/변경.
   // show: 현재 name + systemPrompt (없으면 unset). set <text>: systemPrompt 갱신. reset: null 로.
-  persona: (args, { userContext }) => {
+  // governance-cedar v2.9 §X4 — set/reset 시 Cedar 게이트 fail-closed.
+  // 31-protect-persona.cedar 가 reservedOwner && !isAdmin 차단. evaluator/jwtSub/agentId
+  // 누락 시 (server 외 경로) 도 deny — handleSlashCommand 는 server 에서만 호출.
+  persona: (args, ctx) => {
+    const { userContext, evaluator, jwtSub, agentId } = ctx
     if (!userContext) return { type: 'system', content: 'Persona command unavailable in this context.' }
     const sub = args[0] || 'show'
     if (sub === 'show') {
@@ -84,13 +92,28 @@ const SLASH_COMMANDS = {
       const body = prompt && prompt.length > 0 ? prompt : '(unset — using default role definition)'
       return { type: 'system', content: `Persona: ${persona.name}\n${body}` }
     }
-    if (sub === 'set') {
-      const text = args.slice(1).join(' ').trim()
-      if (!text) return { type: 'system', content: 'Usage: /persona set <text>' }
-      userContext.updatePrimaryPersona({ systemPrompt: text })
-      return { type: 'system', content: 'Persona updated. Takes effect next turn.' }
-    }
-    if (sub === 'reset') {
+    if (sub === 'set' || sub === 'reset') {
+      // Cedar 게이트 — fail-closed. evaluator/jwtSub/agentId 중 하나라도 없으면 deny.
+      if (typeof evaluator !== 'function' || !jwtSub || !agentId) {
+        return { type: 'system', content: 'Persona change denied: missing-evaluator (server context required)' }
+      }
+      const ownerPart = agentId.split('/')[0]
+      const op = CheckAccess({
+        principal: { type: 'LocalUser', id: jwtSub },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: agentId },
+        context:   { isAdmin: jwtSub === ADMIN_USERNAME, reservedOwner: isReservedUsername(ownerPart) },
+      })
+      const decision = runCheckAccess(evaluator, op)
+      if (decision.decision !== 'allow') {
+        return { type: 'system', content: `Persona change denied: ${decision.matchedPolicies?.join(',') || 'cedar-deny'}` }
+      }
+      if (sub === 'set') {
+        const text = args.slice(1).join(' ').trim()
+        if (!text) return { type: 'system', content: 'Usage: /persona set <text>' }
+        userContext.updatePrimaryPersona({ systemPrompt: text })
+        return { type: 'system', content: 'Persona updated. Takes effect next turn.' }
+      }
       userContext.updatePrimaryPersona({ systemPrompt: null })
       return { type: 'system', content: 'Persona reset (default role definition).' }
     }

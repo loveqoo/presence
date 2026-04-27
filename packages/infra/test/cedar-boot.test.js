@@ -263,6 +263,58 @@ const run = async () => {
     assert(r2.decision === 'allow', `CB10: archived + continue-session → allow (got ${r2.decision})`)
   }
 
+  // CB11 — 실 자산 부팅 후 archive_agent + 30-protect-admin 정책 동작 (v2.7 §X)
+  {
+    const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
+    assert(/archive_agent/.test(result.policiesText), 'CB11: 00-base 가 archive_agent permit 포함')
+    assert(/reservedOwner/.test(result.policiesText), 'CB11: 30-protect-admin 의 reservedOwner forbid')
+    const auditor = captureAuditor()
+    const evaluate = createEvaluator({ ...result, auditWriter: auditor })
+    const principal = { type: 'LocalUser', id: 'admin' }
+    const reservedRes = { type: 'Agent', id: 'admin/manager' }
+    const userRes = { type: 'Agent', id: 'alice/old' }
+    // reservedOwner=true → deny
+    const r1 = evaluate({ principal, action: 'archive_agent', resource: reservedRes, context: { isAdmin: true, reservedOwner: true } })
+    assert(r1.decision === 'deny', `CB11: reservedOwner=true → deny (got ${r1.decision})`)
+    // reservedOwner=false → allow
+    const r2 = evaluate({ principal, action: 'archive_agent', resource: userRes, context: { isAdmin: false, reservedOwner: false } })
+    assert(r2.decision === 'allow', `CB11: reservedOwner=false → allow (got ${r2.decision})`)
+  }
+
+  // CB12 — 실 자산 부팅 후 set_persona + 31-protect-persona 동작 (v2.9 §X4)
+  {
+    const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
+    assert(/set_persona/.test(result.policiesText), 'CB12: 00-base 가 set_persona permit 포함')
+    assert(/31-protect-persona|reservedOwner.*!context\.isAdmin/.test(result.policiesText),
+      'CB12: 31-protect-persona 정책 통합')
+    const auditor = captureAuditor()
+    const evaluate = createEvaluator({ ...result, auditWriter: auditor })
+    // !reservedOwner → allow
+    const r1 = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'alice/default' },
+      context:   { isAdmin: false, reservedOwner: false },
+    })
+    assert(r1.decision === 'allow', `CB12: !reservedOwner → allow (got ${r1.decision})`)
+    // reservedOwner + !isAdmin → deny
+    const r2 = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'admin/manager' },
+      context:   { isAdmin: false, reservedOwner: true },
+    })
+    assert(r2.decision === 'deny', `CB12: reservedOwner+!isAdmin → deny (got ${r2.decision})`)
+    // reservedOwner + isAdmin → allow
+    const r3 = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'admin/manager' },
+      context:   { isAdmin: true, reservedOwner: true },
+    })
+    assert(r3.decision === 'allow', `CB12: reservedOwner+isAdmin → allow (got ${r3.decision})`)
+  }
+
   // CB9 — 51-* 같은 5[0-9]- 패턴 모두 차단
   {
     const dir = createFixtureDir('cb9')

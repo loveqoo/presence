@@ -1,6 +1,6 @@
 # Governance Cedar 연결 — 설계 결정 필요 과제
 
-**Status**: 2026-04-28 v2.5 (P2 archived → Cedar 흡수). v2.4 (admin 면제) 위에 archived agent 의미론 (canAccessAgent §3 분기) 도 Cedar 정책으로 이관. `20-archived.cedar` 신규 — `context.archived && context.intent != "continue-session"` 일 때 forbid. `00-base.cedar` 가 `access_agent` permit 추가 (entity Agent 신규). canAccessAgent 시그니처에 옵션 evaluator — 있으면 Cedar 위임, 없으면 코드 분기 fallback. 5 진입점 (session-api / a2a-router / ws-handler / scheduler-factory / delegate.js) 모두 evaluator 전달. 잔여 코드 의미론은 `manual-review` (autoApprove=false) 1 항목.
+**Status**: 2026-04-28 v2.9 (P3 follow-up — set_persona fail-closed 전환). v2.8 의 fail-open skip 을 fail-closed deny 로 전환. `31-protect-persona.cedar` 추가 — `reservedOwner && !isAdmin` 시 forbid. admin/* (reserved owner) agent persona 는 admin 만 변경 가능 (ownership 우회 경로 defense-in-depth). slash-commands.js 가 evaluator/jwtSub/agentId 중 하나라도 누락 시 즉시 deny. 모든 Cedar 게이트가 fail-closed 로 통일 — v2.8 spec-guardian design tension 해소. v2.6 위에 archive transition 의 Cedar 정책 슬롯 추가. `archive_agent` Cedar action + `context: { isAdmin, reservedOwner }`. `30-protect-admin.cedar` 가 `reservedOwner` 일 때 forbid (I5 admin/* archive 불가). 현재 archive transition callsite 부재 — 정책만 forward. transition land 시 Cedar 호출 누락 = `INV-EVALUATOR-INVARIANT` 위반 → fail-closed. 잔여 코드 의미론은 `manual-review` (autoApprove=false) 1 항목.
 
 **Owner**: Presence core.
 
@@ -281,8 +281,129 @@ v2.3 시점에서 `agent-identity-model.md §8.3` + `agent-identity.md I8` 의 a
 
 ---
 
+## §X4 — set_persona fail-closed + 31-protect-persona (P3 follow-up, v2.9)
+
+§X3 (v2.8) 도입 직후 spec-guardian 가 design tension 지적: I-CEDAR-EVALUATOR-INVARIANT (canAccessAgent archived) 는 fail-closed, I-CEDAR-PERSONA 는 fail-open. 이유는 v2.8 의 `set_persona` 는 audit-only (의미 forbid 정책 없음) 라 skip 이 보안 우회가 아니라는 판단. 그러나:
+
+- 모든 Cedar 게이트가 fail-closed 로 통일되어야 운영자가 정책 의도를 일관되게 읽을 수 있다.
+- 의미 forbid 정책을 도입하면 audit-only 가 아니라 실제 deny 게이트가 된다.
+
+**v2.9 변경**:
+
+1. **`31-protect-persona.cedar` 신규** — admin/* (reserved owner) persona 는 admin 만 변경:
+```cedar
+forbid (
+  principal is LocalUser,
+  action == Action::"set_persona",
+  resource is Agent
+) when { context.reservedOwner && !context.isAdmin };
+```
+
+2. **slash-commands.js fail-closed**:
+```js
+if (typeof evaluator !== 'function' || !jwtSub || !agentId) {
+  return { type: 'system', content: 'Persona change denied: missing-evaluator (server context required)' }
+}
+// Cedar 호출 → deny 시 matchedPolicies 노출
+```
+
+`handleSlashCommand` 는 `session-api.js` 에서만 호출 — production 호환성 영향 없음. CLI/테스트 경로에서 호출되더라도 deny 가 올바른 결과 (CLI 는 evaluator 없이 persona 변경 시도하면 안 됨).
+
+**defense-in-depth 의의**: ownership 은 `canAccessAgent` (session middleware) 가 이미 보장. 그러나 future 경로 (admin CLI 가 직접 updatePrimaryPersona / interpreter 가 우회 / a2a 가 cross-user persona 시도) 에서 ownership middleware 가 우회될 수 있다. 31-protect-persona 가 Cedar 정책으로 admin/* persona 보호 — 다층 방어.
+
+**테스트 커버리지**: CE14.1 (!reservedOwner → allow), CE14.2 (reservedOwner+isAdmin → allow), CE14.3 (reservedOwner+!isAdmin → deny). CB12 매트릭스 3 케이스. INV-CEDAR-PERSONA-PROTECT 정적 회귀.
+
+---
+
+## §X3 — set_persona action + slash-commands 통합 (P3 C3, v2.8 — v2.9 에서 fail-closed 전환)
+
+`set_persona` Cedar action 신규. `context: { isAdmin: Bool, reservedOwner: Bool }`.
+
+**의도**: `/persona set` / `/persona reset` 의 audit trail. Cedar evaluator 가 매 호출에서 audit JSONL 에 principal/resource/decision/timestamp 기록 → governance trace 확보.
+
+**`00-base.cedar` permit 만, forbid 없음**. 이유: ownership 이 session middleware (`canAccessAgent`) 에서 이미 강제됨. `/persona` 는 user 의 own session 에서만 호출 가능하므로 cross-owner 공격 표면이 없다. forbid 정책을 도입할 의미 제약이 현재 없다.
+
+**slash-commands.js 통합**:
+```js
+// /persona set|reset 시
+if (typeof evaluator === 'function' && jwtSub && primaryAgentId) {
+  const op = CheckAccess({
+    principal: { type: 'LocalUser', id: jwtSub },
+    action:    'set_persona',
+    resource:  { type: 'Agent', id: primaryAgentId },
+    context:   { isAdmin: jwtSub === ADMIN_USERNAME, reservedOwner: isReservedUsername(ownerPart) },
+  })
+  const decision = runCheckAccess(evaluator, op)
+  if (decision.decision !== 'allow') return /* deny 응답 */
+}
+// allow → updatePrimaryPersona
+```
+
+**fail-open 설계 결정**: evaluator/jwtSub/agentId 미전달 시 게이트 skip. CLI/테스트 호환 + audit-only 게이트라 skip 이 보안 우회가 아님. 단 후속 phase 에서 forbid 정책 추가 시 (예: `!isAdmin && reservedOwner` 차단) fail-closed 로 전환 필요. 현재는 design tension 으로 명시.
+
+`I-CEDAR-EVALUATOR-INVARIANT` (canAccessAgent archived) 는 fail-closed — 의미 deny 정책 (20-archived) 이 있어 evaluator 누락 = 우회. `I-CEDAR-PERSONA` 와 의미가 다른 게이트라 정책이 다른 것이 정합.
+
+---
+
+## §X2 — archive_agent action + 30-protect-admin (P3 C2, v2.7)
+
+`archive_agent` Cedar action 신규. `context: { isAdmin: Bool, reservedOwner: Bool }`.
+
+**의도**: agent-identity I5 의 "admin/manager (reserved owner) 는 archive 불가" 서버 불변식을 Cedar 정책으로 흡수. v2.7 까지 코드 분기로 구현되지 않았던 이유: archive transition 자체가 코드 미구현. 정책만 먼저 land 시켜서 transition 이 도착하면 자동 적용.
+
+**`30-protect-admin.cedar`**:
+```cedar
+forbid (
+  principal is LocalUser,
+  action == Action::"archive_agent",
+  resource is Agent
+) when { context.reservedOwner };
+```
+
+**현재 callsite 부재**: agent transition 이 코드에 land 하기 전이라 `Op.CheckAccess({ action: 'archive_agent' })` 를 호출하는 곳이 없다. P3 C2 는 정책 자산 + Cedar evaluator 동작 검증 (CE13 / CB11) 만 수행. transition 이 land 하면:
+1. callsite 가 `runCheckAccess` 로 archive_agent 호출
+2. `context.reservedOwner = isReservedUsername(agentId.split('/')[0])` 로 채움
+3. `isReservedUsername` 결정은 호출측 책임 (Cedar 정책은 boolean 만 신뢰)
+4. transition 누락 시 I-CEDAR-EVALUATOR-INVARIANT 가 fail-closed (registry+entry 있는 곳에서 evaluator 누락도 deny)
+
+**추가 의미론 가능**: `isAdmin` context 도 받도록 schema 정의 — admin 만 user 의 agent archive 가능하게 forbid 정책 확장 여지. P3 단계는 reservedOwner 만 사용. 후속 phase 에서 정책 추가 가능.
+
+---
+
+## §X1 — evaluator invariant 강제 (P3 C1, v2.6)
+
+v2.5 까지 `canAccessAgent` 가 evaluator 옵션이었다 — 미전달 시 archived 분기에서 코드 fallback (`archived && intent !== CONTINUE_SESSION`) 으로 deny. 호환 phase 의 산출물.
+
+문제: registry+entry 가 있는데 evaluator 가 누락되면 silent fail-open 위험. 새 진입점 추가 시 evaluator 전달을 잊으면 archived 판정은 지나가지만 Cedar audit JSONL 도 미작성 → 결정과 추적이 동시에 사라진다.
+
+해소 (v2.6): registry+entry 있을 때 evaluator 필수. 미전달 시 `REASON.MISSING_EVALUATOR` fail-closed.
+
+```js
+// agent-access.js — v2.6 §X1
+if (registry) {
+  const entry = ...
+  if (entry) {
+    if (typeof evaluator !== 'function') return deny(REASON.MISSING_EVALUATOR)
+    // Cedar 위임 (20-archived.cedar)
+  }
+}
+```
+
+영향:
+- 5 진입점 (session-api / ws-handler / a2a-router / scheduler-factory / delegate.js) 은 v2.5 부터 이미 evaluator 전달 → 무영향
+- 외부 caller (테스트 등) 가 evaluator 누락하면 deny — 명시적 fail-closed
+- `AA5/AA6/AA7/AA7b/AA8` (legacy fallback 의존) 는 `AA-X1/AA-X2/AA-X3/AA-X5` (evaluator 경로) 로 대체. `AA-X4` 는 의미 변경 — 이전 = legacy fallback, 현재 = MISSING_EVALUATOR fail-closed
+
+`REASON.MISSING_EVALUATOR = 'missing-evaluator'` 신규.
+
+---
+
 ## Changelog
 
+- **v2.9 (2026-04-28)**: P3 follow-up — `set_persona` fail-open → fail-closed 전환. `31-protect-persona.cedar` 신규 (`reservedOwner && !isAdmin` forbid). slash-commands.js 의 evaluator/jwtSub/agentId 누락 시 즉시 deny. handleSlashCommand 는 session-api.js 단일 caller — production 호환성 영향 없음. 모든 Cedar 게이트 (canAccessAgent / submitUserAgent / persona) 가 fail-closed 로 통일 — v2.8 spec-guardian design tension 해소. defense-in-depth: ownership 은 session middleware 가 보장하나 future 경로 (admin CLI / interpreter / a2a) 우회 시에도 admin/* persona 보호. CE14.1/14.2/14.3 (3 케이스 매트릭스), CB12 갱신 (3 케이스), INV-CEDAR-PERSONA-PROTECT 정적 회귀, cedar-mock decideSetPersona. agent-identity I-CEDAR-PERSONA 갱신. 4535 passed.
+- **v2.8 (2026-04-28)**: P3 C3 — `set_persona` action + slash-commands `/persona` 통합. schema `set_persona` action + `context: { isAdmin: Bool, reservedOwner: Bool }`. `00-base.cedar` permit 만 (forbid 없음 — ownership 이 session middleware 에서 이미 보장, audit trail 이 핵심). `slash-commands.js persona handler` 가 evaluator + jwtSub + agentId 있을 때 `Op.CheckAccess({ action: 'set_persona' })` 호출 → Cedar audit JSONL 자동 기록. 미전달 시 fail-open skip (CLI/테스트 호환, audit-only 게이트라 보안 우회 아님). session-api `/api/sessions/:sessionId/chat` 가 evaluator + jwtSub 를 ctx 에 추가 전달. CE14 (실 cedar set_persona + audit), CB12 (실 자산 통합), 기존 server S7b (/persona show/set/reset) 가 mock evaluator 통과. cedar-mock.js set_persona 분기. agent-identity I-CEDAR-PERSONA 신규. design tension: forbid 정책 추가 시 fail-closed 전환 검토 — 후속 phase. 4515 passed.
+- **v2.7 (2026-04-28)**: P3 C2 — `archive_agent` action + `30-protect-admin.cedar` 신규. schema 에 `archive_agent` action + `context: { isAdmin: Bool, reservedOwner: Bool }`. `00-base.cedar` 가 `archive_agent` permit 추가. `30-protect-admin.cedar` 가 `reservedOwner` 일 때 forbid (I5 admin/* archive 불가 흡수). 현재 archive transition callsite 부재 — 정책만 forward, transition land 시 자동 적용. Cedar 호출 누락 = INV-EVALUATOR-INVARIANT 위반 → fail-closed. CE13.1/13.2 (실 cedar archive_agent), CB11 (실 자산 통합), cedar-mock.js `decideArchiveAgent` 추가. agent-identity.md I-CEDAR-ARCHIVE-PROTECT 신규 + I5 갱신. 4509 passed.
+- **v2.6 (2026-04-28)**: P3 C1 — evaluator invariant 강제. `canAccessAgent` archived 분기의 legacy fallback 제거. registry+entry 있을 때 evaluator 미전달 시 `REASON.MISSING_EVALUATOR` fail-closed. 5 진입점은 v2.5 부터 이미 evaluator 전달 → 무영향. v2.5 hybrid phase 종료. 의도: silent fail-open + audit 누락 위험 → 명시적 fail-closed. `AA5/AA6/AA7/AA7b/AA8` 삭제 (legacy fallback 의존, `AA-X1/X2/X3/X5` 가 evaluator 경로로 대체). `AA-X4` 의미 변경 (legacy fallback → MISSING_EVALUATOR). `delegate.test.js` / `prod.test.js` 가 `prodInterpreterR.run({...evaluator: createMockEvaluator()})` 추가. agent-identity.md I-CEDAR-EVALUATOR-INVARIANT 신규 + I5 / I-CEDAR-ARCHIVED 갱신. 4502 passed.
 - **v2.5 (2026-04-28)**: P2 archived agent → Cedar 흡수. `20-archived.cedar` 신규 (`forbid ... when context.archived && context.intent != "continue-session"`). `00-base.cedar` 가 `access_agent` permit 추가. schema 에 entity `Agent` + action `access_agent` (context: `{ intent: String, archived: Bool }`) 추가. `canAccessAgent` 시그니처에 옵션 `evaluator` — Cedar 위임 / 코드 분기 fallback 양립. 5 진입점 (session-api new/continue, a2a-router DELEGATE, ws-handler CONTINUE, scheduler-factory SCHEDULED_RUN, delegate interpreter) 모두 evaluator 전달. cedar-mock.js default 도 archived 의미론 모사. AA-X1~X6 (agent-access), CE12 (실 cedar archived 매트릭스), CB10 (실 자산 정책 통합), INV-CEDAR-ARCHIVED-POLICY + INV-ACCESS-AGENT-CALLERS 정적 회귀 추가. 4509 passed. evaluator invariant 강제 (필수화) 는 P3 와 함께 — 현재는 옵션으로 호환.
 - **v2.4 (2026-04-27)**: KG-26 admin 면제 갭 해소 — admin 면제 + hardLimit 을 Cedar 정책으로 흡수. `11-admin-limit.cedar` 신규 (`forbid ... when context.isAdmin && context.currentCount >= context.hardLimit`). `10-quota.cedar` 에 `!context.isAdmin` 조건 추가. schema.context 가 `{ currentCount, maxAgents, isAdmin, hardLimit }` 4 필드. `agent-governance.js submitUserAgent` 가 isAdmin (requester === ADMIN_USERNAME) + hardLimit (PRESENCE_ADMIN_AGENT_HARD_LIMIT env, 기본 50) 첨부. cedar-mock.js 의 default decisionFn 도 admin 면제 모사. GV-X11 (admin under hardLimit), GV-X12 (admin over hardLimit), GV-X13 (non-admin 은 admin hardLimit 무관), GV-X14 (context isAdmin/hardLimit 첨부 검증), CE10 (admin 면제 실 cedar), CE11 (admin hardLimit 실 cedar), CB7 갱신 (admin 정책 동작), INV-CEDAR-ADMIN-EXEMPT 정적 회귀 추가. 잔여 코드 의미론은 manual-review (autoApprove=false) 1 항목.
 - **v2.3 (2026-04-26)**: Phase 1 quota 의미론 → Cedar 정책 흡수 (옵션 Y' hybrid). `10-quota.cedar` 추가 — `currentCount >= maxAgents` 일 때 forbid. schema 에 context `{ currentCount, maxAgents }` 추가. `interpretCedarDecision` 순수 함수로 Cedar 결과 → governance 4-state 매핑. `submitUserAgent` 호출 순서 재배치 (validate → duplicate → count → Cedar → mapping). `boot.js` 가 50-* 운영자 정책 슬롯을 P4 까지 차단 — cedar-wasm 4.10.0 의 `matchedPolicies` 가 정책 파일 식별 불가 (실측 `policy0` 만 반환) → 50-* 가 quota 와 분리되지 않음. autoApprove=false manual_review (third state, Cedar 표현 한계) + admin 면제 (별도 KG-26) 는 코드 잔류. cedar-mock.js 에 decisionFn 시그니처 + 기본 quota-aware 추가. GV-X1~X10 (governance) + CE7~9 (실 cedar-wasm) + CB7~9 (50-* boot throw) + CK4 갱신 (context 셰이프). 이전 GV-Y1/Y4 는 Y' 흡수로 의미가 바뀌어 GV-X 로 대체. 잔여 의미론 (admin 면제) 은 KG-26 등록.

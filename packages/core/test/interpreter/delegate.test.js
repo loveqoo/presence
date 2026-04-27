@@ -10,18 +10,22 @@ import { delegate, respond } from '@presence/core/core/op.js'
 const { Free } = fp
 import { runFreeWithStateT } from '@presence/core/lib/runner.js'
 import { assert, summary } from '../../../../test/lib/assert.js'
+import { createMockEvaluator } from '../../../../test/lib/cedar-mock.js'
 
 const mockLLM = () => ({ chat: async () => ({ type: 'text', content: '' }) })
 
 const runProg = (interpret, ST) => (program) =>
   runFreeWithStateT(interpret, ST)(program)({})
 
+// governance-cedar v2.6 §X1 — registry+entry 있으면 evaluator 필수 (invariant 강제).
+// 테스트는 mock evaluator 주입.
 const makeInterpreter = (agentRegistry) => prodInterpreterR.run({
   llm: mockLLM(),
   toolRegistry: createToolRegistry(),
   reactiveState: createOriginState({}),
   agentRegistry,
   currentUserId: 'test',
+  evaluator: createMockEvaluator(),
 })
 
 async function run() {
@@ -200,6 +204,7 @@ async function run() {
       agentRegistry: reg,
       fetchFn: mockFetch,
       currentUserId: 'test',
+      evaluator: createMockEvaluator(),
     })
 
     const [result] = await runProg(interpret, ST)(delegate('remote-worker', '원격 작업'))

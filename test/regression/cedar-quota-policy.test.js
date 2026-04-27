@@ -137,4 +137,91 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// 6. INV-EVALUATOR-INVARIANT — agent-access.js 가 registry+entry 있을 때 evaluator 필수.
+//    legacy fallback (else if archived ...) 제거 + REASON.MISSING_EVALUATOR 추가 (governance-cedar v2.6 §X1).
+{
+  const text = read('packages/infra/src/infra/authz/agent-access.js')
+  assert(
+    /MISSING_EVALUATOR:\s*['"]missing-evaluator['"]/.test(text),
+    'INV-EVALUATOR-INVARIANT: REASON.MISSING_EVALUATOR enum 정의',
+  )
+  assert(
+    /typeof evaluator !==\s*['"]function['"]\s*\)\s*return deny\(REASON\.MISSING_EVALUATOR\)/.test(text),
+    'INV-EVALUATOR-INVARIANT: registry+entry 있을 때 evaluator 미전달 → fail-closed',
+  )
+  // legacy fallback 패턴 (`else if (archived && intent !==`) 부재
+  assert(
+    !/else if \(archived &&/.test(text),
+    'INV-EVALUATOR-INVARIANT: legacy fallback (else if archived) 제거됨',
+  )
+}
+
+// 7. INV-CEDAR-ARCHIVE-PROTECT — 30-protect-admin.cedar 정책 + schema archive_agent action
+//    (governance-cedar v2.7 §X2)
+{
+  const policyPath = 'packages/infra/src/infra/authz/cedar/policies/30-protect-admin.cedar'
+  assert(existsSync(join(REPO_ROOT, policyPath)), `INV-CEDAR-ARCHIVE-PROTECT: ${policyPath} 존재`)
+  const text = read(policyPath)
+  assert(/forbid\s*\(/.test(text), 'INV-CEDAR-ARCHIVE-PROTECT: forbid 정책')
+  assert(/action == Action::"archive_agent"/.test(text), 'INV-CEDAR-ARCHIVE-PROTECT: action == archive_agent')
+  assert(/resource is Agent/.test(text), 'INV-CEDAR-ARCHIVE-PROTECT: resource is Agent')
+  assert(/context\.reservedOwner/.test(text), 'INV-CEDAR-ARCHIVE-PROTECT: when context.reservedOwner')
+
+  const schema = read('packages/infra/src/infra/authz/cedar/schema.cedarschema')
+  assert(/action archive_agent/.test(schema), 'INV-CEDAR-ARCHIVE-PROTECT: schema 에 archive_agent action')
+  assert(/reservedOwner:\s*Bool/.test(schema), 'INV-CEDAR-ARCHIVE-PROTECT: schema context.reservedOwner: Bool')
+
+  const base = read('packages/infra/src/infra/authz/cedar/policies/00-base.cedar')
+  assert(/Action::"archive_agent"/.test(base), 'INV-CEDAR-ARCHIVE-PROTECT: 00-base 가 archive_agent permit')
+}
+
+// 8. INV-SET-PERSONA-CALLERS — slash-commands.js 의 persona handler 가 set/reset 시
+//    Op.CheckAccess(action='set_persona') 호출 (governance-cedar v2.8 §X3)
+{
+  const text = read('packages/server/src/server/slash-commands.js')
+  // CheckAccess({...action:'set_persona'...}) 호출 존재
+  const callerRe = /CheckAccess\(\{[\s\S]*?\}\)/g
+  let count = 0
+  let m
+  while ((m = callerRe.exec(text)) !== null) {
+    const block = m[0]
+    if (!/action:\s*['"]set_persona['"]/.test(block)) continue
+    count += 1
+    for (const field of ['isAdmin', 'reservedOwner']) {
+      assert(
+        new RegExp(`context:\\s*\\{[\\s\\S]*?${field}[\\s\\S]*?\\}`).test(block),
+        `INV-SET-PERSONA-CALLERS: 호출 #${count} 가 context.${field} 첨부`,
+      )
+    }
+  }
+  assert(count >= 1, `INV-SET-PERSONA-CALLERS: 최소 1 개 set_persona 호출 발견 (got ${count})`)
+
+  const schema = read('packages/infra/src/infra/authz/cedar/schema.cedarschema')
+  assert(/action set_persona/.test(schema), 'INV-SET-PERSONA-CALLERS: schema 에 set_persona action')
+
+  const base = read('packages/infra/src/infra/authz/cedar/policies/00-base.cedar')
+  assert(/Action::"set_persona"/.test(base), 'INV-SET-PERSONA-CALLERS: 00-base 가 set_persona permit')
+}
+
+// 9. INV-CEDAR-PERSONA-PROTECT — 31-protect-persona.cedar 정책 + slash-commands fail-closed
+//    (governance-cedar v2.9 §X4)
+{
+  const policyPath = 'packages/infra/src/infra/authz/cedar/policies/31-protect-persona.cedar'
+  assert(existsSync(join(REPO_ROOT, policyPath)), `INV-CEDAR-PERSONA-PROTECT: ${policyPath} 존재`)
+  const text = read(policyPath)
+  assert(/forbid\s*\(/.test(text), 'INV-CEDAR-PERSONA-PROTECT: forbid 정책')
+  assert(/action == Action::"set_persona"/.test(text), 'INV-CEDAR-PERSONA-PROTECT: action == set_persona')
+  assert(
+    /context\.reservedOwner\s*&&\s*!\s*context\.isAdmin/.test(text),
+    'INV-CEDAR-PERSONA-PROTECT: when context.reservedOwner && !context.isAdmin',
+  )
+
+  // slash-commands.js — evaluator/jwtSub/agentId 누락 시 deny (fail-closed)
+  const slash = read('packages/server/src/server/slash-commands.js')
+  assert(
+    /typeof evaluator !==\s*['"]function['"]\s*\|\|\s*!jwtSub\s*\|\|\s*!agentId/.test(slash),
+    'INV-CEDAR-PERSONA-PROTECT: slash-commands fail-closed 패턴 (evaluator/jwtSub/agentId 누락 시 deny)',
+  )
+}
+
 summary()
