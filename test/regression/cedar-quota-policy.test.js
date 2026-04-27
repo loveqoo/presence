@@ -1,15 +1,18 @@
 /**
- * INV-CEDAR-QUOTA-POLICY + 관련 회귀 (governance-cedar v2.3 §X / v2.4 §X).
+ * INV-CEDAR-QUOTA-POLICY + 관련 회귀 (governance-cedar v2.3 §X / v2.4 §X / v2.5 §X).
  *
- * 정적 grep 으로 P1 + KG-26 의 핵심 invariant 가 침식되지 않았는지 검증한다. 의미론 회귀는
- * `packages/infra/test/agent-governance.test.js` GV-X1~X14 가 행동 검증 — 이 파일은
+ * 정적 grep 으로 P1 + KG-26 + P2 의 핵심 invariant 가 침식되지 않았는지 검증한다.
+ * 의미론 회귀는 `packages/infra/test/agent-governance.test.js` GV-X1~X14 +
+ * `packages/infra/test/agent-access.test.js` AA-X1~X6 가 행동 검증 — 이 파일은
  * "코드/정책 파일에 약속된 형태가 그대로 있는가" 의 정적 방어.
  *
  * 1) INV-CEDAR-QUOTA-POLICY: 10-quota.cedar 가 존재 + forbid... when !isAdmin && currentCount >= maxAgents
  * 2) INV-CEDAR-ADMIN-EXEMPT: 11-admin-limit.cedar 가 존재 + isAdmin && currentCount >= hardLimit
- * 3) INV-SUBMIT-USER-AGENT-CONTEXT: agent-governance.js 의 CheckAccess 가 context { currentCount, maxAgents, isAdmin, hardLimit } 첨부
- * 4) INV-CREATE-AGENT-CALLERS: action: 'create_agent' 호출 모두 4 context 필드 첨부
- * 5) INV-CEDAR-CUSTOM-BLOCK: boot.js readPoliciesDir 가 5[0-9]- 패턴 throw
+ * 3) INV-CEDAR-ARCHIVED-POLICY: 20-archived.cedar 가 존재 + archived && intent != "continue-session"
+ * 4) INV-SUBMIT-USER-AGENT-CONTEXT: agent-governance.js 의 CheckAccess 가 context { currentCount, maxAgents, isAdmin, hardLimit } 첨부
+ * 5) INV-CREATE-AGENT-CALLERS: action: 'create_agent' 호출 모두 4 context 필드 첨부
+ * 6) INV-ACCESS-AGENT-CALLERS: agent-access.js 의 CheckAccess 가 action='access_agent' + context { intent, archived } 첨부
+ * 7) INV-CEDAR-CUSTOM-BLOCK: boot.js readPoliciesDir 가 5[0-9]- 패턴 throw
  */
 
 import { readFileSync, existsSync } from 'node:fs'
@@ -49,6 +52,20 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// 2b. INV-CEDAR-ARCHIVED-POLICY — 20-archived.cedar 의 archived forbid (P2)
+{
+  const policyPath = 'packages/infra/src/infra/authz/cedar/policies/20-archived.cedar'
+  assert(existsSync(join(REPO_ROOT, policyPath)), `INV-CEDAR-ARCHIVED-POLICY: ${policyPath} 존재`)
+  const text = read(policyPath)
+  assert(/forbid\s*\(/.test(text), 'INV-CEDAR-ARCHIVED-POLICY: forbid 정책 선언')
+  assert(/action == Action::"access_agent"/.test(text), 'INV-CEDAR-ARCHIVED-POLICY: action == access_agent')
+  assert(/resource is Agent/.test(text), 'INV-CEDAR-ARCHIVED-POLICY: resource is Agent')
+  assert(
+    /context\.archived\s*&&\s*context\.intent\s*!=\s*"continue-session"/.test(text),
+    'INV-CEDAR-ARCHIVED-POLICY: when context.archived && context.intent != "continue-session"',
+  )
+}
+
 // 3. INV-SUBMIT-USER-AGENT-CONTEXT — submitUserAgent 의 CheckAccess 호출이 4 context 필드 첨부
 {
   const text = read('packages/infra/src/infra/authz/agent-governance.js')
@@ -84,6 +101,27 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
     }
   }
   assert(count >= 1, `INV-CREATE-AGENT-CALLERS: 최소 1 개 create_agent 호출 발견 (got ${count})`)
+}
+
+// 4b. INV-ACCESS-AGENT-CALLERS — agent-access.js 의 CheckAccess 가 access_agent + context 첨부
+{
+  const text = read('packages/infra/src/infra/authz/agent-access.js')
+  const callerRe = /CheckAccess\(\{[\s\S]*?\}\)/g
+  const fields = ['intent', 'archived']
+  let count = 0
+  let m
+  while ((m = callerRe.exec(text)) !== null) {
+    const block = m[0]
+    if (!/action:\s*['"]access_agent['"]/.test(block)) continue
+    count += 1
+    for (const field of fields) {
+      assert(
+        new RegExp(`context:\\s*\\{[\\s\\S]*?${field}[\\s\\S]*?\\}`).test(block),
+        `INV-ACCESS-AGENT-CALLERS: 호출 #${count} 가 context.${field} 첨부`,
+      )
+    }
+  }
+  assert(count >= 1, `INV-ACCESS-AGENT-CALLERS: 최소 1 개 access_agent 호출 발견 (got ${count})`)
 }
 
 // 5. INV-CEDAR-CUSTOM-BLOCK — boot.js readPoliciesDir 가 5[0-9]- 패턴 throw
