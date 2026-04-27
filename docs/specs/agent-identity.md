@@ -32,7 +32,9 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - I7. **Governance quota**: non-admin user가 agent 추가 시 `agent-policies.json`의 `maxAgentsPerUser` 기준 체크. quota 내 + `autoApproveUnderQuota=true`이면 자동 승인. 초과 시 `pending/` 파일 작성. active count는 `config.agents.filter(!archived).length`로 매번 재계산 — 캐시 없음.
 
-- I8. **Admin quota 면제**: `role === 'admin'`이면 quota 체크 스킵. 단, 환경변수 `PRESENCE_ADMIN_AGENT_HARD_LIMIT` (기본 50) 하드 상한 존재.
+- I-CEDAR-QUOTA. **Quota 의미론은 Cedar 정책에서 평가** (governance-cedar v2.3 §X, Phase 1 옵션 Y' hybrid): `submitUserAgent` 가 `Op.CheckAccess` 를 `context: { currentCount, maxAgents }` 와 함께 호출. `10-quota.cedar` 가 `forbid ... when context.currentCount >= context.maxAgents` 매치. 호출 순서: validate → duplicate (Cedar 전 단락) → count/policies 계산 → Cedar → `interpretCedarDecision` 매핑. Cedar `decision='deny' && errors.length > 0` → DENIED(`evaluator-error`); `decision='deny'` (errors 없음) → PENDING(`quota-exceeded`); `decision='allow' && !autoApprove` → PENDING(`manual-review`); `decision='allow' && autoApprove` → APPROVED. 운영자 정책 슬롯 (`50-*.cedar`) 은 `boot.js readPoliciesDir` 가 P4 까지 차단 — cedar-wasm 4.10.0 의 `matchedPolicies` 가 정책 파일 식별 불가 → quota 매치와 운영자 deny 의 분리가 어렵기 때문. P4 의 lint/reload 인프라 도입 후 슬롯 개방.
+
+- I8. **Admin quota 면제**: `role === 'admin'`이면 quota 체크 스킵. 단, 환경변수 `PRESENCE_ADMIN_AGENT_HARD_LIMIT` (기본 50) 하드 상한 존재. **Phase 1 (v2.3) 시점 코드는 admin 분기를 갖지 않음 — KG-26 별도 추적**.
 
 - I9. **Governance 파일 원자성**: user config append, pending→approved/rejected 이동 모두 atomic (tmp + rename). approve 재실행 시 config 선확인(idempotent replay) — config에 이미 있으면 파일만 정리.
 
@@ -103,6 +105,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - I5 → `packages/infra/test/agent-access.test.js` AA5/AA6/AA7/AA7b
 - I6 → `packages/infra/test/agent-governance.test.js` (runAdminBootstrap 통합)
 - I7 → `packages/infra/test/agent-governance.test.js` GV4/GV5/GV6
+- I-CEDAR-QUOTA → `packages/infra/test/agent-governance.test.js` GV-X1~GV-X10, `packages/infra/test/cedar-evaluator.test.js` CE7~CE9, `packages/infra/test/cedar-boot.test.js` CB7~CB9, `packages/infra/test/check-access-interpreter.test.js` CK4
 - I9 → `packages/infra/test/agent-governance.test.js` GV9/GV10/GV14
 - I10 → `packages/infra/test/resolve-delegate-target.test.js` RDT1~RDT9 (Parser→Resolver→Authz §3.6 전체 케이스) + `test/regression/delegate-order-enforcement.test.js` (Op.Delegate 인터프리터 호출 순서 정적 검사)
 - I11 → `packages/server/test/a2a-discovery.test.js` AD4a (`GET /a2a/.well-known/agents` — agents 배열 JSON 미반환) / AD4b (`GET /a2a/admin/manager/card` — card shape 미반환) / AD4c (`POST /a2a/admin/manager` — JSON-RPC envelope 미반환, router 핸들러 미실행). 세 케이스 모두 negation 검증으로 라우트 미등록 확인. enabled=true + publicUrl=null 부팅 거부는 E16 커버 (`packages/server/test/a2a-boot-guard.test.js`)
@@ -168,4 +171,5 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-26: KG-21 resolved — INV-DELEGATE-ORDER 정적 검사 추가. delegate.js 의 resolveDelegateTarget/canAccessAgent 호출 순서를 라인 번호 비교로 강제. 후속 두 옵션 (마커 / spy) 은 침습적이라 미적용 — 정적 grep 으로 회귀 방어 충분.
 - 2026-04-26: KG-17 resolved — feature/cedar-governance-v2. A2A 라우터 caller 인증을 `X-Presence-Caller` 헤더 stub 에서 JWT Bearer 서명 검증으로 교체. `signA2aToken` / `verifyA2aToken` (type='a2a' 분리) 추가. `AUTH.A2A_TOKEN_EXPIRY_S = 60`. `AUTH_INVALID(-32002)` 에러 코드 추가. I13 불변식 신규 등록. 테스트 커버리지 A2A1~A2A4 / AI10 / AI11 추가. 관련 코드에 token.js / policy.js / a2a-protocol.js / a2a-client.js 추가.
 - 2026-04-26: I11 테스트 매핑 갱신 — AD4 를 AD4a/b/c 로 확장하여 세 라우트 미등록 (agents 목록, card, JSON-RPC invoke) 을 모두 negation 검증으로 확인. ⚠️ 미커버 표기 해소.
-- 2026-04-26: I13 강화 — verifyAccessToken 도 type 분리 검사 적용. 세 토큰 type 모두 명시 분리 (access/refresh/a2a 모두 sign + verify 양쪽 강제). 테스트 A2A3 의미 반전 (Right → Left) + A2A5/A2A6 신규 추가 (총 36 passed). 배포 영향: 기존 access token 1회 401 후 자동 refresh.
+- 2026-04-26: I13 강화 — verifyAccessToken 도 type 분리 검사 적용. 세 토큰 type 모두 명시 분리 (access/refresh/a2a 모두 sign + verify 양쪽 강제). 테스트 A2A3 의미 반전 (Right → Left) + A2A5/A2A6 신규 추가 (총 36 passed).
+- 2026-04-27: I-CEDAR-QUOTA 신규 등록 — governance-cedar v2.3 (옵션 Y' hybrid). `submitUserAgent` 의 quota 분기를 `10-quota.cedar` 정책으로 흡수. `interpretCedarDecision` 순수 함수가 Cedar 결과를 governance 4-state 로 매핑. 운영자 슬롯(`50-*.cedar`)은 P4 까지 차단 (cedar-wasm 4.10.0 matchedPolicies 파일 식별 불가 제약). I8 끝에 KG-26 갭 주석 추가. 테스트 커버리지 I-CEDAR-QUOTA 항목 추가. 배포 영향: cedar/policies/ 디렉토리에 50-*.cedar 가 존재하는 운영 환경은 부팅 거부 (P4 까지 차단). 기존 호출자는 호환 — submitUserAgent 의 시그니처/리턴 shape 무변동.

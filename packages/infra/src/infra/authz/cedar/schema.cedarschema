@@ -3,5 +3,8 @@ entity User { id: String };
 action create_agent appliesTo {
   principal: [LocalUser],
   resource: [User],
-  context: {}
+  context: {
+    currentCount: Long,
+    maxAgents:    Long,
+  }
 };

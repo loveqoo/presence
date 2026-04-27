@@ -59,13 +59,26 @@ const run = async () => {
     assert(threw, 'CK3: tag !== CheckAccess → throw')
   }
 
-  // CK4 — runCheckAccess: context 부재 → {} 보정
+  // CK4 — runCheckAccess: context 셰이프. 부재 → {} 보정, 명시 시 그대로 전달.
+  // governance-cedar v2.3 §X — submitUserAgent 가 { currentCount, maxAgents } 첨부.
   {
     let captured = null
     const evaluator = (params) => { captured = params; return { decision: 'allow', matchedPolicies: [], errors: [] } }
-    const op = CheckAccess({ principal: samplePrincipal, action: 'create_agent', resource: sampleResource })
-    runCheckAccess(evaluator, op)
-    assert(typeof captured.context === 'object' && captured.context !== null, 'CK4: context 기본값 객체')
+
+    // 부재 → {} 보정
+    const op0 = CheckAccess({ principal: samplePrincipal, action: 'create_agent', resource: sampleResource })
+    runCheckAccess(evaluator, op0)
+    assert(typeof captured.context === 'object' && captured.context !== null, 'CK4: context 부재 → {} 보정')
+    assert(Object.keys(captured.context).length === 0, 'CK4: 빈 객체')
+
+    // 명시 → 그대로 전달
+    const op1 = CheckAccess({
+      principal: samplePrincipal, action: 'create_agent', resource: sampleResource,
+      context: { currentCount: 3, maxAgents: 5 },
+    })
+    runCheckAccess(evaluator, op1)
+    assert(captured.context.currentCount === 3, `CK4: currentCount 전달 (got ${captured.context.currentCount})`)
+    assert(captured.context.maxAgents === 5, `CK4: maxAgents 전달 (got ${captured.context.maxAgents})`)
   }
 
   // CK5 — 인터프리터 통합: Op.CheckAccess Free → evaluator 호출 → decision 반환

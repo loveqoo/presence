@@ -10,6 +10,10 @@ import fp from '@presence/core/lib/fun-fp.js'
 
 const { Reader } = fp
 
+// governance-cedar v2.3 §X — P1 단계는 50-* 운영자 정책 슬롯을 부팅 시점에 차단.
+// 사유: cedar-wasm 4.10.0 의 matchedPolicies 가 정책 파일별 식별을 보장하지 않아
+// (deny 결과의 출처를 quota / 운영자 정책 사이에서 분리 불가능). P4 의 lint/reload
+// 인프라가 정책 식별 메커니즘을 도입한 뒤에 슬롯을 개방한다.
 const readPoliciesDir = (policiesDir) => {
   if (!existsSync(policiesDir)) {
     throw new Error(`Cedar policies dir 부재: ${policiesDir}`)
@@ -17,6 +21,10 @@ const readPoliciesDir = (policiesDir) => {
   const policyFiles = readdirSync(policiesDir)
     .filter(f => f.endsWith('.cedar'))
     .sort()
+  const customFiles = policyFiles.filter(f => /^5[0-9]-/.test(f))
+  if (customFiles.length > 0) {
+    throw new Error(`Cedar custom policies (50-*) 미지원 — P4 까지 차단: ${customFiles.join(', ')}`)
+  }
   if (policyFiles.length === 0) {
     throw new Error(`Cedar policies dir 비어있음: ${policiesDir}`)
   }

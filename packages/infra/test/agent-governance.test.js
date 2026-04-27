@@ -339,75 +339,12 @@ async function run() {
   }
 
   // ==========================================================================
-  // GV-Y1~Y4 — governance-cedar v2.1 §5.1 회귀 항목 (옵션 Y minimal seed 불변식)
+  // GV-Y2/Y5 — invariant 회귀 (governance-cedar v2.3 hybrid)
   // ==========================================================================
 
-  // GV-Y1 — minimal seed 만 적용된 상태 (mock 이 항상 allow) 에서 admin/user × quota 안/초과 ×
-  //         autoApprove 任 의 8 케이스 전부 evaluate 가 allow 반환 (count == call count + 결과 status 정상)
-  {
-    const dir = createTmpDir()
-    await initAdminBootstrap(dir)
-    let allowCount = 0
-    let denyCount = 0
-    const tracingEvaluator = (input) => {
-      const ans = mockEvaluator(input)
-      if (ans.decision === 'allow') allowCount += 1
-      else denyCount += 1
-      return ans
-    }
-
-    // user × autoApprove=true × under-quota
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
-    writeUserConfig(dir, 'u1', { agents: [] })
-    const r1 = submitUserAgent({ requester: 'u1', agentName: 'a', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r1.status === STATUS.APPROVED, 'GV-Y1.1: user under-quota autoApprove → APPROVED')
-
-    // user × autoApprove=true × over-quota
-    writeUserConfig(dir, 'u2', { agents: [{ name: 'x' }, { name: 'y' }, { name: 'z' }, { name: 'p' }, { name: 'q' }] })
-    const r2 = submitUserAgent({ requester: 'u2', agentName: 'r', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r2.status === STATUS.PENDING, 'GV-Y1.2: user over-quota → PENDING (Cedar allow → 코드 분기)')
-
-    // user × autoApprove=false × under-quota
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: false })
-    writeUserConfig(dir, 'u3', { agents: [] })
-    const r3 = submitUserAgent({ requester: 'u3', agentName: 'a', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r3.status === STATUS.PENDING, 'GV-Y1.3: user under-quota autoApprove=false → PENDING')
-
-    // user × autoApprove=false × over-quota
-    writeUserConfig(dir, 'u4', { agents: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }, { name: 'e' }] })
-    const r4 = submitUserAgent({ requester: 'u4', agentName: 'f', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r4.status === STATUS.PENDING, 'GV-Y1.4: user over-quota autoApprove=false → PENDING')
-
-    // admin (admin 도 일반 LocalUser/create_agent 정책 적용 — 의미론은 코드)
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
-    writeUserConfig(dir, 'admin', { agents: [] })
-    const r5 = submitUserAgent({ requester: 'admin', agentName: 'q1', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r5.status === STATUS.APPROVED, 'GV-Y1.5: admin under-quota autoApprove → APPROVED')
-
-    // admin × under-quota × autoApprove=false
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: false })
-    writeUserConfig(dir, 'admin2', { agents: [] })
-    const r6 = submitUserAgent({ requester: 'admin2', agentName: 'q2', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r6.status === STATUS.PENDING, 'GV-Y1.6: admin under-quota autoApprove=false → PENDING')
-
-    // admin × over-quota × autoApprove=true
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
-    writeUserConfig(dir, 'admin3', { agents: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }, { name: 'e' }] })
-    const r7 = submitUserAgent({ requester: 'admin3', agentName: 'q3', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r7.status === STATUS.PENDING, 'GV-Y1.7: admin over-quota autoApprove=true → PENDING')
-
-    // admin × over-quota × autoApprove=false
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: false })
-    writeUserConfig(dir, 'admin4', { agents: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }, { name: 'e' }] })
-    const r8 = submitUserAgent({ requester: 'admin4', agentName: 'q4', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: tracingEvaluator })
-    assert(r8.status === STATUS.PENDING, 'GV-Y1.8: admin over-quota autoApprove=false → PENDING')
-
-    assert(allowCount === 8, `GV-Y1: 8 케이스 모두 Cedar allow (got allow=${allowCount}, deny=${denyCount})`)
-    assert(denyCount === 0, 'GV-Y1: minimal seed 에선 deny 0건')
-    rmSync(dir, { recursive: true, force: true })
-  }
-
-  // GV-Y2 — Cedar evaluate 호출 횟수 = submitUserAgent 호출 횟수 (1회 보장, 누락/중복 방지)
+  // GV-Y2 — Cedar evaluate 호출 횟수 = submitUserAgent 호출 횟수.
+  //   v2.3 부터 호출 순서: validate → duplicate → count/policies → Cedar.
+  //   ALREADY_EXISTS 는 Cedar 호출 전 단락 (불필요한 latency / audit row 회피).
   {
     const dir = createTmpDir()
     await initAdminBootstrap(dir)
@@ -422,10 +359,9 @@ async function run() {
     submitUserAgent({ requester: 'callcount', agentName: 'a2', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: counter })
     assert(calls === 2, `GV-Y2: 두 번째 submit → 누적 2회 (got ${calls})`)
 
-    // 중복 (ALREADY_EXISTS) 도 evaluator 호출됨 — RBAC 게이트가 dup 검사 전.
-    // 의도적 결정: enforcement point 가 모든 진입에서 작동 (governance-cedar §3.3).
+    // 중복 (ALREADY_EXISTS) 은 Cedar 호출 *전* 단락 — v2.3 에서 호출 순서 변경됨.
     submitUserAgent({ requester: 'callcount', agentName: 'a1', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: counter })
-    assert(calls === 3, `GV-Y2: 중복 submit 도 evaluator 호출 (RBAC gate 우선) (got ${calls})`)
+    assert(calls === 2, `GV-Y2: 중복 submit 은 Cedar 호출 전 단락 (got ${calls})`)
 
     // invalid name → throw 시점은 evaluator 호출 *전* (validate 가 먼저)
     let calls2 = 0
@@ -439,26 +375,6 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // GV-Y4 — evaluator 가 deny 반환 → 코드 분기 미도달 (writePending / appendAgentToConfig 호출 안됨)
-  {
-    const dir = createTmpDir()
-    await initAdminBootstrap(dir)
-    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
-    writeUserConfig(dir, 'denied', { agents: [] })
-
-    const denyEvaluator = () => ({ decision: 'deny', matchedPolicies: ['50-custom'], errors: [] })
-    const result = submitUserAgent({ requester: 'denied', agentName: 'no-go', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: denyEvaluator })
-    assert(result.status === STATUS.DENIED, `GV-Y4: deny → STATUS.DENIED (got ${result.status})`)
-    assert(/50-custom/.test(result.detail || ''), `GV-Y4: detail 에 matchedPolicies 노출 (got ${result.detail})`)
-
-    // 코드 분기 미도달 — config 무변동, pending 0건
-    const config = readUserConfig(dir, 'denied')
-    assert(!config.agents || config.agents.length === 0, 'GV-Y4: config.agents 무변동')
-    assert(listPending(dir).length === 0, 'GV-Y4: pending 미생성')
-    assert(listApproved(dir).length === 0, 'GV-Y4: approved 미생성')
-    rmSync(dir, { recursive: true, force: true })
-  }
-
   // GV-Y5 — evaluator 부재 시 throw (invariant 검증)
   {
     let threw = false
@@ -469,6 +385,142 @@ async function run() {
       assert(/evaluator.*required/.test(e.message), `GV-Y5: error message 에 evaluator required 명시 (${e.message})`)
     }
     assert(threw, 'GV-Y5: evaluator 부재 → throw')
+  }
+
+  // ==========================================================================
+  // GV-X1~X10 — governance-cedar v2.3 §X (P1 quota Cedar 흡수, 옵션 Y' hybrid)
+  // ==========================================================================
+
+  // GV-X1 — Cedar context 셰이프 정확 (currentCount + maxAgents)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    writeUserConfig(dir, 'cx1', { agents: [{ name: 'a' }, { name: 'b' }] })
+    let captured = null
+    const evaluator = (input) => { captured = input; return { decision: 'allow', matchedPolicies: [], errors: [] } }
+    submitUserAgent({ requester: 'cx1', agentName: 'c', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator })
+    assert(captured && captured.context, 'GV-X1: context 전달됨')
+    assert(captured.context.currentCount === 2, `GV-X1: currentCount=2 (got ${captured.context.currentCount})`)
+    assert(captured.context.maxAgents === 5, `GV-X1: maxAgents=5 (got ${captured.context.maxAgents})`)
+    assert(captured.principal.type === 'LocalUser' && captured.principal.id === 'cx1', 'GV-X1: principal=LocalUser/cx1')
+    assert(captured.action === 'create_agent', 'GV-X1: action=create_agent')
+    assert(captured.resource.type === 'User' && captured.resource.id === 'cx1', 'GV-X1: resource=User/cx1')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X2 — count=0 maxAgents=5 autoApprove=true → APPROVED (mock allow)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    writeUserConfig(dir, 'cx2', { agents: [] })
+    const r = submitUserAgent({ requester: 'cx2', agentName: 'a', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.APPROVED, `GV-X2: count=0 maxAgents=5 autoApprove=true → APPROVED (got ${r.status})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X3 — count=4 maxAgents=5 boundary → APPROVED (under quota)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    writeUserConfig(dir, 'cx3', { agents: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }] })
+    const r = submitUserAgent({ requester: 'cx3', agentName: 'e', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.APPROVED, `GV-X3: boundary 4/5 → APPROVED (got ${r.status})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X4 — count=5 maxAgents=5 → mock deny → PENDING(quota-exceeded)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    writeUserConfig(dir, 'cx4', { agents: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }, { name: 'e' }] })
+    const r = submitUserAgent({ requester: 'cx4', agentName: 'f', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.PENDING, `GV-X4: count=5/5 → PENDING (got ${r.status})`)
+    const pending = listPending(dir)
+    assert(pending[0].reason === PENDING_REASON.QUOTA_EXCEEDED, `GV-X4: reason=quota-exceeded (got ${pending[0].reason})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X5 — count=10 maxAgents=5 autoApprove=false → mock deny → PENDING(quota-exceeded). autoApprove 무관.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: false })
+    writeUserConfig(dir, 'cx5', { agents: Array.from({ length: 10 }, (_, i) => ({ name: `a${i}` })) })
+    const r = submitUserAgent({ requester: 'cx5', agentName: 'over', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.PENDING, `GV-X5: over-quota autoApprove=false → PENDING (got ${r.status})`)
+    const pending = listPending(dir)
+    assert(pending[0].reason === PENDING_REASON.QUOTA_EXCEEDED, `GV-X5: reason=quota-exceeded (autoApprove 무관) (got ${pending[0].reason})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X6 — count=2 maxAgents=5 autoApprove=false → mock allow → PENDING(manual-review). third state 코드 잔류.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: false })
+    writeUserConfig(dir, 'cx6', { agents: [{ name: 'a' }, { name: 'b' }] })
+    const r = submitUserAgent({ requester: 'cx6', agentName: 'c', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.PENDING, `GV-X6: under-quota autoApprove=false → PENDING (got ${r.status})`)
+    const pending = listPending(dir)
+    assert(pending[0].reason === PENDING_REASON.MANUAL_REVIEW, `GV-X6: reason=manual-review (got ${pending[0].reason})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X7 — 이미 존재 (active) → ALREADY_EXISTS, Cedar 호출 *전* 단락
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    writeUserConfig(dir, 'cx7', { agents: [{ name: 'dup', archived: false }] })
+    let evalCalled = false
+    const evaluator = (input) => { evalCalled = true; return mockEvaluator(input) }
+    const r = submitUserAgent({ requester: 'cx7', agentName: 'dup', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator })
+    assert(r.status === STATUS.ALREADY_EXISTS, `GV-X7: 중복 → ALREADY_EXISTS (got ${r.status})`)
+    assert(evalCalled === false, 'GV-X7: Cedar 호출 안됨 (duplicate short-circuit)')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X8 — 같은 이름 archived 존재 + count=0 → 정상 진입 (archived 는 차단 사유 아님)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    writeUserConfig(dir, 'cx8', { agents: [{ name: 'reborn', archived: true }] })
+    const r = submitUserAgent({ requester: 'cx8', agentName: 'reborn', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.APPROVED, `GV-X8: archived 동명 → 정상 추가 (got ${r.status})`)
+    const config = readUserConfig(dir, 'cx8')
+    assert(config.agents.length === 2, 'GV-X8: 새 entry append (archived 유지 + 신규)')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X9 — Cedar deny + errors=['parse error'] → DENIED(evaluator-error)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    writeUserConfig(dir, 'cx9', { agents: [] })
+    const evaluator = createMockEvaluator(() => ({ decision: 'deny', matchedPolicies: [], errors: ['parse error: invalid policy'] }))
+    const r = submitUserAgent({ requester: 'cx9', agentName: 'broken', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator })
+    assert(r.status === STATUS.DENIED, `GV-X9: errors → DENIED (got ${r.status})`)
+    assert(r.reason === 'evaluator-error', `GV-X9: reason=evaluator-error (got ${r.reason})`)
+    assert(/parse error/.test(r.detail || ''), `GV-X9: detail 에 errors 노출 (got ${r.detail})`)
+    assert(listPending(dir).length === 0, 'GV-X9: pending 미생성 (DENIED 분기)')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X10 — autoApprove !! 보존 — loadAgentPolicies 가 truthy 입력 (e.g. 1) 을 true 로 coerce
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: 1 })
+    writeUserConfig(dir, 'cx10', { agents: [] })
+    const policies = loadAgentPolicies(dir)
+    assert(policies.autoApproveUnderQuota === true, `GV-X10: 1 → true coerce (got ${policies.autoApproveUnderQuota})`)
+    const r = submitUserAgent({ requester: 'cx10', agentName: 'a', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator: mockEvaluator })
+    assert(r.status === STATUS.APPROVED, `GV-X10: truthy autoApprove → APPROVED (got ${r.status})`)
+    rmSync(dir, { recursive: true, force: true })
   }
 
   summary()

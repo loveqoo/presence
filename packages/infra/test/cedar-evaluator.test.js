@@ -13,6 +13,19 @@ action "create_agent" appliesTo {
   context: {}
 };`
 
+// governance-cedar v2.3 §X — context 확장. CE7~9 가 이 schema 로 quota 정책 동작 검증.
+const SCHEMA_WITH_QUOTA = `entity LocalUser = { id: String, role: String };
+entity User = { id: String };
+action "create_agent" appliesTo {
+  principal: [LocalUser],
+  resource: [User],
+  context: { currentCount: Long, maxAgents: Long }
+};`
+
+const QUOTA_POLICIES =
+  'permit (principal is LocalUser, action == Action::"create_agent", resource is User);\n' +
+  'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { context.currentCount >= context.maxAgents };'
+
 const PERMIT_ALL = 'permit (principal is LocalUser, action == Action::"create_agent", resource is User);'
 
 const PERMIT_PLUS_FORBID_BLOCKED =
@@ -136,6 +149,61 @@ const run = () => {
     try { createEvaluator({ cedar, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter: null }) }
     catch (_) { threw = true }
     assert(threw, 'CE5: auditWriter 부재 시 throw')
+  }
+
+  // ==========================================================================
+  // CE7~9 — governance-cedar v2.3 §X (P1 quota 정책 흡수, 실 cedar-wasm)
+  // ==========================================================================
+
+  // CE7 — 새 schema (context: currentCount/maxAgents) parse + 기본 호출 정상
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'alice' },
+      context:   { currentCount: 0, maxAgents: 5 },
+    })
+    assert(r.decision === 'allow', `CE7: 새 schema 부팅 + allow (got ${r.decision})`)
+    assert(r.errors.length === 0, 'CE7: errors 비어있음')
+  }
+
+  // CE8 — 10-quota forbid 가 currentCount >= maxAgents 일 때 deny.
+  //       matchedPolicies 정확성은 boot.js 가 50-* 를 차단하므로 deny=quota 보장에 의존하지 않음.
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'bob' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'bob' },
+      context:   { currentCount: 5, maxAgents: 5 },
+    })
+    assert(r.decision === 'deny', `CE8: 5/5 → deny (got ${r.decision})`)
+    assert(r.errors.length === 0, 'CE8: errors 없음 (정책 매치, evaluator 정상)')
+    assert(auditWriter.entries[0].decision === 'deny', 'CE8: audit deny 기록')
+  }
+
+  // CE9 — currentCount < maxAgents → forbid 미적용, permit 매치 → allow
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'carol' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'carol' },
+      context:   { currentCount: 4, maxAgents: 5 },
+    })
+    assert(r.decision === 'allow', `CE9: 4/5 → allow (got ${r.decision})`)
+    // 경계: count=0 도 allow (1 >= 0 만 forbid)
+    const r2 = evaluate({
+      principal: { type: 'LocalUser', id: 'carol' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'carol' },
+      context:   { currentCount: 0, maxAgents: 1 },
+    })
+    assert(r2.decision === 'allow', `CE9: 0/1 boundary → allow (got ${r2.decision})`)
   }
 
   // CE6 — Reader 브릿지 동치: createEvaluator(deps) === createEvaluatorR.run(deps) 동일 입력 → 동일 결과

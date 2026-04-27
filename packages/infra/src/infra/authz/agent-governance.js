@@ -36,18 +36,36 @@ const STATUS = Object.freeze({
   ALREADY_EXISTS: 'already-exists',
   ALREADY_APPLIED: 'already-applied',
   NOT_FOUND: 'not-found',
-  // Cedar evaluator deny — Y' minimal seed 에선 발생하지 않으나, 사용자가 50-custom.cedar 로 deny 정책
-  // 추가하면 enforcement point 가 작동. governance-cedar v2.1 §3.3 + §5.1 GV-Y4.
+  // Cedar evaluator deny. governance-cedar v2.3 §X 부터 P1 quota 정책이 흡수,
+  // evaluator 자체 에러 (parse / runtime) 도 deny 로 전파 → reason='evaluator-error'.
   DENIED: 'denied',
 })
 
 // docs §8.3 — pending 요청의 원인 레이블.
-// QUOTA_EXCEEDED: policies.maxAgentsPerUser 초과. MANUAL_REVIEW: quota 여유 있으나 autoApprove=false.
+// QUOTA_EXCEEDED: 10-quota.cedar (currentCount >= maxAgents) 매치.
+// MANUAL_REVIEW: Cedar allow 이지만 autoApprove=false (Cedar 표현 한계 third state, 코드 잔류).
 const PENDING_REASON = Object.freeze({
   QUOTA_EXCEEDED: 'quota-exceeded',
   MANUAL_REVIEW: 'manual-review',
   DENIED_UNSPECIFIED: 'unspecified',
 })
+
+// governance-cedar v2.3 §X — Cedar 결과를 governance 4-state 로 매핑.
+// boot.js 가 50-* 정책을 차단하므로, 이 phase 의 deny = quota-exceeded 보장.
+// errors.length > 0 인 deny 는 evaluator parse/runtime 실패 → DENIED(evaluator-error).
+const interpretCedarDecision = (cedarResult, { autoApprove }) => {
+  const { decision, errors } = cedarResult
+  if (decision === 'deny' && errors && errors.length > 0) {
+    return { status: STATUS.DENIED, reason: 'evaluator-error', detail: errors.join('; ') }
+  }
+  if (decision === 'deny') {
+    return { status: STATUS.PENDING, reason: PENDING_REASON.QUOTA_EXCEEDED }
+  }
+  if (!autoApprove) {
+    return { status: STATUS.PENDING, reason: PENDING_REASON.MANUAL_REVIEW }
+  }
+  return { status: STATUS.APPROVED }
+}
 
 // --- file utils ---
 
@@ -145,57 +163,58 @@ const moveRequest = (presenceDir, reqId, fromSub, toSub, extras) => {
 // --- flows (Reader.asks 기반 DI 통일) ---
 
 // docs §8.3 — 승인 플로우. returns { status, reqId?, detail? }
-// governance-cedar v2.1 §3.3: Cedar evaluator 가 RBAC enforcement point.
-// Y' minimal seed 는 LocalUser create_agent 전부 allow → 의미론은 코드 분기 그대로.
-// 사용자가 50-custom.cedar 로 deny 정책을 추가하면 코드 분기 도달 전 차단.
+// governance-cedar v2.3 §X (Y' hybrid): Cedar 가 RBAC 게이트 + quota 의미론.
+// autoApprove=false manual_review (third state) + admin 면제 (별도 KG) 는 코드 잔류.
+//
+// 호출 순서: validate → duplicate → count/policies → Cedar (with context) → mapping.
+// duplicate 가 Cedar 호출 전 — ALREADY_EXISTS 는 quota 와 무관한 도메인 응답.
 const submitUserAgentR = Reader.asks(({ requester, agentName, persona, basePath, presenceDir, evaluator }) => () => {
   if (!requester || !agentName) throw new Error('submitUserAgent: requester + agentName required')
   if (typeof evaluator !== 'function') {
-    throw new Error('submitUserAgent: evaluator (function) required — Cedar invariant (governance-cedar v2.1 §3.3)')
+    throw new Error('submitUserAgent: evaluator (function) required — Cedar invariant (governance-cedar v2.3 §X)')
   }
   const nameCheck = validateAgentNamePart(agentName)
   if (Either.isLeft(nameCheck)) {
     throw new Error(`submitUserAgent: invalid agentName — ${Either.fold(err => err, () => '', nameCheck)}`)
   }
 
-  // (0) Cedar enforcement point — RBAC 게이트. deny 시 코드 분기 미도달 (GV-Y4).
-  // KG-23 — Op.CheckAccess 도메인 어휘 경유. LLM 시나리오의 인터프리터도 같은 op-runner 위임.
-  const checkAccessOp = CheckAccess({
-    principal: { type: 'LocalUser', id: requester },
-    action:    'create_agent',
-    resource:  { type: 'User', id: requester },
-  })
-  const decision = runCheckAccess(evaluator, checkAccessOp)
-  if (decision.decision !== 'allow') {
-    return {
-      status: STATUS.DENIED,
-      detail: `cedar-deny: matched=${(decision.matchedPolicies ?? []).join(',')}`,
-    }
-  }
-
-  // (1) 중복 — config 에 이미 non-archived agent 있으면 skip
+  // (1) 중복 — config 에 이미 non-archived agent 있으면 skip (Cedar 호출 전)
   const { data } = loadUserConfigFile(requester, basePath)
   if (Array.isArray(data.agents) && data.agents.some(a => a.name === agentName && !a.archived)) {
     return { status: STATUS.ALREADY_EXISTS }
   }
 
-  // (2) policy + count
+  // (2) policy + count — Cedar context 의 입력
   const policies = loadAgentPolicies(presenceDir)
   const count = getActiveAgentCount(requester, { basePath })
-  const underQuota = count < policies.maxAgentsPerUser
 
-  if (underQuota && policies.autoApproveUnderQuota) {
+  // (3) Cedar enforcement point — quota 의미론을 정책으로 흡수 (10-quota.cedar)
+  // KG-23 — Op.CheckAccess 도메인 어휘 경유.
+  const checkAccessOp = CheckAccess({
+    principal: { type: 'LocalUser', id: requester },
+    action:    'create_agent',
+    resource:  { type: 'User', id: requester },
+    context:   { currentCount: count, maxAgents: policies.maxAgentsPerUser },
+  })
+  const cedarResult = runCheckAccess(evaluator, checkAccessOp)
+  const verdict = interpretCedarDecision(cedarResult, { autoApprove: policies.autoApproveUnderQuota })
+
+  if (verdict.status === STATUS.DENIED) {
+    return { status: STATUS.DENIED, reason: verdict.reason, detail: verdict.detail }
+  }
+
+  if (verdict.status === STATUS.APPROVED) {
     appendAgentToConfig({ username: requester, agentName, persona, basePath })
     return { status: STATUS.APPROVED, detail: `auto-approved (count ${count}/${policies.maxAgentsPerUser})` }
   }
 
-  // (3) pending queue
+  // (4) PENDING — quota-exceeded (Cedar deny) 또는 manual-review (Cedar allow + autoApprove=false)
   const reqId = generateRequestId()
   writePendingRequest(presenceDir, {
     id: reqId, requester, agentName, persona,
     submittedAt: new Date().toISOString(),
     status: STATUS.PENDING,
-    reason: underQuota ? PENDING_REASON.MANUAL_REVIEW : PENDING_REASON.QUOTA_EXCEEDED,
+    reason: verdict.reason,
     currentCount: count,
     maxAgentsPerUser: policies.maxAgentsPerUser,
   })
@@ -247,6 +266,7 @@ const listRejected = (presenceDir) => listRequestsIn(presenceDir, SUB_DIRS.REJEC
 export {
   STATUS,
   PENDING_REASON,
+  interpretCedarDecision,
   loadAgentPolicies, loadAgentPoliciesR,
   getActiveAgentCount, getActiveAgentCountR,
   submitUserAgent, submitUserAgentR,
