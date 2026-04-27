@@ -340,10 +340,12 @@ async function run() {
       const { existsSync: exists, readFileSync: readFile } = await import('node:fs')
       const auditPath = joinPath(ctx.tmpDir, 'logs', 'authz-audit.log')
       const before = exists(auditPath) ? readFile(auditPath, 'utf-8').split('\n').filter(Boolean).length : 0
+      // governance-cedar v2.4 §X — schema 가 4 context 필드 (currentCount/maxAgents/isAdmin/hardLimit) 강제.
       const r = ctx.evaluator({
         principal: { type: 'LocalUser', id: 'admin' },
         action:    'create_agent',
         resource:  { type: 'User', id: 'admin' },
+        context:   { currentCount: 0, maxAgents: 5, isAdmin: true, hardLimit: 50 },
       })
       assert(r.decision === 'allow', `SC-Y3: 실 자산으로 admin allow (got ${r.decision})`)
       const after = readFile(auditPath, 'utf-8').split('\n').filter(Boolean).length

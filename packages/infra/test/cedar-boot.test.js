@@ -50,8 +50,8 @@ const captureAuditor = () => {
 const run = async () => {
   console.log('Cedar boot tests')
 
-  // CB1 — 정상 minimal seed → boot 성공 + evaluator 가용 (CI-Y3)
-  // 실제 cedar/ 디렉토리를 가리켜 정적 자산 정합성도 확인.
+  // CB1 — 정상 부팅 → 실 자산 (00-base + 10-quota) 로 evaluator 가용 (CI-Y3)
+  // governance-cedar v2.3 §X 부터 schema 가 currentCount/maxAgents 강제 → context 필수.
   {
     const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
     assert(result.cedar && typeof result.cedar.isAuthorized === 'function', 'CB1: cedar 모듈 반환')
@@ -64,8 +64,9 @@ const run = async () => {
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
       resource:  { type: 'User', id: 'admin' },
+      context:   { currentCount: 0, maxAgents: 5, isAdmin: true, hardLimit: 50 },
     })
-    assert(r.decision === 'allow', `CB1: 실 자산으로 admin allow (got ${r.decision})`)
+    assert(r.decision === 'allow', `CB1: 실 자산으로 under-quota allow (got ${r.decision})`)
   }
 
   // CB2 — schema syntax 에러 → boot throw (CI-Y5 boot fail-closed)
@@ -100,15 +101,16 @@ const run = async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // CB4 — 다중 정책 (`00-base.cedar` permit + `50-custom.cedar` forbid) → 사전순 통합 평가, deny 케이스 정확 (CI-Y6, KG-24 표시)
+  // CB4 — 다중 정책 (`00-base.cedar` permit + `40-test.cedar` forbid) → 사전순 통합 평가, deny 케이스 정확 (CI-Y6).
+  // 50-* 는 P1 차단 (CB8/CB9) — 40-* 는 차단 대상이 아니어서 fixture 로 사용.
   {
     const dir = createFixtureDir('cb4')
     writeFileSync(join(dir, 'schema.cedarschema'), SCHEMA_VALID)
     writeFileSync(join(dir, 'policies', '00-base.cedar'), POLICY_VALID)
-    writeFileSync(join(dir, 'policies', '50-custom.cedar'), POLICY_FORBID_BLOCKED)
+    writeFileSync(join(dir, 'policies', '40-test.cedar'), POLICY_FORBID_BLOCKED)
 
     const result = await bootCedar({ policiesDir: join(dir, 'policies'), schemaPath: join(dir, 'schema.cedarschema') })
-    // 사전순으로 합쳐졌는지: 00-base 가 먼저, 50-custom 이 뒤에
+    // 사전순으로 합쳐졌는지: 00-base 가 먼저, 40-test 가 뒤에
     const idxBase = result.policiesText.indexOf('permit')
     const idxForbid = result.policiesText.indexOf('forbid')
     assert(idxBase >= 0 && idxForbid > idxBase, 'CB4: 사전순 통합 (permit 먼저, forbid 뒤)')
@@ -187,6 +189,78 @@ const run = async () => {
     assert(a.schemaText === b.schemaText, 'CB6: schemaText 동치')
     assert(a.policiesText === b.policiesText, 'CB6: policiesText 동치')
     assert(a.cedar === b.cedar, 'CB6: cedar 모듈 동일 인스턴스 (dynamic import 캐시)')
+  }
+
+  // ==========================================================================
+  // CB7~9 — governance-cedar v2.3 §X (P1 50-* 차단 + 10-quota 통합)
+  // ==========================================================================
+
+  // CB7 — schema + 00-base + 10-quota + 11-admin-limit 부팅 정상 (실 자산 통합)
+  {
+    const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
+    assert(/currentCount/.test(result.policiesText), 'CB7: 10-quota 정책이 통합 텍스트에 포함')
+    assert(/hardLimit/.test(result.policiesText), 'CB7: 11-admin-limit 정책이 통합 텍스트에 포함')
+    const auditor = captureAuditor()
+    const evaluate = createEvaluator({ ...result, auditWriter: auditor })
+    // non-admin over quota → deny
+    const denied = evaluate({
+      principal: { type: 'LocalUser', id: 'over' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'over' },
+      context:   { currentCount: 5, maxAgents: 5, isAdmin: false, hardLimit: 50 },
+    })
+    assert(denied.decision === 'deny', `CB7: non-admin 5/5 → deny (got ${denied.decision})`)
+    // admin under hardLimit → allow (quota 면제)
+    const adminUnder = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'admin' },
+      context:   { currentCount: 10, maxAgents: 5, isAdmin: true, hardLimit: 50 },
+    })
+    assert(adminUnder.decision === 'allow', `CB7: admin over maxAgents under hardLimit → allow (got ${adminUnder.decision})`)
+    // admin over hardLimit → deny
+    const adminOver = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'admin' },
+      context:   { currentCount: 50, maxAgents: 5, isAdmin: true, hardLimit: 50 },
+    })
+    assert(adminOver.decision === 'deny', `CB7: admin 50/50 hardLimit → deny (got ${adminOver.decision})`)
+  }
+
+  // CB8 — 50-test.cedar 추가 시 boot throw — P1 차단 메시지 검증
+  {
+    const dir = createFixtureDir('cb8')
+    writeFileSync(join(dir, 'schema.cedarschema'), SCHEMA_VALID)
+    writeFileSync(join(dir, 'policies', '00-base.cedar'), POLICY_VALID)
+    writeFileSync(join(dir, 'policies', '50-test.cedar'), POLICY_FORBID_BLOCKED)
+    let threw = false
+    try {
+      await bootCedar({ policiesDir: join(dir, 'policies'), schemaPath: join(dir, 'schema.cedarschema') })
+    } catch (e) {
+      threw = true
+      assert(/50-test\.cedar/.test(e.message), `CB8: 차단된 파일명 노출 (${e.message})`)
+      assert(/P4/.test(e.message), `CB8: P4 ETA 명시 (${e.message})`)
+    }
+    assert(threw, 'CB8: 50-test.cedar → boot throw')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CB9 — 51-* 같은 5[0-9]- 패턴 모두 차단
+  {
+    const dir = createFixtureDir('cb9')
+    writeFileSync(join(dir, 'schema.cedarschema'), SCHEMA_VALID)
+    writeFileSync(join(dir, 'policies', '00-base.cedar'), POLICY_VALID)
+    writeFileSync(join(dir, 'policies', '51-test.cedar'), POLICY_FORBID_BLOCKED)
+    let threw = false
+    try {
+      await bootCedar({ policiesDir: join(dir, 'policies'), schemaPath: join(dir, 'schema.cedarschema') })
+    } catch (e) {
+      threw = true
+      assert(/51-test\.cedar/.test(e.message), `CB9: 51-* 도 차단 (${e.message})`)
+    }
+    assert(threw, 'CB9: 51-test.cedar → boot throw')
+    rmSync(dir, { recursive: true, force: true })
   }
 
   summary()

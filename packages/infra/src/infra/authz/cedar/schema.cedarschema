@@ -2,6 +2,11 @@ entity LocalUser { id: String, role: String };
 entity User { id: String };
 action create_agent appliesTo {
   principal: [LocalUser],
-  resource: [User],
-  context: {}
+  resource:  [User],
+  context: {
+    currentCount: Long,
+    maxAgents:    Long,
+    isAdmin:      Bool,
+    hardLimit:    Long,
+  }
 };

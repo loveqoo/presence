@@ -1,6 +1,6 @@
 # Governance Cedar 연결 — 설계 결정 필요 과제
 
-**Status**: 2026-04-26 v2.2 (Phase 구현 완료, GC1 + GC3 머지 대기). 이전 v2.1 (2026-04-25): codex single-round 리뷰 결함 3 건 흡수. §1.0 메타 결정 신설 (의미론 집중도 = 옵션 Y "최소"). §1.1~1.3 sub-결정은 Y 에서 자동 도출 (1.1-A / 1.2-B / 1.3-B). §2 seed 를 minimal 로 단순화. §3~§4 구현 범위 축소. v1 (2026-04-23) 의 무한 리뷰 원인 — 메타 결정이 implicit 한 채 sub-결정 3 개 동시 토론 — 을 메타 결정 명문화로 차단.
+**Status**: 2026-04-27 v2.4 (KG-26 admin 면제 흡수). v2.3 (Phase 1 quota) 위에 admin 면제 + hardLimit 도 Cedar 정책으로 이관. 11-admin-limit.cedar 신규 — `context.isAdmin && context.currentCount >= context.hardLimit` 일 때 forbid. 10-quota.cedar 는 `!isAdmin` 조건 추가. autoApprove=false manual_review 는 여전히 코드 잔류 (Cedar 표현 한계 third state). schema.context 4 필드 (currentCount/maxAgents/isAdmin/hardLimit). §X 는 hybrid 의미론 표 갱신.
 
 **Owner**: Presence core.
 
@@ -240,8 +240,51 @@ action "create_agent" appliesTo {
 
 ---
 
+## §X — Phase 1 quota 흡수 (옵션 Y' hybrid)
+
+v2.3 의 의미론은 Cedar 정책 + 코드 분기에 분산. interpretCedarDecision 표:
+
+| Cedar 결과 | autoApprove | governance status | reason |
+|---|---|---|---|
+| `decision='deny' && errors.length > 0` | 任 | DENIED | `evaluator-error` |
+| `decision='deny'` (10-quota 매치) | 任 | PENDING | `quota-exceeded` |
+| `decision='allow'` | `false` | PENDING | `manual-review` |
+| `decision='allow'` | `true` | APPROVED | — |
+
+호출 순서 (`submitUserAgent`):
+1. `agentName` 검증 — Either.Left → throw
+2. duplicate (config.agents 에 active 동명) → ALREADY_EXISTS, Cedar 호출 *전* 단락
+3. count + policies 계산 (Cedar context 의 입력)
+4. Cedar `CheckAccess` 호출 with context `{ currentCount, maxAgents }`
+5. `interpretCedarDecision` 매핑 → governance status
+
+이 phase 의 정책 구성:
+- `00-base.cedar` — `permit (LocalUser, create_agent, User)` (RBAC 게이트, 변경 없음)
+- `10-quota.cedar` — `forbid ... when context.currentCount >= context.maxAgents` (신규)
+- `50-*.cedar` — boot.js 가 차단 (P4 까지 미지원)
+
+`boot.js readPoliciesDir` 가 `5[0-9]-*.cedar` 패턴 발견 시 throw — cedar-wasm 4.10.0 의 `matchedPolicies` 가 `policy0` 같은 인덱스만 반환, 정책 파일 출처 식별 불가. P4 의 lint/reload 인프라 도입 후 슬롯 개방.
+
+audit trail (운영):
+- APPROVED / PENDING(quota-exceeded) / DENIED(evaluator-error) — Cedar evaluator 가 audit JSONL (`~/.presence/logs/authz-audit.log`) 에 자동 기록. allow/deny/failure 모두 trace 보존.
+- PENDING(manual-review) — Cedar allow → audit allow row 기록 + pending queue 작성.
+
+## §Y — admin 면제 spec/코드 갭 (KG-26 resolved, v2.4)
+
+v2.3 시점에서 `agent-identity-model.md §8.3` + `agent-identity.md I8` 의 admin 면제 (quota 면제 + hardLimit) 가 코드 미반영 → KG-26 으로 추적. v2.4 에서 Cedar 정책 흡수 (옵션 X) 로 해소:
+
+- 정책 — `11-admin-limit.cedar`: `forbid ... when context.isAdmin && context.currentCount >= context.hardLimit`
+- 정책 — `10-quota.cedar` 갱신: `!context.isAdmin` 조건 추가 — admin 은 maxAgents 면제
+- 코드 — `agent-governance.js submitUserAgent` 가 `isAdmin = (requester === ADMIN_USERNAME)` 결정 + `hardLimit = resolveAdminHardLimit()` (PRESENCE_ADMIN_AGENT_HARD_LIMIT 환경변수 우선, 부재 시 50) 첨부
+
+대안 (코드 분기 부활) 대비 장점: 의미론을 정책 1 곳에 집중, 운영자가 정책 텍스트만 보면 admin 면제 / hardLimit 확인 가능. 단점: schema.context 4 필드로 늘어남. trade-off 수용 — Y' hybrid 의 잔여 의미론 (manual-review) 만 코드 잔류.
+
+---
+
 ## Changelog
 
+- **v2.4 (2026-04-27)**: KG-26 admin 면제 갭 해소 — admin 면제 + hardLimit 을 Cedar 정책으로 흡수. `11-admin-limit.cedar` 신규 (`forbid ... when context.isAdmin && context.currentCount >= context.hardLimit`). `10-quota.cedar` 에 `!context.isAdmin` 조건 추가. schema.context 가 `{ currentCount, maxAgents, isAdmin, hardLimit }` 4 필드. `agent-governance.js submitUserAgent` 가 isAdmin (requester === ADMIN_USERNAME) + hardLimit (PRESENCE_ADMIN_AGENT_HARD_LIMIT env, 기본 50) 첨부. cedar-mock.js 의 default decisionFn 도 admin 면제 모사. GV-X11 (admin under hardLimit), GV-X12 (admin over hardLimit), GV-X13 (non-admin 은 admin hardLimit 무관), GV-X14 (context isAdmin/hardLimit 첨부 검증), CE10 (admin 면제 실 cedar), CE11 (admin hardLimit 실 cedar), CB7 갱신 (admin 정책 동작), INV-CEDAR-ADMIN-EXEMPT 정적 회귀 추가. 잔여 코드 의미론은 manual-review (autoApprove=false) 1 항목.
+- **v2.3 (2026-04-26)**: Phase 1 quota 의미론 → Cedar 정책 흡수 (옵션 Y' hybrid). `10-quota.cedar` 추가 — `currentCount >= maxAgents` 일 때 forbid. schema 에 context `{ currentCount, maxAgents }` 추가. `interpretCedarDecision` 순수 함수로 Cedar 결과 → governance 4-state 매핑. `submitUserAgent` 호출 순서 재배치 (validate → duplicate → count → Cedar → mapping). `boot.js` 가 50-* 운영자 정책 슬롯을 P4 까지 차단 — cedar-wasm 4.10.0 의 `matchedPolicies` 가 정책 파일 식별 불가 (실측 `policy0` 만 반환) → 50-* 가 quota 와 분리되지 않음. autoApprove=false manual_review (third state, Cedar 표현 한계) + admin 면제 (별도 KG-26) 는 코드 잔류. cedar-mock.js 에 decisionFn 시그니처 + 기본 quota-aware 추가. GV-X1~X10 (governance) + CE7~9 (실 cedar-wasm) + CB7~9 (50-* boot throw) + CK4 갱신 (context 셰이프). 이전 GV-Y1/Y4 는 Y' 흡수로 의미가 바뀌어 GV-X 로 대체. 잔여 의미론 (admin 면제) 은 KG-26 등록.
 - **v2.2 (2026-04-26)**: Phase 구현 완료. `feature/cedar-governance-v2` 브랜치 14 커밋 (디자인 4 + 플랜 3 + 인프라 5 + 의미론 통합 2). GC1 (`cce021b`) `submitUserAgent` 에 Cedar enforcement point + STATUS.DENIED + cli.js cmdAgentAdd Cedar boot. GC3 (`b114399`) `cmdAgentApprove` manual_approve audit (Cedar evaluate 호출 없음, §1.4 admin override 정합). GV-Y1.1~1.8 (8 케이스 allow), GV-Y2 (호출 횟수 정합), GV-Y4 (mock deny → 코드 분기 미도달), GV-Y5 (evaluator invariant) 자동화 완료. GV-Y3 는 기존 GV1~GV15 가 mock evaluator 주입 후 그대로 통과 — 의미론 회귀 0건. AC4b (cli.js manual_approve audit JSONL) 추가. 전체 4270 passed.
 - **v2.1 (2026-04-25)**: codex single-round 리뷰 결함 3 건 (a) 흡수.
   - Q1: §1.0 Y 단점에 "Cedar evaluate latency" 추가, §7 위험 항목과 정합. §3.3 제목/본문 정합화 — 제목을 "enforcement point 확정 phase" 로 갱신, 본문에 *이 phase 산출물 자체* 의 즉시 검증 가치 (Cedar 호출 / audit 로그 / 의미론 회귀 통과) 3 항목 명시. 마이그레이션 비용 추정 근거 (grep 결과) 추가.
