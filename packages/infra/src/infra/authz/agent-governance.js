@@ -29,6 +29,15 @@ const SUB_DIRS = Object.freeze({
   REJECTED: 'rejected',
 })
 
+// agent-identity.md I8 — admin 면제 + hard limit. governance-cedar v2.4 §X 가 Cedar 정책으로 흡수.
+// 환경변수 PRESENCE_ADMIN_AGENT_HARD_LIMIT 우선, 부재 시 50.
+const ADMIN_AGENT_HARD_LIMIT_DEFAULT = 50
+const resolveAdminHardLimit = () => {
+  const raw = process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : ADMIN_AGENT_HARD_LIMIT_DEFAULT
+}
+
 const STATUS = Object.freeze({
   PENDING: 'pending',
   APPROVED: 'approved',
@@ -188,13 +197,17 @@ const submitUserAgentR = Reader.asks(({ requester, agentName, persona, basePath,
   const policies = loadAgentPolicies(presenceDir)
   const count = getActiveAgentCount(requester, { basePath })
 
-  // (3) Cedar enforcement point — quota 의미론을 정책으로 흡수 (10-quota.cedar)
+  // (3) Cedar enforcement point — quota + admin hard-limit 정책 흡수
+  //   - 10-quota.cedar: !isAdmin && currentCount >= maxAgents
+  //   - 11-admin-limit.cedar: isAdmin && currentCount >= hardLimit
   // KG-23 — Op.CheckAccess 도메인 어휘 경유.
+  const isAdmin = requester === ADMIN_USERNAME
+  const hardLimit = resolveAdminHardLimit()
   const checkAccessOp = CheckAccess({
     principal: { type: 'LocalUser', id: requester },
     action:    'create_agent',
     resource:  { type: 'User', id: requester },
-    context:   { currentCount: count, maxAgents: policies.maxAgentsPerUser },
+    context:   { currentCount: count, maxAgents: policies.maxAgentsPerUser, isAdmin, hardLimit },
   })
   const cedarResult = runCheckAccess(evaluator, checkAccessOp)
   const verdict = interpretCedarDecision(cedarResult, { autoApprove: policies.autoApproveUnderQuota })

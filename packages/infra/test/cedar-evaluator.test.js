@@ -14,17 +14,19 @@ action "create_agent" appliesTo {
 };`
 
 // governance-cedar v2.3 §X — context 확장. CE7~9 가 이 schema 로 quota 정책 동작 검증.
+// v2.4 §X — admin 면제 흡수: schema 에 isAdmin/hardLimit 추가 + 두 forbid 정책.
 const SCHEMA_WITH_QUOTA = `entity LocalUser = { id: String, role: String };
 entity User = { id: String };
 action "create_agent" appliesTo {
   principal: [LocalUser],
   resource: [User],
-  context: { currentCount: Long, maxAgents: Long }
+  context: { currentCount: Long, maxAgents: Long, isAdmin: Bool, hardLimit: Long }
 };`
 
 const QUOTA_POLICIES =
   'permit (principal is LocalUser, action == Action::"create_agent", resource is User);\n' +
-  'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { context.currentCount >= context.maxAgents };'
+  'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { !context.isAdmin && context.currentCount >= context.maxAgents };\n' +
+  'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { context.isAdmin && context.currentCount >= context.hardLimit };'
 
 const PERMIT_ALL = 'permit (principal is LocalUser, action == Action::"create_agent", resource is User);'
 
@@ -155,7 +157,9 @@ const run = () => {
   // CE7~9 — governance-cedar v2.3 §X (P1 quota 정책 흡수, 실 cedar-wasm)
   // ==========================================================================
 
-  // CE7 — 새 schema (context: currentCount/maxAgents) parse + 기본 호출 정상
+  const fullCtx = (override = {}) => ({ currentCount: 0, maxAgents: 5, isAdmin: false, hardLimit: 50, ...override })
+
+  // CE7 — 새 schema (context: currentCount/maxAgents/isAdmin/hardLimit) parse + 기본 호출 정상
   {
     const auditWriter = createCaptureAuditor()
     const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
@@ -163,13 +167,13 @@ const run = () => {
       principal: { type: 'LocalUser', id: 'alice' },
       action:    'create_agent',
       resource:  { type: 'User', id: 'alice' },
-      context:   { currentCount: 0, maxAgents: 5 },
+      context:   fullCtx({ currentCount: 0, maxAgents: 5 }),
     })
     assert(r.decision === 'allow', `CE7: 새 schema 부팅 + allow (got ${r.decision})`)
     assert(r.errors.length === 0, 'CE7: errors 비어있음')
   }
 
-  // CE8 — 10-quota forbid 가 currentCount >= maxAgents 일 때 deny.
+  // CE8 — 10-quota forbid 가 !isAdmin && currentCount >= maxAgents 일 때 deny.
   //       matchedPolicies 정확성은 boot.js 가 50-* 를 차단하므로 deny=quota 보장에 의존하지 않음.
   {
     const auditWriter = createCaptureAuditor()
@@ -178,9 +182,9 @@ const run = () => {
       principal: { type: 'LocalUser', id: 'bob' },
       action:    'create_agent',
       resource:  { type: 'User', id: 'bob' },
-      context:   { currentCount: 5, maxAgents: 5 },
+      context:   fullCtx({ currentCount: 5, maxAgents: 5 }),
     })
-    assert(r.decision === 'deny', `CE8: 5/5 → deny (got ${r.decision})`)
+    assert(r.decision === 'deny', `CE8: non-admin 5/5 → deny (got ${r.decision})`)
     assert(r.errors.length === 0, 'CE8: errors 없음 (정책 매치, evaluator 정상)')
     assert(auditWriter.entries[0].decision === 'deny', 'CE8: audit deny 기록')
   }
@@ -193,17 +197,36 @@ const run = () => {
       principal: { type: 'LocalUser', id: 'carol' },
       action:    'create_agent',
       resource:  { type: 'User', id: 'carol' },
-      context:   { currentCount: 4, maxAgents: 5 },
+      context:   fullCtx({ currentCount: 4, maxAgents: 5 }),
     })
     assert(r.decision === 'allow', `CE9: 4/5 → allow (got ${r.decision})`)
-    // 경계: count=0 도 allow (1 >= 0 만 forbid)
-    const r2 = evaluate({
-      principal: { type: 'LocalUser', id: 'carol' },
+  }
+
+  // CE10 — admin 은 maxAgents 면제, hardLimit 미만이면 allow
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
-      resource:  { type: 'User', id: 'carol' },
-      context:   { currentCount: 0, maxAgents: 1 },
+      resource:  { type: 'User', id: 'admin' },
+      context:   fullCtx({ currentCount: 10, maxAgents: 5, isAdmin: true, hardLimit: 50 }),
     })
-    assert(r2.decision === 'allow', `CE9: 0/1 boundary → allow (got ${r2.decision})`)
+    assert(r.decision === 'allow', `CE10: admin over maxAgents under hardLimit → allow (got ${r.decision})`)
+  }
+
+  // CE11 — admin 도 hardLimit 초과 시 deny (11-admin-limit.cedar)
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'admin' },
+      context:   fullCtx({ currentCount: 50, maxAgents: 5, isAdmin: true, hardLimit: 50 }),
+    })
+    assert(r.decision === 'deny', `CE11: admin 50/50 hardLimit → deny (got ${r.decision})`)
+    assert(r.errors.length === 0, 'CE11: errors 없음')
   }
 
   // CE6 — Reader 브릿지 동치: createEvaluator(deps) === createEvaluatorR.run(deps) 동일 입력 → 동일 결과

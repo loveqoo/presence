@@ -523,6 +523,87 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // ==========================================================================
+  // GV-X11~X14 — governance-cedar v2.4 §X (admin 면제 + hardLimit Cedar 흡수, KG-26)
+  // ==========================================================================
+
+  // GV-X11 — admin 이 maxAgentsPerUser 초과 + hardLimit 미만 → APPROVED (quota 면제)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    // admin 의 user config 는 admin-bootstrap 이 이미 manager agent 1 개 등록.
+    // maxAgents 5 초과 시나리오는 admin 의 agents 를 5+ 로 채워서 만들기.
+    writeUserConfig(dir, 'admin', { agents: Array.from({ length: 6 }, (_, i) => ({ name: `agent-${i}`, archived: false })) })
+    const r = submitUserAgent({
+      requester: 'admin', agentName: 'extra', persona: samplePersona,
+      basePath: dir, presenceDir: dir, evaluator: mockEvaluator,
+    })
+    assert(r.status === STATUS.APPROVED, `GV-X11: admin over maxAgents under hardLimit → APPROVED (got ${r.status})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X12 — admin 이 hardLimit 초과 → PENDING(quota-exceeded). env 로 hardLimit 낮춰 검증.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    const previousHard = process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT
+    process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT = '3'
+    try {
+      writeUserConfig(dir, 'admin', { agents: Array.from({ length: 3 }, (_, i) => ({ name: `agent-${i}`, archived: false })) })
+      const r = submitUserAgent({
+        requester: 'admin', agentName: 'extra', persona: samplePersona,
+        basePath: dir, presenceDir: dir, evaluator: mockEvaluator,
+      })
+      assert(r.status === STATUS.PENDING, `GV-X12: admin 3/3 hardLimit → PENDING (got ${r.status})`)
+      const pending = listPending(dir)
+      assert(pending[0].reason === PENDING_REASON.QUOTA_EXCEEDED, `GV-X12: reason=quota-exceeded (got ${pending[0].reason})`)
+    } finally {
+      if (previousHard === undefined) delete process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT
+      else process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT = previousHard
+    }
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X13 — non-admin 은 admin hardLimit env 무관 — 기존 maxAgentsPerUser 만 적용.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    const previousHard = process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT
+    process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT = '1' // 매우 낮게 — non-admin 에게 영향 없어야 함
+    try {
+      writeUserConfig(dir, 'cx13', { agents: [{ name: 'a' }, { name: 'b' }] })
+      const r = submitUserAgent({
+        requester: 'cx13', agentName: 'c', persona: samplePersona,
+        basePath: dir, presenceDir: dir, evaluator: mockEvaluator,
+      })
+      assert(r.status === STATUS.APPROVED, `GV-X13: non-admin 2/5 ignore admin hardLimit=1 → APPROVED (got ${r.status})`)
+    } finally {
+      if (previousHard === undefined) delete process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT
+      else process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT = previousHard
+    }
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X14 — Cedar context 에 isAdmin + hardLimit 첨부 (admin / non-admin 분기)
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    writeUserConfig(dir, 'cx14', { agents: [] })
+    writeUserConfig(dir, 'admin', { agents: [] })
+    let captured = null
+    const evaluator = (input) => { captured = input; return { decision: 'allow', matchedPolicies: [], errors: [] } }
+
+    submitUserAgent({ requester: 'cx14', agentName: 'a', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator })
+    assert(captured.context.isAdmin === false, `GV-X14a: non-admin → isAdmin=false (got ${captured.context.isAdmin})`)
+    assert(captured.context.hardLimit === 50, `GV-X14a: 기본 hardLimit=50 (got ${captured.context.hardLimit})`)
+
+    submitUserAgent({ requester: 'admin', agentName: 'b', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator })
+    assert(captured.context.isAdmin === true, `GV-X14b: admin → isAdmin=true (got ${captured.context.isAdmin})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

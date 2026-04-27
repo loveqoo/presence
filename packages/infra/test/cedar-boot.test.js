@@ -64,7 +64,7 @@ const run = async () => {
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
       resource:  { type: 'User', id: 'admin' },
-      context:   { currentCount: 0, maxAgents: 5 },
+      context:   { currentCount: 0, maxAgents: 5, isAdmin: true, hardLimit: 50 },
     })
     assert(r.decision === 'allow', `CB1: 실 자산으로 under-quota allow (got ${r.decision})`)
   }
@@ -195,19 +195,37 @@ const run = async () => {
   // CB7~9 — governance-cedar v2.3 §X (P1 50-* 차단 + 10-quota 통합)
   // ==========================================================================
 
-  // CB7 — schema + 00-base + 10-quota 부팅 정상 (실 자산 통합)
+  // CB7 — schema + 00-base + 10-quota + 11-admin-limit 부팅 정상 (실 자산 통합)
   {
     const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
-    assert(/10-quota/.test(result.policiesText) || /currentCount/.test(result.policiesText), 'CB7: 10-quota 정책이 통합 텍스트에 포함')
+    assert(/currentCount/.test(result.policiesText), 'CB7: 10-quota 정책이 통합 텍스트에 포함')
+    assert(/hardLimit/.test(result.policiesText), 'CB7: 11-admin-limit 정책이 통합 텍스트에 포함')
     const auditor = captureAuditor()
     const evaluate = createEvaluator({ ...result, auditWriter: auditor })
+    // non-admin over quota → deny
     const denied = evaluate({
       principal: { type: 'LocalUser', id: 'over' },
       action:    'create_agent',
       resource:  { type: 'User', id: 'over' },
-      context:   { currentCount: 5, maxAgents: 5 },
+      context:   { currentCount: 5, maxAgents: 5, isAdmin: false, hardLimit: 50 },
     })
-    assert(denied.decision === 'deny', `CB7: 5/5 → deny (got ${denied.decision})`)
+    assert(denied.decision === 'deny', `CB7: non-admin 5/5 → deny (got ${denied.decision})`)
+    // admin under hardLimit → allow (quota 면제)
+    const adminUnder = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'admin' },
+      context:   { currentCount: 10, maxAgents: 5, isAdmin: true, hardLimit: 50 },
+    })
+    assert(adminUnder.decision === 'allow', `CB7: admin over maxAgents under hardLimit → allow (got ${adminUnder.decision})`)
+    // admin over hardLimit → deny
+    const adminOver = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'create_agent',
+      resource:  { type: 'User', id: 'admin' },
+      context:   { currentCount: 50, maxAgents: 5, isAdmin: true, hardLimit: 50 },
+    })
+    assert(adminOver.decision === 'deny', `CB7: admin 50/50 hardLimit → deny (got ${adminOver.decision})`)
   }
 
   // CB8 — 50-test.cedar 추가 시 boot throw — P1 차단 메시지 검증
