@@ -130,6 +130,7 @@ const tests = [
   'test/regression/agent-id-validation-enforcement.test.js',
   'test/regression/delegate-order-enforcement.test.js',
   'test/regression/i18n-key-parity.test.js',
+  'test/regression/cedar-quota-policy.test.js',
   // applyFinalState ordering + turn chaining
   'packages/core/test/core/apply-final-state.test.js',
   // Turn concurrency
