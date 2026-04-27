@@ -281,20 +281,38 @@ const run = async () => {
     assert(r2.decision === 'allow', `CB11: reservedOwner=false → allow (got ${r2.decision})`)
   }
 
-  // CB12 — 실 자산 부팅 후 set_persona permit 동작 (v2.8 §X3)
+  // CB12 — 실 자산 부팅 후 set_persona + 31-protect-persona 동작 (v2.9 §X4)
   {
     const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
     assert(/set_persona/.test(result.policiesText), 'CB12: 00-base 가 set_persona permit 포함')
+    assert(/31-protect-persona|reservedOwner.*!context\.isAdmin/.test(result.policiesText),
+      'CB12: 31-protect-persona 정책 통합')
     const auditor = captureAuditor()
     const evaluate = createEvaluator({ ...result, auditWriter: auditor })
-    const r = evaluate({
+    // !reservedOwner → allow
+    const r1 = evaluate({
       principal: { type: 'LocalUser', id: 'alice' },
       action:    'set_persona',
       resource:  { type: 'Agent', id: 'alice/default' },
       context:   { isAdmin: false, reservedOwner: false },
     })
-    assert(r.decision === 'allow', `CB12: set_persona allow (got ${r.decision})`)
-    assert(auditor.entries.length === 1 && auditor.entries[0].action === 'set_persona', 'CB12: audit set_persona 기록')
+    assert(r1.decision === 'allow', `CB12: !reservedOwner → allow (got ${r1.decision})`)
+    // reservedOwner + !isAdmin → deny
+    const r2 = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'admin/manager' },
+      context:   { isAdmin: false, reservedOwner: true },
+    })
+    assert(r2.decision === 'deny', `CB12: reservedOwner+!isAdmin → deny (got ${r2.decision})`)
+    // reservedOwner + isAdmin → allow
+    const r3 = evaluate({
+      principal: { type: 'LocalUser', id: 'admin' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'admin/manager' },
+      context:   { isAdmin: true, reservedOwner: true },
+    })
+    assert(r3.decision === 'allow', `CB12: reservedOwner+isAdmin → allow (got ${r3.decision})`)
   }
 
   // CB9 — 51-* 같은 5[0-9]- 패턴 모두 차단

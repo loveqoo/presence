@@ -79,10 +79,11 @@ const SLASH_COMMANDS = {
 
   // FP-71 — primary agent 의 persona 조회/변경.
   // show: 현재 name + systemPrompt (없으면 unset). set <text>: systemPrompt 갱신. reset: null 로.
-  // governance-cedar v2.8 §X3 — set/reset 시 Op.CheckAccess(action='set_persona') 게이트.
-  // evaluator/jwtSub 미전달 (테스트/CLI 등 비-server 경로) 시 게이트 skip — 호환.
+  // governance-cedar v2.9 §X4 — set/reset 시 Cedar 게이트 fail-closed.
+  // 31-protect-persona.cedar 가 reservedOwner && !isAdmin 차단. evaluator/jwtSub/agentId
+  // 누락 시 (server 외 경로) 도 deny — handleSlashCommand 는 server 에서만 호출.
   persona: (args, ctx) => {
-    const { userContext, evaluator, jwtSub } = ctx
+    const { userContext, evaluator, jwtSub, agentId } = ctx
     if (!userContext) return { type: 'system', content: 'Persona command unavailable in this context.' }
     const sub = args[0] || 'show'
     if (sub === 'show') {
@@ -92,21 +93,20 @@ const SLASH_COMMANDS = {
       return { type: 'system', content: `Persona: ${persona.name}\n${body}` }
     }
     if (sub === 'set' || sub === 'reset') {
-      // Cedar 게이트 — primary agent 의 persona 변경. resource = primary agent.
-      // 현재 정책: 00-base permit 만 (의미 forbid 정책 없음). 호출 자체가 audit JSONL 에 기록 (governance trace).
-      const primaryAgentId = ctx.agentId
-      if (typeof evaluator === 'function' && jwtSub && primaryAgentId) {
-        const ownerPart = primaryAgentId.split('/')[0]
-        const op = CheckAccess({
-          principal: { type: 'LocalUser', id: jwtSub },
-          action:    'set_persona',
-          resource:  { type: 'Agent', id: primaryAgentId },
-          context:   { isAdmin: jwtSub === ADMIN_USERNAME, reservedOwner: isReservedUsername(ownerPart) },
-        })
-        const decision = runCheckAccess(evaluator, op)
-        if (decision.decision !== 'allow') {
-          return { type: 'system', content: `Persona change denied: ${decision.matchedPolicies?.join(',') || 'cedar-deny'}` }
-        }
+      // Cedar 게이트 — fail-closed. evaluator/jwtSub/agentId 중 하나라도 없으면 deny.
+      if (typeof evaluator !== 'function' || !jwtSub || !agentId) {
+        return { type: 'system', content: 'Persona change denied: missing-evaluator (server context required)' }
+      }
+      const ownerPart = agentId.split('/')[0]
+      const op = CheckAccess({
+        principal: { type: 'LocalUser', id: jwtSub },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: agentId },
+        context:   { isAdmin: jwtSub === ADMIN_USERNAME, reservedOwner: isReservedUsername(ownerPart) },
+      })
+      const decision = runCheckAccess(evaluator, op)
+      if (decision.decision !== 'allow') {
+        return { type: 'system', content: `Persona change denied: ${decision.matchedPolicies?.join(',') || 'cedar-deny'}` }
       }
       if (sub === 'set') {
         const text = args.slice(1).join(' ').trim()

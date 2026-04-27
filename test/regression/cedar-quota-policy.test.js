@@ -203,4 +203,25 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   assert(/Action::"set_persona"/.test(base), 'INV-SET-PERSONA-CALLERS: 00-base 가 set_persona permit')
 }
 
+// 9. INV-CEDAR-PERSONA-PROTECT — 31-protect-persona.cedar 정책 + slash-commands fail-closed
+//    (governance-cedar v2.9 §X4)
+{
+  const policyPath = 'packages/infra/src/infra/authz/cedar/policies/31-protect-persona.cedar'
+  assert(existsSync(join(REPO_ROOT, policyPath)), `INV-CEDAR-PERSONA-PROTECT: ${policyPath} 존재`)
+  const text = read(policyPath)
+  assert(/forbid\s*\(/.test(text), 'INV-CEDAR-PERSONA-PROTECT: forbid 정책')
+  assert(/action == Action::"set_persona"/.test(text), 'INV-CEDAR-PERSONA-PROTECT: action == set_persona')
+  assert(
+    /context\.reservedOwner\s*&&\s*!\s*context\.isAdmin/.test(text),
+    'INV-CEDAR-PERSONA-PROTECT: when context.reservedOwner && !context.isAdmin',
+  )
+
+  // slash-commands.js — evaluator/jwtSub/agentId 누락 시 deny (fail-closed)
+  const slash = read('packages/server/src/server/slash-commands.js')
+  assert(
+    /typeof evaluator !==\s*['"]function['"]\s*\|\|\s*!jwtSub\s*\|\|\s*!agentId/.test(slash),
+    'INV-CEDAR-PERSONA-PROTECT: slash-commands fail-closed 패턴 (evaluator/jwtSub/agentId 누락 시 deny)',
+  )
+}
+
 summary()

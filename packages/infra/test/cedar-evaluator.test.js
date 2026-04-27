@@ -318,7 +318,7 @@ const run = () => {
     assert(r.errors.length === 0, 'CE13.2: errors 없음')
   }
 
-  // CE14 — governance-cedar v2.8 §X3 (set_persona — permit only, audit trail 용)
+  // CE14 — governance-cedar v2.9 §X4 (set_persona + 31-protect-persona)
   {
     const SCHEMA_WITH_PERSONA = `entity LocalUser = { id: String, role: String };
 entity Agent = { id: String };
@@ -327,18 +327,50 @@ action "set_persona" appliesTo {
   resource: [Agent],
   context: { isAdmin: Bool, reservedOwner: Bool }
 };`
-    const PERSONA_POLICIES = 'permit (principal is LocalUser, action == Action::"set_persona", resource is Agent);'
-    const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
-    const r = evaluate({
-      principal: { type: 'LocalUser', id: 'alice' },
-      action:    'set_persona',
-      resource:  { type: 'Agent', id: 'alice/default' },
-      context:   { isAdmin: false, reservedOwner: false },
-    })
-    assert(r.decision === 'allow', `CE14: set_persona permit → allow (got ${r.decision})`)
-    assert(auditWriter.entries.length === 1, 'CE14: audit 1건 기록 (governance trace)')
-    assert(auditWriter.entries[0].action === 'set_persona', 'CE14: audit action=set_persona')
+    const PERSONA_POLICIES =
+      'permit (principal is LocalUser, action == Action::"set_persona", resource is Agent);\n' +
+      'forbid (principal is LocalUser, action == Action::"set_persona", resource is Agent) when { context.reservedOwner && !context.isAdmin };'
+
+    // CE14.1 — !reservedOwner → allow (일반 user agent)
+    {
+      const auditWriter = createCaptureAuditor()
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const r = evaluate({
+        principal: { type: 'LocalUser', id: 'alice' },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: 'alice/default' },
+        context:   { isAdmin: false, reservedOwner: false },
+      })
+      assert(r.decision === 'allow', `CE14.1: !reservedOwner → allow (got ${r.decision})`)
+      assert(auditWriter.entries.length === 1, 'CE14.1: audit 1건 기록')
+    }
+
+    // CE14.2 — reservedOwner + isAdmin → allow (admin 본인은 admin/* persona 변경 가능)
+    {
+      const auditWriter = createCaptureAuditor()
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const r = evaluate({
+        principal: { type: 'LocalUser', id: 'admin' },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: 'admin/manager' },
+        context:   { isAdmin: true, reservedOwner: true },
+      })
+      assert(r.decision === 'allow', `CE14.2: reservedOwner+isAdmin → allow (got ${r.decision})`)
+    }
+
+    // CE14.3 — reservedOwner + !isAdmin → deny (non-admin 의 admin/* persona 차단)
+    {
+      const auditWriter = createCaptureAuditor()
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const r = evaluate({
+        principal: { type: 'LocalUser', id: 'alice' },
+        action:    'set_persona',
+        resource:  { type: 'Agent', id: 'admin/manager' },
+        context:   { isAdmin: false, reservedOwner: true },
+      })
+      assert(r.decision === 'deny', `CE14.3: reservedOwner+!isAdmin → deny (got ${r.decision})`)
+      assert(auditWriter.entries[0].decision === 'deny', 'CE14.3: audit decision=deny')
+    }
   }
 
   // CE6 — Reader 브릿지 동치: createEvaluator(deps) === createEvaluatorR.run(deps) 동일 입력 → 동일 결과
