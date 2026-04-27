@@ -27,3 +27,11 @@ action archive_agent appliesTo {
     reservedOwner:  Bool,
   }
 };
+action set_persona appliesTo {
+  principal: [LocalUser],
+  resource:  [Agent],
+  context: {
+    isAdmin:        Bool,
+    reservedOwner:  Bool,
+  }
+};

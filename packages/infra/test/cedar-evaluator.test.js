@@ -318,6 +318,29 @@ const run = () => {
     assert(r.errors.length === 0, 'CE13.2: errors 없음')
   }
 
+  // CE14 — governance-cedar v2.8 §X3 (set_persona — permit only, audit trail 용)
+  {
+    const SCHEMA_WITH_PERSONA = `entity LocalUser = { id: String, role: String };
+entity Agent = { id: String };
+action "set_persona" appliesTo {
+  principal: [LocalUser],
+  resource: [Agent],
+  context: { isAdmin: Bool, reservedOwner: Bool }
+};`
+    const PERSONA_POLICIES = 'permit (principal is LocalUser, action == Action::"set_persona", resource is Agent);'
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'alice/default' },
+      context:   { isAdmin: false, reservedOwner: false },
+    })
+    assert(r.decision === 'allow', `CE14: set_persona permit → allow (got ${r.decision})`)
+    assert(auditWriter.entries.length === 1, 'CE14: audit 1건 기록 (governance trace)')
+    assert(auditWriter.entries[0].action === 'set_persona', 'CE14: audit action=set_persona')
+  }
+
   // CE6 — Reader 브릿지 동치: createEvaluator(deps) === createEvaluatorR.run(deps) 동일 입력 → 동일 결과
   {
     const auditA = createCaptureAuditor()

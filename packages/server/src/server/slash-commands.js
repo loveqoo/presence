@@ -1,6 +1,10 @@
 import { clearDebugState } from '@presence/core/core/state-commit.js'
 import { STATE_PATH } from '@presence/core/core/policies.js'
 import { formatStatusR } from '@presence/core/core/format-status.js'
+import { CheckAccess } from '@presence/core/core/op.js'
+import { runCheckAccess } from '@presence/infra/infra/authz/cedar/op-runner.js'
+import { isReservedUsername } from '@presence/core/core/agent-id.js'
+import { ADMIN_USERNAME } from '@presence/infra/infra/admin-bootstrap.js'
 
 // --- Slash commands (테이블 디스패치) ---
 
@@ -75,7 +79,10 @@ const SLASH_COMMANDS = {
 
   // FP-71 — primary agent 의 persona 조회/변경.
   // show: 현재 name + systemPrompt (없으면 unset). set <text>: systemPrompt 갱신. reset: null 로.
-  persona: (args, { userContext }) => {
+  // governance-cedar v2.8 §X3 — set/reset 시 Op.CheckAccess(action='set_persona') 게이트.
+  // evaluator/jwtSub 미전달 (테스트/CLI 등 비-server 경로) 시 게이트 skip — 호환.
+  persona: (args, ctx) => {
+    const { userContext, evaluator, jwtSub } = ctx
     if (!userContext) return { type: 'system', content: 'Persona command unavailable in this context.' }
     const sub = args[0] || 'show'
     if (sub === 'show') {
@@ -84,13 +91,29 @@ const SLASH_COMMANDS = {
       const body = prompt && prompt.length > 0 ? prompt : '(unset — using default role definition)'
       return { type: 'system', content: `Persona: ${persona.name}\n${body}` }
     }
-    if (sub === 'set') {
-      const text = args.slice(1).join(' ').trim()
-      if (!text) return { type: 'system', content: 'Usage: /persona set <text>' }
-      userContext.updatePrimaryPersona({ systemPrompt: text })
-      return { type: 'system', content: 'Persona updated. Takes effect next turn.' }
-    }
-    if (sub === 'reset') {
+    if (sub === 'set' || sub === 'reset') {
+      // Cedar 게이트 — primary agent 의 persona 변경. resource = primary agent.
+      // 현재 정책: 00-base permit 만 (의미 forbid 정책 없음). 호출 자체가 audit JSONL 에 기록 (governance trace).
+      const primaryAgentId = ctx.agentId
+      if (typeof evaluator === 'function' && jwtSub && primaryAgentId) {
+        const ownerPart = primaryAgentId.split('/')[0]
+        const op = CheckAccess({
+          principal: { type: 'LocalUser', id: jwtSub },
+          action:    'set_persona',
+          resource:  { type: 'Agent', id: primaryAgentId },
+          context:   { isAdmin: jwtSub === ADMIN_USERNAME, reservedOwner: isReservedUsername(ownerPart) },
+        })
+        const decision = runCheckAccess(evaluator, op)
+        if (decision.decision !== 'allow') {
+          return { type: 'system', content: `Persona change denied: ${decision.matchedPolicies?.join(',') || 'cedar-deny'}` }
+        }
+      }
+      if (sub === 'set') {
+        const text = args.slice(1).join(' ').trim()
+        if (!text) return { type: 'system', content: 'Usage: /persona set <text>' }
+        userContext.updatePrimaryPersona({ systemPrompt: text })
+        return { type: 'system', content: 'Persona updated. Takes effect next turn.' }
+      }
       userContext.updatePrimaryPersona({ systemPrompt: null })
       return { type: 'system', content: 'Persona reset (default role definition).' }
     }

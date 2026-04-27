@@ -18,3 +18,9 @@ permit (
   action == Action::"archive_agent",
   resource is Agent
 );
+
+permit (
+  principal is LocalUser,
+  action == Action::"set_persona",
+  resource is Agent
+);

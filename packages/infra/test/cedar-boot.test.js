@@ -281,6 +281,22 @@ const run = async () => {
     assert(r2.decision === 'allow', `CB11: reservedOwner=false → allow (got ${r2.decision})`)
   }
 
+  // CB12 — 실 자산 부팅 후 set_persona permit 동작 (v2.8 §X3)
+  {
+    const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
+    assert(/set_persona/.test(result.policiesText), 'CB12: 00-base 가 set_persona permit 포함')
+    const auditor = captureAuditor()
+    const evaluate = createEvaluator({ ...result, auditWriter: auditor })
+    const r = evaluate({
+      principal: { type: 'LocalUser', id: 'alice' },
+      action:    'set_persona',
+      resource:  { type: 'Agent', id: 'alice/default' },
+      context:   { isAdmin: false, reservedOwner: false },
+    })
+    assert(r.decision === 'allow', `CB12: set_persona allow (got ${r.decision})`)
+    assert(auditor.entries.length === 1 && auditor.entries[0].action === 'set_persona', 'CB12: audit set_persona 기록')
+  }
+
   // CB9 — 51-* 같은 5[0-9]- 패턴 모두 차단
   {
     const dir = createFixtureDir('cb9')

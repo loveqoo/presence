@@ -94,6 +94,9 @@ const mountSessionEndpoints = (router, deps) => {
         memory: effectiveCtx.memory, toolRegistry: effectiveCtx.toolRegistry,
         agentId: req.presenceSession.session.agentId,
         userContext: effectiveCtx,
+        // governance-cedar v2.8 §X3 — /persona set|reset Cedar 게이트용
+        evaluator: deps.evaluator,
+        jwtSub: req.user?.username,
       })
       if (cmd.handled) {
         // state 변경 커맨드(/clear 등) 후 persistence flush
