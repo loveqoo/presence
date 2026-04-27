@@ -62,13 +62,15 @@ class WsHandler {
   #wsAuth
   #userContext
   #getUserContextManager
+  #evaluator
 
-  constructor({ host, authEnabled, wsAuth, userContext, getUserContextManager }) {
+  constructor({ host, authEnabled, wsAuth, userContext, getUserContextManager, evaluator }) {
     this.#host = host
     this.#authEnabled = authEnabled
     this.#wsAuth = wsAuth
     this.#userContext = userContext
     this.#getUserContextManager = getUserContextManager
+    this.#evaluator = evaluator
   }
 
   attach(wss) {
@@ -157,6 +159,7 @@ class WsHandler {
         agentId: entry.session.agentId,
         intent: INTENT.CONTINUE_SESSION,
         registry: effectiveCtx.agentRegistry,
+        evaluator: this.#evaluator,
       })
       if (!access.allow) {
         ws.send(JSON.stringify({ type: 'error', code: 403, message: `Access denied: ${access.reason}`, reason: access.reason }))

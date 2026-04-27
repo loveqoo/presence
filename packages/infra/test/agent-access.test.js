@@ -1,6 +1,7 @@
 import { canAccessAgent, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { assert, summary } from '../../../test/lib/assert.js'
+import { createMockEvaluator } from '../../../test/lib/cedar-mock.js'
 
 console.log('canAccessAgent tests')
 
@@ -215,6 +216,83 @@ console.log('canAccessAgent tests')
     jwtSub: 'admin', agentId: 'admin/manager', intent: INTENT.NEW_SESSION,
   })
   assert(r.allow === true, 'AS5: callback 미전달 시 검사 skip')
+}
+
+// =============================================================================
+// AA-X1~X6 — governance-cedar v2.5 §X (archived → Cedar 정책 흡수)
+// =============================================================================
+
+// AA-X1 — evaluator 전달 시 archived agent + new-session → Cedar deny → REASON.ARCHIVED
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const evaluator = createMockEvaluator()
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.NEW_SESSION, registry: reg, evaluator,
+  })
+  assert(r.allow === false, 'AA-X1: evaluator 경로 archived + new-session deny')
+  assert(r.reason === REASON.ARCHIVED, `AA-X1: reason=archived (got ${r.reason})`)
+}
+
+// AA-X2 — evaluator 경로: archived + continue-session → Cedar allow
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const evaluator = createMockEvaluator()
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.CONTINUE_SESSION, registry: reg, evaluator,
+  })
+  assert(r.allow === true, 'AA-X2: evaluator 경로 archived + continue-session allow')
+}
+
+// AA-X3 — evaluator 가 호출되었음을 capture (Cedar context 셰이프 정확)
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  let captured = null
+  const evaluator = (input) => { captured = input; return { decision: 'deny', matchedPolicies: [], errors: [] } }
+  canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.DELEGATE, registry: reg, evaluator,
+  })
+  assert(captured && captured.action === 'access_agent', 'AA-X3: action=access_agent')
+  assert(captured.principal.type === 'LocalUser' && captured.principal.id === 'anthony', 'AA-X3: principal=LocalUser/anthony')
+  assert(captured.resource.type === 'Agent' && captured.resource.id === 'anthony/old', 'AA-X3: resource=Agent/anthony/old')
+  assert(captured.context.archived === true, 'AA-X3: context.archived=true')
+  assert(captured.context.intent === 'delegate', `AA-X3: context.intent=delegate (got ${captured.context.intent})`)
+}
+
+// AA-X4 — evaluator 미전달 (legacy 경로) — 기존 코드 분기 그대로
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/old', type: 'local', archived: true })
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/old', intent: INTENT.NEW_SESSION, registry: reg,
+  })
+  assert(r.allow === false && r.reason === REASON.ARCHIVED, 'AA-X4: legacy 경로 archived deny')
+}
+
+// AA-X5 — evaluator 전달 + non-archived agent → 평가 호출되어도 allow
+{
+  const reg = createAgentRegistry()
+  reg.register({ agentId: 'anthony/active', type: 'local', archived: false })
+  let calls = 0
+  const evaluator = (input) => { calls += 1; return createMockEvaluator()(input) }
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/active', intent: INTENT.NEW_SESSION, registry: reg, evaluator,
+  })
+  assert(r.allow === true, 'AA-X5: non-archived → allow')
+  assert(calls === 1, `AA-X5: evaluator 1회 호출 (got ${calls})`)
+}
+
+// AA-X6 — registry 없으면 evaluator 호출 안됨 (archived 판정 불가 → skip)
+{
+  let called = false
+  const evaluator = () => { called = true; return { decision: 'allow', matchedPolicies: [], errors: [] } }
+  const r = canAccessAgent({
+    jwtSub: 'anthony', agentId: 'anthony/foo', intent: INTENT.NEW_SESSION, evaluator,
+  })
+  assert(r.allow === true, 'AA-X6: registry 없으면 archived skip → allow')
+  assert(called === false, 'AA-X6: evaluator 미호출 (registry 부재)')
 }
 
 summary()

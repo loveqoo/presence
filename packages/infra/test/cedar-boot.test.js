@@ -246,6 +246,23 @@ const run = async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // CB10 — 실 자산 부팅 후 20-archived 정책 동작 (governance-cedar v2.5 §X)
+  {
+    const result = await bootCedar({ policiesDir: REAL_POLICIES_DIR, schemaPath: REAL_SCHEMA_PATH })
+    assert(/access_agent/.test(result.policiesText), 'CB10: 00-base 가 access_agent permit 포함')
+    assert(/20-archived|context\.archived/.test(result.policiesText), 'CB10: 20-archived 정책 통합')
+    const auditor = captureAuditor()
+    const evaluate = createEvaluator({ ...result, auditWriter: auditor })
+    const principal = { type: 'LocalUser', id: 'alice' }
+    const resource = { type: 'Agent', id: 'alice/helper' }
+    // archived + new-session → deny
+    const r1 = evaluate({ principal, action: 'access_agent', resource, context: { archived: true, intent: 'new-session' } })
+    assert(r1.decision === 'deny', `CB10: archived + new-session → deny (got ${r1.decision})`)
+    // archived + continue-session → allow
+    const r2 = evaluate({ principal, action: 'access_agent', resource, context: { archived: true, intent: 'continue-session' } })
+    assert(r2.decision === 'allow', `CB10: archived + continue-session → allow (got ${r2.decision})`)
+  }
+
   // CB9 — 51-* 같은 5[0-9]- 패턴 모두 차단
   {
     const dir = createFixtureDir('cb9')

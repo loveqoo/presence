@@ -200,6 +200,7 @@ class PresenceServer {
     const wsHandler = new WsHandler({
       host: this.#host, authEnabled: this.#authEnabled, wsAuth: auth.wsAuth,
       userContext: this.#userContext, getUserContextManager,
+      evaluator: this.#evaluator,
     })
     wsHandler.attach(this.#wss)
 
@@ -249,6 +250,7 @@ class PresenceServer {
     // 7. Session API
     app.use('/api', createSessionRouter({
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
+      evaluator: this.#evaluator,
     }))
     // 8. /a2a — docs/design/agent-identity-model.md §11. enabled=true 에서만 마운트.
     // KG-17 resolved: POST 라우트가 Authorization Bearer A2A JWT 검증.
@@ -257,6 +259,7 @@ class PresenceServer {
         userContext: this.#userContext,
         config: this.#userContext.config,
         tokenService: auth.tokenService,
+        evaluator: this.#evaluator,
       }))
     }
     // 9. Static web UI (catch-all — 반드시 마지막)

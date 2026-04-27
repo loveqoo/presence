@@ -28,6 +28,19 @@ const QUOTA_POLICIES =
   'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { !context.isAdmin && context.currentCount >= context.maxAgents };\n' +
   'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { context.isAdmin && context.currentCount >= context.hardLimit };'
 
+// governance-cedar v2.5 §X — access_agent + 20-archived.
+const SCHEMA_WITH_ARCHIVED = `entity LocalUser = { id: String, role: String };
+entity Agent = { id: String };
+action "access_agent" appliesTo {
+  principal: [LocalUser],
+  resource: [Agent],
+  context: { intent: String, archived: Bool }
+};`
+
+const ARCHIVED_POLICIES =
+  'permit (principal is LocalUser, action == Action::"access_agent", resource is Agent);\n' +
+  'forbid (principal is LocalUser, action == Action::"access_agent", resource is Agent) when { context.archived && context.intent != "continue-session" };'
+
 const PERMIT_ALL = 'permit (principal is LocalUser, action == Action::"create_agent", resource is User);'
 
 const PERMIT_PLUS_FORBID_BLOCKED =
@@ -227,6 +240,38 @@ const run = () => {
     })
     assert(r.decision === 'deny', `CE11: admin 50/50 hardLimit → deny (got ${r.decision})`)
     assert(r.errors.length === 0, 'CE11: errors 없음')
+  }
+
+  // ==========================================================================
+  // CE12 — governance-cedar v2.5 §X (access_agent + 20-archived 정책 동작)
+  // ==========================================================================
+
+  // CE12 — archived agent 의 4 intent × allow/deny 정책 매트릭스
+  {
+    const auditWriter = createCaptureAuditor()
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVED, policiesText: ARCHIVED_POLICIES, auditWriter })
+    const principal = { type: 'LocalUser', id: 'alice' }
+    const resource = { type: 'Agent', id: 'alice/helper' }
+
+    // archived=true × intent=continue-session → allow
+    const r1 = evaluate({ principal, action: 'access_agent', resource, context: { archived: true, intent: 'continue-session' } })
+    assert(r1.decision === 'allow', `CE12.1: archived + continue-session → allow (got ${r1.decision})`)
+
+    // archived=true × intent=new-session → deny
+    const r2 = evaluate({ principal, action: 'access_agent', resource, context: { archived: true, intent: 'new-session' } })
+    assert(r2.decision === 'deny', `CE12.2: archived + new-session → deny (got ${r2.decision})`)
+
+    // archived=true × intent=delegate → deny
+    const r3 = evaluate({ principal, action: 'access_agent', resource, context: { archived: true, intent: 'delegate' } })
+    assert(r3.decision === 'deny', `CE12.3: archived + delegate → deny (got ${r3.decision})`)
+
+    // archived=true × intent=scheduled-run → deny
+    const r4 = evaluate({ principal, action: 'access_agent', resource, context: { archived: true, intent: 'scheduled-run' } })
+    assert(r4.decision === 'deny', `CE12.4: archived + scheduled-run → deny (got ${r4.decision})`)
+
+    // archived=false × 任 intent → allow (forbid 미적용)
+    const r5 = evaluate({ principal, action: 'access_agent', resource, context: { archived: false, intent: 'new-session' } })
+    assert(r5.decision === 'allow', `CE12.5: !archived + new-session → allow (got ${r5.decision})`)
   }
 
   // CE6 — Reader 브릿지 동치: createEvaluator(deps) === createEvaluatorR.run(deps) 동일 입력 → 동일 결과
