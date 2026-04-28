@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { createUserStore } from './user-store.js'
 import { ensureSecret } from './token.js'
@@ -8,16 +7,10 @@ import { removeUserCompletely } from './remove-user.js'
 import { Config } from '../config.js'
 import { loadUserMerged } from '../config-loader.js'
 import { Memory } from '../memory.js'
-import {
-  STATUS as GV_STATUS,
-  submitUserAgent,
-  approveUserAgent,
-  denyUserAgent,
-  listPending,
-  loadAgentPolicies,
-  readPendingRequest,
-} from '../authz/agent-governance.js'
-import { bootCedarSubsystem, createSubsystemAuditWriter, getSubsystemAuditStatus } from '../authz/cedar/index.js'
+import { getSubsystemAuditStatus } from '../authz/cedar/index.js'
+import { requireFlag } from './cli-utils.js'
+import { dispatchAgent } from './cli-agent.js'
+import { dispatchPolicy } from './cli-policy.js'
 
 // Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
 
@@ -44,9 +37,9 @@ const promptLine = (prompt) => new Promise((resolve) => {
 const parseArgs = () => {
   const args = process.argv.slice(2)
   const command = args[0]
-  // `agent <action>` 2-단계 subcommand 지원. 나머지는 기존 동작 유지.
-  const action = command === 'agent' ? args[1] : null
-  const flagStart = command === 'agent' ? 2 : 1
+  // `agent <action>` / `policy <action>` 2-단계 subcommand 지원. 나머지는 기존 동작 유지.
+  const action = (command === 'agent' || command === 'policy') ? args[1] : null
+  const flagStart = (command === 'agent' || command === 'policy') ? 2 : 1
   const flags = {}
   for (let i = flagStart; i < args.length; i++) {
     if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
@@ -55,14 +48,6 @@ const parseArgs = () => {
     }
   }
   return { command, action, ...flags }
-}
-
-const requireFlag = (flags, name) => {
-  if (!flags[name]) {
-    console.error(`--${name} is required`)
-    process.exit(1)
-  }
-  return flags[name]
 }
 
 // --- Commands ---
@@ -169,119 +154,6 @@ const cmdPasswd = async ({ username }) => {
   console.log(`Password changed for '${username}'. All existing sessions invalidated.`)
 }
 
-// --- Agent subcommands ---
-
-const loadPersonaFromFile = (filePath) => {
-  if (!filePath) return null
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf-8'))
-  } catch (err) {
-    console.error(`Failed to read persona file: ${err.message}`)
-    process.exit(1)
-  }
-}
-
-const defaultPersona = () => ({
-  name: 'Presence',
-  systemPrompt: null,
-  rules: [],
-  tools: [],
-})
-
-async function cmdAgentAdd(params) {
-  const presenceDir = Config.presenceDir()
-  const persona = params.personaPath ? loadPersonaFromFile(params.personaPath) : defaultPersona()
-  // governance-cedar v2.1: CLI 도 Cedar 부팅 필수 (PresenceServer 와 같은 invariant).
-  const evaluator = await bootCedarSubsystem({ presenceDir })
-  const result = submitUserAgent({
-    requester: params.requester, agentName: params.name, persona,
-    basePath: presenceDir, presenceDir, evaluator,
-  })
-  switch (result.status) {
-    case GV_STATUS.APPROVED:
-      console.log(`Agent '${params.requester}/${params.name}' auto-approved. ${result.detail || ''}`)
-      return
-    case GV_STATUS.PENDING:
-      console.log(`Agent '${params.requester}/${params.name}' pending admin review.`)
-      console.log(`  reqId: ${result.reqId}`)
-      console.log(`  Admin can approve:  npm run user -- agent approve --id ${result.reqId}`)
-      return
-    case GV_STATUS.ALREADY_EXISTS:
-      console.error(`Agent '${params.requester}/${params.name}' already exists.`)
-      process.exit(1)
-      return
-    case GV_STATUS.DENIED:
-      console.error(`Agent '${params.requester}/${params.name}' denied by Cedar policy. ${result.detail || ''}`)
-      process.exit(1)
-      return
-  }
-}
-
-function cmdAgentReview() {
-  const presenceDir = Config.presenceDir()
-  const pending = listPending(presenceDir)
-  if (pending.length === 0) {
-    console.log('No pending agent requests.')
-    return
-  }
-  const policies = loadAgentPolicies(presenceDir)
-  console.log(`Pending requests (${pending.length}):`)
-  console.log(`  policy: maxAgentsPerUser=${policies.maxAgentsPerUser}, autoApproveUnderQuota=${policies.autoApproveUnderQuota}`)
-  for (const req of pending) {
-    console.log('')
-    console.log(`  [${req.id}]`)
-    console.log(`    requester: ${req.requester}`)
-    console.log(`    agentName: ${req.agentName}`)
-    console.log(`    submitted: ${req.submittedAt}`)
-    console.log(`    reason:    ${req.reason} (current ${req.currentCount}/${req.maxAgentsPerUser})`)
-  }
-  console.log('')
-  console.log('Approve: npm run user -- agent approve --id <reqId>')
-  console.log('Deny:    npm run user -- agent deny --id <reqId> --reason "<text>"')
-}
-
-function cmdAgentApprove(params) {
-  const presenceDir = Config.presenceDir()
-  // governance-cedar v2.1 §1.4: admin override 는 Cedar 호출 없음, audit 만 기록.
-  // 요청 정보는 approve 전 캡처 (파일 이동 후엔 pending 에서 사라짐).
-  const req = readPendingRequest(presenceDir, params.id)
-  const result = approveUserAgent(params.id, { presenceDir, basePath: presenceDir })
-  if (result.status === GV_STATUS.APPROVED || result.status === GV_STATUS.ALREADY_APPLIED) {
-    createSubsystemAuditWriter({ presenceDir }).append({
-      ts: new Date().toISOString(), caller: 'admin', action: 'manual_approve', resource: req?.requester ?? 'unknown',
-      decision: 'allow', matchedPolicies: [], errors: [], reqId: params.id, agentName: req?.agentName ?? null,
-      idempotent: result.status === GV_STATUS.ALREADY_APPLIED,
-    })
-  }
-  switch (result.status) {
-    case GV_STATUS.APPROVED:
-      console.log(`Request ${params.id} approved.`)
-      return
-    case GV_STATUS.ALREADY_APPLIED:
-      console.log(`Request ${params.id} already applied (idempotent replay, file cleaned).`)
-      return
-    case GV_STATUS.NOT_FOUND:
-      console.error(`Request ${params.id} not found in pending.`)
-      process.exit(1)
-      return
-  }
-}
-
-function cmdAgentDeny(params) {
-  const presenceDir = Config.presenceDir()
-  const reason = params.reason || 'denied by admin'
-  const result = denyUserAgent(params.id, reason, { presenceDir })
-  switch (result.status) {
-    case GV_STATUS.REJECTED:
-      console.log(`Request ${params.id} denied. Reason: ${reason}`)
-      return
-    case GV_STATUS.NOT_FOUND:
-      console.error(`Request ${params.id} not found in pending.`)
-      process.exit(1)
-      return
-  }
-}
-
 // FP-70 — admin audit log 가시성. size / 백업 개수 / 백업별 size + .gz 열람 안내.
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`
@@ -306,27 +178,6 @@ function cmdAuditStatus() {
   }
 }
 
-const dispatchAgent = (action, flags) => {
-  switch (action) {
-    case 'add':
-      return cmdAgentAdd({
-        requester: requireFlag(flags, 'requester'),
-        name: requireFlag(flags, 'name'),
-        personaPath: flags.persona,
-      })
-    case 'review':
-      return cmdAgentReview()
-    case 'approve':
-      return cmdAgentApprove({ id: requireFlag(flags, 'id') })
-    case 'deny':
-      return cmdAgentDeny({ id: requireFlag(flags, 'id'), reason: flags.reason })
-    default:
-      console.error(`Unknown agent action: ${action}`)
-      console.error('Actions: add, review, approve, deny')
-      process.exit(1)
-  }
-}
-
 // --- Main ---
 
 const main = async () => {
@@ -348,6 +199,11 @@ const main = async () => {
     console.log('')
     console.log('Audit:')
     console.log('  npm run user -- audit-status')
+    console.log('')
+    console.log('Cedar policy:')
+    console.log('  npm run user -- policy lint --file <path.cedar>')
+    console.log('  npm run user -- policy list')
+    console.log('  npm run user -- policy reload  (미지원 — 서버 재시작 필요)')
     process.exit(0)
   }
 
@@ -370,6 +226,12 @@ const main = async () => {
       return dispatchAgent(action, flags)
     case 'audit-status':
       return cmdAuditStatus()
+    case 'policy':
+      if (!action) {
+        console.error('policy: action required (lint / list / reload)')
+        process.exit(1)
+      }
+      return dispatchPolicy(action, flags)
     default:
       console.error(`Unknown command: ${command}`)
       process.exit(1)
