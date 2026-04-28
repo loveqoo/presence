@@ -17,6 +17,7 @@ import { UserContextManager } from './user-context-manager.js'
 import { createAuthSetup } from './auth-setup.js'
 import { createSessionRouter } from './session-api.js'
 import { createA2aRouter } from './a2a-router.js'
+import { createAdminRouter } from './admin-router.js'
 import { fireAndForget } from '@presence/core/lib/task.js'
 import { corsMiddleware, mountStaticWebUi, logStartupSummaryR, warnPresenceDirChange, closeAsync, listenAsync } from './server-utils.js'
 
@@ -254,7 +255,15 @@ class PresenceServer {
         authRequired: this.#authEnabled,
       })
     })
-    // 7. Session API
+    // 7. Admin API — KG-28 P5. policy reload + version 조회 (admin role 강제).
+    //    auth middleware 다음 마운트 — JWT 검증된 요청만 도달.
+    app.use('/api/admin', createAdminRouter({
+      userContextManager: this.#userContextManager,
+      presenceDir: Config.presenceDir(),
+      logger: console,
+      auditWriter: this.#auditWriter,    // server boot 의 단일 인스턴스 재사용
+    }))
+    // 8. Session API
     app.use('/api', createSessionRouter({
       userContext: this.#userContext, getUserContextManager, authEnabled: this.#authEnabled,
       evaluator: this.#evaluator,

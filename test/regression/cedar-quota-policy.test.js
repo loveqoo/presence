@@ -291,4 +291,90 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// KG-28 P5 — INV-CEDAR-RELOAD-WRAPPER: createEvaluatorRef wrapper export + replace/snapshot 메서드.
+{
+  const text = read('packages/infra/src/infra/authz/cedar/evaluator-ref.js')
+  assert(
+    /export\s*\{\s*createEvaluatorRef/.test(text),
+    'INV-CEDAR-RELOAD-WRAPPER: createEvaluatorRef export',
+  )
+  assert(
+    /evaluator\.replace\s*=/.test(text),
+    'INV-CEDAR-RELOAD-WRAPPER: evaluator.replace 메서드 정의',
+  )
+  assert(
+    /evaluator\.snapshot\s*=/.test(text),
+    'INV-CEDAR-RELOAD-WRAPPER: evaluator.snapshot 메서드 정의',
+  )
+}
+
+// KG-28 P5 — INV-CEDAR-RELOAD-FAIL-SAFE: rebootCedarSubsystem 가 throw 위임.
+//   #doReload 가 wrapper.replace 를 boot 결과 throw 후 호출 안 함 (await 가 catch 없이 진행).
+{
+  const cedarIndex = read('packages/infra/src/infra/authz/cedar/index.js')
+  assert(
+    /export\s*\{[\s\S]*rebootCedarSubsystem/.test(cedarIndex),
+    'INV-CEDAR-RELOAD-FAIL-SAFE: rebootCedarSubsystem export',
+  )
+  // try/catch 가 rebootCedarSubsystem 자체에 없음 — 호출자가 fail-safe rollback 책임
+  const rebootSection = cedarIndex.match(/const rebootCedarSubsystem\s*=[\s\S]*?(?=\n(?:const|export|\/\/))/)?.[0] ?? ''
+  assert(
+    !/try\s*\{/.test(rebootSection),
+    'INV-CEDAR-RELOAD-FAIL-SAFE: rebootCedarSubsystem 내부 try/catch 부재 (throw 위임)',
+  )
+
+  const ucm = read('packages/server/src/server/user-context-manager.js')
+  // #doReload 가 await rebootCedarSubsystem 후 wrapper.replace — try/catch 없이 throw 전파
+  assert(
+    /await\s+rebootCedarSubsystem\(/.test(ucm),
+    'INV-CEDAR-RELOAD-FAIL-SAFE: #doReload 가 rebootCedarSubsystem 호출',
+  )
+  // wrapper.replace 가 await 직후 호출 (throw 시 미도달)
+  assert(
+    /await\s+rebootCedarSubsystem[\s\S]*?\.replace\(/.test(ucm),
+    'INV-CEDAR-RELOAD-FAIL-SAFE: await reboot → wrapper.replace 순서 (throw 시 replace 미도달)',
+  )
+}
+
+// KG-28 P5 — INV-CEDAR-RELOAD-EDGE-TRIGGER: reloadEvaluator 가 #reloadPending 단일 promise 공유 패턴.
+//   자동 follow-up (dirty-bit) 부재 검증.
+{
+  const ucm = read('packages/server/src/server/user-context-manager.js')
+  assert(
+    /#reloadPending\s*=\s*null/.test(ucm),
+    'INV-CEDAR-RELOAD-EDGE-TRIGGER: #reloadPending 필드 정의',
+  )
+  assert(
+    /if\s*\(this\.#reloadPending\)\s*return\s*this\.#reloadPending/.test(ucm),
+    'INV-CEDAR-RELOAD-EDGE-TRIGGER: 진행 중 reload promise 공유 (single-flight)',
+  )
+  // dirty-bit 자동 follow-up 패턴 부재 검증
+  assert(
+    !/#reloadDirty/.test(ucm),
+    'INV-CEDAR-RELOAD-EDGE-TRIGGER: dirty-bit 자동 follow-up 패턴 부재',
+  )
+}
+
+// KG-28 P5 — INV-CEDAR-AUDIT-VERSION: createAuditWriter 가 getPolicyVersion 받아 자동 첨부.
+//   admin router 의 audit append 코드에 policyVersion 수동 기입 부재 (단일 진실 소스).
+{
+  const audit = read('packages/infra/src/infra/authz/cedar/audit.js')
+  assert(
+    /getPolicyVersion/.test(audit),
+    'INV-CEDAR-AUDIT-VERSION: createAuditWriter 의 getPolicyVersion 파라미터',
+  )
+  assert(
+    /policyVersion:\s*getPolicyVersion\(\)/.test(audit),
+    'INV-CEDAR-AUDIT-VERSION: append 시 자동 첨부',
+  )
+
+  const adminRouter = read('packages/server/src/server/admin-router.js')
+  // admin router 의 audit append 본문에 policyVersion: 직접 기입 부재 (auditWriter 자동 첨부에 위임)
+  // activePolicyVersion 은 fail audit 의 활성 정보로 별도 의미 — 검증 대상 아님.
+  assert(
+    !/auditWriter\.append\([\s\S]*?\bpolicyVersion\s*:/.test(adminRouter),
+    'INV-CEDAR-AUDIT-VERSION: admin router audit append 본문에 policyVersion 수동 기입 부재 (단일 진실 소스)',
+  )
+}
+
 summary()

@@ -46,8 +46,49 @@ function cmdPolicyList() {
   }
 }
 
-function cmdPolicyReload() {
-  console.error('policy reload: 미지원 — 서버 재시작 필요. (P5 후속 phase 에서 hot reload 검토)')
+// KG-28 P5 — POST /api/admin/policy/reload 호출. 서버 측 hot reload 트리거.
+// PRESENCE_ADMIN_TOKEN env 의 admin access token 으로 인증. 서버 미가동 / 권한 / 부팅 실패 분기.
+async function cmdPolicyReload() {
+  const baseUrl = process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
+  const token = process.env.PRESENCE_ADMIN_TOKEN
+  if (!token) {
+    console.error('policy reload: admin access token 필요.')
+    console.error('  1. admin 으로 로그인 — POST /api/auth/login')
+    console.error('  2. 응답의 access token 을 PRESENCE_ADMIN_TOKEN env 에 설정')
+    console.error('  3. 다시 실행 — npm run user -- policy reload')
+    console.error('  주의: process listing 으로 token 노출 가능. 신뢰된 환경에서만 사용.')
+    process.exit(1)
+  }
+  let response
+  try {
+    response = await fetch(`${baseUrl}/api/admin/policy/reload`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+  } catch (err) {
+    // round 9 M 흡수: ECONNREFUSED 특화 제거. 모든 fetch 실패 동일 처리.
+    console.error(`policy reload: 서버 도달 실패 — ${err.message}`)
+    console.error('  서버 가동 상태 확인 후 재시도 — npm start')
+    process.exit(1)
+  }
+  if (response.status === 401 || response.status === 403) {
+    console.error(`policy reload: 권한 없음 (HTTP ${response.status}). admin role 토큰 사용 확인.`)
+    process.exit(1)
+  }
+  const body = await response.json()
+  if (response.ok) {
+    console.log(`OK: 정책 reload 성공. version=${body.version}`)
+    console.log(`     reloadStartedAt=${body.reloadStartedAt} reloadedAt=${body.reloadedAt}`)
+    console.log('Tip: 자기 reload 가 새로 시작됐는지 확인하려면 명시적 두 번째 호출 후 reloadStartedAt 변화 관찰.')
+    console.log('Tip: 변경 적용 전 lint 권장 — npm run user -- policy lint --file <path>')
+    return
+  }
+  console.error(`policy reload 실패: ${body.error}`)
+  if (body.activeVersion != null) {
+    console.error(`  활성 정책: version=${body.activeVersion} reloadedAt=${body.activeReloadedAt}`)
+  }
+  console.error('이전 정책이 유지됩니다 (fail-safe rollback — 메모리 내 evaluator 미교체).')
+  console.error('디스크 정책 파일 상태는 변경되지 않음 — 운영자가 별도 정정 필요.')
   process.exit(1)
 }
 

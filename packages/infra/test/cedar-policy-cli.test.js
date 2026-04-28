@@ -95,12 +95,61 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // CLI-X5 — policy reload → exit 1 + 미지원 안내 (P5 후속)
+  // CLI-X5 (KG-28 P5 갱신) — policy reload (token 없음) → exit 1 + admin token 필요 안내
   {
     const dir = createTmpDir()
-    const r = runCli('policy reload', dir)
-    assert(r.code === 1, `CLI-X5: reload → exit 1 (got ${r.code})`)
-    assert(r.stderr.includes('미지원'), `CLI-X5: stderr 에 미지원 안내 (got ${r.stderr})`)
+    // PRESENCE_ADMIN_TOKEN env 없는 상태로 실행
+    const env = { ...process.env, PRESENCE_DIR: dir }
+    delete env.PRESENCE_ADMIN_TOKEN
+    let r
+    try {
+      const out = execSync(`${CLI} policy reload`, {
+        env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      r = { code: 0, stdout: out, stderr: '' }
+    } catch (err) {
+      r = {
+        code: err.status ?? -1,
+        stdout: err.stdout?.toString() || '',
+        stderr: err.stderr?.toString() || '',
+      }
+    }
+    assert(r.code === 1, `CLI-X5: token 부재 → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('admin access token 필요'),
+      `CLI-X5: stderr 에 admin token 필요 안내 (got ${r.stderr.slice(0, 200)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X6 — policy reload (서버 미가동 + token 있음) → exit 1 + "서버 도달 실패" 안내
+  // round 9 M 흡수: ECONNREFUSED 특화 제거. 모든 fetch 실패 동일 처리.
+  {
+    const dir = createTmpDir()
+    // 미할당 포트 (서버 미가동 시뮬레이션) 로 reload 호출
+    const env = {
+      ...process.env,
+      PRESENCE_DIR: dir,
+      PRESENCE_ADMIN_TOKEN: 'fake-token-not-validated-because-no-server',
+      PRESENCE_SERVER_URL: 'http://127.0.0.1:9',  // port 9 = unassigned, ECONNREFUSED
+    }
+    let r
+    try {
+      const out = execSync(`${CLI} policy reload`, {
+        env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      })
+      r = { code: 0, stdout: out, stderr: '' }
+    } catch (err) {
+      r = {
+        code: err.status ?? -1,
+        stdout: err.stdout?.toString() || '',
+        stderr: err.stderr?.toString() || '',
+      }
+    }
+    assert(r.code === 1, `CLI-X6: 서버 미가동 → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('서버 도달 실패'),
+      `CLI-X6: stderr 에 "서버 도달 실패" (got ${r.stderr.slice(0, 200)})`)
+    assert(r.stderr.includes('npm start'),
+      `CLI-X6: stderr 에 "npm start 후 재시도" 안내`)
     rmSync(dir, { recursive: true, force: true })
   }
 
