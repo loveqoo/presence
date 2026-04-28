@@ -398,8 +398,42 @@ if (registry) {
 
 ---
 
+## §X5 — Cedar 운영자 custom policy 슬롯 (50-*) unblock (KG-27, P4)
+
+**상태**: open. v2.3 의 `boot.js` 50-* throw 가드 — "cedar-wasm 4.10.0 의 `matchedPolicies` 가 정책 파일 식별 불가 (실측 `policy0` 만 반환)" — 가 잘못된 진단으로 확인됨 (2026-04-28).
+
+**실측 (cedar-wasm 4.10.0)**:
+
+| 입력 모양 | matchedPolicies (response.diagnostics.reason) |
+|---|---|
+| `staticPolicies: <단일 문자열 concat>` | `["policy0", "policy1", ...]` (인덱스 기반) |
+| `staticPolicies: { "alpha": text, "beta": text }` | `["beta"]` (제공된 ID 그대로) |
+
+cedar-wasm API 가 두 입력 모양을 모두 받으며, 맵 형태일 때 정책 식별이 가능. 외부 라이브러리 한계가 아니라 우리가 잘못된 입력 모양 (`readPoliciesDir` 가 `.join('\n\n')`) 을 쓴 것이 원인. 외부 의존 없이 unblock 가능.
+
+**해소 범위 (P4)**:
+1. `boot.js readPoliciesDir` — 단일 문자열 → `{ filename: text }` 맵 (filename = `00-base`, `10-quota`, `20-archived`, `30-protect-admin`, `31-protect-persona`, ...)
+2. `evaluator.js` — `staticPolicies` 에 맵 그대로 전달
+3. `interpretCedarDecision` — `matchedPolicies` 의 prefix 매치를 사유로 분류 (`10-` → quota, `11-` → admin-limit, `20-` → archived, `30-`/`31-` → protect, `50-` → operator-defined)
+4. `boot.js` 50-* throw 가드 제거
+5. admin CLI:
+   - `policy lint <file>` — `cedar.checkParsePolicySet` 활용한 문법/스키마 검증
+   - `policy reload` — runtime evaluator 재구성 (재부팅 없이)
+   - `policy list` — 활성 정책 카테고리별 목록
+6. 회귀: 정책 식별 정확성 (CE-X), 50-* 정상 부팅 (CB-X), interpretCedarDecision 50-* 분기 (GV-X), CLI lint/reload (CLI-X)
+
+**주의**:
+- v2.3 `interpretCedarDecision` 의 단순화 ("deny = quota 보장") 는 매치 ID 기반 분기로 교체. 매치된 정책 ID 가 없을 때 (entity-level 거부) 의 fallback 도 정의.
+- `matchedPolicies` 가 deny 시 forbid 정책 ID 만 반환하는지, allow 시 permit 정책 ID 도 반환하는지는 P4 구현 시 확정.
+- 기존 GV-X4/X5 (quota deny → PENDING) 등은 50-* 차단 전제로 작성됐으므로 P4 phase 에서 매치 ID 검증으로 강화.
+
+**Reference**:
+- 잘못된 진단 출처: v2.3 Changelog (2026-04-26).
+- 실증: 2026-04-28 cedar-wasm 4.10.0 직접 호출 비교 — 두 입력 모양에 대한 응답 차이 확인.
+
 ## Changelog
 
+- **v2.10 (2026-04-28)**: KG-27 등록 — Cedar 운영자 custom policy 슬롯 (50-*) boot 차단 unblock 가능. v2.3 의 진단 (cedar-wasm 4.10.0 matchedPolicies 정책 식별 불가) 이 잘못됐음을 실증으로 확인. `staticPolicies` 가 `string` 외에 `{ id: text }` 맵도 받으며, 맵 형태일 때 매치된 정책 ID 가 그대로 surface 됨. 외부 라이브러리 신버전 대기 불필요 — `boot.js` / `evaluator.js` / `interpretCedarDecision` 입력 모양 변경 + admin CLI (lint/reload/list) 추가로 P4 unblock 가능. §X5 신규 섹션. REGISTRY 에 KG-27 (open, medium, infra) 추가.
 - **v2.9 (2026-04-28)**: P3 follow-up — `set_persona` fail-open → fail-closed 전환. `31-protect-persona.cedar` 신규 (`reservedOwner && !isAdmin` forbid). slash-commands.js 의 evaluator/jwtSub/agentId 누락 시 즉시 deny. handleSlashCommand 는 session-api.js 단일 caller — production 호환성 영향 없음. 모든 Cedar 게이트 (canAccessAgent / submitUserAgent / persona) 가 fail-closed 로 통일 — v2.8 spec-guardian design tension 해소. defense-in-depth: ownership 은 session middleware 가 보장하나 future 경로 (admin CLI / interpreter / a2a) 우회 시에도 admin/* persona 보호. CE14.1/14.2/14.3 (3 케이스 매트릭스), CB12 갱신 (3 케이스), INV-CEDAR-PERSONA-PROTECT 정적 회귀, cedar-mock decideSetPersona. agent-identity I-CEDAR-PERSONA 갱신. 4535 passed.
 - **v2.8 (2026-04-28)**: P3 C3 — `set_persona` action + slash-commands `/persona` 통합. schema `set_persona` action + `context: { isAdmin: Bool, reservedOwner: Bool }`. `00-base.cedar` permit 만 (forbid 없음 — ownership 이 session middleware 에서 이미 보장, audit trail 이 핵심). `slash-commands.js persona handler` 가 evaluator + jwtSub + agentId 있을 때 `Op.CheckAccess({ action: 'set_persona' })` 호출 → Cedar audit JSONL 자동 기록. 미전달 시 fail-open skip (CLI/테스트 호환, audit-only 게이트라 보안 우회 아님). session-api `/api/sessions/:sessionId/chat` 가 evaluator + jwtSub 를 ctx 에 추가 전달. CE14 (실 cedar set_persona + audit), CB12 (실 자산 통합), 기존 server S7b (/persona show/set/reset) 가 mock evaluator 통과. cedar-mock.js set_persona 분기. agent-identity I-CEDAR-PERSONA 신규. design tension: forbid 정책 추가 시 fail-closed 전환 검토 — 후속 phase. 4515 passed.
 - **v2.7 (2026-04-28)**: P3 C2 — `archive_agent` action + `30-protect-admin.cedar` 신규. schema 에 `archive_agent` action + `context: { isAdmin: Bool, reservedOwner: Bool }`. `00-base.cedar` 가 `archive_agent` permit 추가. `30-protect-admin.cedar` 가 `reservedOwner` 일 때 forbid (I5 admin/* archive 불가 흡수). 현재 archive transition callsite 부재 — 정책만 forward, transition land 시 자동 적용. Cedar 호출 누락 = INV-EVALUATOR-INVARIANT 위반 → fail-closed. CE13.1/13.2 (실 cedar archive_agent), CB11 (실 자산 통합), cedar-mock.js `decideArchiveAgent` 추가. agent-identity.md I-CEDAR-ARCHIVE-PROTECT 신규 + I5 갱신. 4509 passed.
