@@ -18,12 +18,15 @@ const extractMessage = (errLike) => {
   return JSON.stringify(errLike)
 }
 
-const createEvaluatorR = Reader.asks(({ cedar, schemaText, policiesText, auditWriter }) => {
+const createEvaluatorR = Reader.asks(({ cedar, schemaText, policiesMap, auditWriter }) => {
   if (!cedar || typeof cedar.isAuthorized !== 'function') {
     throw new Error('createEvaluator: cedar.isAuthorized 부재')
   }
   if (!auditWriter || typeof auditWriter.append !== 'function') {
     throw new Error('createEvaluator: auditWriter.append 부재')
+  }
+  if (!policiesMap || typeof policiesMap !== 'object') {
+    throw new Error('createEvaluator: policiesMap 부재 또는 잘못된 타입')
   }
   return ({ principal, action, resource, context = {} }) => {
     const audit = (entry) => auditWriter.append({
@@ -40,7 +43,7 @@ const createEvaluatorR = Reader.asks(({ cedar, schemaText, policiesText, auditWr
         resource:  { type: resource.type,  id: resource.id },
         context,
         schema:   schemaText,
-        policies: { staticPolicies: policiesText },
+        policies: { staticPolicies: policiesMap },
         entities: [],
       })
       if (answer.type === 'success') {

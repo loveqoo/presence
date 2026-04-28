@@ -50,29 +50,49 @@ const STATUS = Object.freeze({
   DENIED: 'denied',
 })
 
-// docs §8.3 — pending 요청의 원인 레이블.
-// QUOTA_EXCEEDED: 10-quota.cedar (currentCount >= maxAgents) 매치.
-// MANUAL_REVIEW: Cedar allow 이지만 autoApprove=false (Cedar 표현 한계 third state, 코드 잔류).
-const PENDING_REASON = Object.freeze({
-  QUOTA_EXCEEDED: 'quota-exceeded',
-  MANUAL_REVIEW: 'manual-review',
+// governance-cedar v2.11 §X5 (KG-27) — REASON 분류.
+// DENIED terminal: operator/protect/admin-limit/evaluator-error/unspecified
+// PENDING admin queue: quota-exceeded (admin 이 quota 상향 검토 가능) / manual-review (autoApprove=false)
+const REASON = Object.freeze({
+  DENIED_OPERATOR:    'operator-denied',
+  DENIED_PROTECT:     'protect-violated',
+  DENIED_ADMIN_LIMIT: 'admin-hardlimit',
+  DENIED_EVALUATOR:   'evaluator-error',
   DENIED_UNSPECIFIED: 'unspecified',
+  PENDING_QUOTA:      'quota-exceeded',
+  PENDING_MANUAL:     'manual-review',
 })
 
-// governance-cedar v2.3 §X — Cedar 결과를 governance 4-state 로 매핑.
-// boot.js 가 50-* 정책을 차단하므로, 이 phase 의 deny = quota-exceeded 보장.
+// 하위 호환 alias — 기존 코드 (e.g. queue 메타데이터) 가 PENDING_REASON.QUOTA_EXCEEDED 참조 가능.
+// 의미론은 PENDING 사유만 노출 (DENIED 사유는 별도 export 필요 시 REASON 직접).
+const PENDING_REASON = Object.freeze({
+  QUOTA_EXCEEDED: REASON.PENDING_QUOTA,
+  MANUAL_REVIEW:  REASON.PENDING_MANUAL,
+})
+
+// matchedPolicies 의 prefix 다중 매치를 priority 로 분류 (codex H2).
+// 우선순위: operator > protect > admin-limit > quota → unspecified.
+// matchedPolicies 빈 deny → DENIED(unspecified) fail-closed (codex H3).
+const classifyDeny = (matchedPolicies) => {
+  const ids = Array.isArray(matchedPolicies) ? matchedPolicies : []
+  const has = (prefix) => ids.some(id => typeof id === 'string' && id.startsWith(prefix))
+  if (has('50-')) return { status: STATUS.DENIED, reason: REASON.DENIED_OPERATOR, matched: ids }
+  if (has('30-') || has('31-')) return { status: STATUS.DENIED, reason: REASON.DENIED_PROTECT, matched: ids }
+  if (has('11-')) return { status: STATUS.DENIED, reason: REASON.DENIED_ADMIN_LIMIT, matched: ids }
+  if (has('10-')) return { status: STATUS.PENDING, reason: REASON.PENDING_QUOTA, matched: ids }
+  return { status: STATUS.DENIED, reason: REASON.DENIED_UNSPECIFIED, matched: ids }
+}
+
+// governance-cedar v2.11 §X5 (KG-27) — Cedar 결과를 governance 상태로 매핑.
 // errors.length > 0 인 deny 는 evaluator parse/runtime 실패 → DENIED(evaluator-error).
+// 그 외 deny 는 matchedPolicies prefix 로 분류 (classifyDeny).
 const interpretCedarDecision = (cedarResult, { autoApprove }) => {
-  const { decision, errors } = cedarResult
-  if (decision === 'deny' && errors && errors.length > 0) {
-    return { status: STATUS.DENIED, reason: 'evaluator-error', detail: errors.join('; ') }
+  const { decision, matchedPolicies = [], errors = [] } = cedarResult
+  if (decision === 'deny' && errors.length > 0) {
+    return { status: STATUS.DENIED, reason: REASON.DENIED_EVALUATOR, detail: errors.join('; ') }
   }
-  if (decision === 'deny') {
-    return { status: STATUS.PENDING, reason: PENDING_REASON.QUOTA_EXCEEDED }
-  }
-  if (!autoApprove) {
-    return { status: STATUS.PENDING, reason: PENDING_REASON.MANUAL_REVIEW }
-  }
+  if (decision === 'deny') return classifyDeny(matchedPolicies)
+  if (!autoApprove) return { status: STATUS.PENDING, reason: REASON.PENDING_MANUAL }
   return { status: STATUS.APPROVED }
 }
 
@@ -258,7 +278,7 @@ const denyUserAgentR = Reader.asks(({ reqId, reason, presenceDir }) => () => {
   const req = readPendingRequest(presenceDir, reqId)
   if (!req) return { status: STATUS.NOT_FOUND }
   moveRequest(presenceDir, reqId, SUB_DIRS.PENDING, SUB_DIRS.REJECTED, {
-    reason: reason || PENDING_REASON.DENIED_UNSPECIFIED,
+    reason: reason || REASON.DENIED_UNSPECIFIED,
   })
   return { status: STATUS.REJECTED }
 })
@@ -278,7 +298,9 @@ const listRejected = (presenceDir) => listRequestsIn(presenceDir, SUB_DIRS.REJEC
 
 export {
   STATUS,
+  REASON,
   PENDING_REASON,
+  classifyDeny,
   interpretCedarDecision,
   loadAgentPolicies, loadAgentPoliciesR,
   getActiveAgentCount, getActiveAgentCountR,

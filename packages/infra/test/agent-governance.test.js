@@ -543,7 +543,8 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // GV-X12 — admin 이 hardLimit 초과 → PENDING(quota-exceeded). env 로 hardLimit 낮춰 검증.
+  // GV-X12 — admin 이 hardLimit 초과 → DENIED(admin-hardlimit). env 로 hardLimit 낮춰 검증.
+  // KG-27 P4 — 11-admin-limit 매치는 terminal DENIED (admin 자체 한계, queue 진입 안 함).
   {
     const dir = createTmpDir()
     await initAdminBootstrap(dir)
@@ -555,9 +556,10 @@ async function run() {
         requester: 'admin', agentName: 'extra', persona: samplePersona,
         basePath: dir, presenceDir: dir, evaluator: mockEvaluator,
       })
-      assert(r.status === STATUS.PENDING, `GV-X12: admin 3/3 hardLimit → PENDING (got ${r.status})`)
+      assert(r.status === STATUS.DENIED, `GV-X12: admin 3/3 hardLimit → DENIED (got ${r.status})`)
+      assert(r.reason === 'admin-hardlimit', `GV-X12: reason=admin-hardlimit (got ${r.reason})`)
       const pending = listPending(dir)
-      assert(pending[0].reason === PENDING_REASON.QUOTA_EXCEEDED, `GV-X12: reason=quota-exceeded (got ${pending[0].reason})`)
+      assert(pending.length === 0, 'GV-X12: pending 미생성 (terminal DENIED)')
     } finally {
       if (previousHard === undefined) delete process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT
       else process.env.PRESENCE_ADMIN_AGENT_HARD_LIMIT = previousHard
@@ -601,6 +603,92 @@ async function run() {
 
     submitUserAgent({ requester: 'admin', agentName: 'b', persona: samplePersona, basePath: dir, presenceDir: dir, evaluator })
     assert(captured.context.isAdmin === true, `GV-X14b: admin → isAdmin=true (got ${captured.context.isAdmin})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // ===========================================================================
+  // GV-X16~X19 — KG-27 P4 unblock (DENIED 매핑 + priority + fail-closed)
+  // ===========================================================================
+
+  // GV-X16 — matchedPolicies=['50-foo'] → DENIED(operator-denied) terminal (admin queue 진입 안 함).
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    const operatorEval = createMockEvaluator(() => ({
+      decision: 'deny', matchedPolicies: ['50-foo'], errors: [],
+    }))
+    const r = submitUserAgent({
+      requester: 'cx16', agentName: 'a', persona: samplePersona,
+      basePath: dir, presenceDir: dir, evaluator: operatorEval,
+    })
+    assert(r.status === STATUS.DENIED, `GV-X16: 50-foo → DENIED (got ${r.status})`)
+    assert(r.reason === 'operator-denied', `GV-X16: reason=operator-denied (got ${r.reason})`)
+    assert(listPending(dir).length === 0, 'GV-X16: pending 미생성')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X17 — matchedPolicies=['30-protect-admin'] → DENIED(protect-violated) terminal.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    const protectEval = createMockEvaluator(() => ({
+      decision: 'deny', matchedPolicies: ['30-protect-admin'], errors: [],
+    }))
+    const r = submitUserAgent({
+      requester: 'cx17', agentName: 'a', persona: samplePersona,
+      basePath: dir, presenceDir: dir, evaluator: protectEval,
+    })
+    assert(r.status === STATUS.DENIED, `GV-X17: 30-protect-admin → DENIED (got ${r.status})`)
+    assert(r.reason === 'protect-violated', `GV-X17: reason=protect-violated (got ${r.reason})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X18 — matchedPolicies=[] (빈 배열) deny → DENIED(unspecified) fail-closed.
+  // codex H3 — 빈 매치를 PENDING 으로 폴백하지 않음. terminal DENIED 로 진단 가능.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    const emptyMatchEval = createMockEvaluator(() => ({
+      decision: 'deny', matchedPolicies: [], errors: [],
+    }))
+    const r = submitUserAgent({
+      requester: 'cx18', agentName: 'a', persona: samplePersona,
+      basePath: dir, presenceDir: dir, evaluator: emptyMatchEval,
+    })
+    assert(r.status === STATUS.DENIED, `GV-X18: 빈 매치 deny → DENIED fail-closed (got ${r.status})`)
+    assert(r.reason === 'unspecified', `GV-X18: reason=unspecified (got ${r.reason})`)
+    assert(listPending(dir).length === 0, 'GV-X18: pending 미생성')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // GV-X19 — 다중 매치 ['10-quota', '50-foo'] 동시 deny → operator-denied 우선 (priority).
+  // codex H2 — first-match ordering 가정 없음. 분류기가 모든 매치를 본 뒤 priority 결정.
+  {
+    const dir = createTmpDir()
+    await initAdminBootstrap(dir)
+    overridePolicies(dir, { maxAgentsPerUser: 5, autoApproveUnderQuota: true })
+    const multiMatchEval = createMockEvaluator(() => ({
+      decision: 'deny', matchedPolicies: ['10-quota', '50-foo'], errors: [],
+    }))
+    const r = submitUserAgent({
+      requester: 'cx19', agentName: 'a', persona: samplePersona,
+      basePath: dir, presenceDir: dir, evaluator: multiMatchEval,
+    })
+    assert(r.status === STATUS.DENIED, `GV-X19: 다중 매치 → DENIED (operator 우선) (got ${r.status})`)
+    assert(r.reason === 'operator-denied', `GV-X19: 50-foo 가 10-quota 보다 우선 (got ${r.reason})`)
+
+    // 순서 반대로 — 결과 같아야 함 (배열 ordering 무관)
+    const reverseEval = createMockEvaluator(() => ({
+      decision: 'deny', matchedPolicies: ['50-foo', '10-quota'], errors: [],
+    }))
+    const r2 = submitUserAgent({
+      requester: 'cx19b', agentName: 'a', persona: samplePersona,
+      basePath: dir, presenceDir: dir, evaluator: reverseEval,
+    })
+    assert(r2.reason === 'operator-denied', `GV-X19: 배열 ordering 반대 → 동일 결과 (got ${r2.reason})`)
     rmSync(dir, { recursive: true, force: true })
   }
 

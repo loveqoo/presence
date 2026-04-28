@@ -1,6 +1,8 @@
 // Cedar 인프라 public entry — server 가 호출하는 단일 helper.
 // 정적 자산 경로 노출 없이 boot + evaluator + audit 을 일괄 조립.
 
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
+import { join } from 'path'
 import fp from '@presence/core/lib/fun-fp.js'
 import { bootCedar } from './boot.js'
 import { createEvaluator } from './evaluator.js'
@@ -17,7 +19,7 @@ const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () =>
   if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
     throw new Error('bootCedarSubsystem: presenceDir 부재')
   }
-  const { cedar, schemaText, policiesText } = await bootCedar({
+  const { cedar, schemaText, policiesMap } = await bootCedar({
     policiesDir: POLICIES_DIR,
     schemaPath:  SCHEMA_PATH,
   })
@@ -25,7 +27,7 @@ const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () =>
     logPath: auditLogPath(presenceDir),
     logger,
   })
-  return createEvaluator({ cedar, schemaText, policiesText, auditWriter })
+  return createEvaluator({ cedar, schemaText, policiesMap, auditWriter })
 })
 
 const bootCedarSubsystem = (deps) => bootCedarSubsystemR.run(deps)()
@@ -54,9 +56,81 @@ const getSubsystemAuditStatusR = Reader.asks(({ presenceDir }) => {
 
 const getSubsystemAuditStatus = (deps) => getSubsystemAuditStatusR.run(deps)
 
+// KG-27 P4 — admin CLI 가 호출. 정책 파일 lint (parse + schema 적합성).
+// 다중 statement 파일도 처리 — policySetTextToParts 로 split 후 각 statement 를
+// { p0: stmt, p1: stmt, ... } 맵으로 검증.
+// schemaText 가 없으면 schema validate skip — parse 만 검증.
+const lintPolicyText = async ({ text, schemaText }) => {
+  if (typeof text !== 'string') throw new Error('lintPolicyText: text 부재')
+  const cedar = await import('@cedar-policy/cedar-wasm/nodejs')
+
+  const split = cedar.policySetTextToParts(text)
+  if (split.type !== 'success') {
+    return { ok: false, parseErrors: split.errors ?? [], schemaErrors: [] }
+  }
+  const stmts = split.policies
+  if (stmts.length === 0) {
+    return { ok: false, parseErrors: [{ message: 'no policy statement found' }], schemaErrors: [] }
+  }
+  const policies = {}
+  stmts.forEach((stmt, i) => { policies[`p${i}`] = stmt })
+
+  const parseResult = cedar.checkParsePolicySet({ staticPolicies: policies })
+  if (parseResult.type !== 'success') {
+    return { ok: false, parseErrors: parseResult.errors ?? [], schemaErrors: [] }
+  }
+  if (typeof schemaText !== 'string') {
+    return { ok: true, parseErrors: [], schemaErrors: [] }
+  }
+  const validation = cedar.validate({ schema: schemaText, policies: { staticPolicies: policies } })
+  if (validation.type === 'failure') {
+    return { ok: false, parseErrors: [], schemaErrors: validation.errors ?? [] }
+  }
+  if (validation.type === 'success' && validation.validationErrors.length > 0) {
+    return { ok: false, parseErrors: [], schemaErrors: validation.validationErrors }
+  }
+  return { ok: true, parseErrors: [], schemaErrors: [] }
+}
+
+// KG-27 P4 — admin CLI policy list. POLICIES_DIR 스캔 + prefix 카테고리 매핑.
+const POLICY_CATEGORIES = Object.freeze([
+  { prefix: '00-', category: 'base' },
+  { prefix: '10-', category: 'quota' },
+  { prefix: '11-', category: 'admin-limit' },
+  { prefix: '20-', category: 'archived' },
+  { prefix: '30-', category: 'protect' },
+  { prefix: '31-', category: 'protect' },
+  { prefix: '50-', category: 'operator' },
+])
+
+const categorizePolicy = (filename) => {
+  for (const { prefix, category } of POLICY_CATEGORIES) {
+    if (filename.startsWith(prefix)) return category
+  }
+  return 'unknown'
+}
+
+const listPolicyFiles = (policiesDir = POLICIES_DIR) => {
+  if (!existsSync(policiesDir)) return []
+  return readdirSync(policiesDir)
+    .filter(f => f.endsWith('.cedar'))
+    .sort()
+    .map(filename => ({
+      filename,
+      category: categorizePolicy(filename),
+      size: statSync(join(policiesDir, filename)).size,
+    }))
+}
+
+const readSchemaText = (schemaPath = SCHEMA_PATH) => {
+  if (!existsSync(schemaPath)) return null
+  return readFileSync(schemaPath, 'utf-8')
+}
+
 export {
   bootCedarSubsystem, bootCedarSubsystemR,
   createSubsystemAuditWriter, createSubsystemAuditWriterR,
   getSubsystemAuditStatus, getSubsystemAuditStatusR,
+  lintPolicyText, listPolicyFiles, readSchemaText,
   AUDIT_LOG_FILENAME,
 }

@@ -86,6 +86,7 @@ const tests = [
   'packages/infra/test/cedar-evaluator.test.js',
   'packages/infra/test/cedar-boot.test.js',
   'packages/infra/test/cedar-audit.test.js',
+  'packages/infra/test/cedar-policy-cli.test.js',
   'packages/infra/test/cedar-user-context.test.js',
   'packages/infra/test/agent-cli.test.js',
   'packages/infra/test/self-card.test.js',

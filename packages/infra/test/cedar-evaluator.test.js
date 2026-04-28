@@ -1,9 +1,19 @@
-// Cedar evaluator 단위 테스트 (CE1~CE4) — Y' 인프라 phase
-// 실 cedar-wasm 인스턴스 + 인라인 정책/스키마 사용. boot.js 미사용 (commit 2 책임).
+// Cedar evaluator 단위 테스트 — Y' 인프라 phase + KG-27 P4 unblock.
+// 실 cedar-wasm 인스턴스 + 인라인 정책/스키마 사용. boot.js 미사용.
+// KG-27 — policiesMap (object) 입력 + matchedPolicies 가 ID 그대로 surface.
 
 import * as cedar from '@cedar-policy/cedar-wasm/nodejs'
 import { createEvaluator, createEvaluatorR } from '@presence/infra/infra/authz/cedar/evaluator.js'
 import { assert, summary } from '../../../test/lib/assert.js'
+
+// 다중 statement 문자열을 { p0: stmt, p1: stmt, ... } 맵으로 변환 (cedar split 도우미).
+const toMap = (text) => {
+  const parts = cedar.policySetTextToParts(text)
+  if (parts.type !== 'success') throw new Error(`split failed: ${JSON.stringify(parts.errors)}`)
+  const map = {}
+  parts.policies.forEach((stmt, i) => { map[`p${i}`] = stmt })
+  return map
+}
 
 const SCHEMA = `entity LocalUser = { id: String, role: String };
 entity User = { id: String };
@@ -23,10 +33,11 @@ action "create_agent" appliesTo {
   context: { currentCount: Long, maxAgents: Long, isAdmin: Bool, hardLimit: Long }
 };`
 
-const QUOTA_POLICIES =
+const QUOTA_POLICIES = toMap(
   'permit (principal is LocalUser, action == Action::"create_agent", resource is User);\n' +
   'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { !context.isAdmin && context.currentCount >= context.maxAgents };\n' +
   'forbid (principal is LocalUser, action == Action::"create_agent", resource is User) when { context.isAdmin && context.currentCount >= context.hardLimit };'
+)
 
 // governance-cedar v2.5 §X — access_agent + 20-archived.
 const SCHEMA_WITH_ARCHIVED = `entity LocalUser = { id: String, role: String };
@@ -37,9 +48,10 @@ action "access_agent" appliesTo {
   context: { intent: String, archived: Bool }
 };`
 
-const ARCHIVED_POLICIES =
+const ARCHIVED_POLICIES = toMap(
   'permit (principal is LocalUser, action == Action::"access_agent", resource is Agent);\n' +
   'forbid (principal is LocalUser, action == Action::"access_agent", resource is Agent) when { context.archived && context.intent != "continue-session" };'
+)
 
 // governance-cedar v2.7 §X — archive_agent + 30-protect-admin.
 const SCHEMA_WITH_ARCHIVE_GUARD = `entity LocalUser = { id: String, role: String };
@@ -50,15 +62,17 @@ action "archive_agent" appliesTo {
   context: { isAdmin: Bool, reservedOwner: Bool }
 };`
 
-const ARCHIVE_GUARD_POLICIES =
+const ARCHIVE_GUARD_POLICIES = toMap(
   'permit (principal is LocalUser, action == Action::"archive_agent", resource is Agent);\n' +
   'forbid (principal is LocalUser, action == Action::"archive_agent", resource is Agent) when { context.reservedOwner };'
+)
 
-const PERMIT_ALL = 'permit (principal is LocalUser, action == Action::"create_agent", resource is User);'
+const PERMIT_ALL = toMap('permit (principal is LocalUser, action == Action::"create_agent", resource is User);')
 
-const PERMIT_PLUS_FORBID_BLOCKED =
+const PERMIT_PLUS_FORBID_BLOCKED = toMap(
   'permit (principal is LocalUser, action == Action::"create_agent", resource is User);\n' +
   'forbid (principal == LocalUser::"blocked", action == Action::"create_agent", resource is User);'
+)
 
 const createCaptureAuditor = () => {
   const entries = []
@@ -74,7 +88,7 @@ const run = () => {
   // CE1 — minimal seed + admin → allow + audit 기록
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA, policiesMap: PERMIT_ALL, auditWriter })
     const result = evaluate({
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
@@ -93,7 +107,7 @@ const run = () => {
   // CE2 — minimal seed + user → allow (RBAC 게이트만, role 무관) — CI-Y2
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA, policiesMap: PERMIT_ALL, auditWriter })
     const result = evaluate({
       principal: { type: 'LocalUser', id: 'alice' },
       action:    'create_agent',
@@ -107,7 +121,7 @@ const run = () => {
   // CE3 — deny 정책 인라인 + 해당 케이스 → deny + matchedPolicies 정확
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA, policiesText: PERMIT_PLUS_FORBID_BLOCKED, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA, policiesMap: PERMIT_PLUS_FORBID_BLOCKED, auditWriter })
 
     const blocked = evaluate({
       principal: { type: 'LocalUser', id: 'blocked' },
@@ -135,7 +149,7 @@ const run = () => {
     const throwingCedar = {
       isAuthorized: () => { throw new Error('boom-runtime') },
     }
-    const evaluate = createEvaluator({ cedar: throwingCedar, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter })
+    const evaluate = createEvaluator({ cedar: throwingCedar, schemaText: SCHEMA, policiesMap: PERMIT_ALL, auditWriter })
     const result = evaluate({
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
@@ -155,7 +169,7 @@ const run = () => {
     const failureCedar = {
       isAuthorized: () => ({ type: 'failure', errors: [{ message: 'invalid-call' }], warnings: [] }),
     }
-    const evaluate = createEvaluator({ cedar: failureCedar, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter })
+    const evaluate = createEvaluator({ cedar: failureCedar, schemaText: SCHEMA, policiesMap: PERMIT_ALL, auditWriter })
     const result = evaluate({
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
@@ -169,12 +183,12 @@ const run = () => {
   // CE5 — deps 누락 → throw (createEvaluator 자체 검증)
   {
     let threw = false
-    try { createEvaluator({ cedar: null, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter: createCaptureAuditor() }) }
+    try { createEvaluator({ cedar: null, schemaText: SCHEMA, policiesMap: PERMIT_ALL, auditWriter: createCaptureAuditor() }) }
     catch (_) { threw = true }
     assert(threw, 'CE5: cedar 부재 시 throw')
 
     threw = false
-    try { createEvaluator({ cedar, schemaText: SCHEMA, policiesText: PERMIT_ALL, auditWriter: null }) }
+    try { createEvaluator({ cedar, schemaText: SCHEMA, policiesMap: PERMIT_ALL, auditWriter: null }) }
     catch (_) { threw = true }
     assert(threw, 'CE5: auditWriter 부재 시 throw')
   }
@@ -188,7 +202,7 @@ const run = () => {
   // CE7 — 새 schema (context: currentCount/maxAgents/isAdmin/hardLimit) parse + 기본 호출 정상
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesMap: QUOTA_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'alice' },
       action:    'create_agent',
@@ -203,7 +217,7 @@ const run = () => {
   //       matchedPolicies 정확성은 boot.js 가 50-* 를 차단하므로 deny=quota 보장에 의존하지 않음.
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesMap: QUOTA_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'bob' },
       action:    'create_agent',
@@ -218,7 +232,7 @@ const run = () => {
   // CE9 — currentCount < maxAgents → forbid 미적용, permit 매치 → allow
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesMap: QUOTA_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'carol' },
       action:    'create_agent',
@@ -231,7 +245,7 @@ const run = () => {
   // CE10 — admin 은 maxAgents 면제, hardLimit 미만이면 allow
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesMap: QUOTA_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
@@ -244,7 +258,7 @@ const run = () => {
   // CE11 — admin 도 hardLimit 초과 시 deny (11-admin-limit.cedar)
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesText: QUOTA_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_QUOTA, policiesMap: QUOTA_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'create_agent',
@@ -262,7 +276,7 @@ const run = () => {
   // CE12 — archived agent 의 4 intent × allow/deny 정책 매트릭스
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVED, policiesText: ARCHIVED_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVED, policiesMap: ARCHIVED_POLICIES, auditWriter })
     const principal = { type: 'LocalUser', id: 'alice' }
     const resource = { type: 'Agent', id: 'alice/helper' }
 
@@ -294,7 +308,7 @@ const run = () => {
   // CE13.1 — reservedOwner=false (일반 user agent) → allow
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVE_GUARD, policiesText: ARCHIVE_GUARD_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVE_GUARD, policiesMap: ARCHIVE_GUARD_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'alice' },
       action:    'archive_agent',
@@ -307,7 +321,7 @@ const run = () => {
   // CE13.2 — reservedOwner=true (admin/manager) → deny (admin 본인이 시도해도 차단)
   {
     const auditWriter = createCaptureAuditor()
-    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVE_GUARD, policiesText: ARCHIVE_GUARD_POLICIES, auditWriter })
+    const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_ARCHIVE_GUARD, policiesMap: ARCHIVE_GUARD_POLICIES, auditWriter })
     const r = evaluate({
       principal: { type: 'LocalUser', id: 'admin' },
       action:    'archive_agent',
@@ -327,14 +341,15 @@ action "set_persona" appliesTo {
   resource: [Agent],
   context: { isAdmin: Bool, reservedOwner: Bool }
 };`
-    const PERSONA_POLICIES =
+    const PERSONA_POLICIES = toMap(
       'permit (principal is LocalUser, action == Action::"set_persona", resource is Agent);\n' +
       'forbid (principal is LocalUser, action == Action::"set_persona", resource is Agent) when { context.reservedOwner && !context.isAdmin };'
+    )
 
     // CE14.1 — !reservedOwner → allow (일반 user agent)
     {
       const auditWriter = createCaptureAuditor()
-      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesMap: PERSONA_POLICIES, auditWriter })
       const r = evaluate({
         principal: { type: 'LocalUser', id: 'alice' },
         action:    'set_persona',
@@ -348,7 +363,7 @@ action "set_persona" appliesTo {
     // CE14.2 — reservedOwner + isAdmin → allow (admin 본인은 admin/* persona 변경 가능)
     {
       const auditWriter = createCaptureAuditor()
-      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesMap: PERSONA_POLICIES, auditWriter })
       const r = evaluate({
         principal: { type: 'LocalUser', id: 'admin' },
         action:    'set_persona',
@@ -361,7 +376,7 @@ action "set_persona" appliesTo {
     // CE14.3 — reservedOwner + !isAdmin → deny (non-admin 의 admin/* persona 차단)
     {
       const auditWriter = createCaptureAuditor()
-      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesText: PERSONA_POLICIES, auditWriter })
+      const evaluate = createEvaluator({ cedar, schemaText: SCHEMA_WITH_PERSONA, policiesMap: PERSONA_POLICIES, auditWriter })
       const r = evaluate({
         principal: { type: 'LocalUser', id: 'alice' },
         action:    'set_persona',
@@ -377,8 +392,8 @@ action "set_persona" appliesTo {
   {
     const auditA = createCaptureAuditor()
     const auditB = createCaptureAuditor()
-    const evA = createEvaluator({ cedar, schemaText: SCHEMA, policiesText: PERMIT_PLUS_FORBID_BLOCKED, auditWriter: auditA })
-    const evB = createEvaluatorR.run({ cedar, schemaText: SCHEMA, policiesText: PERMIT_PLUS_FORBID_BLOCKED, auditWriter: auditB })
+    const evA = createEvaluator({ cedar, schemaText: SCHEMA, policiesMap: PERMIT_PLUS_FORBID_BLOCKED, auditWriter: auditA })
+    const evB = createEvaluatorR.run({ cedar, schemaText: SCHEMA, policiesMap: PERMIT_PLUS_FORBID_BLOCKED, auditWriter: auditB })
 
     const input = {
       principal: { type: 'LocalUser', id: 'blocked' },

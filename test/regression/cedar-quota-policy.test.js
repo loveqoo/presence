@@ -1,18 +1,22 @@
 /**
- * INV-CEDAR-QUOTA-POLICY + 관련 회귀 (governance-cedar v2.3 §X / v2.4 §X / v2.5 §X).
+ * INV-CEDAR-QUOTA-POLICY + 관련 회귀 (governance-cedar v2.3~v2.11 §X / §X1~§X5).
  *
- * 정적 grep 으로 P1 + KG-26 + P2 의 핵심 invariant 가 침식되지 않았는지 검증한다.
- * 의미론 회귀는 `packages/infra/test/agent-governance.test.js` GV-X1~X14 +
- * `packages/infra/test/agent-access.test.js` AA-X1~X6 가 행동 검증 — 이 파일은
+ * 정적 grep 으로 P1 ~ P4 의 핵심 invariant 가 침식되지 않았는지 검증한다.
+ * 의미론 회귀는 packages/infra/test/agent-governance.test.js (GV-X1~X19) +
+ * packages/infra/test/agent-access.test.js (AA-X1~X6) 가 행동 검증 — 이 파일은
  * "코드/정책 파일에 약속된 형태가 그대로 있는가" 의 정적 방어.
  *
- * 1) INV-CEDAR-QUOTA-POLICY: 10-quota.cedar 가 존재 + forbid... when !isAdmin && currentCount >= maxAgents
- * 2) INV-CEDAR-ADMIN-EXEMPT: 11-admin-limit.cedar 가 존재 + isAdmin && currentCount >= hardLimit
- * 3) INV-CEDAR-ARCHIVED-POLICY: 20-archived.cedar 가 존재 + archived && intent != "continue-session"
- * 4) INV-SUBMIT-USER-AGENT-CONTEXT: agent-governance.js 의 CheckAccess 가 context { currentCount, maxAgents, isAdmin, hardLimit } 첨부
- * 5) INV-CREATE-AGENT-CALLERS: action: 'create_agent' 호출 모두 4 context 필드 첨부
- * 6) INV-ACCESS-AGENT-CALLERS: agent-access.js 의 CheckAccess 가 action='access_agent' + context { intent, archived } 첨부
- * 7) INV-CEDAR-CUSTOM-BLOCK: boot.js readPoliciesDir 가 5[0-9]- 패턴 throw
+ *  1) INV-CEDAR-QUOTA-POLICY: 10-quota.cedar 의 forbid 패턴
+ *  2) INV-CEDAR-ADMIN-EXEMPT: 11-admin-limit.cedar 의 hardLimit forbid
+ *  3) INV-CEDAR-ARCHIVED-POLICY: 20-archived.cedar 의 archived forbid
+ *  4) INV-SUBMIT-USER-AGENT-CONTEXT / INV-CREATE-AGENT-CALLERS / INV-ACCESS-AGENT-CALLERS
+ *  5) INV-EVALUATOR-INVARIANT: agent-access.js MISSING_EVALUATOR fail-closed
+ *  6) INV-CEDAR-ARCHIVE-PROTECT / INV-SET-PERSONA-CALLERS / INV-CEDAR-PERSONA-PROTECT
+ *  7) KG-27 P4 신규 invariant:
+ *     - INV-CEDAR-POLICY-MAP: boot.js 가 { basename: rawText } 맵 반환 + evaluator 가 staticPolicies 에 맵 그대로
+ *     - INV-INTERPRET-MATCHED-POLICIES: agent-governance.js classifyDeny + matchedPolicies 참조
+ *     - INV-DENIED-VS-PENDING: classifyDeny 가 50-/30-/31-/11- 를 STATUS.DENIED, 10- 만 STATUS.PENDING 매핑
+ *     - INV-CEDAR-CUSTOM-BLOCK 은 KG-27 에서 제거 (boot 가 50-* 차단하지 않음)
  */
 
 import { readFileSync, existsSync } from 'node:fs'
@@ -124,16 +128,30 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   assert(count >= 1, `INV-ACCESS-AGENT-CALLERS: 최소 1 개 access_agent 호출 발견 (got ${count})`)
 }
 
-// 5. INV-CEDAR-CUSTOM-BLOCK — boot.js readPoliciesDir 가 5[0-9]- 패턴 throw
+// 5. INV-CEDAR-POLICY-MAP — KG-27 P4. boot.js 가 { basename: text } 맵 반환 + evaluator 가 맵 사용.
 {
-  const text = read('packages/infra/src/infra/authz/cedar/boot.js')
+  const bootText = read('packages/infra/src/infra/authz/cedar/boot.js')
+  // readPoliciesDir 가 객체 (map) 반환 패턴 — `map[id]` 또는 `return map`
   assert(
-    /\/\^5\[0-9\]-\//.test(text),
-    'INV-CEDAR-CUSTOM-BLOCK: 5[0-9]- 정규식 패턴 존재',
+    /map\[id\]\s*=\s*readFileSync/.test(bootText),
+    'INV-CEDAR-POLICY-MAP: readPoliciesDir 가 map[id] 로 객체 반환',
   )
+  // 50-* throw 가드 부재 (KG-27 unblock)
   assert(
-    /custom policies.*P4/i.test(text),
-    'INV-CEDAR-CUSTOM-BLOCK: 차단 메시지에 P4 ETA 명시',
+    !/\/\^5\[0-9\]-\//.test(bootText),
+    'INV-CEDAR-POLICY-MAP: 50-* throw 가드 제거됨 (KG-27 unblock)',
+  )
+  // bootCedarR 의 splitPoliciesByStatement 가 cedar.policySetTextToParts 호출
+  assert(
+    /policySetTextToParts/.test(bootText),
+    'INV-CEDAR-POLICY-MAP: cedar.policySetTextToParts 로 다중 statement 분리',
+  )
+
+  const evalText = read('packages/infra/src/infra/authz/cedar/evaluator.js')
+  // policiesMap 변수명 + staticPolicies 에 그대로 전달
+  assert(
+    /staticPolicies:\s*policiesMap/.test(evalText),
+    'INV-CEDAR-POLICY-MAP: evaluator 가 staticPolicies 에 policiesMap 객체 전달',
   )
 }
 
@@ -221,6 +239,55 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   assert(
     /typeof evaluator !==\s*['"]function['"]\s*\|\|\s*!jwtSub\s*\|\|\s*!agentId/.test(slash),
     'INV-CEDAR-PERSONA-PROTECT: slash-commands fail-closed 패턴 (evaluator/jwtSub/agentId 누락 시 deny)',
+  )
+}
+
+// 10. INV-INTERPRET-MATCHED-POLICIES — agent-governance.js 의 interpretCedarDecision 이
+//     matchedPolicies 를 참조 + classifyDeny 함수 존재 (KG-27 P4)
+{
+  const text = read('packages/infra/src/infra/authz/agent-governance.js')
+  assert(
+    /classifyDeny\s*=\s*\(matchedPolicies\)/.test(text),
+    'INV-INTERPRET-MATCHED-POLICIES: classifyDeny(matchedPolicies) 함수 정의',
+  )
+  assert(
+    /matchedPolicies\s*=\s*\[\]/.test(text),
+    'INV-INTERPRET-MATCHED-POLICIES: interpretCedarDecision destructure 에 matchedPolicies = [] default',
+  )
+  assert(
+    /classifyDeny\(matchedPolicies\)/.test(text),
+    'INV-INTERPRET-MATCHED-POLICIES: interpretCedarDecision 이 classifyDeny 호출',
+  )
+}
+
+// 11. INV-DENIED-VS-PENDING — classifyDeny 가 50-/30-/31-/11- 를 STATUS.DENIED 로,
+//     10- 만 STATUS.PENDING 으로 분류 (KG-27 P4 codex H3)
+{
+  const text = read('packages/infra/src/infra/authz/agent-governance.js')
+  // 50- → DENIED_OPERATOR
+  assert(
+    /has\(['"]50-['"]\)\s*\)\s*return\s*\{\s*status:\s*STATUS\.DENIED,\s*reason:\s*REASON\.DENIED_OPERATOR/.test(text),
+    'INV-DENIED-VS-PENDING: 50- → STATUS.DENIED + DENIED_OPERATOR',
+  )
+  // 30-/31- → DENIED_PROTECT
+  assert(
+    /has\(['"]30-['"]\)\s*\|\|\s*has\(['"]31-['"]\)\s*\)\s*return\s*\{\s*status:\s*STATUS\.DENIED,\s*reason:\s*REASON\.DENIED_PROTECT/.test(text),
+    'INV-DENIED-VS-PENDING: 30-/31- → STATUS.DENIED + DENIED_PROTECT',
+  )
+  // 11- → DENIED_ADMIN_LIMIT
+  assert(
+    /has\(['"]11-['"]\)\s*\)\s*return\s*\{\s*status:\s*STATUS\.DENIED,\s*reason:\s*REASON\.DENIED_ADMIN_LIMIT/.test(text),
+    'INV-DENIED-VS-PENDING: 11- → STATUS.DENIED + DENIED_ADMIN_LIMIT',
+  )
+  // 10- → PENDING_QUOTA (admin queue 진입 가능 사유 유일)
+  assert(
+    /has\(['"]10-['"]\)\s*\)\s*return\s*\{\s*status:\s*STATUS\.PENDING,\s*reason:\s*REASON\.PENDING_QUOTA/.test(text),
+    'INV-DENIED-VS-PENDING: 10- → STATUS.PENDING + PENDING_QUOTA (유일한 PENDING)',
+  )
+  // 매치 없음 fallback → DENIED(unspecified) fail-closed
+  assert(
+    /return\s*\{\s*status:\s*STATUS\.DENIED,\s*reason:\s*REASON\.DENIED_UNSPECIFIED/.test(text),
+    'INV-DENIED-VS-PENDING: 매치 없음 → DENIED(unspecified) fail-closed',
   )
 }
 
