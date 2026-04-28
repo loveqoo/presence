@@ -20,7 +20,10 @@ const NETWORK_TESTS = new Set([
   'packages/infra/test/session.test.js',
   'packages/infra/test/supervisor-session.test.js',
   'packages/infra/test/cedar-user-context.test.js',
-  'test/e2e/tui-e2e.test.js',
+  'test/e2e/tui-e2e-basic.test.js',
+  'test/e2e/tui-e2e-slash.test.js',
+  'test/e2e/tui-e2e-input.test.js',
+  'test/e2e/tui-e2e-regression.test.js',
   'packages/server/test/server.test.js',
   'packages/server/test/auth-e2e.test.js',
   'packages/server/test/scheduler-e2e.test.js',
@@ -139,7 +142,10 @@ const tests = [
   // Turn concurrency
   'packages/core/test/core/turn-concurrency.test.js',
   // E2E bootstrap
-  'test/e2e/tui-e2e.test.js',
+  'test/e2e/tui-e2e-basic.test.js',
+  'test/e2e/tui-e2e-slash.test.js',
+  'test/e2e/tui-e2e-input.test.js',
+  'test/e2e/tui-e2e-regression.test.js',
   // Interpreter
   'packages/core/test/interpreter/delegate.test.js',
   // Infra
