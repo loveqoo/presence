@@ -84,8 +84,12 @@ const rotateIfNeeded = (logPath, maxBytes, maxBackups, logger) => {
   }
 }
 
+// KG-28 P5 — getPolicyVersion 함수 주입 시 append 시점에 entry.policyVersion 자동 첨부.
+// reload 마다 wrapper.replace 가 state.version 갱신 → 다음 append 부터 새 version 자동 첨부.
+// 단일 진실 소스: server 프로세스 전체 audit 가 같은 writer 인스턴스 공유.
+// CLI 단발 프로세스 (cli-agent.js manual_approve) 는 wrapper 미생성 → getPolicyVersion 부재 → 기존 동작.
 const createAuditWriterR = Reader.asks((env) => {
-  const { logPath, maxBytes, maxBackups, logger } = env
+  const { logPath, maxBytes, maxBackups, logger, getPolicyVersion } = env
   if (typeof logPath !== 'string' || logPath.length === 0) {
     throw new Error('createAuditWriter: logPath 부재')
   }
@@ -95,7 +99,10 @@ const createAuditWriterR = Reader.asks((env) => {
   return {
     append: (entry) => {
       rotateIfNeeded(logPath, limitBytes, limitBackups, logger)
-      const line = JSON.stringify(entry) + '\n'
+      const enriched = typeof getPolicyVersion === 'function'
+        ? { ...entry, policyVersion: getPolicyVersion() }
+        : entry
+      const line = JSON.stringify(enriched) + '\n'
       appendFileSync(logPath, line, { mode: 0o600 })
       safeChmod(logPath, 0o600)
     },

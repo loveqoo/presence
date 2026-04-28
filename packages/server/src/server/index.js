@@ -41,6 +41,7 @@ class PresenceServer {
   #host
   #username
   #evaluator
+  #auditWriter
 
   static async create(configOverride, opts = {}) {
     const instance = new PresenceServer(opts)
@@ -129,8 +130,12 @@ class PresenceServer {
     }
 
     // Cedar 인프라 부팅 — 정책/스키마 parse 검증 (boot fail-closed) + audit writer.
-    // 의미론 호출처는 governance-cedar v2.1 phase 에서 박힘. 이 phase 는 evaluator 노출만.
-    this.#evaluator = await bootCedarSubsystem({ presenceDir, logger: console })
+    // KG-28 P5: bootCedarSubsystem 가 { evaluator, auditWriter } 반환. evaluator 는 callable
+    // wrapper 함수 (typeof === 'function' + snapshot/replace 메서드). reload 시 wrapper 의
+    // closure-bound state 만 갱신 — 호출 사이트 변경 0. auditWriter 는 admin router 에 주입.
+    const cedarBoot = await bootCedarSubsystem({ presenceDir, logger: console })
+    this.#evaluator = cedarBoot.evaluator
+    this.#auditWriter = cedarBoot.auditWriter
 
     this.#bridge = sessionBridgeR.run({ wss: this.#wss })
 
@@ -187,9 +192,11 @@ class PresenceServer {
     })
 
     // UserContextManager — auth 는 위에서 이미 부팅됨 (KG-17 순서 변경).
+    // KG-28 P5: auditWriter 도 전달 — reload 시 재사용 + admin REST 의 audit append 단일 진실 소스.
     this.#userContextManager = new UserContextManager({
       bridge: this.#bridge, serverConfig: config, memory: this.#memory,
-      evaluator: this.#evaluator, tokenService: auth.tokenService,
+      evaluator: this.#evaluator, auditWriter: this.#auditWriter,
+      tokenService: auth.tokenService,
     })
     const getUserContextManager = () => this.#userContextManager
 

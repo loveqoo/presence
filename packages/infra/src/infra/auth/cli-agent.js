@@ -36,7 +36,8 @@ async function cmdAgentAdd(params) {
   const presenceDir = Config.presenceDir()
   const persona = params.personaPath ? loadPersonaFromFile(params.personaPath) : defaultPersona()
   // governance-cedar v2.1: CLI 도 Cedar 부팅 필수 (PresenceServer 와 같은 invariant).
-  const evaluator = await bootCedarSubsystem({ presenceDir })
+  // KG-28 P5: bootCedarSubsystem 가 { evaluator, auditWriter } destructuring. CLI 단발 프로세스라 auditWriter 무시.
+  const { evaluator } = await bootCedarSubsystem({ presenceDir })
   const result = submitUserAgent({
     requester: params.requester, agentName: params.name, persona,
     basePath: presenceDir, presenceDir, evaluator,

@@ -7,6 +7,7 @@ import fp from '@presence/core/lib/fun-fp.js'
 import { bootCedar } from './boot.js'
 import { createEvaluator } from './evaluator.js'
 import { createAuditWriter, getAuditStatus } from './audit.js'
+import { createEvaluatorRef } from './evaluator-ref.js'
 import { POLICIES_DIR, SCHEMA_PATH } from './paths.js'
 
 const { Reader } = fp
@@ -15,6 +16,9 @@ const AUDIT_LOG_FILENAME = 'authz-audit.log'
 
 const auditLogPath = (presenceDir) => `${presenceDir}/logs/${AUDIT_LOG_FILENAME}`
 
+// KG-28 P5 — wrapper + auditWriter 둘 다 반환 (destructuring contract).
+// wrapper.snapshot 을 audit writer 의 getPolicyVersion closure 로 주입 → reload 후 audit entry 자동 첨부.
+// reload 는 wrapperHandle.ref.replace(newEvaluator, newVersion) 으로 evaluator 함수만 교체.
 const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () => {
   if (typeof presenceDir !== 'string' || presenceDir.length === 0) {
     throw new Error('bootCedarSubsystem: presenceDir 부재')
@@ -23,14 +27,33 @@ const bootCedarSubsystemR = Reader.asks(({ presenceDir, logger }) => async () =>
     policiesDir: POLICIES_DIR,
     schemaPath:  SCHEMA_PATH,
   })
+  // wrapper handle — getPolicyVersion closure 에서 lazy 참조.
+  const wrapperHandle = { ref: null }
   const auditWriter = createAuditWriter({
     logPath: auditLogPath(presenceDir),
     logger,
+    getPolicyVersion: () => wrapperHandle.ref?.snapshot().version ?? null,
   })
-  return createEvaluator({ cedar, schemaText, policiesMap, auditWriter })
+  const innerEvaluator = createEvaluator({ cedar, schemaText, policiesMap, auditWriter })
+  wrapperHandle.ref = createEvaluatorRef(innerEvaluator, { version: 1 })
+  return { evaluator: wrapperHandle.ref, auditWriter }
 })
 
 const bootCedarSubsystem = (deps) => bootCedarSubsystemR.run(deps)()
+
+// KG-28 P5 — reload 전용. evaluator 함수만 부팅 (wrapper 미생성, audit writer 재사용).
+// 부팅 실패 시 throw → 호출자 (UserContextManager.#doReload) 가 wrapper.replace 미호출 = fail-safe rollback.
+// auditWriter 재사용으로 wrapper.snapshot closure 가 단일 wrapper 만 가리키게 유지.
+const rebootCedarSubsystem = async ({ auditWriter }) => {
+  if (!auditWriter || typeof auditWriter.append !== 'function') {
+    throw new Error('rebootCedarSubsystem: auditWriter (with append) 필수')
+  }
+  const { cedar, schemaText, policiesMap } = await bootCedar({
+    policiesDir: POLICIES_DIR,
+    schemaPath:  SCHEMA_PATH,
+  })
+  return createEvaluator({ cedar, schemaText, policiesMap, auditWriter })
+}
 
 // audit 만 필요한 경로 (예: agent approve 의 manual_approve 기록 — Cedar 호출 없이 감사 추적만).
 // boot 비용 (wasm 로딩 + parse 검증) 회피.
@@ -129,6 +152,7 @@ const readSchemaText = (schemaPath = SCHEMA_PATH) => {
 
 export {
   bootCedarSubsystem, bootCedarSubsystemR,
+  rebootCedarSubsystem,
   createSubsystemAuditWriter, createSubsystemAuditWriterR,
   getSubsystemAuditStatus, getSubsystemAuditStatusR,
   lintPolicyText, listPolicyFiles, readSchemaText,
