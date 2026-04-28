@@ -92,9 +92,23 @@ Entity 모델 출처: `docs/design/a2a-authorization.md` line 82, 100~123 의 Ca
 
 분석은 `jq` 등 외부 도구. DB audit + 인덱싱 + 대시보드는 X'.
 
-### 1.7 Boot 흐름 (Y' 자동 도출 → 부팅 시 한번 로딩, hot reload 없음)
+### 1.7 Boot 흐름 + Hot reload (KG-28 P5 갱신, governance-cedar v2.13)
 
-**확정**: 서버 부팅 시 `cedar/policies/*.cedar` + `schema.cedarschema` 로딩 → evaluator 인스턴스 생성 → UserContext 에 주입. 정책 변경은 서버 재시작 필요. hot reload 는 X'.
+**Boot**: 서버 부팅 시 `cedar/policies/*.cedar` + `schema.cedarschema` 로딩 → evaluator 인스턴스 생성 → callable wrapper (`createEvaluatorRef`) 로 wrapping → 5 진입점 (UserContext / UserContextManager / WsHandler / SessionRouter / A2aRouter) 에 wrapper 함수 주입. wrapper 는 closure-bound state.current 를 매 호출마다 읽음 — 살아있는 세션 / 캐시된 UC / 인터프리터 closure 모두 reload 후 자동 새 정책 사용.
+
+**Hot reload (KG-28 P5 resolved, 2026-04-29)**: 운영자 명시 트리거로 hot reload 가능. file watch 자동 reload 는 범위 밖.
+
+- **트리거**: `POST /api/admin/policy/reload` (admin role JWT 필요) 또는 CLI `npm run user -- policy reload` (PRESENCE_ADMIN_TOKEN env)
+- **동작**: `rebootCedarSubsystem` 가 새 evaluator 함수만 부팅 (wrapper / auditWriter 미생성, boot 시점 단일 인스턴스 재사용) → wrapper.replace 로 state.current 갱신 → 즉시 모든 호출자에 propagate
+- **단순 single-flight**: `UserContextManager.#reloadPending` 진행 중이면 후속 호출은 같은 promise 결과 공유 (follower). reloadStartedAt 이 leader/follower 동일 — 자동 follow-up 없음 (호출자가 변경 적용 검증하려면 명시적 두 번째 호출 후 reloadStartedAt 변화 관찰)
+- **Fail-safe rollback (메모리)**: 부팅 실패 시 `rebootCedarSubsystem` throw → wrapper.replace 미호출 → 메모리 내 evaluator 미교체. GET `/api/admin/policy/version` 으로 현재 활성 버전 조회. 응답 contract 의 `activeVersion` / `activeReloadedAt` 으로 즉시 식별
+- **Fail-safe rollback (디스크) — 운영자 책임**: 잘못된 50-* 정책 추가 → reload 실패 → 메모리 미교체 → 동일 디스크 파일로 재시도하면 계속 실패. 운영자가 파일을 직접 수정/삭제 후 재시도해야 함. 권장 절차: (1) `npm run user -- policy lint --file <path>` 로 사전 검증, (2) `git` 등으로 정책 디렉토리 버전 관리, (3) reload 실패 응답의 `error` 메시지 + audit JSONL `decision: fail` 로 원인 진단, (4) 디스크 파일 정정 후 재시도. 본 phase 는 자동 디스크 롤백 메커니즘 미제공 (KG-30 신규 등록 — 운영자 가이드 강화 또는 자동화 후속)
+- **응답 단일 metadata**: 응답 `reloadStartedAt` 이 호출자의 변경 적용 여부 판정 단일 신호. 디스크 mtime / 시각 비교는 본 phase 비-범위 (다중 파일 / 원자적 rename / 동일 초 케이스 불안정)
+- **호출 단위 atomicity**: evaluator 한 번의 호출 = 한 정책 버전 사용 (보장). 한 요청 흐름 (예: chat 핸들러의 access_agent + set_persona 두 번 호출) 은 다른 정책 버전 가능 — 각 호출은 self-consistent (fail-closed 의미론 보존). 자세한 invariant: `agent-identity.md` I-CEDAR-RELOAD-CALL-LINEARIZABLE / FAIL-SAFE / EDGE-TRIGGER / I-CEDAR-AUDIT-VERSION
+
+**Audit policyVersion**: server boot 단일 auditWriter 인스턴스가 모든 server-side authz audit entry 에 `policyVersion` 자동 첨부 (`getPolicyVersion: () => wrapperHandle.ref?.snapshot().version`). 단일 진실 소스 — 수동 기입 금지. CLI 단발 프로세스 (`cmdAgentApprove manual_approve`) 는 wrapper 미생성 → policyVersion=null 정합 (admin override, 정책 무관).
+
+이전 표현 ("정책 변경은 서버 재시작 필요. hot reload 는 X'") 은 KG-28 P5 ship 후 stale — KG-29 갱신.
 
 ### 1.8 정책 우선순위 (Y' 자동 도출 → 사전순 통합 평가)
 
@@ -304,6 +318,7 @@ const evaluator = createEvaluator({ cedarInstance, auditWriter })
 
 ## Changelog
 
+- **v1.3 (2026-04-29)**: KG-28 P5 (Cedar policy hot reload) ship 후속 갱신. §1.7 stale 수정 — "hot reload 없음" 표현 폐기. callable wrapper (`createEvaluatorRef`) + `rebootCedarSubsystem` + REST/CLI 트리거 + fail-safe rollback (메모리/디스크 분리) + audit policyVersion 단일 진실 소스 명시. 잘못된 정책 파일 디스크 롤백 절차 (lint 사전 검증 + git 버전 관리 + 운영자 수동 정정) 명시 — KG-30 신규 등록. KG-29 (cedar-infra hot reload stale) resolved (본 갱신).
 - **v1.2 (2026-04-26)**: Y' 인프라 구현 완료. `feature/cedar-governance-v2` 브랜치 5 커밋 (270a38c~52ef096). evaluator (Reader.asks) + boot (3중 parse fail-closed) + audit (JSONL 0600) + paths.js + bootCedarSubsystem + PresenceServer/UserContext invariant 주입. CI-Y1/Y2 (CE1~CE3), CI-Y3 (SC-Y1a + CB1), CI-Y4 (CA1), CI-Y5 (CB2/CB3), CI-Y6 (CB4 — KG-24 호출 정합성은 governance phase 의 GV-Y1~Y4 가 담당), CI-Y7 (CE4) 자동화 완료. Pre-1 wasm 가용성 PASS (`@cedar-policy/cedar-wasm@4.10.0`, AWS 공식, sync API). 87 신규 assertions.
 - **v1.1 (2026-04-25)**: codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록.
   - Q1: §1.0 Y' 단점에 latency + audit 무한 증가 + Op wrapping 부재 추가 (§7 와 정합)
