@@ -4,6 +4,7 @@ import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { Config } from '../config.js'
 import { AUTH } from './policy.js'
+import { ROLES } from '@presence/core/core/policies.js'
 
 // =============================================================================
 // UserStore: 사용자 CRUD + refreshSessions 관리
@@ -13,7 +14,7 @@ import { AUTH } from './policy.js'
 const UserSchema = z.object({
   username: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),
   passwordHash: z.string(),
-  roles: z.array(z.string()).default(['user']),
+  roles: z.array(z.string()).default([ROLES.USER]),
   tokenVersion: z.number().int().default(0),
   refreshSessions: z.array(z.string()).default([]),
   createdAt: z.string(),
@@ -89,7 +90,7 @@ const createUserStore = ({ basePath } = {}) => {
     const user = {
       username,
       passwordHash,
-      roles: store.users.length === 0 ? ['admin'] : ['user'],
+      roles: store.users.length === 0 ? [ROLES.ADMIN] : [ROLES.USER],
       tokenVersion: 0,
       refreshSessions: [],
       createdAt: new Date().toISOString(),

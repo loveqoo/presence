@@ -14,6 +14,7 @@ import {
 } from '../authz/agent-governance.js'
 import { bootCedarSubsystem, createSubsystemAuditWriter } from '../authz/cedar/index.js'
 import { requireFlag } from './cli-utils.js'
+import { AUDIT_ACTION, AUDIT_DECISION, ROLES } from '@presence/core/core/policies.js'
 
 const loadPersonaFromFile = (filePath) => {
   if (!filePath) return null
@@ -93,8 +94,8 @@ function cmdAgentApprove(params) {
   const result = approveUserAgent(params.id, { presenceDir, basePath: presenceDir })
   if (result.status === GV_STATUS.APPROVED || result.status === GV_STATUS.ALREADY_APPLIED) {
     createSubsystemAuditWriter({ presenceDir }).append({
-      ts: new Date().toISOString(), caller: 'admin', action: 'manual_approve', resource: req?.requester ?? 'unknown',
-      decision: 'allow', matchedPolicies: [], errors: [], reqId: params.id, agentName: req?.agentName ?? null,
+      ts: new Date().toISOString(), caller: ROLES.ADMIN, action: AUDIT_ACTION.MANUAL_APPROVE, resource: req?.requester ?? 'unknown',
+      decision: AUDIT_DECISION.ALLOW, matchedPolicies: [], errors: [], reqId: params.id, agentName: req?.agentName ?? null,
       idempotent: result.status === GV_STATUS.ALREADY_APPLIED,
     })
   }

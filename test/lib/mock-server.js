@@ -139,7 +139,9 @@ const createTestServer = async (llmHandler, opts = {}) => {
     mockLLM,
     defaultSessionId,
     userContext: result.userContext,
+    userContextManager: result.userContextManager,
     evaluator: result.evaluator,
+    auditWriter: result.auditWriter,
   }
 }
 

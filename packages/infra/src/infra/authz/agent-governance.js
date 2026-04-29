@@ -6,6 +6,7 @@ import { Config } from '../config.js'
 import { ADMIN_USERNAME, DEFAULT_POLICIES } from '../admin-bootstrap.js'
 import { validateAgentNamePart } from '@presence/core/core/agent-id.js'
 import { CheckAccess } from '@presence/core/core/op.js'
+import { AUDIT_ACTION } from '@presence/core/core/policies.js'
 import { runCheckAccess } from './cedar/op-runner.js'
 import { atomicWriteJson } from '../fs-utils.js'
 
@@ -225,7 +226,7 @@ const submitUserAgentR = Reader.asks(({ requester, agentName, persona, basePath,
   const hardLimit = resolveAdminHardLimit()
   const checkAccessOp = CheckAccess({
     principal: { type: 'LocalUser', id: requester },
-    action:    'create_agent',
+    action:    AUDIT_ACTION.CREATE_AGENT,
     resource:  { type: 'User', id: requester },
     context:   { currentCount: count, maxAgents: policies.maxAgentsPerUser, isAdmin, hardLimit },
   })

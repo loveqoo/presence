@@ -58,15 +58,36 @@ async function run() {
       assert(res.status === 401, `AR3: 미인증 → 401 (got ${res.status})`)
     }
 
-    // AR4 — 부팅 실패 시 활성 evaluator 유지 — userContextManager.reloadEvaluator 가 throw
-    //   하도록 monkey-patch. 응답 500 + activeVersion 명시 + GET version 변경 없음.
+    // AR4 — 부팅 실패 시 활성 evaluator 유지. userContextManager.reloadEvaluator 가
+    //   throw 하도록 monkey-patch. 응답 500 + status='fail' + activeVersion + activeReloadedAt
+    //   명시 + GET version 은 변경 없음 (메모리 fail-safe rollback).
     {
-      const beforeVer = (await request(port, 'GET', '/api/admin/policy/version', null, { token: adminToken })).body.version
-      const ucm = ctx.userContext.constructor // can't access UCM directly. Approach: trigger via temporary file system corruption.
-      // 직접 접근 불가하므로 server boot 후 정책 dir 의 임시 정책 파일로 reload 실패 유도 시도.
-      // 단, POLICIES_DIR 은 hardcoded 라 실제 디스크 변경 위험. 본 테스트 는 skip.
-      // 대안: AR4 oracle 을 후속 phase 의 unit test (mock UCM) 로 분리.
-      assert(beforeVer >= 1, 'AR4: skip (POLICIES_DIR 격리 불가 — RL2 가 fail-safe 검증 커버)')
+      const beforeRes = await request(port, 'GET', '/api/admin/policy/version', null, { token: adminToken })
+      const beforeVer = beforeRes.body.version
+      const beforeReloadedAt = beforeRes.body.reloadedAt
+
+      const ucm = ctx.userContextManager
+      const original = ucm.reloadEvaluator.bind(ucm)
+      ucm.reloadEvaluator = async () => { throw new Error('reload-boot-failed-test') }
+      try {
+        const reloadRes = await request(port, 'POST', '/api/admin/policy/reload', null, { token: adminToken })
+        assert(reloadRes.status === 500, `AR4: 부팅 실패 → 500 (got ${reloadRes.status})`)
+        assert(reloadRes.body.status === 'fail', `AR4: status=fail (got ${reloadRes.body.status})`)
+        assert(reloadRes.body.error.includes('reload-boot-failed-test'),
+          `AR4: error 에 throw 메시지 (got ${reloadRes.body.error})`)
+        assert(reloadRes.body.activeVersion === beforeVer,
+          `AR4: activeVersion = beforeVer (got ${reloadRes.body.activeVersion}, expected ${beforeVer})`)
+        assert(reloadRes.body.activeReloadedAt === beforeReloadedAt,
+          `AR4: activeReloadedAt 유지 (got ${reloadRes.body.activeReloadedAt})`)
+      } finally {
+        ucm.reloadEvaluator = original
+      }
+
+      const afterRes = await request(port, 'GET', '/api/admin/policy/version', null, { token: adminToken })
+      assert(afterRes.body.version === beforeVer,
+        `AR4: GET version 도 미변경 (got ${afterRes.body.version}, expected ${beforeVer})`)
+      assert(afterRes.body.reloadedAt === beforeReloadedAt,
+        `AR4: GET reloadedAt 도 미변경`)
     }
 
     // AR5 — GET /api/admin/policy/version → 200 + 현재 version + reloadedAt
@@ -89,11 +110,39 @@ async function run() {
       assert(userRes.status === 403, `AR6: roles=user → 403 (got ${userRes.status})`)
     }
 
-    // AR7 — audit append 실패 격리: AR4 와 같은 이유로 server-side 직접 monkey-patch 어려움.
-    //   대안: 본 phase 는 admin-router 코드 자체의 try/catch 분리를 정적 검증 (INV-CEDAR-RELOAD-AUDIT-ISOLATED).
-    //   응답 contract 가 audit append throw 시에도 200/500 outcome 결과만 반영하는지 정적 확인.
+    // AR7 — audit append 실패 격리. auditWriter.append 가 throw 하도록 monkey-patch.
+    //   POST /policy/reload 응답이 200 OK + 정상 reload payload 를 반환하는지 검증
+    //   (audit I/O 실패가 reload outcome 을 오염하지 않음). logger.warn 호출은 console.warn
+    //   spy 로 검증.
     {
-      assert(true, 'AR7: skip (정적 INV 로 검증 — admin-router.js 의 try/catch 분리 grep)')
+      const aw = ctx.auditWriter
+      const originalAppend = aw.append.bind(aw)
+      const originalWarn = console.warn
+      let warnCount = 0
+      let warnMessage = null
+
+      aw.append = () => { throw new Error('audit-append-failed-test') }
+      console.warn = (msg) => { warnCount += 1; warnMessage = String(msg) }
+
+      try {
+        const beforeVer = (await request(port, 'GET', '/api/admin/policy/version', null, { token: adminToken })).body.version
+        const reloadRes = await request(port, 'POST', '/api/admin/policy/reload', null, { token: adminToken })
+        assert(reloadRes.status === 200,
+          `AR7: audit fail 에도 reload 응답 200 (got ${reloadRes.status} body=${JSON.stringify(reloadRes.body)})`)
+        assert(reloadRes.body.status === 'ok',
+          `AR7: status=ok 유지 (got ${reloadRes.body.status})`)
+        assert(reloadRes.body.version === beforeVer + 1,
+          `AR7: version 증가 (got ${reloadRes.body.version})`)
+        assert(typeof reloadRes.body.reloadStartedAt === 'string',
+          'AR7: reloadStartedAt 정상')
+        assert(warnCount >= 1,
+          `AR7: logger.warn 호출 (got ${warnCount})`)
+        assert(warnMessage && warnMessage.includes('audit append failed'),
+          `AR7: warn 메시지에 audit fail 표시 (got ${warnMessage})`)
+      } finally {
+        aw.append = originalAppend
+        console.warn = originalWarn
+      }
     }
 
   } finally {

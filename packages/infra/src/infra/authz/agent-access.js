@@ -1,5 +1,6 @@
 import { isReservedUsername } from '@presence/core/core/agent-id.js'
 import { CheckAccess } from '@presence/core/core/op.js'
+import { AUDIT_ACTION } from '@presence/core/core/policies.js'
 import { runCheckAccess } from './cedar/op-runner.js'
 
 // =============================================================================
@@ -102,7 +103,7 @@ function canAccessAgent(input) {
       const archived = !!entry.archived
       const op = CheckAccess({
         principal: { type: 'LocalUser', id: jwtSub },
-        action:    'access_agent',
+        action:    AUDIT_ACTION.ACCESS_AGENT,
         resource:  { type: 'Agent', id: agentId },
         context:   { intent, archived },
       })

@@ -66,7 +66,9 @@ class PresenceServer {
   get server() { return this.#httpServer }
   get wss() { return this.#wss }
   get userContext() { return this.#userContext }
+  get userContextManager() { return this.#userContextManager }
   get evaluator() { return this.#evaluator }
+  get auditWriter() { return this.#auditWriter }
 
   get app() {
     return {
@@ -286,7 +288,8 @@ class PresenceServer {
 
 }
 
-// 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, evaluator, shutdown }
+// 레거시 브릿지 — 테스트 호환 { server, wss, app, userContext, userContextManager,
+//                                  evaluator, auditWriter, shutdown }
 const startServer = async (configOverride, opts = {}) => {
   const instance = await PresenceServer.create(configOverride, opts)
   return {
@@ -294,7 +297,9 @@ const startServer = async (configOverride, opts = {}) => {
     wss: instance.wss,
     app: instance.app,
     userContext: instance.userContext,
+    userContextManager: instance.userContextManager,
     evaluator: instance.evaluator,
+    auditWriter: instance.auditWriter,
     shutdown: instance.shutdown.bind(instance),
   }
 }

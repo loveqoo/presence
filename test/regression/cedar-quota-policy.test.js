@@ -76,7 +76,7 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   const checkAccessBlock = text.match(/CheckAccess\(\{[\s\S]*?\}\)/)
   assert(checkAccessBlock, 'INV-SUBMIT-USER-AGENT-CONTEXT: CheckAccess 호출 존재')
   const block = checkAccessBlock[0]
-  assert(/action:\s*'create_agent'/.test(block), 'INV-SUBMIT-USER-AGENT-CONTEXT: action: create_agent')
+  assert(/action:\s*(?:'create_agent'|AUDIT_ACTION\.CREATE_AGENT)/.test(block), 'INV-SUBMIT-USER-AGENT-CONTEXT: action: create_agent')
   for (const field of ['currentCount', 'maxAgents', 'isAdmin', 'hardLimit']) {
     assert(
       new RegExp(`context:\\s*\\{[\\s\\S]*?${field}[\\s\\S]*?\\}`).test(block),
@@ -95,7 +95,7 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   let m
   while ((m = callerRe.exec(text)) !== null) {
     const block = m[0]
-    if (!/action:\s*['"]create_agent['"]/.test(block)) continue
+    if (!/action:\s*(?:['"]create_agent['"]|AUDIT_ACTION\.CREATE_AGENT)/.test(block)) continue
     count += 1
     for (const field of fields) {
       assert(
@@ -116,7 +116,7 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   let m
   while ((m = callerRe.exec(text)) !== null) {
     const block = m[0]
-    if (!/action:\s*['"]access_agent['"]/.test(block)) continue
+    if (!/action:\s*(?:['"]access_agent['"]|AUDIT_ACTION\.ACCESS_AGENT)/.test(block)) continue
     count += 1
     for (const field of fields) {
       assert(
@@ -203,7 +203,7 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   let m
   while ((m = callerRe.exec(text)) !== null) {
     const block = m[0]
-    if (!/action:\s*['"]set_persona['"]/.test(block)) continue
+    if (!/action:\s*(?:['"]set_persona['"]|AUDIT_ACTION\.SET_PERSONA)/.test(block)) continue
     count += 1
     for (const field of ['isAdmin', 'reservedOwner']) {
       assert(
@@ -316,10 +316,15 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
     /export\s*\{[\s\S]*rebootCedarSubsystem/.test(cedarIndex),
     'INV-CEDAR-RELOAD-FAIL-SAFE: rebootCedarSubsystem export',
   )
-  // try/catch 가 rebootCedarSubsystem 자체에 없음 — 호출자가 fail-safe rollback 책임
-  const rebootSection = cedarIndex.match(/const rebootCedarSubsystem\s*=[\s\S]*?(?=\n(?:const|export|\/\/))/)?.[0] ?? ''
+  // try/catch 가 rebootCedarSubsystem 자체에 없음 — 호출자가 fail-safe rollback 책임.
+  // 정규식 매치 실패 시 (선언 형태 변경 등) 빈 문자열 false-negative 회피 — 매치 강제 검증.
+  const rebootMatch = cedarIndex.match(/const rebootCedarSubsystem\s*=[\s\S]*?(?=\n(?:const|export|\/\/))/)
   assert(
-    !/try\s*\{/.test(rebootSection),
+    rebootMatch != null && rebootMatch[0].length > 0,
+    'INV-CEDAR-RELOAD-FAIL-SAFE: rebootCedarSubsystem 정의 추출 가능 (정규식 매치)',
+  )
+  assert(
+    !/try\s*\{/.test(rebootMatch[0]),
     'INV-CEDAR-RELOAD-FAIL-SAFE: rebootCedarSubsystem 내부 try/catch 부재 (throw 위임)',
   )
 
@@ -374,6 +379,36 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   assert(
     !/auditWriter\.append\([\s\S]*?\bpolicyVersion\s*:/.test(adminRouter),
     'INV-CEDAR-AUDIT-VERSION: admin router audit append 본문에 policyVersion 수동 기입 부재 (단일 진실 소스)',
+  )
+}
+
+// KG-28 P5 — INV-CEDAR-RELOAD-AUDIT-ISOLATED: admin-router 의 reload outcome 과 audit append 가
+//   별도 try 블록으로 분리되어 audit I/O 실패가 응답을 오염하지 않음 (round 9 H 흡수).
+{
+  const adminRouter = read('packages/server/src/server/admin-router.js')
+  // POST /policy/reload 핸들러 본문 추출
+  const reloadHandler = adminRouter.match(/router\.post\(['"]\/policy\/reload['"][\s\S]*?\n\s{2}\}\)/)
+  assert(
+    reloadHandler != null && reloadHandler[0].length > 0,
+    'INV-CEDAR-RELOAD-AUDIT-ISOLATED: POST /policy/reload 핸들러 추출 가능',
+  )
+  const handlerBody = reloadHandler[0]
+  // 핸들러 본문에 try 블록 최소 2개 (reload + audit) — 분리 검증
+  const tryCount = (handlerBody.match(/try\s*\{/g) ?? []).length
+  assert(
+    tryCount >= 2,
+    `INV-CEDAR-RELOAD-AUDIT-ISOLATED: 핸들러에 try 블록 2개 이상 (got ${tryCount})`,
+  )
+  // res.json / res.status(...).json 이 두 try 블록 사이 또는 첫 try 의 catch 다음에 위치
+  // (response 가 audit append try 보다 앞에 와서 audit 실패 시 이미 응답 완료)
+  assert(
+    /res\.(json|status)[\s\S]*?try\s*\{[\s\S]*?auditWriter\.append/.test(handlerBody),
+    'INV-CEDAR-RELOAD-AUDIT-ISOLATED: response 가 audit append try 보다 앞 (audit 실패 시 응답 영향 없음)',
+  )
+  // audit try 의 catch 가 logger.warn 만 호출 (response 변경 없음)
+  assert(
+    /catch\s*\(\s*auditErr[\s\S]*?\.warn\(/.test(handlerBody),
+    'INV-CEDAR-RELOAD-AUDIT-ISOLATED: audit catch 가 logger.warn 호출 (response 미변경)',
   )
 }
 

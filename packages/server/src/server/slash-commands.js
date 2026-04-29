@@ -1,5 +1,5 @@
 import { clearDebugState } from '@presence/core/core/state-commit.js'
-import { STATE_PATH } from '@presence/core/core/policies.js'
+import { STATE_PATH, AUDIT_ACTION } from '@presence/core/core/policies.js'
 import { formatStatusR } from '@presence/core/core/format-status.js'
 import { CheckAccess } from '@presence/core/core/op.js'
 import { runCheckAccess } from '@presence/infra/infra/authz/cedar/op-runner.js'
@@ -100,7 +100,7 @@ const SLASH_COMMANDS = {
       const ownerPart = agentId.split('/')[0]
       const op = CheckAccess({
         principal: { type: 'LocalUser', id: jwtSub },
-        action:    'set_persona',
+        action:    AUDIT_ACTION.SET_PERSONA,
         resource:  { type: 'Agent', id: agentId },
         context:   { isAdmin: jwtSub === ADMIN_USERNAME, reservedOwner: isReservedUsername(ownerPart) },
       })

@@ -186,6 +186,37 @@ export const EVENT_TYPE = Object.freeze({
   A2A_RESPONSE:  'a2a_response',
 })
 
+// 사용자 role 식별자. user-store 의 role 부여 + admin-router 의 인가 검증이 같은 값을 참조.
+export const ROLES = Object.freeze({
+  ADMIN: 'admin',
+  USER:  'user',
+})
+
+// authz audit JSONL 의 action 필드. Cedar action ID (create_agent / access_agent / set_persona /
+// archive_agent) 와 non-Cedar admin event (manual_approve / policy_reload) 를 포함.
+// 정의와 사용이 한 enum 을 참조해야 wire 포맷 회귀를 막을 수 있다.
+export const AUDIT_ACTION = Object.freeze({
+  CREATE_AGENT:   'create_agent',
+  ACCESS_AGENT:   'access_agent',
+  SET_PERSONA:    'set_persona',
+  ARCHIVE_AGENT:  'archive_agent',
+  MANUAL_APPROVE: 'manual_approve',
+  POLICY_RELOAD:  'policy_reload',
+})
+
+// audit JSONL 의 resource 필드 — non-Cedar admin event 용 단일 자원 식별자.
+export const AUDIT_RESOURCE = Object.freeze({
+  CEDAR_EVALUATOR: 'cedar-evaluator',
+})
+
+// authz audit decision 필드 (allow/deny 는 Cedar 결과, success/fail 은 admin event).
+export const AUDIT_DECISION = Object.freeze({
+  ALLOW:   'allow',
+  DENY:    'deny',
+  SUCCESS: 'success',
+  FAIL:    'fail',
+})
+
 // A2A Phase 1 정책 상수. S4 enforcement/expire/recovery 에서 소비.
 export const A2A = Object.freeze({
   QUEUE_MAX_PER_AGENT: 100,
