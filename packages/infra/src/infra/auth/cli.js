@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { createInterface } from 'node:readline'
 import { createUserStore } from './user-store.js'
 import { ensureSecret } from './token.js'
 import { removeUserCompletely } from './remove-user.js'
@@ -8,31 +7,11 @@ import { Config } from '../config.js'
 import { loadUserMerged } from '../config-loader.js'
 import { Memory } from '../memory.js'
 import { getSubsystemAuditStatus } from '../authz/cedar/index.js'
-import { requireFlag } from './cli-utils.js'
+import { requireFlag, promptPassword, promptLine } from './cli-utils.js'
 import { dispatchAgent } from './cli-agent.js'
 import { dispatchPolicy } from './cli-policy.js'
 
 // Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
-
-const promptPassword = (prompt = 'Password: ') => new Promise((resolve) => {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  const origWrite = rl._writeToOutput
-  rl._writeToOutput = (s) => {
-    if (s.includes(prompt)) origWrite.call(rl, s)
-    else origWrite.call(rl, '*')
-  }
-  rl.question(prompt, (answer) => {
-    rl._writeToOutput = origWrite
-    rl.close()
-    console.log() // 줄바꿈
-    resolve(answer)
-  })
-})
-
-const promptLine = (prompt) => new Promise((resolve) => {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  rl.question(prompt, (answer) => { rl.close(); resolve(answer.trim()) })
-})
 
 const parseArgs = () => {
   const args = process.argv.slice(2)
