@@ -93,12 +93,12 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 | FP-69  | resolved | medium   | tui  | 빈 워크스페이스에서 외부 파일 요청 시 LLM 수렴 루프 + 안내 부재          | docs/ux/tui-status-tools.md         |
 | FP-70  | resolved | low      | infra| Cedar audit JSONL rotation 운영자 가시성 부재 — 무음 + 상태 조회 경로 없음 | docs/ux/tui-status-tools.md         |
 | FP-71  | resolved | medium   | tui  | 첫 진입 시 에이전트 페르소나 미설정 안내 부재                              | docs/ux/tui-entry-shell.md          |
-| FP-72  | open     | high     | infra| `npm run user -- policy` usage 가 P5 후 stale — `reload (미지원)` 출력 잔재 | docs/ux/issues/2026-04-29-policy-reload-usage-stale.md |
+| FP-72  | resolved | high     | infra| `npm run user -- policy` usage 가 P5 후 stale — `reload (미지원)` 출력 잔재. cli.js usage 갱신 + `policy version` 노출 | docs/ux/issues/2026-04-29-policy-reload-usage-stale.md |
 | FP-73  | open     | high     | infra| admin token 추출 비친화 — login 응답에서 access token 수동 발췌 + ENV 설정 필요 | docs/ux/issues/2026-04-29-policy-reload-token-extraction.md |
-| FP-74  | open     | medium   | infra| `policy version` CLI wrapper 부재 — REST GET /api/admin/policy/version 만 노출 | docs/ux/issues/2026-04-29-policy-version-cli-missing.md |
-| FP-75  | open     | medium   | infra| reload 실패 후 회복 절차 안내 부족 — "별도 정정 필요" 만 출력, lint→reload 재시도 흐름 부재 | docs/ux/issues/2026-04-29-policy-reload-failure-recovery.md |
-| FP-76  | open     | medium   | infra| `reloadStartedAt` 의미 혼동 — single-flight follower 가 leader 의 값 받는 의미 운영자에 불명확 | docs/ux/issues/2026-04-29-policy-reload-startedAt-confusion.md |
-| FP-77  | open     | low      | infra| reload 401/403 통합 메시지 — 미인증 vs admin 권한 부재 구분 안 됨            | docs/ux/issues/2026-04-29-policy-reload-403-message.md |
+| FP-74  | resolved | medium   | infra| `policy version` CLI wrapper 추가 — `cmdPolicyVersion` + dispatchPolicy 분기 + 사용자 친화 출력 | docs/ux/issues/2026-04-29-policy-version-cli-missing.md |
+| FP-75  | resolved | medium   | infra| reload 실패 메시지 구조 개선 — "복구 방법" 3단계 (.cedar 수정 → lint → reload) 명시 | docs/ux/issues/2026-04-29-policy-reload-failure-recovery.md |
+| FP-76  | resolved | medium   | infra| reload 성공 출력 운영자 친화 변경 — 버전/시작/완료 분리 + single-flight 동작 안내 명시 | docs/ux/issues/2026-04-29-policy-reload-startedAt-confusion.md |
+| FP-77  | resolved | low      | infra| 401/403 분기 분리 + 각 안내 메시지 (인증 필요 / admin 권한 필요)              | docs/ux/issues/2026-04-29-policy-reload-403-message.md |
 | FP-78  | open     | medium   | infra| Cedar 정책 작성 가이드 부재 — 운영자가 50-*.cedar 문법/예시 없이 lint/reload 사용 불가 | docs/ux/issues/2026-04-29-cedar-policy-syntax-guide-missing.md |
 | FP-79  | open     | low      | tui  | TUI 에서 정책 버전 확인 단일 경로 부재 — CLI/REST 별도 호출 필요              | docs/ux/issues/2026-04-29-tui-policy-version-not-shown.md |
 
@@ -139,12 +139,13 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 
 ## 통계
 
-- FP 총 **79개** — open **8**, resolved **71**
+- FP 총 **79개** — open **3**, resolved **76**
 - KG 총 **30개** — open **1**, resolved **29**
-- Severity 분포 (open만): high 2 (FP-72, FP-73), medium 5 (FP-74~76, 78, KG-30), low 2 (FP-77, FP-79)
+- Severity 분포 (open만): high 1 (FP-73), medium 2 (FP-78, KG-30), low 1 (FP-79)
 
 ## 변경 이력
 
+- 2026-04-29: FP-72/74/75/76/77 resolved — KG-28 P5 사후 옵션 A "Policy reload UX 묶음". (FP-72) cli.js usage 의 stale "reload (미지원)" 제거 + `policy version` 노출. (FP-74) `cmdPolicyVersion` + dispatchPolicy version 분기 + 운영자 친화 출력. (FP-75) reload 실패 메시지 구조 개선 — "복구 방법" 3단계 (수정 → lint → reload) 명시 + 활성 정책 한국어 친화. (FP-76) reload 성공 출력 — 버전/시작/완료 시각 분리 + single-flight 동작 명시 + Tip 위치 success-only. (FP-77) 401/403 분기 분리 + 각 분기에 조치 안내 (인증 필요 vs admin 권한 필요). 회귀: CLI-X7~X9 (token/server/usage) + AR8 (서버측 401/403 응답 분리) + INV-CEDAR-CLI-AUTH-SPLIT + INV-CEDAR-CLI-VERSION 정적 회귀. 4662 → 4684 passed (+22).
 - 2026-04-29: FP-72~79 + KG-29/KG-30 추가 — KG-28 P5 ship 직후 4 가디언 (code-reviewer / spec-guardian / ux-guardian / user-guide-writer) 병렬 감사 결과 반영. ux-guardian 6 마찰점 (FP-72~77 — usage stale / token 추출 / version CLI / 실패 회복 / reloadStartedAt / 401-403 통합) + user-guide-writer 2 갭 (FP-78 정책 작성 가이드 / FP-79 TUI 버전 표시) + spec-guardian 2 갭 (KG-29 cedar-infra §1.7 stale resolved 동시 / KG-30 디스크 롤백 자동화). KG-29 는 본 등록과 함께 cedar-infra v1.3 으로 즉시 resolved. code-reviewer 는 두 차례 중간 출력만 반환 — 직접 핵심 파일 점검으로 대체 (evaluator-ref state 변이 = wrapper 경계 의도된 패턴, admin-router 매직 스트링 = 단일 파일 spread 위험 없음).
 - 2026-04-29: KG-28 resolved — `feature/cedar-p5-hot-reload` 후속. callable wrapper (`createEvaluatorRef`) closure-bound state 패턴 — evaluator(args) 호출이 매번 state.current 읽음, 살아있는 세션 / 캐시된 UC / 인터프리터 closure 모두 자동 새 정책 사용. `bootCedarSubsystem` `{ evaluator, auditWriter }` destructuring contract — server boot 단일 auditWriter 인스턴스를 admin router 에 재사용. `rebootCedarSubsystem` 은 evaluator 함수만 부팅 (wrapper / auditWriter 미생성) — 부팅 실패 시 throw → wrapper.replace 미호출 = 메모리 미교체 (fail-safe rollback). UserContextManager.reloadEvaluator 단순 single-flight + reloadStartedAt promise 생성 시점 캡처 — leader/follower 동일 metadata 공유 (응답 single authoritative). POST /api/admin/policy/reload + GET /policy/version 신규 (admin role 미들웨어). audit `getPolicyVersion` closure 자동 첨부 — 모든 server-side audit entry policyVersion (단일 진실 소스). audit append 별도 try/catch — I/O 실패 reload outcome 오염 안 함. CLI `npm run user -- policy reload` REST 호출. plan-reviewer (codex) 11 라운드 비판 리뷰 흡수 후 ship — H1 (wrapper), H2 (타입 계약), H3 (호출 단위 선형화), H4 (single-flight follower), L1 (호출 사이트 변경 0), M1~M7 + round 5~11 결함. RL1~RL9 + AR1~AR7 + CLI-X5~X6 + INV-CEDAR-RELOAD-* + INV-CEDAR-AUDIT-VERSION 회귀. 4646 passed.
 - 2026-04-26: FP-71 resolved — `feature/cedar-governance-v2` 후속. 사용자 동의받은 3단계 적용. (1) `/persona [show|set <text>|reset]` 슬래시 명령 — 서버 측 `slash-commands.js` 의 `SLASH_COMMANDS` 테이블에 핸들러 추가, `session-api.js` 의 handleSlashCommand ctx 에 userContext 첨부, `user-context.js` 에 `username` 필드 + `updatePrimaryPersona({ systemPrompt })` 메서드 (config.json `agents[primary].persona` 부분 갱신 + atomicWriteJson 영속 + in-memory 동기화), TUI `commandMap` 에 `/persona` 위임 핸들러. (2) 첫 진입 안내 — `GET /api/sessions/:id/config` 응답에 `personaConfigured: boolean` 추가, TUI `RemoteSession` 생성자가 `false` 면 `pendingInitialMessages` 에 transient 안내 1 회 push (휴리스틱: systemPrompt 빈값일 때만 — set 후 자동 안 뜸, reset 후 재시작 시 다시 뜸). (3) `/help` 갱신 — ko/en `help.commands` 에 `/persona` 라인 추가 + `persona_cmd` / `persona_onboarding` namespace 신설 (KO=EN=226 키). 회귀: server S3 (personaConfigured boolean) + S7b (show/set/reset/usage 6 케이스 10 asserts) + app.test.js 81b (help 노출) + 81c (dispatch 위임 + system 메시지). 4419 passed.

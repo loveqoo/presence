@@ -58,64 +58,94 @@ function cmdPolicyList() {
 // PRESENCE_ADMIN_TOKEN env 의 admin access token 으로 인증.
 //
 // 단계 분리 — 함수 길이 단축 + Either-style 단일 exit 수렴점:
-//   resolveAdminToken → fetchReload → handleAuthError → printReloadSuccess / formatReloadFailure
+//   resolveAdminToken → fetchAdmin → handleAuthError → printReloadSuccess / formatReloadFailure
 // 각 단계는 throw 또는 return 으로 dispatch — process.exit 는 dispatchPolicy 에서만 호출.
 
 const RELOAD_PATH = '/api/admin/policy/reload'
+const VERSION_PATH = '/api/admin/policy/version'
+
+const resolveBaseUrl = () => process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
 
 const resolveAdminToken = () => {
   const token = process.env.PRESENCE_ADMIN_TOKEN
   if (!token) {
     throw new CliPolicyError([
-      'policy reload: admin access token 필요.',
+      'policy: admin access token 필요.',
       '  1. admin 으로 로그인 — POST /api/auth/login',
       '  2. 응답의 access token 을 PRESENCE_ADMIN_TOKEN env 에 설정',
-      '  3. 다시 실행 — npm run user -- policy reload',
+      '  3. 다시 실행',
       '  주의: process listing 으로 token 노출 가능. 신뢰된 환경에서만 사용.',
     ].join('\n'))
   }
   return token
 }
 
-const fetchReload = async (baseUrl, token) => {
+const fetchAdmin = async (path, { method = 'GET', token, baseUrl }) => {
   try {
-    return await fetch(`${baseUrl}${RELOAD_PATH}`, {
-      method: 'POST',
+    return await fetch(`${baseUrl}${path}`, {
+      method,
       headers: { 'Authorization': `Bearer ${token}` },
     })
   } catch (err) {
     // round 9 M 흡수: ECONNREFUSED 특화 제거. 모든 fetch 실패 동일 처리.
     throw new CliPolicyError([
-      `policy reload: 서버 도달 실패 — ${err.message}`,
+      `policy: 서버 도달 실패 — ${err.message}`,
       '  서버 가동 상태 확인 후 재시도 — npm start',
     ].join('\n'))
   }
 }
 
-const printReloadSuccess = (body) => {
-  console.log(`OK: 정책 reload 성공. version=${body.version}`)
-  console.log(`     reloadStartedAt=${body.reloadStartedAt} reloadedAt=${body.reloadedAt}`)
-  console.log('Tip: 자기 reload 가 새로 시작됐는지 확인하려면 명시적 두 번째 호출 후 reloadStartedAt 변화 관찰.')
-  console.log('Tip: 변경 적용 전 lint 권장 — npm run user -- policy lint --file <path>')
+// FP-77: 401/403 분리 — 각 상황에 맞는 조치 안내. 401=token 자체 문제, 403=admin role 부재.
+const handleAuthError = (response) => {
+  if (response.status === 401) {
+    throw new CliPolicyError([
+      'policy: 인증이 필요합니다 (HTTP 401).',
+      '  PRESENCE_ADMIN_TOKEN 이 올바른지 확인하거나 재로그인 후 token 을 갱신하세요.',
+    ].join('\n'))
+  }
+  if (response.status === 403) {
+    throw new CliPolicyError([
+      'policy: admin 권한이 필요합니다 (HTTP 403).',
+      '  현재 token 의 계정이 admin role 을 보유하고 있는지 확인하세요.',
+      '  다른 계정으로 로그인하거나 admin 계정 token 을 사용하세요.',
+    ].join('\n'))
+  }
 }
 
+// FP-76: 운영자 친화 출력. version + 시작/완료 시각 분리 + single-flight 동작 명시.
+const printReloadSuccess = (body) => {
+  console.log('OK: 정책이 적용되었습니다.')
+  console.log(`  버전: ${body.version}`)
+  console.log(`  reload 시작: ${body.reloadStartedAt}`)
+  console.log(`  적용 완료:   ${body.reloadedAt}`)
+  console.log('')
+  console.log('참고: 짧은 시간 내 여러 admin 이 동시에 reload 를 요청하면 한 번만 실행됩니다.')
+  console.log('      "reload 시작" 시각이 이전 호출과 같으면 기존 reload 에 합류된 것입니다.')
+  console.log('      새 reload 를 강제하려면 잠시 후 다시 실행하세요.')
+}
+
+// FP-75: 실패 시 복구 단계 명시 — 정책 파일 수정 → lint → reload 흐름 안내.
 const formatReloadFailure = (body) => {
-  const lines = [`policy reload 실패: ${body.error}`]
+  const lines = ['정책 reload 실패.']
+  lines.push(`원인: ${body.error}`)
+  lines.push('')
   if (body.activeVersion != null) {
-    lines.push(`  활성 정책: version=${body.activeVersion} reloadedAt=${body.activeReloadedAt}`)
+    lines.push(`현재 활성 정책은 그대로 유지됩니다 (버전 ${body.activeVersion}, 적용: ${body.activeReloadedAt}).`)
   }
-  lines.push('이전 정책이 유지됩니다 (fail-safe rollback — 메모리 내 evaluator 미교체).')
-  lines.push('디스크 정책 파일 상태는 변경되지 않음 — 운영자가 별도 정정 필요.')
+  lines.push('디스크의 정책 파일은 변경되지 않았습니다.')
+  lines.push('')
+  lines.push('복구 방법:')
+  lines.push('  1. 문제가 되는 .cedar 파일을 수정하거나 제거하세요')
+  lines.push('  2. lint 로 검증하세요 — npm run user -- policy lint --file <파일>')
+  lines.push('  3. 다시 reload 하세요   — npm run user -- policy reload')
   return lines.join('\n')
 }
 
 async function cmdPolicyReload() {
-  const baseUrl = process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
+  const baseUrl = resolveBaseUrl()
   const token = resolveAdminToken()
-  const response = await fetchReload(baseUrl, token)
-  if (response.status === 401 || response.status === 403) {
-    throw new CliPolicyError(`policy reload: 권한 없음 (HTTP ${response.status}). admin role 토큰 사용 확인.`)
-  }
+  const response = await fetchAdmin(RELOAD_PATH, { method: 'POST', token, baseUrl })
+  handleAuthError(response)
   const body = await response.json()
   if (response.ok) {
     printReloadSuccess(body)
@@ -124,14 +154,28 @@ async function cmdPolicyReload() {
   throw new CliPolicyError(formatReloadFailure(body))
 }
 
+// FP-74: GET /api/admin/policy/version CLI wrapper. 변경 적용 후 운영자가 활성 버전 재확인.
+async function cmdPolicyVersion() {
+  const baseUrl = resolveBaseUrl()
+  const token = resolveAdminToken()
+  const response = await fetchAdmin(VERSION_PATH, { method: 'GET', token, baseUrl })
+  handleAuthError(response)
+  const body = await response.json()
+  if (!response.ok) {
+    throw new CliPolicyError(`policy version 조회 실패: ${body?.error ?? `HTTP ${response.status}`}`)
+  }
+  console.log(`현재 활성 정책: 버전 ${body.version} (적용: ${body.reloadedAt})`)
+}
+
 export const dispatchPolicy = async (action, flags) => {
   try {
     switch (action) {
-      case 'lint':   return await cmdPolicyLint({ file: requireFlag(flags, 'file') })
-      case 'list':   return cmdPolicyList()
-      case 'reload': return await cmdPolicyReload()
+      case 'lint':    return await cmdPolicyLint({ file: requireFlag(flags, 'file') })
+      case 'list':    return cmdPolicyList()
+      case 'reload':  return await cmdPolicyReload()
+      case 'version': return await cmdPolicyVersion()
       default:
-        throw new CliPolicyError(`Unknown policy action: ${action}\nActions: lint, list, reload`)
+        throw new CliPolicyError(`Unknown policy action: ${action}\nActions: lint, list, reload, version`)
     }
   } catch (err) {
     if (err instanceof CliPolicyError) {

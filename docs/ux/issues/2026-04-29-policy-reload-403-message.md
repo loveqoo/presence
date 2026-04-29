@@ -2,7 +2,7 @@
 
 **영역**: infra (admin CLI), server
 **심각도**: low
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/infra/src/infra/auth/cli-policy.js:74-77`, `packages/server/src/server/admin-router.js:18-25`
 
 ## 시나리오
@@ -52,3 +52,12 @@ if (response.status === 403) {
 ## 근거
 
 심각도가 low 인 이유: 현재 메시지도 최소한의 안내("admin role 토큰")를 제공한다. 그러나 첫 번째로 reload 를 시도하는 admin 이 실수로 일반 계정 token 을 사용했을 때, 출력만으로 즉시 조치를 취하기가 어렵다. 401/403 구분과 짧은 조치 안내 추가는 변경 비용이 매우 낮고 효과는 명확하다.
+
+## 해소 (2026-04-29)
+
+`handleAuthError` 함수에 401/403 별도 분기 추가.
+
+- 401: "인증이 필요합니다" + PRESENCE_ADMIN_TOKEN 갱신 안내.
+- 403: "admin 권한이 필요합니다" + admin role 보유 확인 + 다른 계정/admin token 사용 안내.
+
+회귀 커버리지: AR8 (`admin-router.test.js` 서버측 401/403 응답), INV-CEDAR-CLI-AUTH-SPLIT (정적 grep — 분기 + 메시지 + PRESENCE_ADMIN_TOKEN).

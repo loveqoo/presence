@@ -153,6 +153,76 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // CLI-X7 (FP-74) — policy version (token 없음) → exit 1 + admin token 필요 안내
+  {
+    const dir = createTmpDir()
+    const env = { ...process.env, PRESENCE_DIR: dir }
+    delete env.PRESENCE_ADMIN_TOKEN
+    let r
+    try {
+      const out = execSync(`${CLI} policy version`, {
+        env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+      })
+      r = { code: 0, stdout: out, stderr: '' }
+    } catch (err) {
+      r = {
+        code: err.status ?? -1,
+        stdout: err.stdout?.toString() || '',
+        stderr: err.stderr?.toString() || '',
+      }
+    }
+    assert(r.code === 1, `CLI-X7: token 부재 + version → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('admin access token 필요'),
+      `CLI-X7: stderr 에 admin token 필요 안내 (got ${r.stderr.slice(0, 200)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X8 (FP-74) — policy version (서버 미가동 + token) → exit 1 + 서버 도달 실패
+  {
+    const dir = createTmpDir()
+    const env = {
+      ...process.env,
+      PRESENCE_DIR: dir,
+      PRESENCE_ADMIN_TOKEN: 'fake-token-not-validated',
+      PRESENCE_SERVER_URL: 'http://127.0.0.1:9',
+    }
+    let r
+    try {
+      const out = execSync(`${CLI} policy version`, {
+        env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      })
+      r = { code: 0, stdout: out, stderr: '' }
+    } catch (err) {
+      r = {
+        code: err.status ?? -1,
+        stdout: err.stdout?.toString() || '',
+        stderr: err.stderr?.toString() || '',
+      }
+    }
+    assert(r.code === 1, `CLI-X8: 서버 미가동 + version → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('서버 도달 실패'),
+      `CLI-X8: stderr 에 "서버 도달 실패" (got ${r.stderr.slice(0, 200)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X9 (FP-72) — `npm run user` (인자 없음) usage 에 policy reload/version 정상 표시
+  //   stale "(미지원 — 서버 재시작 필요)" 문구 부재 + "policy version" 항목 추가 검증.
+  {
+    const dir = createTmpDir()
+    const r = runCli('', dir)   // 인자 없음 — usage 출력
+    assert(r.code === 0, `CLI-X9: usage 출력 → exit 0 (got ${r.code})`)
+    assert(r.stdout.includes('policy reload'),
+      `CLI-X9: usage 에 policy reload 표시`)
+    assert(r.stdout.includes('policy version'),
+      `CLI-X9: usage 에 policy version 표시 (FP-74)`)
+    assert(!r.stdout.includes('미지원'),
+      `CLI-X9: usage 에 stale "미지원" 문구 부재 (FP-72)`)
+    assert(r.stdout.includes('서버 재시작 없이'),
+      `CLI-X9: usage 에 hot reload 설명 표시 (FP-72)`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

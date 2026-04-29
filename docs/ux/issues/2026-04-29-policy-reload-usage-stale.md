@@ -2,7 +2,7 @@
 
 **영역**: infra (admin CLI)
 **심각도**: high
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/infra/src/infra/auth/cli.js:206`
 
 ## 시나리오
@@ -53,3 +53,13 @@ Cedar policy:
 ## 근거
 
 usage 는 admin 이 기능을 발견하는 1차 경로다. KG-28 P5 구현 이후에도 usage 가 갱신되지 않아, hot reload 기능은 "알고 있는 사람만 쓸 수 있는" 숨겨진 기능이 되었다. 코드 변경 후 usage 문자열 동기화가 누락된 것으로, 기능 자체가 아니라 발견 경로가 막힌 마찰점이다.
+
+## 해소 (2026-04-29)
+
+`cli.js` usage 문자열 갱신.
+
+- `policy reload` 항목에서 "(미지원 — 서버 재시작 필요)" 문구 제거, "(서버 재시작 없이 정책 즉시 적용)"으로 교체.
+- `policy version` 항목 신규 추가 (현재 활성 정책 버전 확인).
+- PRESENCE_ADMIN_TOKEN env 필수 안내 한 줄 추가.
+
+회귀 커버리지: CLI-X9 (`cedar-policy-cli.test.js`).

@@ -2,7 +2,7 @@
 
 **영역**: infra (admin CLI)
 **심각도**: medium
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/infra/src/infra/auth/cli-policy.js:80-83`
 
 ## 시나리오
@@ -53,3 +53,13 @@ Tip 은 현재 항상 출력된다. 실패(500) 경로에서는 Tip 이 아니�
 ## 근거
 
 "자기 reload 가 새로 시작됐는지 확인하려면 명시적 두 번째 호출 후 reloadStartedAt 변화 관찰" 은 single-flight 개념을 아는 사람에게는 명확하지만, 운영자는 이 내부 구현 세부 사항을 알 필요가 없다. 출력 메시지가 운영자의 행동(재시도 여부 판단)을 직접 안내해야 한다.
+
+## 해소 (2026-04-29)
+
+`printReloadSuccess` 메시지 구조 개선.
+
+- 버전 / reload 시작 / 적용 완료 3행 분리 출력.
+- "참고:" 단락에 single-flight 동작 명시: 동시 호출 시 한 번 실행, 시작 시각이 같으면 기존 reload 에 합류된 것, 새 reload 강제 시 잠시 후 재실행.
+- 실패 경로의 Tip 출력 제거 (success-only 표시로 정리).
+
+회귀 커버리지: 출력 메시지 변경은 직접 검증 (CLI-X1~X9 회귀 통과).

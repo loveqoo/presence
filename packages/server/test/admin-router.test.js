@@ -1,5 +1,7 @@
 // KG-28 P5 — admin REST 라우터 통합 테스트.
 // AR1~AR7 — POST /policy/reload + GET /policy/version + role 매트릭스 + audit fail isolation.
+// AR8 (FP-77) — 서버 측 401 vs 403 응답 분리 검증. CLI 측 메시지 분리는 INV-CEDAR-CLI-AUTH-SPLIT
+// 정적 회귀로 cedar-quota-policy.test.js 에서 검증.
 
 import { createTestServer, request } from '../../../test/lib/mock-server.js'
 import { createUserStore } from '@presence/infra/infra/auth/user-store.js'
@@ -143,6 +145,18 @@ async function run() {
         aw.append = originalAppend
         console.warn = originalWarn
       }
+    }
+
+    // AR8 (FP-77) — 서버측 401 vs 403 응답 분리 검증. CLI 측 메시지 분기는 정적 회귀로 검증.
+    //   401: invalid token → server admin/* 진입 차단 (auth middleware)
+    //   403: regular user (admin role 부재) → admin router requireAdmin 차단
+    {
+      const r401 = await request(port, 'POST', '/api/admin/policy/reload', null, { token: 'invalid-fake-token' })
+      assert(r401.status === 401, `AR8-401: 잘못된 token → 401 (got ${r401.status})`)
+
+      const r403 = await request(port, 'POST', '/api/admin/policy/reload', null, { token: regularToken })
+      assert(r403.status === 403, `AR8-403: regular user → 403 (got ${r403.status})`)
+      assert(r403.body.error === 'admin only', `AR8-403: error message=admin only (got ${r403.body.error})`)
     }
 
   } finally {

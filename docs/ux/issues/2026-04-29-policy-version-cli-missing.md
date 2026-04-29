@@ -2,7 +2,7 @@
 
 **영역**: infra (admin CLI)
 **심각도**: medium
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/server/src/server/admin-router.js:90-93`, `packages/infra/src/infra/auth/cli-policy.js`
 
 ## 시나리오
@@ -62,3 +62,13 @@ npm run user -- policy version   (현재 활성 정책 버전 확인)
 ## 근거
 
 변경 적용 확인은 reload 흐름의 마지막 단계다. reload → version 확인 은 자연스러운 쌍이며, REST API 에 이미 엔드포인트가 존재한다. CLI wrapper 부재는 운영자를 curl + jq 조합으로 강제하는 두 번째 진입 장벽이다.
+
+## 해소 (2026-04-29)
+
+`cmdPolicyVersion` 함수 추가 및 `dispatchPolicy` 에 `version` 분기 연결.
+
+- `GET /api/admin/policy/version` 호출 wrapper 구현.
+- 운영자 친화 출력: "현재 활성 정책: 버전 N (적용: YYYY-MM-DD HH:MM:SS)".
+- usage 에 `policy version` 항목 노출 (FP-72 해소와 함께 적용).
+
+회귀 커버리지: CLI-X7 (token 부재), CLI-X8 (서버 미가동), INV-CEDAR-CLI-VERSION (정적 검증).

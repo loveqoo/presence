@@ -2,7 +2,7 @@
 
 **영역**: infra (admin CLI)
 **심각도**: medium
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/infra/src/infra/auth/cli-policy.js:86-91`, `packages/server/src/server/admin-router.js:59-65`
 
 ## 시나리오
@@ -53,3 +53,12 @@ policy reload 실패: <에러 메시지>
 ## 근거
 
 실패 회복 흐름은 성공 흐름보다 안내가 더 중요하다. 운영자가 당황한 상태에서 "무엇을 해야 하는가"를 다음 행동으로 직결시켜야 한다. 현재 "별도 정정 필요"는 마찰 포인트를 해소하지 않고 운영자에게 되돌려주는 셈이다.
+
+## 해소 (2026-04-29)
+
+`formatReloadFailure` 메시지 구조 개선.
+
+- 출력 3단계 분리: 원인 / 현재 활성 정책 (한국어 친화 필드명) / "복구 방법" (1. .cedar 파일 수정/제거 → 2. lint 검증 → 3. 다시 reload).
+- 영어 필드명(`version=`, `reloadedAt=`) → 한국어 레이블로 교체.
+
+범위 외: 에러 소스 특정 (`failedFile`) 은 서버 응답 구조 확장이 필요하여 별도 phase 로 이관.

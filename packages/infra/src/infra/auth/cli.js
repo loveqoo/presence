@@ -203,7 +203,9 @@ const main = async () => {
     console.log('Cedar policy:')
     console.log('  npm run user -- policy lint --file <path.cedar>')
     console.log('  npm run user -- policy list')
-    console.log('  npm run user -- policy reload  (미지원 — 서버 재시작 필요)')
+    console.log('  npm run user -- policy reload                      (서버 재시작 없이 정책 즉시 적용)')
+    console.log('  npm run user -- policy version                     (현재 활성 정책 버전 확인)')
+    console.log('  policy reload / version: PRESENCE_ADMIN_TOKEN env 필수.')
     process.exit(0)
   }
 

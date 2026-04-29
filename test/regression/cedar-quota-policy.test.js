@@ -382,6 +382,62 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// FP-77 — INV-CEDAR-CLI-AUTH-SPLIT: cli-policy.js 의 handleAuthError 가 401 / 403 별도 분기로
+//   각각 다른 안내 메시지 출력. 401=token 자체 문제 (인증), 403=admin role 부재 (인가).
+{
+  const cli = read('packages/infra/src/infra/auth/cli-policy.js')
+  const handler = cli.match(/handleAuthError\s*=[\s\S]*?(?=\n(?:const|async function|export|\/\/))/)
+  assert(
+    handler != null && handler[0].length > 0,
+    'INV-CEDAR-CLI-AUTH-SPLIT: handleAuthError 정의 추출 가능',
+  )
+  const body = handler[0]
+  assert(
+    /response\.status\s*===\s*401/.test(body),
+    'INV-CEDAR-CLI-AUTH-SPLIT: 401 별도 분기',
+  )
+  assert(
+    /response\.status\s*===\s*403/.test(body),
+    'INV-CEDAR-CLI-AUTH-SPLIT: 403 별도 분기',
+  )
+  assert(
+    /인증이\s*필요/.test(body),
+    'INV-CEDAR-CLI-AUTH-SPLIT: 401 안내 메시지 ("인증이 필요")',
+  )
+  assert(
+    /admin\s*권한이\s*필요/.test(body),
+    'INV-CEDAR-CLI-AUTH-SPLIT: 403 안내 메시지 ("admin 권한이 필요")',
+  )
+  assert(
+    /PRESENCE_ADMIN_TOKEN/.test(body),
+    'INV-CEDAR-CLI-AUTH-SPLIT: 401 분기에 토큰 갱신 안내',
+  )
+}
+
+// FP-74 — INV-CEDAR-CLI-VERSION: cli-policy.js 가 cmdPolicyVersion + dispatchPolicy version 분기 +
+//   cli.js usage 에 policy version 노출.
+{
+  const cli = read('packages/infra/src/infra/auth/cli-policy.js')
+  assert(
+    /async\s+function\s+cmdPolicyVersion/.test(cli),
+    'INV-CEDAR-CLI-VERSION: cmdPolicyVersion 정의',
+  )
+  assert(
+    /case\s+'version'\s*:\s*return\s+await\s+cmdPolicyVersion/.test(cli),
+    'INV-CEDAR-CLI-VERSION: dispatchPolicy version 분기',
+  )
+
+  const cliMain = read('packages/infra/src/infra/auth/cli.js')
+  assert(
+    /policy version/.test(cliMain),
+    'INV-CEDAR-CLI-VERSION: cli.js usage 에 policy version 노출',
+  )
+  assert(
+    !/policy reload\s+\(미지원/.test(cliMain),
+    'INV-CEDAR-CLI-VERSION (FP-72): cli.js usage 에 stale "(미지원)" 부재',
+  )
+}
+
 // KG-28 P5 — INV-CEDAR-RELOAD-AUDIT-ISOLATED: admin-router 의 reload outcome 과 audit append 가
 //   별도 try 블록으로 분리되어 audit I/O 실패가 응답을 오염하지 않음 (round 9 H 흡수).
 {
