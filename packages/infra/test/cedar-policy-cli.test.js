@@ -223,6 +223,179 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // ===== FP-73 — admin token 자동 저장 — CLI-X10~X17 =====
+
+  const runCliEnv = (args, presenceDir, extraEnv = {}) => {
+    try {
+      const out = execSync(`${CLI} ${args}`, {
+        env: { ...process.env, PRESENCE_DIR: presenceDir, ...extraEnv },
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      })
+      return { code: 0, stdout: out, stderr: '' }
+    } catch (err) {
+      return {
+        code: err.status ?? -1,
+        stdout: err.stdout?.toString() || '',
+        stderr: err.stderr?.toString() || '',
+      }
+    }
+  }
+
+  // CLI-X10 — `admin login` 서버 미가동 → exit 1 + "서버 도달 실패"
+  {
+    const dir = createTmpDir()
+    const r = runCliEnv('admin login --username admin --password fake', dir, {
+      PRESENCE_SERVER_URL: 'http://127.0.0.1:9',  // unassigned port
+    })
+    assert(r.code === 1, `CLI-X10: 서버 미가동 → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('서버 도달 실패'),
+      `CLI-X10: stderr 에 "서버 도달 실패" (got ${r.stderr.slice(0, 150)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X11 — `admin logout` 세션 없음 → exit 0 + "Not logged in"
+  {
+    const dir = createTmpDir()
+    const r = runCliEnv('admin logout', dir)
+    assert(r.code === 0, `CLI-X11: 세션 없음 logout → exit 0 (got ${r.code})`)
+    assert(r.stdout.includes('Not logged in'),
+      `CLI-X11: stdout 에 "Not logged in" (got ${r.stdout})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X12 — `admin whoami` 세션 없음 → "Not logged in"
+  {
+    const dir = createTmpDir()
+    const r = runCliEnv('admin whoami', dir)
+    assert(r.code === 0, `CLI-X12: whoami → exit 0 (got ${r.code})`)
+    assert(r.stdout.includes('Not logged in'),
+      `CLI-X12: stdout 에 "Not logged in" (got ${r.stdout})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X13 — `policy reload` ENV 없음 + 파일 없음 → exit 1 + "admin login" 안내
+  {
+    const dir = createTmpDir()
+    const env = { ...process.env, PRESENCE_DIR: dir }
+    delete env.PRESENCE_ADMIN_TOKEN
+    let r
+    try {
+      const out = execSync(`${CLI} policy reload`, {
+        env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      })
+      r = { code: 0, stdout: out, stderr: '' }
+    } catch (err) {
+      r = { code: err.status ?? -1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' }
+    }
+    assert(r.code === 1, `CLI-X13: ENV 없음 + 파일 없음 → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('admin login'),
+      `CLI-X13: stderr 에 "admin login" 안내 (got ${r.stderr.slice(0, 200)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X14 — usage 에 admin login/logout/whoami + 갱신된 정책 안내
+  {
+    const dir = createTmpDir()
+    const r = runCliEnv('', dir)
+    assert(r.code === 0, `CLI-X14: usage exit 0`)
+    assert(r.stdout.includes('admin login'), `CLI-X14: usage 에 admin login`)
+    assert(r.stdout.includes('admin logout'), `CLI-X14: usage 에 admin logout`)
+    assert(r.stdout.includes('admin whoami'), `CLI-X14: usage 에 admin whoami`)
+    assert(r.stdout.includes('자동 동작'),
+      `CLI-X14: 정책 안내 갱신 — "ENV 없이 자동 동작" 문구`)
+    assert(!r.stdout.includes('PRESENCE_ADMIN_TOKEN env 필수'),
+      `CLI-X14: stale "env 필수" 문구 부재`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X16 — 권한 위배 (mode 0o644) → exit 1 + chmod 안내
+  {
+    const dir = createTmpDir()
+    const path = join(dir, 'admin-session.json')
+    writeFileSync(path, JSON.stringify({
+      username: 'admin',
+      accessToken: 'fake.access',
+      refreshToken: 'fake.refresh',
+      accessExp: new Date(Date.now() + 900_000).toISOString(),
+      savedAt: new Date().toISOString(),
+    }))
+    const { chmodSync } = await import('node:fs')
+    chmodSync(path, 0o644)
+    const env = { ...process.env, PRESENCE_DIR: dir }
+    delete env.PRESENCE_ADMIN_TOKEN
+    let r
+    try {
+      execSync(`${CLI} policy reload`, { env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 })
+      r = { code: 0, stdout: '', stderr: '' }
+    } catch (err) {
+      r = { code: err.status ?? -1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' }
+    }
+    assert(r.code === 1, `CLI-X16: mode 위배 → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('권한 위배'),
+      `CLI-X16: stderr 에 "권한 위배" (got ${r.stderr.slice(0, 200)})`)
+    assert(r.stderr.includes('chmod 600'),
+      `CLI-X16: stderr 에 chmod 600 안내`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X17 — 손상 JSON → exit 1 + admin login 안내
+  {
+    const dir = createTmpDir()
+    const path = join(dir, 'admin-session.json')
+    writeFileSync(path, '{ broken json')
+    const { chmodSync } = await import('node:fs')
+    chmodSync(path, 0o600)
+    const env = { ...process.env, PRESENCE_DIR: dir }
+    delete env.PRESENCE_ADMIN_TOKEN
+    let r
+    try {
+      execSync(`${CLI} policy reload`, { env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 })
+      r = { code: 0, stdout: '', stderr: '' }
+    } catch (err) {
+      r = { code: err.status ?? -1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' }
+    }
+    assert(r.code === 1, `CLI-X17: 손상 JSON → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('손상'),
+      `CLI-X17: stderr 에 "손상" (got ${r.stderr.slice(0, 200)})`)
+    assert(r.stderr.includes('admin login'),
+      `CLI-X17: stderr 에 "admin login" 안내`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X15c — ENV + 손상 파일 동시 → ENV 흐름 정상 진행 (CI 안전성)
+  // 서버 미가동이라 fetch 단계에서 실패하지만 admin-session.json 손상이 진입을 막지 않는지가 핵심.
+  {
+    const dir = createTmpDir()
+    const path = join(dir, 'admin-session.json')
+    writeFileSync(path, '{ broken json')
+    const { chmodSync } = await import('node:fs')
+    chmodSync(path, 0o600)
+    const env = {
+      ...process.env,
+      PRESENCE_DIR: dir,
+      PRESENCE_ADMIN_TOKEN: 'fake-token',
+      PRESENCE_SERVER_URL: 'http://127.0.0.1:9',
+    }
+    let r
+    try {
+      execSync(`${CLI} policy reload`, { env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 })
+      r = { code: 0, stdout: '', stderr: '' }
+    } catch (err) {
+      r = { code: err.status ?? -1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' }
+    }
+    // ENV 사용으로 진입 → 서버 도달 실패가 결정적 종료. "손상" 메시지가 나오면 안 됨.
+    assert(r.code === 1, `CLI-X15c: 서버 미가동 → exit 1 (got ${r.code})`)
+    assert(r.stderr.includes('서버 도달 실패'),
+      `CLI-X15c: ENV 흐름 진입 → "서버 도달 실패" (got ${r.stderr.slice(0, 200)})`)
+    assert(!r.stderr.includes('손상'),
+      `CLI-X15c: 손상 파일 검사가 ENV 흐름을 막지 않음`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 

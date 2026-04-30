@@ -468,4 +468,109 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// FP-73 — admin-session 자동 fallback / mode / drift / admin 명령 / mustChangePassword 정적 회귀
+{
+  const cliPolicyPath = 'packages/infra/src/infra/auth/cli-policy.js'
+  const adminSessionPath = 'packages/infra/src/infra/auth/admin-session.js'
+  const cliPath = 'packages/infra/src/infra/auth/cli.js'
+  const cliAdminPath = 'packages/infra/src/infra/auth/cli-admin.js'
+
+  const cliPolicyText = read(cliPolicyPath)
+  const adminSessionText = read(adminSessionPath)
+  const cliText = read(cliPath)
+  const cliAdminText = read(cliAdminPath)
+
+  // INV-CEDAR-CLI-FILE-FALLBACK — resolveAdminToken 정의에 ENV + loadAdminSession 양쪽 분기 + ENV 우선.
+  {
+    const fnMatch = cliPolicyText.match(/const\s+resolveAdminToken\s*=\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?\n\}/)
+    assert(fnMatch, 'INV-CEDAR-CLI-FILE-FALLBACK: resolveAdminToken async 정의 추출')
+    const body = fnMatch?.[0] || ''
+    assert(
+      /process\.env\.PRESENCE_ADMIN_TOKEN/.test(body),
+      'INV-CEDAR-CLI-FILE-FALLBACK: ENV 분기 존재',
+    )
+    assert(
+      /loadAdminSession\s*\(\s*\)/.test(body),
+      'INV-CEDAR-CLI-FILE-FALLBACK: 파일 분기 (loadAdminSession 호출)',
+    )
+    assert(
+      /isAccessNearExpiry\s*\(/.test(body),
+      'INV-CEDAR-CLI-FILE-FALLBACK: 만료 임박 검사',
+    )
+    // ENV 분기가 파일 분기보다 먼저 — 우선순위 강제
+    const envIdx = body.indexOf('process.env.PRESENCE_ADMIN_TOKEN')
+    const fileIdx = body.indexOf('loadAdminSession')
+    assert(envIdx >= 0 && fileIdx >= 0 && envIdx < fileIdx,
+      'INV-CEDAR-CLI-FILE-FALLBACK: ENV 분기가 파일 분기보다 우선')
+  }
+
+  // INV-ADMIN-SESSION-MODE — saveAdminSession 본문에 atomicWriteJson({ mode: 0o600 }) + mkdirSync({ ..., mode: 0o700 })
+  {
+    assert(
+      /atomicWriteJson\([\s\S]*?mode:\s*0o600/.test(adminSessionText),
+      'INV-ADMIN-SESSION-MODE: atomicWriteJson(... { mode: 0o600 })',
+    )
+    assert(
+      /mkdirSync\([\s\S]*?mode:\s*0o700/.test(adminSessionText),
+      'INV-ADMIN-SESSION-MODE: mkdirSync(... { mode: 0o700 })',
+    )
+    assert(
+      /mode\s*&\s*0o077/.test(adminSessionText),
+      'INV-ADMIN-SESSION-MODE: mode & 0o077 권한 검증',
+    )
+  }
+
+  // INV-CEDAR-CLI-ADMIN-CMDS — cli.js usage + main switch + dispatchAdmin import + parseArgs 의 admin 분기.
+  {
+    assert(
+      /import\s*\{\s*dispatchAdmin\s*\}\s*from\s*['"]\.\/cli-admin\.js['"]/.test(cliText),
+      'INV-CEDAR-CLI-ADMIN-CMDS: dispatchAdmin import',
+    )
+    assert(
+      /case\s+['"]admin['"]\s*:[\s\S]*?dispatchAdmin\s*\(/.test(cliText),
+      'INV-CEDAR-CLI-ADMIN-CMDS: main switch 의 admin case',
+    )
+    assert(
+      /admin login/.test(cliText) && /admin logout/.test(cliText) && /admin whoami/.test(cliText),
+      'INV-CEDAR-CLI-ADMIN-CMDS: usage 에 admin login/logout/whoami',
+    )
+    assert(
+      /command\s*===\s*['"]admin['"]/.test(cliText),
+      'INV-CEDAR-CLI-ADMIN-CMDS: parseArgs 의 admin 2-단계 분기',
+    )
+  }
+
+  // INV-ADMIN-SESSION-DRIFT-BUFFER — isAccessNearExpiry 본문에 ADMIN_SESSION_DRIFT_BUFFER_S 사용 (매직 넘버 금지).
+  {
+    const fnMatch = adminSessionText.match(/function\s+isAccessNearExpiry\([\s\S]*?\n\}/)
+    assert(fnMatch, 'INV-ADMIN-SESSION-DRIFT-BUFFER: isAccessNearExpiry 정의 추출')
+    const body = fnMatch?.[0] || ''
+    assert(
+      /ADMIN_SESSION_DRIFT_BUFFER_S/.test(body),
+      'INV-ADMIN-SESSION-DRIFT-BUFFER: 상수 ADMIN_SESSION_DRIFT_BUFFER_S 사용',
+    )
+    assert(
+      !/\b30\b/.test(body.replace(/ADMIN_SESSION_DRIFT_BUFFER_S/g, '')),
+      'INV-ADMIN-SESSION-DRIFT-BUFFER: 본문 내 매직 넘버 30 부재',
+    )
+  }
+
+  // INV-ADMIN-MUST-CHANGE-PASSWORD — cmdAdminLogin 본문에 top-level body.mustChangePassword 검사 + 파일 미저장.
+  {
+    const fnMatch = cliAdminText.match(/async\s+function\s+cmdAdminLogin\s*\([\s\S]*?\n\}/)
+    assert(fnMatch, 'INV-ADMIN-MUST-CHANGE-PASSWORD: cmdAdminLogin 정의 추출')
+    const body = fnMatch?.[0] || ''
+    assert(
+      /body\.mustChangePassword\s*===\s*true/.test(body),
+      'INV-ADMIN-MUST-CHANGE-PASSWORD: top-level body.mustChangePassword 검사',
+    )
+    // throw 가 saveAdminSession 호출보다 먼저 — 파일 미저장 강제.
+    const throwIdx = body.search(/throw\s+new\s+CliAdminError\(\s*\[[\s\S]*?비밀번호 변경/)
+    const saveIdx = body.indexOf('saveAdminSession(')
+    assert(throwIdx >= 0, 'INV-ADMIN-MUST-CHANGE-PASSWORD: 비밀번호 변경 안내 throw 존재')
+    assert(saveIdx >= 0, 'INV-ADMIN-MUST-CHANGE-PASSWORD: saveAdminSession 호출 존재')
+    assert(throwIdx < saveIdx, 'INV-ADMIN-MUST-CHANGE-PASSWORD: throw 가 saveAdminSession 보다 먼저 (파일 미저장)')
+  }
+}
+
 summary()

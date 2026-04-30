@@ -10,15 +10,16 @@ import { getSubsystemAuditStatus } from '../authz/cedar/index.js'
 import { requireFlag, promptPassword, promptLine } from './cli-utils.js'
 import { dispatchAgent } from './cli-agent.js'
 import { dispatchPolicy } from './cli-policy.js'
+import { dispatchAdmin } from './cli-admin.js'
 
 // Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
 
 const parseArgs = () => {
   const args = process.argv.slice(2)
   const command = args[0]
-  // `agent <action>` / `policy <action>` 2-단계 subcommand 지원. 나머지는 기존 동작 유지.
-  const action = (command === 'agent' || command === 'policy') ? args[1] : null
-  const flagStart = (command === 'agent' || command === 'policy') ? 2 : 1
+  // `agent <action>` / `policy <action>` / `admin <action>` 2-단계 subcommand 지원. 나머지는 기존 동작 유지.
+  const action = (command === 'agent' || command === 'policy' || command === 'admin') ? args[1] : null
+  const flagStart = (command === 'agent' || command === 'policy' || command === 'admin') ? 2 : 1
   const flags = {}
   for (let i = flagStart; i < args.length; i++) {
     if (args[i].startsWith('--') && args[i + 1] && !args[i + 1].startsWith('--')) {
@@ -179,12 +180,17 @@ const main = async () => {
     console.log('Audit:')
     console.log('  npm run user -- audit-status')
     console.log('')
+    console.log('Admin (FP-73 — admin token 자동 저장):')
+    console.log('  npm run user -- admin login [--username <name>]   (기본: admin)')
+    console.log('  npm run user -- admin logout')
+    console.log('  npm run user -- admin whoami')
+    console.log('')
     console.log('Cedar policy:')
     console.log('  npm run user -- policy lint --file <path.cedar>')
     console.log('  npm run user -- policy list')
     console.log('  npm run user -- policy reload                      (서버 재시작 없이 정책 즉시 적용)')
     console.log('  npm run user -- policy version                     (현재 활성 정책 버전 확인)')
-    console.log('  policy reload / version: PRESENCE_ADMIN_TOKEN env 필수.')
+    console.log('  policy reload / version: \'admin login\' 후 ENV 없이 자동 동작 (또는 PRESENCE_ADMIN_TOKEN env).')
     process.exit(0)
   }
 
@@ -213,6 +219,12 @@ const main = async () => {
         process.exit(1)
       }
       return dispatchPolicy(action, flags)
+    case 'admin':
+      if (!action) {
+        console.error('admin: action required (login / logout / whoami)')
+        process.exit(1)
+      }
+      return dispatchAdmin(action, flags)
     default:
       console.error(`Unknown command: ${command}`)
       process.exit(1)

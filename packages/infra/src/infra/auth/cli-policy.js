@@ -1,9 +1,18 @@
 // KG-27 P4 — Cedar 정책 운영자 CLI 핸들러. cli.js 의 main switch 에서 dispatchPolicy 호출.
 // lint (parse + schema validate) / list (카테고리 표) / reload (P5 후속, hot reload).
+// FP-73: resolveAdminToken 에 admin-session.json 파일 fallback + 자동 refresh + 401 retry.
 
 import { readFileSync } from 'node:fs'
 import { lintPolicyText, listPolicyFiles, readSchemaText } from '../authz/cedar/index.js'
 import { requireFlag } from './cli-utils.js'
+import {
+  loadAdminSession,
+  saveAdminSession,
+  clearAdminSession,
+  isAccessNearExpiry,
+  decodeAccessExp,
+  AdminSessionError,
+} from './admin-session.js'
 
 // CLI handler 가 throw 하면 dispatchPolicy 가 catch + process.exit(1) 로 단일 수렴.
 // 각 handler 는 비즈니스 로직만 — exit 처리는 dispatch 경계.
@@ -66,18 +75,98 @@ const VERSION_PATH = '/api/admin/policy/version'
 
 const resolveBaseUrl = () => process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
 
-const resolveAdminToken = () => {
-  const token = process.env.PRESENCE_ADMIN_TOKEN
-  if (!token) {
+// ENV 분기는 어떤 경우에도 파일 상태로 깨지지 않아야 함 (CI 호환).
+// 파일이 mode 위배 또는 손상이어도 ENV 흐름은 그대로 진행 — 경고는 best-effort.
+const warnEnvShadowingFile = () => {
+  let fileExists = false
+  try { fileExists = (loadAdminSession() != null) } catch (_) {}
+  if (fileExists) {
+    console.warn('주의: PRESENCE_ADMIN_TOKEN env 가 admin-session.json 보다 우선 사용됩니다.')
+    console.warn('  파일 기반 자동 동작을 원하면: unset PRESENCE_ADMIN_TOKEN')
+  }
+}
+
+const refreshAndPersist = async (session) => {
+  const baseUrl = resolveBaseUrl()
+  let response
+  try {
+    response = await fetch(`${baseUrl}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+    })
+  } catch (err) {
     throw new CliPolicyError([
-      'policy: admin access token 필요.',
-      '  1. admin 으로 로그인 — POST /api/auth/login',
-      '  2. 응답의 access token 을 PRESENCE_ADMIN_TOKEN env 에 설정',
-      '  3. 다시 실행',
-      '  주의: process listing 으로 token 노출 가능. 신뢰된 환경에서만 사용.',
+      `policy: 서버 도달 실패 — ${err.message}`,
+      '  서버 가동 상태 확인 후 재시도 — npm start',
     ].join('\n'))
   }
-  return token
+  if (response.status === 401) {
+    clearAdminSession()
+    throw new CliPolicyError([
+      'policy: 세션 만료 (refresh token 무효).',
+      '  npm run user -- admin login 으로 재로그인.',
+    ].join('\n'))
+  }
+  if (!response.ok) {
+    throw new CliPolicyError(`policy: refresh 실패 (HTTP ${response.status}).`)
+  }
+  const body = await response.json()
+  if (!body.accessToken || !body.refreshToken) {
+    throw new CliPolicyError([
+      'policy: refresh 응답에 토큰이 누락되었습니다 (서버 응답 형식이 호환되지 않음).',
+      '  npm run user -- admin login 으로 재로그인.',
+    ].join('\n'))
+  }
+  const accessExp = decodeAccessExp(body.accessToken)
+  saveAdminSession({
+    username: session.username,
+    accessToken: body.accessToken,
+    refreshToken: body.refreshToken,
+    accessExp,
+  })
+  return body.accessToken
+}
+
+const resolveAdminToken = async () => {
+  if (process.env.PRESENCE_ADMIN_TOKEN) {
+    warnEnvShadowingFile()
+    return process.env.PRESENCE_ADMIN_TOKEN
+  }
+
+  let session
+  try {
+    session = loadAdminSession()
+  } catch (err) {
+    if (err instanceof AdminSessionError && err.reason === 'mode') {
+      throw new CliPolicyError([
+        `policy: admin-session.json 권한 위배 (${err.message}).`,
+        '  chmod 600 ~/.presence/admin-session.json 후 재시도.',
+      ].join('\n'))
+    }
+    if (err instanceof AdminSessionError && err.reason === 'corrupt') {
+      throw new CliPolicyError([
+        `policy: admin-session.json 손상 — ${err.message}`,
+        '  npm run user -- admin login 으로 재로그인.',
+      ].join('\n'))
+    }
+    throw err
+  }
+
+  if (!session) {
+    throw new CliPolicyError([
+      'policy: admin access token 필요.',
+      '',
+      '  로그인 — npm run user -- admin login',
+      '  (이후 reload/version 은 ENV 없이 자동 동작)',
+      '',
+      '  CI/자동화 환경: PRESENCE_ADMIN_TOKEN env 사용 가능.',
+      '    주의: process listing 으로 token 노출 가능.',
+    ].join('\n'))
+  }
+
+  if (!isAccessNearExpiry(session)) return session.accessToken
+  return await refreshAndPersist(session)
 }
 
 const fetchAdmin = async (path, { method = 'GET', token, baseUrl }) => {
@@ -141,10 +230,34 @@ const formatReloadFailure = (body) => {
   return lines.join('\n')
 }
 
+// FP-73: clock drift 대응 — 첫 401 시 1회 force-refresh + retry. ENV 사용 중에는 retry 안 함.
+const fetchAdminWithRetry = async (path, { method, baseUrl }) => {
+  let token = await resolveAdminToken()
+  let response = await fetchAdmin(path, { method, token, baseUrl })
+  if (response.status === 401 && !process.env.PRESENCE_ADMIN_TOKEN) {
+    const session = loadAdminSession()
+    if (!session) {
+      throw new CliPolicyError([
+        'policy: 인증 실패 (401). 세션이 없습니다.',
+        '  npm run user -- admin login 으로 재로그인.',
+      ].join('\n'))
+    }
+    token = await refreshAndPersist(session)
+    response = await fetchAdmin(path, { method, token, baseUrl })
+    if (response.status === 401) {
+      throw new CliPolicyError([
+        'policy: 인증 실패 (refresh 후에도 401).',
+        '  npm run user -- admin login 으로 재시도.',
+        '  반복 발생 시 서버측 auth 상태 확인 (서버 로그/restart 검토 필요).',
+      ].join('\n'))
+    }
+  }
+  return response
+}
+
 async function cmdPolicyReload() {
   const baseUrl = resolveBaseUrl()
-  const token = resolveAdminToken()
-  const response = await fetchAdmin(RELOAD_PATH, { method: 'POST', token, baseUrl })
+  const response = await fetchAdminWithRetry(RELOAD_PATH, { method: 'POST', baseUrl })
   handleAuthError(response)
   const body = await response.json()
   if (response.ok) {
@@ -157,8 +270,7 @@ async function cmdPolicyReload() {
 // FP-74: GET /api/admin/policy/version CLI wrapper. 변경 적용 후 운영자가 활성 버전 재확인.
 async function cmdPolicyVersion() {
   const baseUrl = resolveBaseUrl()
-  const token = resolveAdminToken()
-  const response = await fetchAdmin(VERSION_PATH, { method: 'GET', token, baseUrl })
+  const response = await fetchAdminWithRetry(VERSION_PATH, { method: 'GET', baseUrl })
   handleAuthError(response)
   const body = await response.json()
   if (!response.ok) {
