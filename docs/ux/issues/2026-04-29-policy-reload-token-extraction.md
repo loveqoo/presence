@@ -2,8 +2,52 @@
 
 **영역**: infra (admin CLI)
 **심각도**: high
-**상태**: open
-**관련 코드**: `packages/infra/src/infra/auth/cli-policy.js:51-93`
+**상태**: resolved (2026-04-30)
+**관련 코드**: `admin-session.js`, `cli-admin.js`, `cli-policy.js`
+
+## 해소 (2026-04-30)
+
+제안 옵션 "별도 phase — token 자동 저장" 채택. MVP 범위로 반영됨.
+
+**운영 가정 (release gate)**
+
+single-admin / single-machine / single-host server / passwd 가능 환경에서만 운영한다고 가정.
+
+**신규 명령**
+
+| 명령 | 역할 |
+|------|------|
+| `npm run user -- admin login [--username <name>]` | 1회 인증 → 파일 저장 |
+| `npm run user -- admin logout` | 서버 측 jti revoke + 파일 삭제 |
+| `npm run user -- admin whoami` | 세션 상태 확인 (token 미노출) |
+
+**저장 방식**
+
+`~/.presence/admin-session.json` (mode 0o600, 부모 디렉토리 0o700, atomicWriteJson).
+
+**token 해석 우선순위**
+
+ENV → 파일 (만료 임박 시 자동 refresh) → 부재 시 안내 출력.
+
+**후속 phase 로 분리된 항목**
+
+- file lock 동시 race 방어
+- contract drift 감지
+- credential rotation 가이드
+- mustChangePassword 자동 변경
+- multi-instance topology 대응
+
+**회귀 커버리지**
+
+AS1~AS10 (단위) + CLI-X10~X17 (CLI) + AR9~AR14b (server) + INV 5종 (정적). 4684 → 4775 passed (+91).
+
+**결정 경위**
+
+plan-reviewer 11 라운드 (pre-MVP 6 + MVP 5) 거쳐 사용자 결정으로 확정. 운영 규율 영역(rotation, multi-instance 등)은 가이드 문서로 흡수.
+
+---
+
+## (이하 원래 issue 본문)
 
 ## 시나리오
 

@@ -24,47 +24,136 @@
 
 ---
 
-## 준비 사항: admin 토큰 발급
+## 준비 사항: admin 로그인
 
-정책 리로드(즉시 반영)는 admin 계정으로 로그인한 뒤 받은 **access token** 이 필요합니다.
+정책 리로드(즉시 반영)와 버전 확인은 admin 계정으로 로그인한 상태여야 합니다.
 
-### 1단계. admin 계정으로 로그인
+로그인 방법은 두 가지입니다. 일반 운영에는 **1순위(권장)** 방법을 사용하세요.
 
-터미널에서 아래 명령을 실행합니다. (서버가 `http://localhost:3000` 에서 실행 중이어야 합니다.)
+### 1순위 (권장): admin login 명령으로 1회 로그인
+
+```bash
+npm run user -- admin login
+```
+
+비밀번호를 입력하면 로그인 정보가 `~/.presence/admin-session.json` 파일에 자동으로 저장됩니다. 이후 `policy reload`, `policy version` 등의 명령을 실행할 때 이 파일을 자동으로 읽으므로, **별도 설정 없이 바로 사용**할 수 있습니다.
+
+**화면 예시:**
+
+```
+admin 비밀번호:
+로그인 성공. 인증 정보가 저장되었습니다.
+```
+
+로그인 후 사용할 수 있는 admin 계정 관련 명령:
+
+| 명령 | 하는 일 |
+|------|---------|
+| `admin login [--username <이름>]` | 1회 로그인 후 파일에 자동 저장 (기본 계정: admin) |
+| `admin logout` | 서버 측 인증 무효화 + 저장된 파일 삭제 |
+| `admin whoami` | 현재 로그인 상태와 인증 만료 시각 확인 |
+
+> 로그인 정보는 만료 시각이 가까워지면 자동으로 갱신됩니다. 평소에는 신경 쓰지 않아도 됩니다.
+
+#### 처음 로그인할 때 비밀번호 변경 요구가 나오면
+
+새로 만든 admin 계정은 처음 로그인 시 아래 안내가 표시될 수 있습니다:
+
+```
+admin login: 비밀번호 변경이 필요합니다 (mustChangePassword=true).
+  서버 호스트에서: npm run user -- passwd --username admin
+  (passwd 는 서버에 저장된 계정 정보만 변경하므로 서버가 실행 중인 컴퓨터에서 실행해야 함)
+비밀번호 변경 후 다시 admin login 하세요.
+```
+
+이 경우 아래 순서로 진행합니다:
+
+1. **서버가 실행 중인 컴퓨터** 에서 비밀번호를 변경합니다:
+   ```bash
+   npm run user -- passwd --username admin
+   ```
+2. 새 비밀번호를 입력합니다.
+3. 다시 로그인합니다:
+   ```bash
+   npm run user -- admin login
+   ```
+
+#### 동시 실행 자제
+
+admin login 으로 운영 중에는 다음을 지켜주세요:
+
+- 단일 admin 운영자 / 단일 머신을 가정합니다.
+- `policy reload` 같은 admin 명령을 두 개 이상의 터미널에서 **동시에 실행하지 마세요.** 내부 인증 갱신이 충돌하면 양쪽 모두 재로그인이 필요해집니다.
+- 충돌이 의심되면 `npm run user -- admin login` 으로 다시 로그인하면 자연 복구됩니다.
+- 적용 여부가 불확실하면 `npm run user -- policy version` 으로 즉시 확인할 수 있습니다.
+
+---
+
+### 2순위 (CI/자동화 전용): 환경 변수로 토큰 직접 설정
+
+스크립트나 CI 파이프라인처럼 대화형 로그인을 사용할 수 없는 환경에서는 아래 방법을 사용합니다.
+
+> **1순위 방법을 권장합니다.** 환경 변수 방식은 같은 컴퓨터의 다른 프로세스가 프로세스 목록을 조회할 때 토큰이 노출될 수 있습니다. 신뢰할 수 있는 자동화 환경에서만 사용하세요.
+
+**1단계. admin 계정으로 로그인하여 토큰 발급**
 
 ```bash
 curl -s -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"비밀번호"}'
+  -d '{"username":"admin","password":"비밀번호"}' \
+  | jq -r '.accessToken'
 ```
 
-성공하면 아래와 같은 응답이 옵니다:
+성공하면 `eyJhbGciOi...` 형태의 토큰 문자열이 출력됩니다.
 
-```
-{
-  "accessToken": "eyJhbGciOi...(긴 문자열)...",
-  "refreshToken": "...",
-  ...
-}
-```
-
-### 2단계. 토큰을 환경 변수에 저장
-
-응답에서 `accessToken` 값을 복사해 아래 명령어의 따옴표 안에 붙여넣습니다.
+**2단계. 환경 변수에 저장**
 
 ```bash
-export PRESENCE_ADMIN_TOKEN="여기에_accessToken_붙여넣기"
+export PRESENCE_ADMIN_TOKEN="위에서_출력된_토큰"
 ```
 
-> **주의:** 이 토큰은 터미널을 닫으면 사라집니다. 세션마다 다시 발급해야 합니다.
->
-> **보안 주의:** 토큰을 환경 변수로 설정하면 같은 컴퓨터에서 실행 중인 다른 프로그램이 프로세스 목록을 조회할 때 토큰이 노출될 수 있습니다. 신뢰할 수 있는 환경에서만 사용하세요.
+> **주의:** 이 토큰은 터미널을 닫으면 사라집니다. 실행할 때마다 다시 발급해야 합니다.
 
-서버 주소가 다르다면 `PRESENCE_SERVER_URL` 도 설정합니다:
+서버 주소가 기본값(`http://localhost:3000`)과 다르다면 함께 설정합니다:
 
 ```bash
 export PRESENCE_SERVER_URL="http://서버주소:포트"
 ```
+
+---
+
+## 토큰 노출 시 대응
+
+`~/.presence/admin-session.json` 에 저장된 인증 정보(refresh token)는 최대 7일간 유효한 자격 증명입니다. 아래 상황이 의심될 때는 즉시 대응하세요:
+
+- 백업 매체나 분실한 장비에 파일이 잔존하는 경우
+- 같은 컴퓨터에서 악의적인 프로세스가 실행됐을 가능성이 있는 경우
+
+**대응 순서:**
+
+1. 저장된 인증 무효화 (서버 측 + 로컬 파일 동시 삭제):
+   ```bash
+   npm run user -- admin logout
+   ```
+2. 서버 재시작 (서버 메모리에 남은 인증 정보 일괄 초기화):
+   ```bash
+   # 서버가 실행 중인 컴퓨터에서
+   npm start
+   ```
+3. 백업 매체나 분실 장비에 남은 `~/.presence/admin-session.json` 파일을 직접 삭제합니다.
+4. 다시 로그인합니다:
+   ```bash
+   npm run user -- admin login
+   ```
+
+**비밀번호 변경이 필요한 경우:**
+
+```bash
+# 서버가 실행 중인 컴퓨터에서
+npm run user -- passwd --username admin
+```
+
+비밀번호 변경 후에는 기존 로그인 세션이 모두 무효가 되므로 `admin login` 으로 다시 로그인합니다.
 
 ---
 
@@ -150,7 +239,7 @@ filename              category    size
 
 정책 파일을 수정하거나 새로 추가한 뒤, 서버를 재시작하지 않고 바로 적용하려면 아래 명령을 실행합니다.
 
-`PRESENCE_ADMIN_TOKEN` 환경 변수가 설정된 상태여야 합니다 (위의 준비 사항 참고).
+`admin login` 으로 로그인한 상태여야 합니다 (위의 [준비 사항](#준비-사항-admin-로그인) 참고).
 
 ```bash
 npm run user -- policy reload
@@ -196,7 +285,7 @@ OK: 정책이 적용되었습니다.
 
 reload 후 현재 어떤 버전의 정책이 서버에서 실행 중인지 언제든 확인할 수 있습니다.
 
-`PRESENCE_ADMIN_TOKEN` 환경 변수가 설정된 상태여야 합니다.
+`admin login` 으로 로그인한 상태여야 합니다.
 
 ```bash
 npm run user -- policy version
@@ -260,7 +349,7 @@ npm run user -- policy version
 현재 활성 정책: 버전 3 (적용: 2026-04-29T10:00:00.000Z)
 ```
 
-`PRESENCE_ADMIN_TOKEN` 환경 변수가 설정된 상태여야 합니다.
+`admin login` 으로 로그인한 상태여야 합니다.
 
 ---
 
@@ -268,28 +357,33 @@ npm run user -- policy version
 
 ### "policy reload: admin access token 필요." 라고 나옵니다
 
-`PRESENCE_ADMIN_TOKEN` 환경 변수가 설정되지 않은 상태입니다. 위의 [준비 사항](#준비-사항-admin-토큰-발급) 을 다시 따라합니다.
+로그인이 되어 있지 않거나 인증 파일이 없는 상태입니다.
+
+- 권장 방법: `npm run user -- admin login` 으로 로그인합니다.
+- 환경 변수 방식 사용 중이라면 `PRESENCE_ADMIN_TOKEN` 이 설정되어 있는지 확인합니다.
 
 ### "policy reload: 서버 도달 실패" 라고 나옵니다
 
 서버가 꺼져 있거나 주소가 틀렸습니다.
+
 - 서버 실행: `npm start`
-- 주소가 다르면: `export PRESENCE_SERVER_URL="http://올바른주소:포트"`
+- 서버 주소가 기본값과 다르면: `export PRESENCE_SERVER_URL="http://올바른주소:포트"`
 
 ### "인증이 필요합니다 (HTTP 401)" 라고 나옵니다
 
-토큰이 만료됐거나 잘못 설정된 것입니다. 아래 순서로 처리합니다:
+로그인 정보가 만료됐습니다. 아래 순서로 처리합니다:
 
-1. 위의 [준비 사항](#준비-사항-admin-토큰-발급) 을 다시 따라해 새 토큰을 발급받습니다.
-2. `export PRESENCE_ADMIN_TOKEN="새_토큰"` 으로 환경 변수를 갱신합니다.
-3. 다시 명령을 실행합니다.
+1. `npm run user -- admin login` 으로 다시 로그인합니다.
+2. 다시 명령을 실행합니다.
+
+환경 변수 방식을 사용 중이라면 새 토큰을 발급해 `PRESENCE_ADMIN_TOKEN` 을 갱신합니다.
 
 ### "admin 권한이 필요합니다 (HTTP 403)" 라고 나옵니다
 
-로그인한 계정이 admin role 을 가지고 있지 않습니다. 아래를 확인합니다:
+로그인한 계정에 admin 권한이 없습니다. 아래를 확인합니다:
 
 - 설정 파일에서 해당 계정에 `role: admin` 이 부여되어 있는지 확인합니다.
-- admin role 이 있는 다른 계정으로 로그인해서 토큰을 새로 발급받습니다.
+- admin 권한이 있는 계정으로 다시 `admin login` 합니다.
 
 ### reload 에 성공했는데 정책이 적용 안 된 것 같습니다
 
