@@ -228,4 +228,4 @@ class HttpAuthService extends AuthService {
   }
 }
 
-export { HttpAuthService }
+export { HttpAuthService, createRateLimiter, httpStatus, MUST_CHANGE_PASSWORD_ALLOWLIST }

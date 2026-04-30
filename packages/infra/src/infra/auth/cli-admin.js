@@ -9,7 +9,7 @@ import {
   decodeAccessExp,
   adminSessionPath,
 } from './admin-session.js'
-import { promptPassword } from './cli-utils.js'
+import { promptPassword, httpJson, mapHttpFetchError } from './cli-utils.js'
 
 class CliAdminError extends Error {
   constructor(stderrMessage) {
@@ -37,33 +37,23 @@ async function cmdAdminLogin({ username, password }) {
   const resolvedPassword = passwordFromFlag || passwordFromEnv || await promptPassword('Password: ')
 
   const baseUrl = resolveBaseUrl()
-  let response
+  let res
   try {
-    response = await fetch(`${baseUrl}/api/auth/login`, {
+    res = await httpJson(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: resolvedUsername, password: resolvedPassword }),
     })
   } catch (err) {
-    throw new CliAdminError([
-      `admin login: 서버 도달 실패 — ${err.message}`,
-      '  서버 가동 상태 확인 후 재시도 — npm start',
-    ].join('\n'))
+    throw mapHttpFetchError(err, CliAdminError, 'admin login')
   }
 
-  let body
-  try {
-    body = await response.json()
-  } catch {
-    throw new CliAdminError(`admin login: 응답 파싱 실패 (HTTP ${response.status}).`)
-  }
-
-  if (!response.ok) {
-    throw new CliAdminError(`admin login: 로그인 실패 (HTTP ${response.status}): ${body?.error ?? '(empty)'}`)
+  if (!res.ok) {
+    throw new CliAdminError(`admin login: 로그인 실패 (HTTP ${res.status}): ${res.body?.error ?? '(empty)'}`)
   }
 
   // mustChangePassword 차단 — 저장하면 useless token 이 디스크에 남음. 안내 후 exit.
-  if (body.mustChangePassword === true) {
+  if (res.body.mustChangePassword === true) {
     throw new CliAdminError([
       'admin login: 비밀번호 변경이 필요합니다 (mustChangePassword=true).',
       `  서버 호스트에서: npm run user -- passwd --username ${resolvedUsername}`,
@@ -72,15 +62,15 @@ async function cmdAdminLogin({ username, password }) {
     ].join('\n'))
   }
 
-  if (!body.accessToken || !body.refreshToken) {
+  if (!res.body.accessToken || !res.body.refreshToken) {
     throw new CliAdminError('admin login: 응답에 토큰이 누락되었습니다 (서버 응답 형식이 호환되지 않음).')
   }
 
-  const accessExp = decodeAccessExp(body.accessToken)
+  const accessExp = decodeAccessExp(res.body.accessToken)
   saveAdminSession({
     username: resolvedUsername,
-    accessToken: body.accessToken,
-    refreshToken: body.refreshToken,
+    accessToken: res.body.accessToken,
+    refreshToken: res.body.refreshToken,
     accessExp,
   })
 

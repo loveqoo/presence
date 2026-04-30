@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs'
 import { lintPolicyText, listPolicyFiles, readSchemaText } from '../authz/cedar/index.js'
-import { requireFlag } from './cli-utils.js'
+import { requireFlag, httpJson, mapHttpFetchError } from './cli-utils.js'
 import {
   loadAdminSession,
   saveAdminSession,
@@ -88,44 +88,40 @@ const warnEnvShadowingFile = () => {
 
 const refreshAndPersist = async (session) => {
   const baseUrl = resolveBaseUrl()
-  let response
+  let res
   try {
-    response = await fetch(`${baseUrl}/api/auth/refresh`, {
+    res = await httpJson(`${baseUrl}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: session.refreshToken }),
     })
   } catch (err) {
-    throw new CliPolicyError([
-      `policy: 서버 도달 실패 — ${err.message}`,
-      '  서버 가동 상태 확인 후 재시도 — npm start',
-    ].join('\n'))
+    throw mapHttpFetchError(err, CliPolicyError, 'policy')
   }
-  if (response.status === 401) {
+  if (res.status === 401) {
     clearAdminSession()
     throw new CliPolicyError([
       'policy: 세션 만료 (refresh token 무효).',
       '  npm run user -- admin login 으로 재로그인.',
     ].join('\n'))
   }
-  if (!response.ok) {
-    throw new CliPolicyError(`policy: refresh 실패 (HTTP ${response.status}).`)
+  if (!res.ok) {
+    throw new CliPolicyError(`policy: refresh 실패 (HTTP ${res.status}).`)
   }
-  const body = await response.json()
-  if (!body.accessToken || !body.refreshToken) {
+  if (!res.body.accessToken || !res.body.refreshToken) {
     throw new CliPolicyError([
       'policy: refresh 응답에 토큰이 누락되었습니다 (서버 응답 형식이 호환되지 않음).',
       '  npm run user -- admin login 으로 재로그인.',
     ].join('\n'))
   }
-  const accessExp = decodeAccessExp(body.accessToken)
+  const accessExp = decodeAccessExp(res.body.accessToken)
   saveAdminSession({
     username: session.username,
-    accessToken: body.accessToken,
-    refreshToken: body.refreshToken,
+    accessToken: res.body.accessToken,
+    refreshToken: res.body.refreshToken,
     accessExp,
   })
-  return body.accessToken
+  return res.body.accessToken
 }
 
 const resolveAdminToken = async () => {
@@ -169,18 +165,15 @@ const resolveAdminToken = async () => {
   return await refreshAndPersist(session)
 }
 
+// httpJson 반환 형태로 통일 — { status, ok, body }. caller 는 res.body 직접 사용.
 const fetchAdmin = async (path, { method = 'GET', token, baseUrl }) => {
   try {
-    return await fetch(`${baseUrl}${path}`, {
+    return await httpJson(`${baseUrl}${path}`, {
       method,
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}` },
     })
   } catch (err) {
-    // round 9 M 흡수: ECONNREFUSED 특화 제거. 모든 fetch 실패 동일 처리.
-    throw new CliPolicyError([
-      `policy: 서버 도달 실패 — ${err.message}`,
-      '  서버 가동 상태 확인 후 재시도 — npm start',
-    ].join('\n'))
+    throw mapHttpFetchError(err, CliPolicyError, 'policy')
   }
 }
 
@@ -233,8 +226,8 @@ const formatReloadFailure = (body) => {
 // FP-73: clock drift 대응 — 첫 401 시 1회 force-refresh + retry. ENV 사용 중에는 retry 안 함.
 const fetchAdminWithRetry = async (path, { method, baseUrl }) => {
   let token = await resolveAdminToken()
-  let response = await fetchAdmin(path, { method, token, baseUrl })
-  if (response.status === 401 && !process.env.PRESENCE_ADMIN_TOKEN) {
+  let res = await fetchAdmin(path, { method, token, baseUrl })
+  if (res.status === 401 && !process.env.PRESENCE_ADMIN_TOKEN) {
     const session = loadAdminSession()
     if (!session) {
       throw new CliPolicyError([
@@ -243,8 +236,8 @@ const fetchAdminWithRetry = async (path, { method, baseUrl }) => {
       ].join('\n'))
     }
     token = await refreshAndPersist(session)
-    response = await fetchAdmin(path, { method, token, baseUrl })
-    if (response.status === 401) {
+    res = await fetchAdmin(path, { method, token, baseUrl })
+    if (res.status === 401) {
       throw new CliPolicyError([
         'policy: 인증 실패 (refresh 후에도 401).',
         '  npm run user -- admin login 으로 재시도.',
@@ -252,31 +245,29 @@ const fetchAdminWithRetry = async (path, { method, baseUrl }) => {
       ].join('\n'))
     }
   }
-  return response
+  return res
 }
 
 async function cmdPolicyReload() {
   const baseUrl = resolveBaseUrl()
-  const response = await fetchAdminWithRetry(RELOAD_PATH, { method: 'POST', baseUrl })
-  handleAuthError(response)
-  const body = await response.json()
-  if (response.ok) {
-    printReloadSuccess(body)
+  const res = await fetchAdminWithRetry(RELOAD_PATH, { method: 'POST', baseUrl })
+  handleAuthError(res)
+  if (res.ok) {
+    printReloadSuccess(res.body)
     return
   }
-  throw new CliPolicyError(formatReloadFailure(body))
+  throw new CliPolicyError(formatReloadFailure(res.body))
 }
 
 // FP-74: GET /api/admin/policy/version CLI wrapper. 변경 적용 후 운영자가 활성 버전 재확인.
 async function cmdPolicyVersion() {
   const baseUrl = resolveBaseUrl()
-  const response = await fetchAdminWithRetry(VERSION_PATH, { method: 'GET', baseUrl })
-  handleAuthError(response)
-  const body = await response.json()
-  if (!response.ok) {
-    throw new CliPolicyError(`policy version 조회 실패: ${body?.error ?? `HTTP ${response.status}`}`)
+  const res = await fetchAdminWithRetry(VERSION_PATH, { method: 'GET', baseUrl })
+  handleAuthError(res)
+  if (!res.ok) {
+    throw new CliPolicyError(`policy version 조회 실패: ${res.body?.error ?? `HTTP ${res.status}`}`)
   }
-  console.log(`현재 활성 정책: 버전 ${body.version} (적용: ${body.reloadedAt})`)
+  console.log(`현재 활성 정책: 버전 ${res.body.version} (적용: ${res.body.reloadedAt})`)
 }
 
 export const dispatchPolicy = async (action, flags) => {
