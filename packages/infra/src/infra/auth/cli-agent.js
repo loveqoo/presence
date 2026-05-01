@@ -13,16 +13,19 @@ import {
   readPendingRequest,
 } from '../authz/agent-governance.js'
 import { bootCedarSubsystem, createSubsystemAuditWriter } from '../authz/cedar/index.js'
-import { requireFlag } from './cli-utils.js'
+import { requireFlag, CliError, dispatchWithCliErrorHandling } from './cli-utils.js'
 import { AUDIT_ACTION, AUDIT_DECISION, ROLES } from '@presence/core/core/policies.js'
+
+class CliAgentError extends CliError {
+  constructor(stderrMessage) { super(stderrMessage, 'CliAgentError') }
+}
 
 const loadPersonaFromFile = (filePath) => {
   if (!filePath) return null
   try {
     return JSON.parse(readFileSync(filePath, 'utf-8'))
   } catch (err) {
-    console.error(`Failed to read persona file: ${err.message}`)
-    process.exit(1)
+    throw new CliAgentError(`Failed to read persona file: ${err.message}`)
   }
 }
 
@@ -53,13 +56,9 @@ async function cmdAgentAdd(params) {
       console.log(`  Admin can approve:  npm run user -- agent approve --id ${result.reqId}`)
       return
     case GV_STATUS.ALREADY_EXISTS:
-      console.error(`Agent '${params.requester}/${params.name}' already exists.`)
-      process.exit(1)
-      return
+      throw new CliAgentError(`Agent '${params.requester}/${params.name}' already exists.`)
     case GV_STATUS.DENIED:
-      console.error(`Agent '${params.requester}/${params.name}' denied by Cedar policy. ${result.detail || ''}`)
-      process.exit(1)
-      return
+      throw new CliAgentError(`Agent '${params.requester}/${params.name}' denied by Cedar policy. ${result.detail || ''}`)
   }
 }
 
@@ -107,9 +106,7 @@ function cmdAgentApprove(params) {
       console.log(`Request ${params.id} already applied (idempotent replay, file cleaned).`)
       return
     case GV_STATUS.NOT_FOUND:
-      console.error(`Request ${params.id} not found in pending.`)
-      process.exit(1)
-      return
+      throw new CliAgentError(`Request ${params.id} not found in pending.`)
   }
 }
 
@@ -122,16 +119,14 @@ function cmdAgentDeny(params) {
       console.log(`Request ${params.id} denied. Reason: ${reason}`)
       return
     case GV_STATUS.NOT_FOUND:
-      console.error(`Request ${params.id} not found in pending.`)
-      process.exit(1)
-      return
+      throw new CliAgentError(`Request ${params.id} not found in pending.`)
   }
 }
 
-export const dispatchAgent = (action, flags) => {
+export const dispatchAgent = (action, flags) => dispatchWithCliErrorHandling(async () => {
   switch (action) {
     case 'add':
-      return cmdAgentAdd({
+      return await cmdAgentAdd({
         requester: requireFlag(flags, 'requester'),
         name: requireFlag(flags, 'name'),
         personaPath: flags.persona,
@@ -143,8 +138,6 @@ export const dispatchAgent = (action, flags) => {
     case 'deny':
       return cmdAgentDeny({ id: requireFlag(flags, 'id'), reason: flags.reason })
     default:
-      console.error(`Unknown agent action: ${action}`)
-      console.error('Actions: add, review, approve, deny')
-      process.exit(1)
+      throw new CliAgentError(`Unknown agent action: ${action}\nActions: add, review, approve, deny`)
   }
-}
+})

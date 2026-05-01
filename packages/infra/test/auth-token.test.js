@@ -1,5 +1,5 @@
 import {
-  createTokenService, ensureSecret,
+  createTokenService, ensureSecret, decodeJwtPayload,
 } from '@presence/infra/infra/auth/token.js'
 import fp from '@presence/core/lib/fun-fp.js'
 import { mkdirSync, rmSync, existsSync, statSync } from 'fs'
@@ -202,6 +202,48 @@ async function run() {
     assert(isLeft(service.verifyA2aToken('not.a.token')), 'A2A4: malformed → Left')
     assert(isLeft(service.verifyA2aToken('')), 'A2A4: empty → Left')
     assert(isLeft(service.verifyA2aToken(null)), 'A2A4: null → Left')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // --- decodeJwtPayload (admin-session client + 향후 A2A RS256 공용) ---
+
+  // DJP1. 정상 access token → payload 반환 + sub/exp/type 보존
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const accessToken = service.signAccessToken({ sub: 'eve', roles: ['user'] })
+    const payload = decodeJwtPayload(accessToken)
+    assert(payload.sub === 'eve', 'DJP1: sub 보존')
+    assert(payload.type === 'access', 'DJP1: type=access 보존')
+    assert(typeof payload.exp === 'number', 'DJP1: exp 숫자')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // DJP2. malformed → Error throw (parts !== 3 / null / non-string)
+  {
+    let threw = false
+    try { decodeJwtPayload('only.two') } catch { threw = true }
+    assert(threw, 'DJP2: parts !== 3 → throw')
+
+    threw = false
+    try { decodeJwtPayload('') } catch { threw = true }
+    assert(threw, 'DJP2: empty → throw')
+
+    threw = false
+    try { decodeJwtPayload(null) } catch { threw = true }
+    assert(threw, 'DJP2: null → throw')
+  }
+
+  // DJP3. signature 검증 부재 — 잘못된 서명도 payload 반환 (verify() 가 검증 담당).
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const accessToken = service.signAccessToken({ sub: 'frank', roles: [] })
+    const parts = accessToken.split('.')
+    const tamperedSig = `${parts[0]}.${parts[1]}.WRONG_SIGNATURE`
+    const payload = decodeJwtPayload(tamperedSig)
+    assert(payload.sub === 'frank', 'DJP3: sub 그대로 — decode 자체는 서명 검증 안 함')
+    assert(isLeft(service.verifyAccessToken(tamperedSig)), 'DJP3: verifyAccessToken 은 서명 위조 차단')
     rmSync(dir, { recursive: true, force: true })
   }
 

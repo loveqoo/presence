@@ -24,6 +24,15 @@ const base64url = (data) =>
 const base64urlDecode = (str) =>
   Buffer.from(str.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8')
 
+// JWT payload 디코딩 — signature 검증은 verify() 가 담당. payload only 용도.
+// client 측 (admin-session.js 의 exp 추출) + 향후 A2A RS256 verify 양쪽 재사용.
+const decodeJwtPayload = (token) => {
+  if (!token || typeof token !== 'string') throw new Error('invalid JWT format')
+  const parts = token.split('.')
+  if (parts.length !== 3) throw new Error('invalid JWT format')
+  return JSON.parse(base64urlDecode(parts[1]))
+}
+
 // --- Secret 파일 관리 ---
 
 /**
@@ -225,4 +234,4 @@ const createTokenService = ({ basePath } = {}) => {
   }
 }
 
-export { createTokenService, ensureSecret, sign }
+export { createTokenService, ensureSecret, sign, decodeJwtPayload }

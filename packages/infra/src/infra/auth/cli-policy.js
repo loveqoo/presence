@@ -4,7 +4,11 @@
 
 import { readFileSync } from 'node:fs'
 import { lintPolicyText, listPolicyFiles, readSchemaText } from '../authz/cedar/index.js'
-import { requireFlag, httpJson, mapHttpFetchError } from './cli-utils.js'
+import {
+  requireFlag, httpJson, mapHttpFetchError, resolveBaseUrl,
+  CliError, dispatchWithCliErrorHandling,
+  AUTH_PATHS, ADMIN_PATHS,
+} from './cli-utils.js'
 import {
   loadAdminSession,
   saveAdminSession,
@@ -16,11 +20,8 @@ import {
 
 // CLI handler 가 throw 하면 dispatchPolicy 가 catch + process.exit(1) 로 단일 수렴.
 // 각 handler 는 비즈니스 로직만 — exit 처리는 dispatch 경계.
-class CliPolicyError extends Error {
-  constructor(stderrMessage) {
-    super(stderrMessage)
-    this.name = 'CliPolicyError'
-  }
+class CliPolicyError extends CliError {
+  constructor(stderrMessage) { super(stderrMessage, 'CliPolicyError') }
 }
 
 async function cmdPolicyLint({ file }) {
@@ -70,11 +71,6 @@ function cmdPolicyList() {
 //   resolveAdminToken → fetchAdmin → handleAuthError → printReloadSuccess / formatReloadFailure
 // 각 단계는 throw 또는 return 으로 dispatch — process.exit 는 dispatchPolicy 에서만 호출.
 
-const RELOAD_PATH = '/api/admin/policy/reload'
-const VERSION_PATH = '/api/admin/policy/version'
-
-const resolveBaseUrl = () => process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
-
 // ENV 분기는 어떤 경우에도 파일 상태로 깨지지 않아야 함 (CI 호환).
 // 파일이 mode 위배 또는 손상이어도 ENV 흐름은 그대로 진행 — 경고는 best-effort.
 const warnEnvShadowingFile = () => {
@@ -90,7 +86,7 @@ const refreshAndPersist = async (session) => {
   const baseUrl = resolveBaseUrl()
   let res
   try {
-    res = await httpJson(`${baseUrl}/api/auth/refresh`, {
+    res = await httpJson(`${baseUrl}${AUTH_PATHS.REFRESH}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: session.refreshToken }),
@@ -250,7 +246,7 @@ const fetchAdminWithRetry = async (path, { method, baseUrl }) => {
 
 async function cmdPolicyReload() {
   const baseUrl = resolveBaseUrl()
-  const res = await fetchAdminWithRetry(RELOAD_PATH, { method: 'POST', baseUrl })
+  const res = await fetchAdminWithRetry(ADMIN_PATHS.POLICY_RELOAD, { method: 'POST', baseUrl })
   handleAuthError(res)
   if (res.ok) {
     printReloadSuccess(res.body)
@@ -262,7 +258,7 @@ async function cmdPolicyReload() {
 // FP-74: GET /api/admin/policy/version CLI wrapper. 변경 적용 후 운영자가 활성 버전 재확인.
 async function cmdPolicyVersion() {
   const baseUrl = resolveBaseUrl()
-  const res = await fetchAdminWithRetry(VERSION_PATH, { method: 'GET', baseUrl })
+  const res = await fetchAdminWithRetry(ADMIN_PATHS.POLICY_VERSION, { method: 'GET', baseUrl })
   handleAuthError(res)
   if (!res.ok) {
     throw new CliPolicyError(`policy version 조회 실패: ${res.body?.error ?? `HTTP ${res.status}`}`)
@@ -270,21 +266,13 @@ async function cmdPolicyVersion() {
   console.log(`현재 활성 정책: 버전 ${res.body.version} (적용: ${res.body.reloadedAt})`)
 }
 
-export const dispatchPolicy = async (action, flags) => {
-  try {
-    switch (action) {
-      case 'lint':    return await cmdPolicyLint({ file: requireFlag(flags, 'file') })
-      case 'list':    return cmdPolicyList()
-      case 'reload':  return await cmdPolicyReload()
-      case 'version': return await cmdPolicyVersion()
-      default:
-        throw new CliPolicyError(`Unknown policy action: ${action}\nActions: lint, list, reload, version`)
-    }
-  } catch (err) {
-    if (err instanceof CliPolicyError) {
-      console.error(err.message)
-      process.exit(1)
-    }
-    throw err
+export const dispatchPolicy = (action, flags) => dispatchWithCliErrorHandling(async () => {
+  switch (action) {
+    case 'lint':    return await cmdPolicyLint({ file: requireFlag(flags, 'file') })
+    case 'list':    return cmdPolicyList()
+    case 'reload':  return await cmdPolicyReload()
+    case 'version': return await cmdPolicyVersion()
+    default:
+      throw new CliPolicyError(`Unknown policy action: ${action}\nActions: lint, list, reload, version`)
   }
-}
+})

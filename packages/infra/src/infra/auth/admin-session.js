@@ -6,6 +6,7 @@ import { existsSync, statSync, readFileSync, unlinkSync, mkdirSync } from 'node:
 import { join } from 'node:path'
 import { Config } from '../config.js'
 import { atomicWriteJson } from '../fs-utils.js'
+import { decodeJwtPayload } from './token.js'
 
 // drift buffer: 로컬 시계가 30s 이내로 어긋날 경우에도 만료를 안전 인지.
 const ADMIN_SESSION_DRIFT_BUFFER_S = 30
@@ -70,12 +71,9 @@ function isAccessNearExpiry(session, { driftBufferS = ADMIN_SESSION_DRIFT_BUFFER
   return now + driftBufferS >= epochOfIso(session.accessExp)
 }
 
-// JWT exp 클레임 → ISO 8601. base64url payload 디코딩.
+// JWT exp 클레임 → ISO 8601. payload 디코딩은 token.js 의 공통 helper 가 담당.
 function decodeAccessExp(jwt) {
-  const parts = jwt.split('.')
-  if (parts.length !== 3) throw new Error('invalid JWT format')
-  const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf-8')
-  const payload = JSON.parse(payloadJson)
+  const payload = decodeJwtPayload(jwt)
   if (typeof payload.exp !== 'number') throw new Error('JWT missing exp claim')
   return new Date(payload.exp * 1000).toISOString()
 }

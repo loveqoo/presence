@@ -1,11 +1,17 @@
-// CLI 공통 유틸 단위 테스트 — requireFlag / httpJson / mapHttpFetchError / HttpFetchError.
-// Tier 2 cleanup — 통합 테스트로만 검증되던 헬퍼들을 단위 단계에서 분리 검증.
+// CLI 공통 유틸 단위 테스트 — requireFlag / httpJson / mapHttpFetchError / HttpFetchError /
+// CliError / dispatchWithCliErrorHandling / AUTH_PATHS / ADMIN_PATHS.
+// 통합 테스트로만 검증되던 헬퍼들을 단위 단계에서 분리 검증.
 
 import {
   requireFlag,
   httpJson,
   mapHttpFetchError,
   HttpFetchError,
+  CliError,
+  dispatchWithCliErrorHandling,
+  AUTH_PATHS,
+  ADMIN_PATHS,
+  resolveBaseUrl,
 } from '@presence/infra/infra/auth/cli-utils.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 
@@ -137,6 +143,71 @@ console.log('cli-utils unit tests')
   const generic = new Error('generic')
   const mapped = mapHttpFetchError(generic, CliTestError, 'admin')
   assert(mapped === generic, 'CU9: non-HttpFetchError → 동일 객체 그대로 반환')
+}
+
+// CU10 — CliError 베이스: name 기본값 + 사용자 지정
+{
+  const base = new CliError('msg')
+  assert(base.name === 'CliError', 'CU10: name 기본값')
+  assert(base.message === 'msg', 'CU10: message 보존')
+  assert(base instanceof Error, 'CU10: instanceof Error')
+
+  const named = new CliError('m', 'CliFooError')
+  assert(named.name === 'CliFooError', 'CU10: 사용자 지정 name')
+}
+
+// CU11 — CliError.display(): stderr + exit(1)
+{
+  const err = new CliError('boom')
+  const r = await captureExit(() => err.display())
+  assert(r.exitCode === 1, `CU11: display → exit 1 (got ${r.exitCode})`)
+  assert(/boom/.test(r.stderr), `CU11: message stderr (got ${r.stderr})`)
+}
+
+// CU12 — dispatchWithCliErrorHandling: CliError 잡고 display 호출
+{
+  const r = await captureExit(() => dispatchWithCliErrorHandling(() => {
+    throw new CliError('handled')
+  }))
+  assert(r.exitCode === 1, 'CU12: CliError → exit 1')
+  assert(/handled/.test(r.stderr), 'CU12: message stderr')
+}
+
+// CU13 — dispatchWithCliErrorHandling: non-CliError 는 그대로 위로 throw
+{
+  let caught
+  try {
+    await dispatchWithCliErrorHandling(() => { throw new Error('not cli') })
+  } catch (err) { caught = err }
+  assert(caught instanceof Error && caught.message === 'not cli', 'CU13: non-CliError pass-through')
+}
+
+// CU14 — dispatchWithCliErrorHandling: 정상 반환값 그대로 전달
+{
+  const result = await dispatchWithCliErrorHandling(() => 'ok')
+  assert(result === 'ok', 'CU14: 정상 반환값 보존')
+}
+
+// CU15 — AUTH_PATHS / ADMIN_PATHS: 정의 + 동결 (수정 시 throw)
+{
+  assert(AUTH_PATHS.LOGIN === '/api/auth/login', 'CU15: AUTH_PATHS.LOGIN')
+  assert(AUTH_PATHS.LOGOUT === '/api/auth/logout', 'CU15: AUTH_PATHS.LOGOUT')
+  assert(AUTH_PATHS.REFRESH === '/api/auth/refresh', 'CU15: AUTH_PATHS.REFRESH')
+  assert(ADMIN_PATHS.POLICY_RELOAD === '/api/admin/policy/reload', 'CU15: ADMIN_PATHS.POLICY_RELOAD')
+  assert(ADMIN_PATHS.POLICY_VERSION === '/api/admin/policy/version', 'CU15: ADMIN_PATHS.POLICY_VERSION')
+  assert(Object.isFrozen(AUTH_PATHS), 'CU15: AUTH_PATHS frozen')
+  assert(Object.isFrozen(ADMIN_PATHS), 'CU15: ADMIN_PATHS frozen')
+}
+
+// CU16 — resolveBaseUrl: env override + 기본값
+{
+  const orig = process.env.PRESENCE_SERVER_URL
+  delete process.env.PRESENCE_SERVER_URL
+  assert(resolveBaseUrl() === 'http://localhost:3000', 'CU16: 기본값')
+  process.env.PRESENCE_SERVER_URL = 'https://prod.example.com'
+  assert(resolveBaseUrl() === 'https://prod.example.com', 'CU16: env override')
+  if (orig === undefined) delete process.env.PRESENCE_SERVER_URL
+  else process.env.PRESENCE_SERVER_URL = orig
 }
 
 summary()

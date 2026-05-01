@@ -9,16 +9,14 @@ import {
   decodeAccessExp,
   adminSessionPath,
 } from './admin-session.js'
-import { promptPassword, httpJson, mapHttpFetchError } from './cli-utils.js'
+import {
+  promptPassword, httpJson, mapHttpFetchError, resolveBaseUrl,
+  CliError, dispatchWithCliErrorHandling, AUTH_PATHS,
+} from './cli-utils.js'
 
-class CliAdminError extends Error {
-  constructor(stderrMessage) {
-    super(stderrMessage)
-    this.name = 'CliAdminError'
-  }
+class CliAdminError extends CliError {
+  constructor(stderrMessage) { super(stderrMessage, 'CliAdminError') }
 }
-
-const resolveBaseUrl = () => process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
 
 // stale ENV 감지 — admin login 직후 + logout 직후 표시. 셸 변수가 파일을 가립니다 안내.
 const warnStaleEnv = () => {
@@ -39,7 +37,7 @@ async function cmdAdminLogin({ username, password }) {
   const baseUrl = resolveBaseUrl()
   let res
   try {
-    res = await httpJson(`${baseUrl}/api/auth/login`, {
+    res = await httpJson(`${baseUrl}${AUTH_PATHS.LOGIN}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: resolvedUsername, password: resolvedPassword }),
@@ -87,7 +85,7 @@ async function cmdAdminLogout() {
 
   const baseUrl = resolveBaseUrl()
   try {
-    await fetch(`${baseUrl}/api/auth/logout`, {
+    await fetch(`${baseUrl}${AUTH_PATHS.LOGOUT}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: session.refreshToken }),
@@ -112,20 +110,12 @@ function cmdAdminWhoami() {
   console.log(`Saved at: ${session.savedAt}`)
 }
 
-export const dispatchAdmin = async (action, flags) => {
-  try {
-    switch (action) {
-      case 'login':   return await cmdAdminLogin({ username: flags.username, password: flags.password })
-      case 'logout':  return await cmdAdminLogout()
-      case 'whoami':  return cmdAdminWhoami()
-      default:
-        throw new CliAdminError(`Unknown admin action: ${action}\nActions: login, logout, whoami`)
-    }
-  } catch (err) {
-    if (err instanceof CliAdminError) {
-      console.error(err.message)
-      process.exit(1)
-    }
-    throw err
+export const dispatchAdmin = (action, flags) => dispatchWithCliErrorHandling(async () => {
+  switch (action) {
+    case 'login':   return await cmdAdminLogin({ username: flags.username, password: flags.password })
+    case 'logout':  return await cmdAdminLogout()
+    case 'whoami':  return cmdAdminWhoami()
+    default:
+      throw new CliAdminError(`Unknown admin action: ${action}\nActions: login, logout, whoami`)
   }
-}
+})

@@ -3,6 +3,21 @@
 
 import { createInterface } from 'node:readline'
 
+// admin/policy CLI 가 서버에 도달할 base URL — env override 가능. 기본은 dev 단일 호스트.
+export const resolveBaseUrl = () => process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
+
+// 서버 wire format paths — string concat 대신 상수 참조. cli + 향후 client (tui) 공유 후보.
+export const AUTH_PATHS = Object.freeze({
+  LOGIN: '/api/auth/login',
+  LOGOUT: '/api/auth/logout',
+  REFRESH: '/api/auth/refresh',
+})
+
+export const ADMIN_PATHS = Object.freeze({
+  POLICY_RELOAD: '/api/admin/policy/reload',
+  POLICY_VERSION: '/api/admin/policy/version',
+})
+
 export const requireFlag = (flags, name) => {
   if (!flags[name]) {
     console.error(`--${name} is required`)
@@ -73,4 +88,31 @@ export const mapHttpFetchError = (err, CliErrorClass, prefix) => {
     return new CliErrorClass(`${prefix}: 응답 파싱 실패 (HTTP ${err.status}).`)
   }
   return err
+}
+
+// 모든 CLI 핸들러가 throw 하는 도메인 에러의 베이스. 서브타입 (CliPolicyError /
+// CliAdminError / CliAgentError) 은 자기 모듈에서 정의 — 베이스는 dispatch wrapper 가
+// 'CliError 인지' 만 일관 검사.
+export class CliError extends Error {
+  constructor(stderrMessage, name = 'CliError') {
+    super(stderrMessage)
+    this.name = name
+  }
+
+  // stderr + process.exit(1). dispatch wrapper 가 단일 진입점에서 호출.
+  display() {
+    console.error(this.message)
+    process.exit(1)
+  }
+}
+
+// dispatch* 의 try/catch 통일 — CliError 면 자기 display() 호출, 그 외는 위로 throw.
+// 각 dispatch 가 동일한 boilerplate 를 반복하지 않게.
+export const dispatchWithCliErrorHandling = async (fn) => {
+  try {
+    return await fn()
+  } catch (err) {
+    if (err instanceof CliError) err.display()
+    else throw err
+  }
 }
