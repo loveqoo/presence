@@ -6,6 +6,7 @@
 import React from 'react'
 import { render } from 'ink-testing-library'
 import http from 'node:http'
+import { existsSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { createMirrorState } from '@presence/infra/infra/states/mirror-state.js'
 import { App } from '@presence/tui/ui/App.js'
@@ -169,6 +170,24 @@ const authenticate = async () => {
   return { username, store }
 }
 
+// 임시 유저의 workingDir 에 프로젝트 루트 entry 를 symlink 로 노출.
+// 시나리오 테스트가 package.json / packages/ 같은 프로젝트 파일을 참조하기 위함.
+// 서버 스펙 (agent-identity.md I-WD): workingDir 은 userId 에서 자동 결정 →
+// `~/.presence/users/{username}/`. 임시 유저 dir 은 비어있으므로 시나리오용으로만 seed.
+// rmSync(recursive) 는 symlink 를 unlink 로 제거하므로 teardown 안전.
+const seedUserWorkspace = (userDir) => {
+  mkdirSync(userDir, { recursive: true })
+  const projectRoot = process.cwd()
+  const skip = new Set(['node_modules', 'admin-initial-password.txt'])
+  for (const entry of readdirSync(projectRoot)) {
+    if (entry.startsWith('.')) continue
+    if (skip.has(entry)) continue
+    const link = join(userDir, entry)
+    if (existsSync(link)) continue
+    try { symlinkSync(join(projectRoot, entry), link) } catch (_) { /* best-effort */ }
+  }
+}
+
 const connect = async () => {
   const instanceRes = await httpRequest('GET', '/api/instance').catch(() => null)
   if (!instanceRes || instanceRes.status !== 200) {
@@ -187,6 +206,11 @@ const connect = async () => {
     username = auth.username
     store = auth.store
     sessionId = `${username}-default`
+    // 임시 유저인 경우 (OVERRIDE 아님) workingDir 에 프로젝트 entry seed
+    if (store) {
+      const userDir = join(Config.presenceDir(), 'users', username)
+      seedUserWorkspace(userDir)
+    }
   }
 
   const apiBase = `/api/sessions/${sessionId}`

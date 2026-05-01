@@ -86,8 +86,9 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
 //     1) 프로젝트 구조를 파악해달라고 요청
 //     2) 어떤 패키지들이 있는지 답변에 포함되어야 함
 //
-// Phase 20 근본 교정 이후: TUI 가 프로젝트 루트를 workingDir 로 서버에 전달 →
-// 상대경로 `packages/` 가 프로젝트 루트 기준으로 해석된다.
+// 임시 테스트 유저의 workingDir (`~/.presence/users/{username}/`) 은 비어있으므로
+// live-helpers.js 의 seedUserWorkspace 가 프로젝트 루트 entry 를 symlink 로 노출한다.
+// 상대경로 `packages/` 는 symlink 따라 실제 프로젝트 루트 packages 로 해석된다.
 // =============================================================================
 {
   const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
@@ -210,8 +211,8 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
   try {
     // /status
     await typeInput(stdin, '/status')
-    await waitFor(() => lastFrame().includes('status:'), { timeout: 5000 })
-    assert(lastFrame().includes('status:'), 'S10-1: /status 동작')
+    await waitFor(() => lastFrame().includes('상태:'), { timeout: 5000 })
+    assert(lastFrame().includes('상태:'), 'S10-1: /status 동작')
 
     // 일반 대화
     await sendAndWait(stdin, remoteState, lastFrame, '"HELLO-MIX"라고 답해줘.')
@@ -321,7 +322,7 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
   const { lastFrame, stdin, remoteState, cleanup } = await setup(serverInfo)
   try {
     await typeInput(stdin, '/status')
-    await waitFor(() => lastFrame().includes('status:'), { timeout: 5000 })
+    await waitFor(() => lastFrame().includes('상태:'), { timeout: 5000 })
     assert(lastFrame().includes('idle'), 'S15-1: /status idle')
 
     await sendAndWait(stdin, remoteState, lastFrame, '"ALPHA"라고 답해.')
@@ -331,7 +332,7 @@ console.log(`TUI scenario tests (세션: ${serverInfo.sessionId}, 모델: ${serv
     await delay(1000)
     // turn이 0이 아닌 값을 포함해야 함 (대화 1턴 후)
     const frame3 = lastFrame()
-    assert(frame3.includes('status:'), 'S15-3: 대화 후 /status')
+    assert(frame3.includes('상태:'), 'S15-3: 대화 후 /status')
 
     await sendAndWait(stdin, remoteState, lastFrame, '"BRAVO"라고 답해.')
     const frame4 = lastFrame()
