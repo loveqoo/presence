@@ -11,6 +11,7 @@ import { requireFlag, promptPassword, promptLine } from './cli-utils.js'
 import { dispatchAgent } from './cli-agent.js'
 import { dispatchPolicy } from './cli-policy.js'
 import { dispatchAdmin } from './cli-admin.js'
+import { CORE_AGENT_NAMES } from '@presence/core/core/policies.js'
 
 // Auth CLI — 사용법은 main() 의 usage 출력 참조 (init / add / remove / list / passwd / agent ...).
 
@@ -70,19 +71,6 @@ const cmdAdd = async ({ username }) => {
   console.log(`User '${user.username}' added with roles: [${user.roles.join(', ')}]`)
 }
 
-// 유저의 현재 알려진 agent 이름 집합 — core agents + config.agents.
-// Memory 는 agent 단위 격리이므로 각 agent 마다 clearAll 호출 (data-scope-alignment §9).
-// 과거 agent orphan 은 잔존 — 같은 이름 재사용 전까지 미조회 (설계 수용).
-const CORE_AGENT_NAMES = ['default', 'summarizer']
-
-const resolveAgentIds = (username, config) => {
-  const names = new Set(CORE_AGENT_NAMES)
-  for (const agentDef of (config?.agents || [])) {
-    if (agentDef?.name) names.add(agentDef.name)
-  }
-  return [...names].map(name => `${username}/${name}`)
-}
-
 const cmdRemove = async ({ username }) => {
   const store = createUserStore()
   if (!store.findUser(username)) {
@@ -100,7 +88,15 @@ const cmdRemove = async ({ username }) => {
     console.warn(`Memory init skipped: ${err.message}`)
   }
 
-  const agentIds = resolveAgentIds(username, config)
+  // 유저의 현재 알려진 agent 이름 집합 — core agents + config.agents.
+  // Memory 는 agent 단위 격리이므로 각 agent 마다 clearAll 호출 (data-scope-alignment §9).
+  // 과거 agent orphan 은 잔존 — 같은 이름 재사용 전까지 미조회 (설계 수용).
+  const names = new Set(CORE_AGENT_NAMES)
+  for (const agentDef of (config?.agents || [])) {
+    if (agentDef?.name) names.add(agentDef.name)
+  }
+  const agentIds = [...names].map(name => `${username}/${name}`)
+
   const { memoryCount, dirRemoved } = await removeUserCompletely({
     store, memory, username, userDir: Config.userDataPath(username), agentIds,
   })
@@ -135,13 +131,13 @@ const cmdPasswd = async ({ username }) => {
 }
 
 // FP-70 — admin audit log 가시성. size / 백업 개수 / 백업별 size + .gz 열람 안내.
-const formatBytes = (bytes) => {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 function cmdAuditStatus() {
+  const formatBytes = (bytes) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
   const presenceDir = Config.presenceDir()
   const status = getSubsystemAuditStatus({ presenceDir })
   const pct = status.maxBytes > 0 ? Math.round((status.currentSize / status.maxBytes) * 100) : 0
@@ -150,8 +146,8 @@ function cmdAuditStatus() {
   console.log(`  Backups: ${status.backups.length}/${status.maxBackups}`)
   if (status.backups.length > 0) {
     console.log('  Backup files:')
-    for (const b of status.backups) {
-      console.log(`    ${b.path}  (${formatBytes(b.size)})`)
+    for (const backup of status.backups) {
+      console.log(`    ${backup.path}  (${formatBytes(backup.size)})`)
     }
     console.log('')
     console.log('  Tip: gunzip <file>.gz | jq . — 압축 백업 열람')

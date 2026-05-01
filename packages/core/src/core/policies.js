@@ -192,6 +192,28 @@ export const ROLES = Object.freeze({
   USER:  'user',
 })
 
+// REST API mount prefix. Express 가 /api 에 마운트, 라우터 내부는 prefix 없이 매칭.
+// client (cli/tui) 는 prefix + path, server middleware (mount 후) 는 path 만 사용.
+export const API_PREFIX = '/api'
+
+// auth 라우터 paths (mount 후 기준). cli/tui 는 API_PREFIX + AUTH_API_PATHS 로 호출.
+// http-service 의 mustChangePassword allowlist 는 mount 후 기준이라 직접 참조.
+export const AUTH_API_PATHS = Object.freeze({
+  LOGIN:           '/auth/login',
+  LOGOUT:          '/auth/logout',
+  REFRESH:         '/auth/refresh',
+  CHANGE_PASSWORD: '/auth/change-password',
+})
+
+// admin 라우터 paths (mount 후 기준). cli 가 API_PREFIX + ADMIN_API_PATHS 로 호출.
+export const ADMIN_API_PATHS = Object.freeze({
+  POLICY_RELOAD:  '/admin/policy/reload',
+  POLICY_VERSION: '/admin/policy/version',
+})
+
+// 시스템 제공 core agent 이름. user 마다 동일하게 부팅됨. cli remove 시 memory clear 대상.
+export const CORE_AGENT_NAMES = Object.freeze(['default', 'summarizer'])
+
 // authz audit JSONL 의 action 필드. Cedar action ID (create_agent / access_agent / set_persona /
 // archive_agent) 와 non-Cedar admin event (manual_approve / policy_reload) 를 포함.
 // 정의와 사용이 한 enum 을 참조해야 wire 포맷 회귀를 막을 수 있다.

@@ -1,6 +1,6 @@
 // KG-27 P4 — Cedar 정책 운영자 CLI 핸들러. cli.js 의 main switch 에서 dispatchPolicy 호출.
-// lint (parse + schema validate) / list (카테고리 표) / reload (P5 후속, hot reload).
-// FP-73: resolveAdminToken 에 admin-session.json 파일 fallback + 자동 refresh + 401 retry.
+// lint (parse + schema validate) / list (카테고리 표) / reload (P5, hot reload) / version.
+// FP-73: AdminTokenManager 가 admin-session.json 파일 fallback + 자동 refresh + 401 retry.
 
 import { readFileSync } from 'node:fs'
 import { lintPolicyText, listPolicyFiles, readSchemaText } from '../authz/cedar/index.js'
@@ -24,152 +24,152 @@ class CliPolicyError extends CliError {
   constructor(stderrMessage) { super(stderrMessage, 'CliPolicyError') }
 }
 
-async function cmdPolicyLint({ file }) {
-  const text = readFileSync(file, 'utf-8')
-  const schemaText = readSchemaText()
-  const result = await lintPolicyText({ text, schemaText })
-  if (result.ok) {
-    console.log(`OK: ${file}`)
-    return
-  }
-  if (result.parseErrors.length > 0) {
-    const lines = [`Parse error: ${file}`]
-    for (const e of result.parseErrors) {
-      lines.push(`  ${e.message ?? JSON.stringify(e)}`)
-    }
-    throw new CliPolicyError(lines.join('\n'))
-  }
-  if (result.schemaErrors.length > 0) {
-    const lines = [`Schema mismatch: ${file}`]
-    for (const e of result.schemaErrors) {
-      const msg = e?.error?.message ?? e?.message ?? JSON.stringify(e)
-      lines.push(`  ${msg}`)
-    }
-    throw new CliPolicyError(lines.join('\n'))
-  }
-}
-
-function cmdPolicyList() {
-  const files = listPolicyFiles()
-  if (files.length === 0) {
-    console.log('(no policies)')
-    return
-  }
-  const widthName = Math.max(...files.map(f => f.filename.length), 'filename'.length)
-  const widthCat = Math.max(...files.map(f => f.category.length), 'category'.length)
-  console.log(`${'filename'.padEnd(widthName)}  ${'category'.padEnd(widthCat)}  size`)
-  console.log(`${'-'.repeat(widthName)}  ${'-'.repeat(widthCat)}  ----`)
-  for (const f of files) {
-    console.log(`${f.filename.padEnd(widthName)}  ${f.category.padEnd(widthCat)}  ${f.size} B`)
-  }
-}
-
-// KG-28 P5 — POST /api/admin/policy/reload 호출. 서버 측 hot reload 트리거.
-// PRESENCE_ADMIN_TOKEN env 의 admin access token 으로 인증.
+// FP-73 — admin token 흐름의 응집 단위. baseUrl + ENV snapshot 을 인스턴스에 묶음.
+//   resolveToken: ENV 우선 → 파일 → 부재 안내 → 만료 임박 시 자동 refresh.
+//   fetchAdminWithRetry: clock drift 대응 1회 force-refresh + retry. ENV 사용 중에는 retry 안 함.
 //
-// 단계 분리 — 함수 길이 단축 + Either-style 단일 exit 수렴점:
-//   resolveAdminToken → fetchAdmin → handleAuthError → printReloadSuccess / formatReloadFailure
-// 각 단계는 throw 또는 return 으로 dispatch — process.exit 는 dispatchPolicy 에서만 호출.
+// constructor 에서 process.env 1회 snapshot — 인스턴스 수명 동안 일관 (fp-monad.md 의 "전역 직접
+// 참조 금지" 룰 준수, dispatch 경계에서만 env 진입).
+class AdminTokenManager {
+  #baseUrl
+  #envToken
 
-// ENV 분기는 어떤 경우에도 파일 상태로 깨지지 않아야 함 (CI 호환).
-// 파일이 mode 위배 또는 손상이어도 ENV 흐름은 그대로 진행 — 경고는 best-effort.
-const warnEnvShadowingFile = () => {
-  let fileExists = false
-  try { fileExists = (loadAdminSession() != null) } catch (_) {}
-  if (fileExists) {
-    console.warn('주의: PRESENCE_ADMIN_TOKEN env 가 admin-session.json 보다 우선 사용됩니다.')
-    console.warn('  파일 기반 자동 동작을 원하면: unset PRESENCE_ADMIN_TOKEN')
+  constructor({ baseUrl, envToken }) {
+    this.#baseUrl = baseUrl
+    this.#envToken = envToken || null
   }
-}
 
-const refreshAndPersist = async (session) => {
-  const baseUrl = resolveBaseUrl()
-  let res
-  try {
-    res = await httpJson(`${baseUrl}${AUTH_PATHS.REFRESH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: session.refreshToken }),
+  // CLI dispatch 경계 진입점 — 한 번만 호출되어야 한다 (process.env snapshot 일관성).
+  static fromEnv() {
+    return new AdminTokenManager({
+      baseUrl: resolveBaseUrl(),
+      envToken: process.env.PRESENCE_ADMIN_TOKEN,
     })
-  } catch (err) {
-    throw mapHttpFetchError(err, CliPolicyError, 'policy')
-  }
-  if (res.status === 401) {
-    clearAdminSession()
-    throw new CliPolicyError([
-      'policy: 세션 만료 (refresh token 무효).',
-      '  npm run user -- admin login 으로 재로그인.',
-    ].join('\n'))
-  }
-  if (!res.ok) {
-    throw new CliPolicyError(`policy: refresh 실패 (HTTP ${res.status}).`)
-  }
-  if (!res.body.accessToken || !res.body.refreshToken) {
-    throw new CliPolicyError([
-      'policy: refresh 응답에 토큰이 누락되었습니다 (서버 응답 형식이 호환되지 않음).',
-      '  npm run user -- admin login 으로 재로그인.',
-    ].join('\n'))
-  }
-  const accessExp = decodeAccessExp(res.body.accessToken)
-  saveAdminSession({
-    username: session.username,
-    accessToken: res.body.accessToken,
-    refreshToken: res.body.refreshToken,
-    accessExp,
-  })
-  return res.body.accessToken
-}
-
-const resolveAdminToken = async () => {
-  if (process.env.PRESENCE_ADMIN_TOKEN) {
-    warnEnvShadowingFile()
-    return process.env.PRESENCE_ADMIN_TOKEN
   }
 
-  let session
-  try {
-    session = loadAdminSession()
-  } catch (err) {
-    if (err instanceof AdminSessionError && err.reason === 'mode') {
+  async resolveToken() {
+    if (this.#envToken) {
+      this.#warnEnvShadowingFile()
+      return this.#envToken
+    }
+    const session = this.#loadSessionOrThrow()
+    if (!isAccessNearExpiry(session)) return session.accessToken
+    return await this.#refresh(session)
+  }
+
+  async fetchAdminWithRetry(path, { method }) {
+    let token = await this.resolveToken()
+    let res = await this.#fetchAdmin(path, { method, token })
+    if (res.status === 401 && !this.#envToken) {
+      const session = loadAdminSession()
+      if (!session) {
+        throw new CliPolicyError([
+          'policy: 인증 실패 (401). 세션이 없습니다.',
+          '  npm run user -- admin login 으로 재로그인.',
+        ].join('\n'))
+      }
+      token = await this.#refresh(session)
+      res = await this.#fetchAdmin(path, { method, token })
+      if (res.status === 401) {
+        throw new CliPolicyError([
+          'policy: 인증 실패 (refresh 후에도 401).',
+          '  npm run user -- admin login 으로 재시도.',
+          '  반복 발생 시 서버측 auth 상태 확인 (서버 로그/restart 검토 필요).',
+        ].join('\n'))
+      }
+    }
+    return res
+  }
+
+  // ENV 분기는 어떤 경우에도 파일 상태로 깨지지 않아야 함 (CI 호환).
+  // 파일이 mode 위배 또는 손상이어도 ENV 흐름은 그대로 진행 — 경고는 best-effort.
+  #warnEnvShadowingFile() {
+    let fileExists = false
+    try { fileExists = (loadAdminSession() != null) } catch (loadErr) { /* best-effort */ }
+    if (fileExists) {
+      console.warn('주의: PRESENCE_ADMIN_TOKEN env 가 admin-session.json 보다 우선 사용됩니다.')
+      console.warn('  파일 기반 자동 동작을 원하면: unset PRESENCE_ADMIN_TOKEN')
+    }
+  }
+
+  #loadSessionOrThrow() {
+    let session
+    try {
+      session = loadAdminSession()
+    } catch (err) {
+      if (err instanceof AdminSessionError && err.reason === 'mode') {
+        throw new CliPolicyError([
+          `policy: admin-session.json 권한 위배 (${err.message}).`,
+          '  chmod 600 ~/.presence/admin-session.json 후 재시도.',
+        ].join('\n'))
+      }
+      if (err instanceof AdminSessionError && err.reason === 'corrupt') {
+        throw new CliPolicyError([
+          `policy: admin-session.json 손상 — ${err.message}`,
+          '  npm run user -- admin login 으로 재로그인.',
+        ].join('\n'))
+      }
+      throw err
+    }
+    if (!session) {
       throw new CliPolicyError([
-        `policy: admin-session.json 권한 위배 (${err.message}).`,
-        '  chmod 600 ~/.presence/admin-session.json 후 재시도.',
+        'policy: admin access token 필요.',
+        '',
+        '  로그인 — npm run user -- admin login',
+        '  (이후 reload/version 은 ENV 없이 자동 동작)',
+        '',
+        '  CI/자동화 환경: PRESENCE_ADMIN_TOKEN env 사용 가능.',
+        '    주의: process listing 으로 token 노출 가능.',
       ].join('\n'))
     }
-    if (err instanceof AdminSessionError && err.reason === 'corrupt') {
+    return session
+  }
+
+  async #refresh(session) {
+    let res
+    try {
+      res = await httpJson(`${this.#baseUrl}${AUTH_PATHS.REFRESH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+      })
+    } catch (err) {
+      throw mapHttpFetchError(err, CliPolicyError, 'policy')
+    }
+    if (res.status === 401) {
+      clearAdminSession()
       throw new CliPolicyError([
-        `policy: admin-session.json 손상 — ${err.message}`,
+        'policy: 세션 만료 (refresh token 무효).',
         '  npm run user -- admin login 으로 재로그인.',
       ].join('\n'))
     }
-    throw err
-  }
-
-  if (!session) {
-    throw new CliPolicyError([
-      'policy: admin access token 필요.',
-      '',
-      '  로그인 — npm run user -- admin login',
-      '  (이후 reload/version 은 ENV 없이 자동 동작)',
-      '',
-      '  CI/자동화 환경: PRESENCE_ADMIN_TOKEN env 사용 가능.',
-      '    주의: process listing 으로 token 노출 가능.',
-    ].join('\n'))
-  }
-
-  if (!isAccessNearExpiry(session)) return session.accessToken
-  return await refreshAndPersist(session)
-}
-
-// httpJson 반환 형태로 통일 — { status, ok, body }. caller 는 res.body 직접 사용.
-const fetchAdmin = async (path, { method = 'GET', token, baseUrl }) => {
-  try {
-    return await httpJson(`${baseUrl}${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${token}` },
+    if (!res.ok) {
+      throw new CliPolicyError(`policy: refresh 실패 (HTTP ${res.status}).`)
+    }
+    if (!res.body.accessToken || !res.body.refreshToken) {
+      throw new CliPolicyError([
+        'policy: refresh 응답에 토큰이 누락되었습니다 (서버 응답 형식이 호환되지 않음).',
+        '  npm run user -- admin login 으로 재로그인.',
+      ].join('\n'))
+    }
+    saveAdminSession({
+      username: session.username,
+      accessToken: res.body.accessToken,
+      refreshToken: res.body.refreshToken,
+      accessExp: decodeAccessExp(res.body.accessToken),
     })
-  } catch (err) {
-    throw mapHttpFetchError(err, CliPolicyError, 'policy')
+    return res.body.accessToken
+  }
+
+  async #fetchAdmin(path, { method = 'GET', token }) {
+    try {
+      return await httpJson(`${this.#baseUrl}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    } catch (err) {
+      throw mapHttpFetchError(err, CliPolicyError, 'policy')
+    }
   }
 }
 
@@ -190,75 +190,82 @@ const handleAuthError = (response) => {
   }
 }
 
-// FP-76: 운영자 친화 출력. version + 시작/완료 시각 분리 + single-flight 동작 명시.
-const printReloadSuccess = (body) => {
-  console.log('OK: 정책이 적용되었습니다.')
-  console.log(`  버전: ${body.version}`)
-  console.log(`  reload 시작: ${body.reloadStartedAt}`)
-  console.log(`  적용 완료:   ${body.reloadedAt}`)
-  console.log('')
-  console.log('참고: 짧은 시간 내 여러 admin 이 동시에 reload 를 요청하면 한 번만 실행됩니다.')
-  console.log('      "reload 시작" 시각이 이전 호출과 같으면 기존 reload 에 합류된 것입니다.')
-  console.log('      새 reload 를 강제하려면 잠시 후 다시 실행하세요.')
+async function cmdPolicyLint({ file }) {
+  const text = readFileSync(file, 'utf-8')
+  const schemaText = readSchemaText()
+  const result = await lintPolicyText({ text, schemaText })
+  if (result.ok) {
+    console.log(`OK: ${file}`)
+    return
+  }
+  if (result.parseErrors.length > 0) {
+    const lines = [`Parse error: ${file}`]
+    for (const error of result.parseErrors) {
+      lines.push(`  ${error.message ?? JSON.stringify(error)}`)
+    }
+    throw new CliPolicyError(lines.join('\n'))
+  }
+  if (result.schemaErrors.length > 0) {
+    const lines = [`Schema mismatch: ${file}`]
+    for (const error of result.schemaErrors) {
+      const msg = error?.error?.message ?? error?.message ?? JSON.stringify(error)
+      lines.push(`  ${msg}`)
+    }
+    throw new CliPolicyError(lines.join('\n'))
+  }
 }
 
+function cmdPolicyList() {
+  const files = listPolicyFiles()
+  if (files.length === 0) {
+    console.log('(no policies)')
+    return
+  }
+  const widthName = Math.max(...files.map(file => file.filename.length), 'filename'.length)
+  const widthCat = Math.max(...files.map(file => file.category.length), 'category'.length)
+  console.log(`${'filename'.padEnd(widthName)}  ${'category'.padEnd(widthCat)}  size`)
+  console.log(`${'-'.repeat(widthName)}  ${'-'.repeat(widthCat)}  ----`)
+  for (const file of files) {
+    console.log(`${file.filename.padEnd(widthName)}  ${file.category.padEnd(widthCat)}  ${file.size} B`)
+  }
+}
+
+// KG-28 P5 — POST /api/admin/policy/reload 호출. 서버 측 hot reload 트리거.
+// FP-76: 운영자 친화 출력. version + 시작/완료 시각 분리 + single-flight 동작 명시.
 // FP-75: 실패 시 복구 단계 명시 — 정책 파일 수정 → lint → reload 흐름 안내.
-const formatReloadFailure = (body) => {
-  const lines = ['정책 reload 실패.']
-  lines.push(`원인: ${body.error}`)
-  lines.push('')
+async function cmdPolicyReload() {
+  const manager = AdminTokenManager.fromEnv()
+  const res = await manager.fetchAdminWithRetry(ADMIN_PATHS.POLICY_RELOAD, { method: 'POST' })
+  handleAuthError(res)
+  if (res.ok) {
+    const body = res.body
+    console.log('OK: 정책이 적용되었습니다.')
+    console.log(`  버전: ${body.version}`)
+    console.log(`  reload 시작: ${body.reloadStartedAt}`)
+    console.log(`  적용 완료:   ${body.reloadedAt}`)
+    console.log('')
+    console.log('참고: 짧은 시간 내 여러 admin 이 동시에 reload 를 요청하면 한 번만 실행됩니다.')
+    console.log('      "reload 시작" 시각이 이전 호출과 같으면 기존 reload 에 합류된 것입니다.')
+    console.log('      새 reload 를 강제하려면 잠시 후 다시 실행하세요.')
+    return
+  }
+  const body = res.body
+  const lines = ['정책 reload 실패.', `원인: ${body.error}`, '']
   if (body.activeVersion != null) {
     lines.push(`현재 활성 정책은 그대로 유지됩니다 (버전 ${body.activeVersion}, 적용: ${body.activeReloadedAt}).`)
   }
-  lines.push('디스크의 정책 파일은 변경되지 않았습니다.')
-  lines.push('')
+  lines.push('디스크의 정책 파일은 변경되지 않았습니다.', '')
   lines.push('복구 방법:')
   lines.push('  1. 문제가 되는 .cedar 파일을 수정하거나 제거하세요')
   lines.push('  2. lint 로 검증하세요 — npm run user -- policy lint --file <파일>')
   lines.push('  3. 다시 reload 하세요   — npm run user -- policy reload')
-  return lines.join('\n')
-}
-
-// FP-73: clock drift 대응 — 첫 401 시 1회 force-refresh + retry. ENV 사용 중에는 retry 안 함.
-const fetchAdminWithRetry = async (path, { method, baseUrl }) => {
-  let token = await resolveAdminToken()
-  let res = await fetchAdmin(path, { method, token, baseUrl })
-  if (res.status === 401 && !process.env.PRESENCE_ADMIN_TOKEN) {
-    const session = loadAdminSession()
-    if (!session) {
-      throw new CliPolicyError([
-        'policy: 인증 실패 (401). 세션이 없습니다.',
-        '  npm run user -- admin login 으로 재로그인.',
-      ].join('\n'))
-    }
-    token = await refreshAndPersist(session)
-    res = await fetchAdmin(path, { method, token, baseUrl })
-    if (res.status === 401) {
-      throw new CliPolicyError([
-        'policy: 인증 실패 (refresh 후에도 401).',
-        '  npm run user -- admin login 으로 재시도.',
-        '  반복 발생 시 서버측 auth 상태 확인 (서버 로그/restart 검토 필요).',
-      ].join('\n'))
-    }
-  }
-  return res
-}
-
-async function cmdPolicyReload() {
-  const baseUrl = resolveBaseUrl()
-  const res = await fetchAdminWithRetry(ADMIN_PATHS.POLICY_RELOAD, { method: 'POST', baseUrl })
-  handleAuthError(res)
-  if (res.ok) {
-    printReloadSuccess(res.body)
-    return
-  }
-  throw new CliPolicyError(formatReloadFailure(res.body))
+  throw new CliPolicyError(lines.join('\n'))
 }
 
 // FP-74: GET /api/admin/policy/version CLI wrapper. 변경 적용 후 운영자가 활성 버전 재확인.
 async function cmdPolicyVersion() {
-  const baseUrl = resolveBaseUrl()
-  const res = await fetchAdminWithRetry(ADMIN_PATHS.POLICY_VERSION, { method: 'GET', baseUrl })
+  const manager = AdminTokenManager.fromEnv()
+  const res = await manager.fetchAdminWithRetry(ADMIN_PATHS.POLICY_VERSION, { method: 'GET' })
   handleAuthError(res)
   if (!res.ok) {
     throw new CliPolicyError(`policy version 조회 실패: ${res.body?.error ?? `HTTP ${res.status}`}`)

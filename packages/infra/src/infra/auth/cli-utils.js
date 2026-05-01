@@ -2,20 +2,23 @@
 // cli.js / cli-admin.js / cli-policy.js 가 import.
 
 import { createInterface } from 'node:readline'
+import {
+  API_PREFIX, AUTH_API_PATHS, ADMIN_API_PATHS,
+} from '@presence/core/core/policies.js'
 
 // admin/policy CLI 가 서버에 도달할 base URL — env override 가능. 기본은 dev 단일 호스트.
 export const resolveBaseUrl = () => process.env.PRESENCE_SERVER_URL || 'http://localhost:3000'
 
-// 서버 wire format paths — string concat 대신 상수 참조. cli + 향후 client (tui) 공유 후보.
+// client 측 full paths — API_PREFIX + 라우터 path 로 derive (단일 진실 소스: policies.js).
 export const AUTH_PATHS = Object.freeze({
-  LOGIN: '/api/auth/login',
-  LOGOUT: '/api/auth/logout',
-  REFRESH: '/api/auth/refresh',
+  LOGIN:   API_PREFIX + AUTH_API_PATHS.LOGIN,
+  LOGOUT:  API_PREFIX + AUTH_API_PATHS.LOGOUT,
+  REFRESH: API_PREFIX + AUTH_API_PATHS.REFRESH,
 })
 
 export const ADMIN_PATHS = Object.freeze({
-  POLICY_RELOAD: '/api/admin/policy/reload',
-  POLICY_VERSION: '/api/admin/policy/version',
+  POLICY_RELOAD:  API_PREFIX + ADMIN_API_PATHS.POLICY_RELOAD,
+  POLICY_VERSION: API_PREFIX + ADMIN_API_PATHS.POLICY_VERSION,
 })
 
 export const requireFlag = (flags, name) => {

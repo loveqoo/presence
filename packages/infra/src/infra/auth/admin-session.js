@@ -62,8 +62,8 @@ function clearAdminSession({ basePath } = {}) {
   return true
 }
 
-function epochOfIso(iso) {
-  return Math.floor(new Date(iso).getTime() / 1000)
+function epochOfIso(isoString) {
+  return Math.floor(new Date(isoString).getTime() / 1000)
 }
 
 function isAccessNearExpiry(session, { driftBufferS = ADMIN_SESSION_DRIFT_BUFFER_S } = {}) {

@@ -480,28 +480,35 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   const cliText = read(cliPath)
   const cliAdminText = read(cliAdminPath)
 
-  // INV-CEDAR-CLI-FILE-FALLBACK — resolveAdminToken 정의에 ENV + loadAdminSession 양쪽 분기 + ENV 우선.
+  // INV-CEDAR-CLI-FILE-FALLBACK — AdminTokenManager.resolveToken 에 ENV + loadAdminSession 양쪽 분기 + ENV 우선.
+  // pre-A2A cleanup: AdminTokenManager Extract Class. resolveAdminToken module-level → resolveToken method.
   {
-    const fnMatch = cliPolicyText.match(/const\s+resolveAdminToken\s*=\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?\n\}/)
-    assert(fnMatch, 'INV-CEDAR-CLI-FILE-FALLBACK: resolveAdminToken async 정의 추출')
-    const body = fnMatch?.[0] || ''
+    const classMatch = cliPolicyText.match(/class\s+AdminTokenManager\s*\{[\s\S]*?\n\}/)
+    assert(classMatch, 'INV-CEDAR-CLI-FILE-FALLBACK: AdminTokenManager 클래스 정의 추출')
+    const classBody = classMatch?.[0] || ''
     assert(
-      /process\.env\.PRESENCE_ADMIN_TOKEN/.test(body),
-      'INV-CEDAR-CLI-FILE-FALLBACK: ENV 분기 존재',
+      /async\s+resolveToken\s*\(\s*\)\s*\{/.test(classBody),
+      'INV-CEDAR-CLI-FILE-FALLBACK: async resolveToken() 메서드 정의',
     )
     assert(
-      /loadAdminSession\s*\(\s*\)/.test(body),
+      /process\.env\.PRESENCE_ADMIN_TOKEN/.test(cliPolicyText),
+      'INV-CEDAR-CLI-FILE-FALLBACK: ENV 진입점 (fromEnv) 존재',
+    )
+    assert(
+      /loadAdminSession\s*\(\s*\)/.test(classBody),
       'INV-CEDAR-CLI-FILE-FALLBACK: 파일 분기 (loadAdminSession 호출)',
     )
     assert(
-      /isAccessNearExpiry\s*\(/.test(body),
+      /isAccessNearExpiry\s*\(/.test(classBody),
       'INV-CEDAR-CLI-FILE-FALLBACK: 만료 임박 검사',
     )
-    // ENV 분기가 파일 분기보다 먼저 — 우선순위 강제
-    const envIdx = body.indexOf('process.env.PRESENCE_ADMIN_TOKEN')
-    const fileIdx = body.indexOf('loadAdminSession')
+    // ENV 분기가 파일 분기보다 먼저 — resolveToken 본문 내 우선순위 강제
+    const resolveBodyMatch = classBody.match(/async\s+resolveToken\s*\(\s*\)\s*\{[\s\S]*?\n\s{2}\}/)
+    const resolveBody = resolveBodyMatch?.[0] || ''
+    const envIdx = resolveBody.indexOf('#envToken')
+    const fileIdx = resolveBody.indexOf('#loadSessionOrThrow')
     assert(envIdx >= 0 && fileIdx >= 0 && envIdx < fileIdx,
-      'INV-CEDAR-CLI-FILE-FALLBACK: ENV 분기가 파일 분기보다 우선')
+      'INV-CEDAR-CLI-FILE-FALLBACK: ENV 분기가 파일 분기보다 우선 (resolveToken 본문)')
   }
 
   // INV-ADMIN-SESSION-MODE — saveAdminSession 본문에 atomicWriteJson({ mode: 0o600 }) + mkdirSync({ ..., mode: 0o700 })

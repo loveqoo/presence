@@ -40,10 +40,8 @@ const decodeJwtPayload = (token) => {
  * @param {string} [basePath] - Override for ~/.presence directory
  * @returns {string}
  */
-const secretFilePath = (basePath) => {
-  const dir = basePath || process.env.PRESENCE_DIR || Config.presenceDir()
-  return join(dir, 'server.secret.json')
-}
+const secretFilePath = (basePath) =>
+  join(Config.resolveDir(basePath), 'server.secret.json')
 
 /**
  * Loads the JWT secret from PRESENCE_JWT_SECRET env var or the secret file.

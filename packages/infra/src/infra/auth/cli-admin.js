@@ -85,7 +85,8 @@ async function cmdAdminLogout() {
 
   const baseUrl = resolveBaseUrl()
   try {
-    await fetch(`${baseUrl}${AUTH_PATHS.LOGOUT}`, {
+    // best-effort 호출 — 서버 도달 실패도 로컬 파일 삭제는 진행. httpJson 의 응답 body 는 사용 안 함.
+    await httpJson(`${baseUrl}${AUTH_PATHS.LOGOUT}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: session.refreshToken }),

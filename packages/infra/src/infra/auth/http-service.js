@@ -1,4 +1,5 @@
 import fp from '@presence/core/lib/fun-fp.js'
+import { AUTH_API_PATHS } from '@presence/core/core/policies.js'
 import { AUTH, AUTH_ERROR, AuthError, toPrincipal } from './policy.js'
 import { AuthService } from './service.js'
 
@@ -9,7 +10,12 @@ const { Either } = fp
 // AuthService 서브클래스 — extractPrincipal, gate, 핸들러.
 // =============================================================================
 
-const MUST_CHANGE_PASSWORD_ALLOWLIST = ['/auth/change-password', '/auth/refresh', '/auth/logout']
+// mustChangePassword 사용자가 접근 허용되는 paths (mount 후 기준 — Express 라우터 내부 path).
+const MUST_CHANGE_PASSWORD_ALLOWLIST = [
+  AUTH_API_PATHS.CHANGE_PASSWORD,
+  AUTH_API_PATHS.REFRESH,
+  AUTH_API_PATHS.LOGOUT,
+]
 
 // --- Rate Limiter (in-memory, 서버 수명과 동일) ---
 
@@ -194,7 +200,8 @@ class HttpAuthService extends AuthService {
               // 비밀번호 변경 성공 콜백 — initial-password 파일 삭제 등 side-effect.
               // 실패해도 응답에는 영향 없음 (best-effort).
               if (this.#onPasswordChanged) {
-                try { this.#onPasswordChanged(tokens.user.username) } catch (_) {}
+                try { this.#onPasswordChanged(tokens.user.username) }
+                catch (callbackErr) { /* best-effort: 콜백 실패가 응답에 영향 주면 안 됨. 진단 필요 시 logger 주입. */ }
               }
               res.json({
                 accessToken: tokens.accessToken,
