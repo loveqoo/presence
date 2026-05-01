@@ -113,6 +113,7 @@ const tests = [
   'packages/infra/test/auth-provider.test.js',
   'packages/infra/test/admin-bootstrap.test.js',
   'packages/infra/test/admin-session.test.js',
+  'packages/infra/test/admin-token-manager.test.js',
   'packages/infra/test/cli-utils.test.js',
   'packages/infra/test/http-service.test.js',
   'packages/infra/test/user-migration.test.js',

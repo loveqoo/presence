@@ -580,4 +580,46 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   }
 }
 
+// agent-identity I-CORE-AGENTS — cli.js cmdRemove 가 CORE_AGENT_NAMES + config.agents 합집합으로
+// agentIds 를 구성. core agent 이름은 policies.js 단일 진실 소스.
+{
+  const cliText = read('packages/infra/src/infra/auth/cli.js')
+  const policiesText = read('packages/core/src/core/policies.js')
+
+  // CORE_AGENT_NAMES 는 policies.js 에 정의 (Object.freeze 배열).
+  assert(
+    /export\s+const\s+CORE_AGENT_NAMES\s*=\s*Object\.freeze\(\s*\[/.test(policiesText),
+    'INV-CORE-AGENTS-USAGE: policies.js 에 CORE_AGENT_NAMES 정의 (frozen array)',
+  )
+
+  // cli.js 가 policies.js 에서 import.
+  assert(
+    /import\s*\{[^}]*\bCORE_AGENT_NAMES\b[^}]*\}\s*from\s*['"]@presence\/core\/core\/policies\.js['"]/.test(cliText),
+    'INV-CORE-AGENTS-USAGE: cli.js 가 policies.js 에서 CORE_AGENT_NAMES import',
+  )
+
+  // cli.js 에 로컬 재정의 부재 (정의는 policies.js 만).
+  assert(
+    !/^const\s+CORE_AGENT_NAMES\s*=/m.test(cliText),
+    'INV-CORE-AGENTS-USAGE: cli.js 에 CORE_AGENT_NAMES 로컬 재정의 부재',
+  )
+
+  // cmdRemove 본문에 CORE_AGENT_NAMES + config.agents 합집합 처리.
+  const cmdRemoveMatch = cliText.match(/const\s+cmdRemove\s*=\s*async\s*\([\s\S]*?\n\}/)
+  assert(cmdRemoveMatch, 'INV-CORE-AGENTS-USAGE: cmdRemove 정의 추출')
+  const body = cmdRemoveMatch?.[0] || ''
+  assert(
+    /new\s+Set\(\s*CORE_AGENT_NAMES\s*\)/.test(body),
+    'INV-CORE-AGENTS-USAGE: cmdRemove 가 CORE_AGENT_NAMES 로 Set 초기화',
+  )
+  assert(
+    /config\?\.agents/.test(body),
+    'INV-CORE-AGENTS-USAGE: cmdRemove 가 config.agents 합집합 추가',
+  )
+  assert(
+    /removeUserCompletely\(\s*\{[\s\S]*?agentIds[\s\S]*?\}\s*\)/.test(body),
+    'INV-CORE-AGENTS-USAGE: agentIds 가 removeUserCompletely 에 전달',
+  )
+}
+
 summary()

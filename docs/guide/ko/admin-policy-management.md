@@ -41,8 +41,8 @@ npm run user -- admin login
 **화면 예시:**
 
 ```
-admin 비밀번호:
-로그인 성공. 인증 정보가 저장되었습니다.
+Password:
+Logged in as admin. Saved to /Users/<사용자명>/.presence/admin-session.json (mode 0600).
 ```
 
 로그인 후 사용할 수 있는 admin 계정 관련 명령:
@@ -62,7 +62,7 @@ admin 비밀번호:
 ```
 admin login: 비밀번호 변경이 필요합니다 (mustChangePassword=true).
   서버 호스트에서: npm run user -- passwd --username admin
-  (passwd 는 서버에 저장된 계정 정보만 변경하므로 서버가 실행 중인 컴퓨터에서 실행해야 함)
+  (passwd 는 로컬 user-store 만 변경하므로 서버가 실행 중인 컴퓨터에서 실행해야 함)
 비밀번호 변경 후 다시 admin login 하세요.
 ```
 
@@ -355,21 +355,21 @@ npm run user -- policy version
 
 ## 문제가 생기면
 
-### "policy reload: admin access token 필요." 라고 나옵니다
+### "policy: admin access token 필요." 라고 나옵니다
 
 로그인이 되어 있지 않거나 인증 파일이 없는 상태입니다.
 
 - 권장 방법: `npm run user -- admin login` 으로 로그인합니다.
 - 환경 변수 방식 사용 중이라면 `PRESENCE_ADMIN_TOKEN` 이 설정되어 있는지 확인합니다.
 
-### "policy reload: 서버 도달 실패" 라고 나옵니다
+### "policy: 서버 도달 실패 — ..." 라고 나옵니다
 
 서버가 꺼져 있거나 주소가 틀렸습니다.
 
 - 서버 실행: `npm start`
 - 서버 주소가 기본값과 다르면: `export PRESENCE_SERVER_URL="http://올바른주소:포트"`
 
-### "인증이 필요합니다 (HTTP 401)" 라고 나옵니다
+### "policy: 인증이 필요합니다 (HTTP 401)." 라고 나옵니다
 
 로그인 정보가 만료됐습니다. 아래 순서로 처리합니다:
 
@@ -378,7 +378,7 @@ npm run user -- policy version
 
 환경 변수 방식을 사용 중이라면 새 토큰을 발급해 `PRESENCE_ADMIN_TOKEN` 을 갱신합니다.
 
-### "admin 권한이 필요합니다 (HTTP 403)" 라고 나옵니다
+### "policy: admin 권한이 필요합니다 (HTTP 403)." 라고 나옵니다
 
 로그인한 계정에 admin 권한이 없습니다. 아래를 확인합니다:
 

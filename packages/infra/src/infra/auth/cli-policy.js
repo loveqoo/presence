@@ -273,6 +273,8 @@ async function cmdPolicyVersion() {
   console.log(`현재 활성 정책: 버전 ${res.body.version} (적용: ${res.body.reloadedAt})`)
 }
 
+export { AdminTokenManager }
+
 export const dispatchPolicy = (action, flags) => dispatchWithCliErrorHandling(async () => {
   switch (action) {
     case 'lint':    return await cmdPolicyLint({ file: requireFlag(flags, 'file') })

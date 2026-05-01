@@ -12,7 +12,7 @@ presence의 인증 경계를 정의한다. 유저 등록, 로그인, 토큰 갱�
   - `npm run user -- passwd --username <name>` — 비밀번호 재설정 (기존 세션 전체 무효화)
   - `npm run user -- list` — 등록된 유저 목록 출력
 - I2. **인증 없이 서비스 사용 불가**: `/api` 하위 모든 엔드포인트는 유효한 Access Token 없이 403/401 반환. 예외: `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/status`, `/api/instance`. (`auth-setup.js:28` publicPaths 목록 기준) `authEnabled`는 `PresenceServer.#boot()`에서 `true`로 하드코딩. 런타임 또는 설정 파일로 override 불가. `session-api.js`와 `ws-handler.js`에 존재하는 `authEnabled &&` 조건 분기는 테스트/레거시 호환 목적이며, 운영 환경에서는 항상 true 경로를 탄다.
-- I3. **mustChangePassword 강제**: 최초 등록 사용자는 `mustChangePassword: true`. 이 상태에서 `/api/auth/change-password`, `/api/auth/refresh`, `/api/auth/logout` 외 모든 API 403 반환. 실제 상수는 `http-service.js`의 `MUST_CHANGE_PASSWORD_ALLOWLIST`이며 `req.path` 기준으로 `/auth/change-password`, `/auth/refresh`, `/auth/logout` 형식 (Express 라우터가 `/api` prefix를 벗긴 후 매칭). 외부 URL 기준으로는 `/api/auth/...`와 동일 endpoint.
+- I3. **mustChangePassword 강제**: 최초 등록 사용자는 `mustChangePassword: true`. 이 상태에서 `/api/auth/change-password`, `/api/auth/refresh`, `/api/auth/logout` 외 모든 API 403 반환. 실제 상수는 `http-service.js`의 `MUST_CHANGE_PASSWORD_ALLOWLIST`이며 `req.path` 기준으로 `/auth/change-password`, `/auth/refresh`, `/auth/logout` 형식 (Express 라우터가 `/api` prefix를 벗긴 후 매칭). 외부 URL 기준으로는 `/api/auth/...`와 동일 endpoint. **단일 진실 소스**: `MUST_CHANGE_PASSWORD_ALLOWLIST`는 `policies.js`의 `AUTH_API_PATHS`(CHANGE_PASSWORD/REFRESH/LOGOUT)에서 derive — 경로 상수가 `http-service.js`에 중복 기술되지 않음.
 - I4. **Access Token 수명**: 15분. Refresh Token 수명: 7일.
 - I5. **Refresh Token Rotation**: 토큰 갱신 시 기존 refresh 세션 무효화 후 새 세션 발급. `validateRefreshChain`에서 두 가지 경로 모두 `revokeAllRefreshSessions(sub)` 호출 후 즉시 거부:
   1. `!hasRefreshSession(sub, jti)` — 이미 폐기된 jti 재사용 → **탈취 감지** → `AUTH_ERROR.TOKEN_REVOKED` (401)
@@ -28,12 +28,14 @@ presence의 인증 경계를 정의한다. 유저 등록, 로그인, 토큰 갱�
 - I10. **Rate Limiting**: IP 기준 실패한 로그인 시도만 윈도 내 카운트. 한도 초과 시 429. 성공 로그인은 카운트하지 않는다. 상수: `AUTH.RATE_LIMIT_MAX_ATTEMPTS`(5회), `AUTH.RATE_LIMIT_WINDOW_MS`(60,000ms). 서버 프로세스 수명과 동일한 in-memory 카운터. (`http-service.js` `loginHandler()` — `record(ip)`는 `result.left` 실패 분기에서만 호출)
 - I11. **Principal 정규화**: 모든 인증 경로(access token payload, refresh chain user)는 `{ username, roles, mustChangePassword }` 형태의 단일 Principal로 변환. `username` 부재 시 즉시 Left 반환. `mustChangePassword` 부재 시 `false`로 기본값 처리 — 이 기본값은 `user-store.js` 레코드 로드(`findUser`), `toPrincipal()` payload 변환(`policy.js:48 ?? false`), `service.js` 토큰 발급(`|| false`) 세 곳에서 일관되게 적용된다. 레거시 유저 레코드(해당 필드 없음)와 테스트 편의를 위한 의도적 설계이며, 부재를 `true`(강제 변경 필요)로 해석하지 않는다는 점에서 보안상 안전한 기본값이다.
 
+- I12. **Admin CLI 세션 — ENV 우선, 파일 fallback, 단일 snapshot**: `AdminTokenManager.fromEnv()`는 CLI dispatch 경계 진입점. `process.env.PRESENCE_ADMIN_TOKEN` 을 생성 시 1회 snapshot — 인스턴스 수명 동안 ENV 값 불변. ENV 있으면 `~/.presence/admin-session.json` 무시(파일 상태에 영향 없음). ENV 없으면 파일 로드 → 만료 임박(30s drift buffer) 시 자동 refresh + 파일 갱신. 401 응답 수신 시 force-refresh 1회 + retry — ENV 모드에서는 retry 없음. 파일 모드 위배(chmod != 600) 또는 파일 손상(JSON parse 실패) 시 `AdminSessionError`로 즉시 중단, 적절한 복구 안내 출력. `admin-session.json` 파일은 `~/.presence/` 하위에 위치하며 0600 권한 필수.
+
 ## 경계 조건 (Edge Cases)
 
 - E1. `users.json` 파일이 없는 상태에서 서버 시작 → `userStore.hasUsers()` false → 두 경로가 독립적으로 거부:
-  1. CLI 진입점(`index.js:304`) — `process.exit(1)`로 조기 종료.
-  2. 프로그램적 진입점 `createAuthSetup()`(`auth-setup.js:24`) — `throw new Error('No users configured...')`로 `#boot()` 실패.
-  두 경로 모두 `hasUsers()` false를 거부하는 의도된 이중 방어다. 독립 테스트 없음(`index.js` CLI 분기 + `auth-setup.js` throw 모두 자동화 미커버). ⚠️
+  1. CLI 진입점(`cli.js`) — `process.exit(1)`로 조기 종료.
+  2. 프로그램적 진입점 `createAuthSetup()`(`auth-setup.js`) — `throw new Error('No users configured...')`로 `#boot()` 실패.
+  두 경로 모두 `hasUsers()` false를 거부하는 의도된 이중 방어다. 독립 테스트 없음(CLI 분기 + `auth-setup.js` throw 모두 자동화 미커버). ⚠️
 - E2. `mustChangePassword: true` 상태의 유저가 `/api/sessions/:id/chat` 요청 → 403 반환. 세션 상태 변경 없음.
 - E3. 만료된 Access Token으로 API 접근 → 401 반환. Refresh Token으로 갱신 후 재시도 필요.
 - E4. 이미 폐기된 jti로 refresh 시도 → 탈취 감지(`TOKEN_REVOKED`): 해당 유저 모든 refresh 세션 삭제 → 401 반환. 유저는 재로그인 필요.
@@ -56,23 +58,30 @@ presence의 인증 경계를 정의한다. 유저 등록, 로그인, 토큰 갱�
 - I9 → `packages/infra/test/auth-user-store.test.js` (changePassword refreshSessions 초기화)
 - I10 → `packages/infra/test/auth-provider.test.js` (rate limit 검증)
 - I11 → `packages/infra/test/auth-middleware.test.js` (toPrincipal)
-- E1 → `packages/server/src/server/index.js` CLI 분기 (hasUsers 체크 — 자동화 테스트 없음) ⚠️
+- I12 → `packages/infra/test/admin-token-manager.test.js` AT1~AT11 (fromEnv snapshot / ENV 우선 / 파일 fallback / mode 위배 / corrupt JSON / 만료 임박 refresh / 401 retry / ENV 모드 no-retry / refresh 401 → 파일 삭제), `packages/server/test/admin-router.test.js` AR9~AR14c (dispatchPolicy 통합 — admin login flow / refresh fallback / mustChangePassword / clock drift retry / ENV no-retry / two-step 401)
+- E1 → `packages/infra/src/infra/auth/cli.js` CLI 분기 (hasUsers 체크 — 자동화 테스트 없음) ⚠️
 - E4 → `packages/infra/test/auth-middleware.test.js` (탈취 감지 시나리오)
 - E6 → `packages/server/test/server.test.js` (WS origin 체크)
 
 ## 관련 코드
 
+- `packages/core/src/core/policies.js` — `API_PREFIX`, `AUTH_API_PATHS`, `ADMIN_API_PATHS` (단일 진실 소스)
 - `packages/infra/src/infra/auth/policy.js` — AUTH 상수, AUTH_ERROR, AuthError, toPrincipal
 - `packages/infra/src/infra/auth/user-store.js` — 유저 CRUD, refreshSessions 관리 (`~/.presence/users.json`)
-- `packages/infra/src/infra/auth/token.js` — JWT 발급/검증 (node:crypto HMAC-SHA256)
+- `packages/infra/src/infra/auth/token.js` — JWT 발급/검증 (node:crypto HMAC-SHA256). `decodeJwtPayload` — signature 검증 없는 payload decode (admin-session exp 추출 + 향후 A2A RS256 decode 공유)
 - `packages/infra/src/infra/auth/service.js` — AuthService 기반 클래스
-- `packages/infra/src/infra/auth/http-service.js` — HTTP 인증 (rate limiter, mustChangePassword allowlist)
+- `packages/infra/src/infra/auth/http-service.js` — HTTP 인증 (rate limiter, mustChangePassword allowlist). `MUST_CHANGE_PASSWORD_ALLOWLIST`는 `AUTH_API_PATHS`에서 derive
 - `packages/infra/src/infra/auth/ws-service.js` — WebSocket 인증
+- `packages/infra/src/infra/auth/cli-utils.js` — CLI 공통 유틸. `AUTH_PATHS`/`ADMIN_PATHS`는 `API_PREFIX + AUTH_API_PATHS/ADMIN_API_PATHS`로 derive. `CliError` 베이스 클래스 (서브타입: `CliPolicyError`/`CliAdminError`)
+- `packages/infra/src/infra/auth/cli-policy.js` — Cedar 정책 CLI (`AdminTokenManager` 클래스: `fromEnv()` static factory, `resolveToken`/`fetchAdminWithRetry`)
+- `packages/infra/src/infra/auth/admin-session.js` — admin-session.json 파일 관리 (0600). `decodeJwtPayload` (token.js) 공유
 - `packages/server/src/server/auth-setup.js` — Express 라우터/미들웨어 조립
 - `packages/server/src/server/ws-handler.js` — WS 연결 인증 + close 코드 매핑
 
 ## 변경 이력
 
+- 2026-04-30: E1 파일 참조 정정 — `index.js:304` → `cli.js` (리팩토링 후 stale). I3 단일 진실 소스 명시 — `MUST_CHANGE_PASSWORD_ALLOWLIST`가 `AUTH_API_PATHS`에서 derive됨. 관련 코드에 `policies.js`/`cli-utils.js`/`cli-policy.js`/`admin-session.js` 추가. `token.js`에 `decodeJwtPayload` export 추가 명시.
+- 2026-04-30: I12 미커버 ⚠️ 해소 — `packages/infra/test/admin-token-manager.test.js` 신규 (AT1~AT11: AdminTokenManager 클래스 단위 검증). 통합 커버는 `packages/server/test/admin-router.test.js` AR9~AR14c (dispatchPolicy 경유).
 - 2026-04-10: 초기 작성
 - 2026-04-10: I8 WS close 코드 순서 정정 (4001=AUTH_FAILED, 4002=PASSWORD_CHANGE_REQUIRED, 4003=ORIGIN_NOT_ALLOWED). close 코드 단일 정의는 server-ws.md에 위임
 - 2026-04-10: E6 `config.host` → `opts.host` 정정. Config 스키마에 host 항목 없음을 명시.

@@ -76,6 +76,8 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 
 - I-WD. **workingDir = Config.userDataPath(userId) 고정**: 모든 세션의 `workingDir`은 생성 시 `Config.userDataPath(userId)`로 자동 결정된다. 외부 입력(`opts.workingDir`, TUI `cwd`, `POST /sessions` body `workingDir`)은 무시된다. 런타임 변경 불가. 세션 유형(USER/SCHEDULED/AGENT)과 무관하게 동일 규칙이 적용된다. `workingDir`은 persistence에 저장하지 않으며 복원 시에도 `userId` 기반으로 재계산한다. tool 경계 검증(`isWithinWorkspace`), `shell_exec` cwd, system prompt `WORKING_DIR` 섹션의 유일 기준점.
 
+- I-CORE-AGENTS. **시스템 제공 core agent 이름 집합은 `CORE_AGENT_NAMES`가 단일 진실 소스**: `policies.js`의 `CORE_AGENT_NAMES = ['default', 'summarizer']` (현재 2종). 모든 유저에게 동일하게 부팅되는 agent 이름 목록. `npm run user -- remove` 시 `CORE_AGENT_NAMES` 전체 + `config.agents` 이름의 합집합으로 `agentIds`를 구성해 Memory clearAll을 수행한다. core agent 이름은 `policies.js` 외 어떤 파일에도 중복 기술 금지 (`refactor.md` 매직 스트링 금지 규칙). 새 시스템 agent 추가 시 이 상수만 갱신하면 CLI remove 경로가 자동으로 포괄한다.
+
 ---
 
 ## 경계 조건 (Edge Cases)
@@ -150,6 +152,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
   - A2A6 (access 토큰 payload.type='access' 확인 — 신규)
   - `packages/server/test/a2a-invoke.test.js` AI2 (AUTH_MISSING), AI10 (위조 서명 → AUTH_INVALID -32002), AI11 (access 토큰 오용 → 'not an a2a token')
 - I-WD → `packages/infra/test/session.test.js` SD6 (workingDir = userDataPath), `packages/server/test/server.test.js` S20b (body workingDir 무시 + 응답 effective 확인), `packages/server/test/scheduler-e2e.test.js` SE3 (SCHEDULED 세션 workingDir)
+- I-CORE-AGENTS → `test/regression/cedar-quota-policy.test.js` INV-CORE-AGENTS-USAGE (정적 회귀 7 항목 — policies.js 단일 정의, cli.js import + 로컬 재정의 부재, cmdRemove Set 합집합, removeUserCompletely 전달)
 - E6 → `packages/infra/test/agent-access.test.js` AA3
 - E7/E8 → `packages/infra/test/agent-access.test.js` AA-X1(E7: evaluator 경로 archived+new-session deny)/AA-X2(E8: evaluator 경로 archived+continue-session allow)
 - E12 → `packages/infra/test/agent-access.test.js` AA14
@@ -183,6 +186,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - `packages/infra/src/infra/actors/memory-actor.js` — MemoryActor (agentId 기반 recall/save)
 - `packages/infra/src/infra/sessions/internal/session-actors.js` — sessionEnv에 agentId 주입
 - `packages/infra/src/infra/auth/remove-user.js` — removeUserCompletely (agentIds 순회 clearAll)
+- `packages/infra/src/infra/auth/cli.js` — `cmdRemove`: `CORE_AGENT_NAMES + config.agents` 합집합으로 agentIds 구성 후 removeUserCompletely 호출 (I-CORE-AGENTS)
 - `packages/server/src/server/slash-commands.js` — /memory 슬래시 커맨드 ctx.agentId 전달, /persona set|reset Cedar 게이트 (I-CEDAR-PERSONA)
 - `packages/core/src/core/repl-commands.js` — Repl agentId 기반 memory 조회
 - `packages/infra/src/infra/authz/cedar/evaluator-ref.js` — `createEvaluatorRef`: closure-bound state (current/version/reloadedAt), `replace` / `snapshot` 메서드 (I-CEDAR-RELOAD-CALL-LINEARIZABLE, I-CEDAR-RELOAD-FAIL-SAFE)
@@ -218,3 +222,5 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-28: I-CEDAR-PERSONA fail-open → fail-closed 전환 (governance-cedar v2.9 §X4). `31-protect-persona.cedar` 신규 (`reservedOwner && !isAdmin → deny`). `slash-commands.js` 가 evaluator/jwtSub/agentId 누락 시 즉시 deny (fail-closed). 모든 Cedar 게이트가 fail-closed 로 통일. v2.8 spec-guardian design tension 해소. 테스트 커버리지 CE14 → CE14.1/14.2/14.3 매트릭스, CB12 → 3 케이스, INV-CEDAR-PERSONA-PROTECT 정적 회귀 추가. I-CEDAR-PERSONA 불변식 본문 갱신.
 - 2026-04-28: KG-27 resolved + I-CEDAR-MATCH-ID 신규 + I-CEDAR-DENY-CLASSIFICATION 신규 — governance-cedar v2.11 §X5. cedar-wasm staticPolicies 맵 입력으로 50-* 운영자 슬롯 unblock. `classifyDeny` priority 분류로 first-match ordering 가정 제거. operator/protect/admin-limit deny 가 terminal DENIED, quota 만 PENDING (codex H3). admin CLI policy lint/list 추가. CB-X1/X2/X3 + GV-X16~X19 + CLI-X1~X5 회귀 + INV-CEDAR-POLICY-MAP/INTERPRET-MATCHED-POLICIES/DENIED-VS-PENDING 정적 회귀. 4583 passed.
 - 2026-04-29: KG-28 resolved + I-CEDAR-RELOAD-CALL-LINEARIZABLE / I-CEDAR-RELOAD-FAIL-SAFE / I-CEDAR-RELOAD-EDGE-TRIGGER / I-CEDAR-AUDIT-VERSION 신규 — governance-cedar v2.13 §X6. I-CEDAR-RELOAD-CALL-LINEARIZABLE 에 chat 경로 다중 호출 구체화 (attachSessionMiddleware canAccessAgent + handleSlashCommand set_persona). I-CEDAR-AUDIT-VERSION 에 단일 인스턴스 주입 경로 명시 (bootCedarSubsystem → innerEvaluator closure 경유). KG-28 Known Gaps 섹션에 resolved 항목 추가. spec-guardian 교차 점검 반영 (2026-04-29). callable wrapper (`createEvaluatorRef`) 로 hot reload 경로 완성. rebootCedarSubsystem throw → wrapper.replace 미호출 (fail-safe). single-flight reloadPending 으로 follower 가 leader reloadStartedAt 공유 (edge-trigger). audit getPolicyVersion closure 로 모든 server-side entry policyVersion 자동 첨부 (단일 진실 소스). CLI manual_approve 는 policyVersion=null 명시적 예외. 관련 코드에 evaluator-ref.js / admin-router.js / audit.js 추가. 테스트 커버리지 RL1~RL9 / AR1~AR7 / INV-CEDAR-RELOAD-* / INV-CEDAR-AUDIT-VERSION 매핑 추가. 4646 passed.
+- 2026-04-30: I-CORE-AGENTS 불변식 신규 — `CORE_AGENT_NAMES` 정책 상수 격상 반영. 시스템 제공 agent 이름 집합의 단일 진실 소스를 policies.js로 명문화. 관련 코드에 cli.js 추가. 테스트 커버리지 I-CORE-AGENTS 미커버 ⚠️ 등록.
+- 2026-04-30: I-CORE-AGENTS 미커버 ⚠️ 해소 — `test/regression/cedar-quota-policy.test.js` INV-CORE-AGENTS-USAGE 정적 회귀 7 항목 추가 (policies.js 단일 정의, cli.js import + 로컬 재정의 부재, cmdRemove Set 합집합, removeUserCompletely 전달).
