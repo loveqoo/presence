@@ -87,6 +87,25 @@ const transitions = [
     emit: [{ topic: 'turn.cancelled', payload: { turnState: TurnState.idle() } }],
   }),
 
+  // cancelling + complete → idle (FP-80: cancel 신호 도달 후에도 turn 이 정상 완료)
+  // LLM SDK 가 abort 를 무시했거나 cancel 이 turn 종료 직전에 도착 — 어느 쪽이든
+  // turn 자체는 끝났으므로 idle 로 수렴. emit 은 turn.cancelled (cancel 시도가 있었음을 보존).
+  Transition({
+    from: isCancelling,
+    on: 'complete',
+    to: () => TurnState.idle(),
+    emit: [{ topic: 'turn.cancelled', payload: { turnState: TurnState.idle() } }],
+  }),
+
+  // cancelling + failure → idle (FP-80: cancel 후 turn 이 비-abort 사유로 실패)
+  // 예: LLM 응답이 cancel 직후 timeout 으로 끝남. abort_complete 가 아닌 failure 로 도착해도 idle 수렴.
+  Transition({
+    from: isCancelling,
+    on: 'failure',
+    to: () => TurnState.idle(),
+    emit: [{ topic: 'turn.cancelled', payload: { turnState: TurnState.idle() } }],
+  }),
+
   // --- Explicit rejections ---
   Transition({ from: isWorking,    on: 'chat',   reject: 'session-busy' }),
   Transition({ from: isCancelling, on: 'chat',   reject: 'cancelling-in-progress' }),

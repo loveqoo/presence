@@ -87,6 +87,32 @@ const working = (input) => TurnState.working(input)
   )
 }
 
+// A7 (FP-80). cancelling + complete → idle + turn.cancelled
+// LLM 이 abort 를 무시하고 정상 완료한 경우 — turn 자체는 끝났으므로 idle 수렴.
+{
+  const r = step(turnGateFSM, cancelling('q'), { type: 'complete' })
+  assert(r.isRight(), 'A7: cancelling+complete accept (FP-80)')
+  assertDeepEqual(r.value.state, IDLE, 'A7: state=idle')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.cancelled', payload: { turnState: IDLE } }],
+    'A7: turn.cancelled payload (cancel 시도 보존)'
+  )
+}
+
+// A8 (FP-80). cancelling + failure → idle + turn.cancelled
+// cancel 후 turn 이 비-abort 사유로 실패한 경우 (예: timeout) — 마찬가지로 idle 수렴.
+{
+  const r = step(turnGateFSM, cancelling('q'), { type: 'failure' })
+  assert(r.isRight(), 'A8: cancelling+failure accept (FP-80)')
+  assertDeepEqual(r.value.state, IDLE, 'A8: state=idle')
+  assertDeepEqual(
+    r.value.events,
+    [{ topic: 'turn.cancelled', payload: { turnState: IDLE } }],
+    'A8: turn.cancelled payload (cancel 시도 보존)'
+  )
+}
+
 // --- Explicit rejections ---
 
 // E1. working + chat → Left session-busy

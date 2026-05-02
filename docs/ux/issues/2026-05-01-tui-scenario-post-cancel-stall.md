@@ -2,7 +2,7 @@
 
 **영역**: tui, server
 **심각도**: low
-**상태**: open
+**상태**: resolved
 **관련 코드**: `test/e2e/tui-scenario.test.js:425-477` (S19 → S20), `packages/server/src/server/ws-handler.js`, `packages/tui/src/remote-session.js`
 
 ## 시나리오
@@ -54,3 +54,27 @@ S19 종료 후 S20 setup() 진입 전 짧은 대기(`await sleep(500)` 수준)�
 ## 근거
 
 심각도 low: 현재까지 라이브 시나리오 테스트에서만 관찰됨. 실제 UX 에서 cancel + 즉시 재시도는 자연스러운 흐름이므로, 수동 재현 성공 시 medium 으로 격상한다.
+
+## 해소 (2026-05-02)
+
+원인 — turnGateFSM 에 `cancelling + complete` / `cancelling + failure` 트랜지션 부재.
+LLM SDK 가 abort 신호를 무시하고 정상 완료할 경우 (또는 cancel 이 turn 종료 직전에 도착할
+경우), executor 가 `complete` 이벤트를 submit 하지만 FSM 은 `cancelling` 상태에서 이를
+거부 (no-match) → FSM 이 영구히 `cancelling` 에 stuck. Bridge 가 `cancelling → working`
+projection 을 유지하면서 `state.turnState = 'working'` 도 영구. TUI 의 `InputBar` 는
+`disabled = isWorking` 으로 입력을 차단하므로, 사용자/테스트의 다음 typeInput 이 무시되어
+`POST /chat` 자체가 발생하지 않음 → 다음 turn 시작 못함.
+
+수정 — `packages/infra/src/infra/fsm/turn-gate-fsm.js` 에 두 트랜지션 추가:
+
+- `cancelling + complete → idle` + `turn.cancelled` emit (cancel 시도 보존)
+- `cancelling + failure → idle` + `turn.cancelled` emit
+
+LLM 이 abort 를 무시했든 cancel 이 늦게 도착했든, turn 자체가 끝나면 idle 로 수렴.
+
+회귀 — A7 / A8 (turn-gate-fsm.test.js) 단위 테스트 + isolated 재현 스크립트로 검증
+(cancel 후 idle 복귀 10ms, 다음 chat turn 증가 정상).
+
+테스트 측면 — 라이브 시나리오 테스트의 S19→S20 전이는 본 수정으로 해소. 단, 별도 LLM
+응답 지연 (qwen3.6-35b 로컬 모델 + 누적 컨텍스트 길어짐) 으로 인한 sendAndWait timeout
+은 독립 이슈로 잔존 — 본 ticket 범위 밖.
