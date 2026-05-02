@@ -110,11 +110,43 @@ const waitTurnComplete = async (remoteState, lastFrame, turnBefore) => {
   await waitIdle(lastFrame)
 }
 
+// PRESENCE_LIVE_TIMING=1 — sendAndWait 별 timing 로그 + timeout 시 server state dump.
+// FP-81 진단용. 평소 출력에는 영향 없음.
+const TIMING_ENABLED = process.env.PRESENCE_LIVE_TIMING === '1'
+
+// connect() 가 마지막 sessionId 를 모듈 스코프에 보관 — TIMING dump 가 즉시 사용 가능.
+let _diagSessionId = null
+
+const dumpServerState = async (label) => {
+  if (!_diagSessionId) return
+  try {
+    const r = await httpRequest('GET', `/api/sessions/${_diagSessionId}/state`)
+    const s = r.body || {}
+    console.log(`  [diag:${label}] turn=${s.turn} turnState=${JSON.stringify(s.turnState)} lastTurn=${s.lastTurn?.tag} historyLen=${(s.context?.conversationHistory || []).length} streaming=${s.streaming?.status || 'null'}`)
+  } catch (err) {
+    console.log(`  [diag:${label}] state dump 실패: ${err.message}`)
+  }
+}
+
 // 메시지를 보내고 응답 완료까지 대기
 const sendAndWait = async (stdin, remoteState, lastFrame, message) => {
   const turnBefore = remoteState.get('turn') ?? 0
   await typeInput(stdin, message)
-  await waitTurnComplete(remoteState, lastFrame, turnBefore)
+  if (!TIMING_ENABLED) {
+    await waitTurnComplete(remoteState, lastFrame, turnBefore)
+    return
+  }
+  const t0 = Date.now()
+  try {
+    await waitTurnComplete(remoteState, lastFrame, turnBefore)
+    const elapsed = Date.now() - t0
+    if (elapsed > 5000) console.log(`  [timing] "${message.slice(0, 40)}" — ${(elapsed / 1000).toFixed(1)}s`)
+  } catch (err) {
+    const elapsed = Date.now() - t0
+    console.log(`  [timing:TIMEOUT] "${message.slice(0, 40)}" — ${(elapsed / 1000).toFixed(1)}s`)
+    await dumpServerState('on-timeout')
+    throw err
+  }
 }
 
 // =============================================================================
@@ -212,6 +244,7 @@ const connect = async () => {
       seedUserWorkspace(userDir)
     }
   }
+  _diagSessionId = sessionId
 
   const apiBase = `/api/sessions/${sessionId}`
   const [toolsRes, agentsRes, configRes] = await Promise.all([

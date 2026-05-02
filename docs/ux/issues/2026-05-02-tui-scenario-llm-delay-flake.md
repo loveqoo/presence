@@ -57,3 +57,63 @@ FP-80 (cancel-stuck FSM) 수정 후 S19→S20 cancel 흐름은 통과하지만, 
 ## 근거
 
 심각도 low: 실제 UX 영향 없음. CI 가 라이브 테스트를 nightly 전용으로만 실행한다면 운영 영향도 없다. 그러나 회귀 검증 신뢰도가 낮아져 FP-80 같은 진짜 회귀를 묻을 수 있으므로 진단은 필요하다. (a) 진단부터 시작해 원인이 확인되면 (b)/(c) 중 적은 비용의 방안을 먼저 적용하는 것을 권장.
+
+## 진단 (2026-05-02)
+
+`PRESENCE_LIVE_TIMING=1` 환경변수로 시나리오별 turn 응답 시간 측정 + timeout 시
+서버 state dump 인프라 추가 (`test/e2e/live-helpers.js`).
+
+### 측정 데이터
+
+라이브 시나리오 테스트 2회 실행 결과:
+
+**1차 실행** (S9-1 에서 hang):
+- S1~S8 통과: 모든 turn 5~18초 응답 (평균 10초)
+- S9-1 (`루트 디렉토리의 파일과 폴더 개수를 세줘`) 에서 120s timeout
+- 실패 모드: turn change 됐으나 idle 도달 못함 (`waitIdle`)
+
+**2차 실행** (S10-3 에서 hang):
+- S1~S10-2 통과: 모든 turn 5~16초 응답
+- S10-3 (`/tool list` 후 `file_` 텍스트 frame 검증) 에서 5s timeout
+- 실패 모드: slash 명령 후 frame 에 결과 미반영
+
+**이전 실행들** (timing 없이):
+- S20, S13-3, S15-4 등 다양한 위치에서 120s turn change timeout
+
+### 패턴
+
+| 실패 종류 | 의심 원인 |
+|----------|----------|
+| 120s — turn change 미발생 | typeInput 의 stdin write 손실 / InputBar 입력 무시 / WS broadcast 누락 |
+| 120s — idle 미도달 | LLM 응답 hang / executor.afterTurn 처리 지연 / FSM emit 누락 |
+| 5s — frame 검증 실패 | Ink testing library frame 렌더 race / slash 결과 transient 빠른 소실 |
+
+### 결론
+
+단일 원인이 아닌 **복합 race conditions**. 매 실행마다 다른 위치/다른 종류 timeout 발생.
+LLM 지연만이 아니라:
+- stdin → InputBar 입력 동기화 race
+- WS broadcast → MirrorState 갱신 race
+- Frame 렌더 race
+- LLM 응답 시간의 자연 변동 (5~25초 관찰, 더 클 수도)
+
+### 다음 단계 (후속 phase)
+
+- 각 race 종류별 분리 재현 → 각각 별도 fix
+- LLM 응답 시간 변동을 흡수하는 timeout 정책 (시나리오별 가변 timeout)
+- stdin write → InputBar 도착 ack 메커니즘 (테스트 framework 한정)
+- WS broadcast 누락 감지 (sequence number / 재요청)
+
+본 phase 에서는 `PRESENCE_LIVE_TIMING=1` 진단 인프라만 보존. 향후 데이터 수집 +
+원인별 점진적 해결을 위한 발판.
+
+### 참고
+
+진단 인프라 사용법:
+```bash
+npm run server:start
+PRESENCE_LIVE_TIMING=1 node test/e2e/tui-scenario.test.js
+```
+
+각 sendAndWait 의 5s 초과 timing 출력 + timeout 시 server state (turn / turnState
+/ lastTurn / historyLen / streaming) dump.
