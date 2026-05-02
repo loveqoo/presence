@@ -95,9 +95,19 @@ const typeInput = async (stdin, text) => {
   await delay(20)
 }
 
-// idle 복귀 대기
+// 응답 완료 (입력 재개 가능) 대기. StatusBar 는 status 별로 다른 indicator 표시:
+//   - working:    '◌ thinking' 또는 '◌ <activity>'   (yellow)
+//   - reconnecting: '◌ reconnecting'                  (yellow)
+//   - error:      '✗ error' 또는 '✗ error: ...'      (red, InputBar 활성)
+//   - idle:       '● idle'                            (green, InputBar 활성)
+// FP-81 진단 결과: lastTurn=failure 로 status='error' 가 되면 frame 에 'idle' 텍스트가
+// 등장하지 않아 이전 'lastFrame.includes("idle")' 검사가 영원히 timeout 됐다.
+// InputBar 의 disabled = isWorking 이라 error 도 입력 가능 = 응답 완료의 일종이다.
 const waitIdle = (lastFrame) => waitFor(
-  () => lastFrame().includes('idle') && !lastFrame().includes('thinking'),
+  () => {
+    const f = lastFrame()
+    return f.includes('● idle') || f.includes('✗ error')
+  },
   { timeout: LLM_TIMEOUT },
 )
 

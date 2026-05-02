@@ -2,7 +2,7 @@
 
 **영역**: tui, infra
 **심각도**: low
-**상태**: open
+**상태**: resolved
 **관련 코드**: `test/e2e/tui-scenario.test.js`, `test/e2e/live-helpers.js` (LLM_TIMEOUT, sendAndWait), `packages/infra/src/infra/llm/` (LLM 클라이언트)
 
 ## 시나리오
@@ -117,3 +117,64 @@ PRESENCE_LIVE_TIMING=1 node test/e2e/tui-scenario.test.js
 
 각 sendAndWait 의 5s 초과 timing 출력 + timeout 시 server state (turn / turnState
 / lastTurn / historyLen / streaming) dump.
+
+## 해소 (2026-05-02)
+
+진단 인프라로 timeout 시점 server state 를 캡처한 결과, 가설이 뒤집혔다.
+
+### 실제 원인
+
+`waitIdle` 함수의 frame 검사 로직 결함:
+
+```javascript
+const waitIdle = (lastFrame) => waitFor(
+  () => lastFrame().includes('idle') && !lastFrame().includes('thinking'),
+  { timeout: LLM_TIMEOUT },
+)
+```
+
+LLM 이 가끔 failure 로 응답 종료할 때 (truncation / invalid format / abort 등 자연
+발생 케이스), 서버는 정상적으로 `turnState=idle` 진입 + `lastTurn=failure` 로 마킹.
+TUI 의 StatusBar 는 status 별 indicator 를 표시:
+
+- working: `◌ thinking` 또는 `◌ <activity>`
+- error:   `✗ error` 또는 `✗ error: <hint>`
+- idle:    `● idle`
+
+`lastTurn=failure` 면 TUI status='error' 가 되어 StatusBar 가 `✗ error` 를 그린다.
+이때 frame 에 'idle' 텍스트가 등장하지 않으므로 `waitIdle` 이 영원히 timeout.
+
+`InputBar.disabled = isWorking` 이라 error 상태에서도 입력은 가능 — 즉 응답 완료의
+일종이지만 framework 검사가 이를 인식 못 했다.
+
+### 수정
+
+`test/e2e/live-helpers.js` 의 `waitIdle` 가 두 indicator 모두 인식:
+
+```javascript
+const waitIdle = (lastFrame) => waitFor(
+  () => {
+    const f = lastFrame()
+    return f.includes('● idle') || f.includes('✗ error')
+  },
+  { timeout: LLM_TIMEOUT },
+)
+```
+
+`reconnecting` 은 일시적 (재연결 후 idle/error 로 수렴) 이라 별도 처리 안 함.
+
+### 회귀 검증
+
+수정 후 라이브 시나리오 테스트 2회 연속 실행 — 모두 48/48 passed. 이전 매 실행마다
+다른 위치에서 hang 하던 비결정성 완전 해소.
+
+### Production 영향
+
+없음. TUI 의 InputBar 는 이미 error 상태에서도 활성. 사용자는 LLM failure 후 즉시
+다음 메시지 입력 가능. 본 이슈는 e2e framework 의 검사 로직 결함이었다.
+
+### 보존된 진단 인프라
+
+`PRESENCE_LIVE_TIMING=1` 환경변수로 sendAndWait 별 timing + timeout 시 server state
+dump 출력. 향후 다른 race conditions 진단에 활용 가능. 인프라 자체는 평소 출력에
+영향 없음 (env 부재 시 비활성).
