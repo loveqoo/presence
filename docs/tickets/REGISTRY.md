@@ -102,6 +102,7 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 | FP-78  | open     | medium   | infra| Cedar 정책 작성 가이드 부재 — 운영자가 50-*.cedar 문법/예시 없이 lint/reload 사용 불가 | docs/ux/issues/2026-04-29-cedar-policy-syntax-guide-missing.md |
 | FP-79  | open     | low      | tui  | TUI 에서 정책 버전 확인 단일 경로 부재 — CLI/REST 별도 호출 필요              | docs/ux/issues/2026-04-29-tui-policy-version-not-shown.md |
 | FP-80  | resolved | low      | tui  | cancel 직후 다음 입력이 새 turn 시작 못하는 stall (라이브 시나리오 S19→S20)         | docs/ux/issues/2026-05-01-tui-scenario-post-cancel-stall.md |
+| FP-81  | open     | low      | tui  | 라이브 시나리오 테스트가 누적 LLM 컨텍스트로 비결정적 timeout (매 실행 다른 위치)         | docs/ux/issues/2026-05-02-tui-scenario-llm-delay-flake.md |
 
 ## Known Gaps (KG)
 
@@ -140,12 +141,13 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 
 ## 통계
 
-- FP 총 **80개** — open **2**, resolved **78**
+- FP 총 **81개** — open **3**, resolved **78**
 - KG 총 **30개** — open **1**, resolved **29**
-- Severity 분포 (open만): medium 2 (FP-78, KG-30), low 1 (FP-79)
+- Severity 분포 (open만): medium 2 (FP-78, KG-30), low 2 (FP-79, FP-81)
 
 ## 변경 이력
 
+- 2026-05-02: FP-81 추가 — FP-80 fix 후에도 라이브 시나리오 테스트가 비결정적 hang. S13-3, S15-4 등 cancel 무관 시나리오에서 sendAndWait 가 turn 변화 못보고 LLM_TIMEOUT (120s). agent.log 에 명시적 실패 없음 → 서버측 정상 처리 추정. 매 실행 hang 위치 다름 → 누적 LLM 컨텍스트 (qwen3.6-35b 35B + accumulated conversationHistory) 로 응답 지연 추정. 진단 우선 (응답 시간 측정 / 격리 강화 / timeout 조정 / 모델 분리). 실제 UX 무관, CI 회귀 신뢰도만 영향.
 - 2026-05-02: FP-80 resolved — turnGateFSM 에 `cancelling + complete → idle` + `cancelling + failure → idle` 트랜지션 추가. 원인: LLM 이 abort 무시하고 정상 완료한 경우 executor 가 `complete` submit → FSM 의 cancelling 상태에서 거부 (no-match) → FSM 영구 stuck → bridge projection 으로 `state.turnState='working'` 영구 → TUI `InputBar disabled=isWorking` 으로 다음 입력 차단. 수정: 두 트랜지션 모두 `turn.cancelled` emit (cancel 시도 보존). 회귀: turn-gate-fsm.test.js A7/A8 (4 asserts) + isolated 재현 스크립트 (cancel 후 idle 복귀 10ms, 다음 chat 정상). 4894 → 4900 passed (+6).
 - 2026-05-01: FP-80 추가 — 라이브 시나리오 테스트 S19 cancel → S20-1 sendAndWait 가 turn 진입 못 하고 LLM_TIMEOUT (120s) 까지 hang. setup() /state 폴링은 idle 통과 후에도 다음 chat 이 새 turn 시작 안 함. 진단 우선 (서버 cancellation flag lifetime / MirrorState 재연결 race / 실 UX 수동 재현). 본 사이클의 라이브 e2e 검증 결과 — live 15/15 + 시나리오 S1~S19 (45 assertions) 통과 후 노출. 우리 정리 (cli-utils / AdminTokenManager / policies.js) 와 무관 (session/cancel 흐름 미경유).
 - 2026-04-30: FP-73 resolved — `feature/cedar-p5-hot-reload` 후속. MVP 범위 (single-admin / single-machine / single-host server / passwd 가능 환경). 신규 `admin-session.js` (atomicWriteJson 0o600 + 부모 디렉토리 0o700 + permission check `mode & 0o077` + decodeAccessExp + DRIFT_BUFFER 30s). 신규 `cli-admin.js` — `dispatchAdmin(login/logout/whoami)` + CliAdminError. login: password prompt/ENV/--password → POST /api/auth/login → 응답 top-level `mustChangePassword=true` 면 파일 미저장 + passwd 안내 + exit 1, 그 외 토큰 저장 + stale ENV 경고. logout: 서버 측 jti revoke + 파일 삭제 (서버 통신 실패 시 best-effort 로컬만). whoami: username + accessExp + 만료 임박 표시 (token 미노출). `cli-utils.js` 확장 — promptPassword/promptLine 이전 (cli.js refactor). cli-policy.js `resolveAdminToken` ENV 우선 → 파일 fallback → 부재 안내. 만료 임박 시 자동 refresh + 파일 갱신. `fetchAdminWithRetry` — 첫 401 시 1회 force-refresh + retry (clock drift 대응). ENV 사용 중에는 retry 안 함. 위협 모델 (수용): 동일 uid 악성 프로세스 / 백업 매체 유출 / 분실 머신 — 운영자 책임. 동시 admin CLI 실행 → self-DoS = single-admin sequential 가정으로 수용. 후속 phase: file lock / contract drift / credential rotation / mustChangePassword 자동 변경 / multi-instance 서버. plan-reviewer 11 라운드 (pre-MVP 6 + MVP 5) 거쳐 사용자 결정 (옵션 B) 으로 운영 규율 영역은 가이드 문서로 흡수. 회귀: AS1~AS10 (단위) + CLI-X10~X17 (CLI 통합) + AR9~AR14b (server 통합) + INV-CEDAR-CLI-FILE-FALLBACK / INV-ADMIN-SESSION-MODE / INV-CEDAR-CLI-ADMIN-CMDS / INV-ADMIN-SESSION-DRIFT-BUFFER / INV-ADMIN-MUST-CHANGE-PASSWORD 정적 회귀. 4684 → 4775 passed (+91).
