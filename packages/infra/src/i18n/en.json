@@ -31,7 +31,7 @@
     "memory_unavailable": "Memory not available."
   },
   "help": {
-    "commands": "── Conversation ──\n/clear        Clear conversation history (memory is kept)\n\n── Info ──\n/status       Current status (turn, mode, last result)\n/tool list    List registered tools\n/todo list    Show TODO list\n\n── Settings ──\n/models       List or switch model (e.g. /models gpt-4)\n/memory       Memory management (e.g. /memory list, /memory clear 7d)\n/persona      Show or change agent persona (e.g. /persona show, /persona set code mentor)\n/statusline   Configure status bar items (e.g. /statusline +turn)\n\n── Sessions ──\n/session list           List sessions\n/session new [name]     Create a new session\n/session switch <id>    Switch to session\n/session delete <id>    Delete session\n\n── Display ──\n/panel        Toggle side panel\n/report       Save debug report\n/copy         Copy last response to clipboard\n\n/quit         Exit\n\n── Shortcuts ──\nCtrl+T  Transcript      Ctrl+O  Tool details\n↑↓      Input history\nESC     Cancel turn / Dismiss help"
+    "commands": "── Conversation ──\n/clear        Clear conversation history (memory is kept)\n\n── Info ──\n/status       Current status (turn, mode, last result)\n/tool list    List registered tools\n/todo list    Show TODO list\n\n── Settings ──\n/models       List or switch model (e.g. /models gpt-4)\n/memory       Memory management (e.g. /memory list, /memory clear 7d)\n/persona      Show or change agent persona (e.g. /persona show, /persona set code mentor)\n/policy version  Active Cedar policy version (admin only)\n/statusline   Configure status bar items (e.g. /statusline +turn)\n\n── Sessions ──\n/session list           List sessions\n/session new [name]     Create a new session\n/session switch <id>    Switch to session\n/session delete <id>    Delete session\n\n── Display ──\n/panel        Toggle side panel\n/report       Save debug report\n/copy         Copy last response to clipboard\n\n/quit         Exit\n\n── Shortcuts ──\nCtrl+T  Transcript      Ctrl+O  Tool details\n↑↓      Input history\nESC     Cancel turn / Dismiss help"
   },
   "copy_cmd": {
     "copied": "Last response copied to clipboard",
@@ -179,6 +179,14 @@
   },
   "persona_cmd": {
     "not_available": "Persona command is unavailable in standalone mode."
+  },
+  "policy_cmd": {
+    "version": "Policy version: {{version}} (applied: {{reloadedAt}})",
+    "never_reloaded": "no reload since boot",
+    "usage": "Usage: /policy version  (admin only)",
+    "admin_only": "This command is restricted to admins.",
+    "unexpected_response": "Could not parse policy version response. Check server version.",
+    "not_available": "Policy command is only available in remote mode."
   },
   "persona_onboarding": {
     "hint": "Your agent's role is not defined yet. Run /persona set <description> to set one, or /persona show to inspect the current state."

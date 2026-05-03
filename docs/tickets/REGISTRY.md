@@ -100,7 +100,7 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 | FP-76  | resolved | medium   | infra| reload 성공 출력 운영자 친화 변경 — 버전/시작/완료 분리 + single-flight 동작 안내 명시 | docs/ux/issues/2026-04-29-policy-reload-startedAt-confusion.md |
 | FP-77  | resolved | low      | infra| 401/403 분기 분리 + 각 안내 메시지 (인증 필요 / admin 권한 필요)              | docs/ux/issues/2026-04-29-policy-reload-403-message.md |
 | FP-78  | resolved | medium   | infra| Cedar 정책 작성 가이드 부재 — 운영자가 50-*.cedar 문법/예시 없이 lint/reload 사용 불가 | docs/ux/issues/2026-04-29-cedar-policy-syntax-guide-missing.md |
-| FP-79  | open     | low      | tui  | TUI 에서 정책 버전 확인 단일 경로 부재 — CLI/REST 별도 호출 필요              | docs/ux/issues/2026-04-29-tui-policy-version-not-shown.md |
+| FP-79  | resolved | low      | tui  | TUI 에서 정책 버전 확인 단일 경로 부재 — CLI/REST 별도 호출 필요              | docs/ux/issues/2026-04-29-tui-policy-version-not-shown.md |
 | FP-80  | resolved | low      | tui  | cancel 직후 다음 입력이 새 turn 시작 못하는 stall (라이브 시나리오 S19→S20)         | docs/ux/issues/2026-05-01-tui-scenario-post-cancel-stall.md |
 | FP-81  | resolved | low      | tui  | 라이브 시나리오 테스트가 누적 LLM 컨텍스트로 비결정적 timeout (매 실행 다른 위치)         | docs/ux/issues/2026-05-02-tui-scenario-llm-delay-flake.md |
 
@@ -141,12 +141,13 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 
 ## 통계
 
-- FP 총 **81개** — open **1**, resolved **80**
+- FP 총 **81개** — open **0**, resolved **81**
 - KG 총 **30개** — open **1**, resolved **29**
-- Severity 분포 (open만): medium 1 (KG-30), low 1 (FP-79)
+- Severity 분포 (open만): medium 1 (KG-30)
 
 ## 변경 이력
 
+- 2026-05-03: FP-79 resolved — `feature/fp-79-tui-policy-version` 후속. 옵션 A (MVP — 슬래시 커맨드) 채택. 신규 `/policy version` (TUI) — `RemoteSession` 의 `onPolicyVersion` closure 가 GET `/api/admin/policy/version` 호출, 200 시 `정책 버전: N (적용: YYYY-MM-DD HH:MM:SS)` 표시 (reloadedAt null 이면 "초기 부팅 후 reload 없음" fallback), 403 시 "이 명령은 관리자 전용입니다." 안내, 네트워크 오류 원본 메시지 노출. 신규 `slash-commands/policy.js` (handlePolicy). 변경: slash-commands.js 디스패치 등록 + App.js prop 전달 + remote-session.js closure 주입. i18n `policy_cmd` namespace 신설 (6 키 × 2 locale, KO/EN parity 232=232). help.commands 에 `/policy version` 라인 추가. 회귀: app.test.js 81d~81l (9 케이스 23 단언 — help 노출 / 200 admin / 403 / null reloadedAt / 단독 모드 / usage / 네트워크 오류 / 비정상 응답 / dispatch 통합). 4890 → 4913 passed (+23). 본 phase 의 범위는 명시적 호출 가시성. 후속 phase 후보 (옵션 B/C, 미구현): StatusBar 세그먼트 통합 (`정책: vN`) / 서버 reload 시 WS broadcast 실시간 갱신.
 - 2026-05-03: FP-78 resolved — `feature/fp-78-cedar-policy-guide` 후속. 신규 `docs/guide/ko/cedar-policy-guide.md` (9 섹션 — 개요 / 사용 시기 / 시작 전 / Cedar 문법 입문 (permit·forbid / principal·action·resource / when·unless / context / 특정 사람·에이전트 지정) / presence 스키마 매핑 (Entity 3종 LocalUser·User·Agent + Action 4종 create_agent·access_agent·archive_agent·set_persona + 행동별 context 필드 표) / 실전 예시 4종 (50-block-user 특정 사용자 차단 / 50-restrict-agent 소유자 외 차단 / 50-archived-strict 보관 에이전트 접속 완전 차단 / 50-tighter-quota admin 면제 + 5개 한도) / 흔한 함정 (permit 추가 무효 / 사용자명 정확 일치 / context 행동별 차이 / 50- 외 번호 금지) / 검증 절차 (lint → reload → version) / 문제 해결). `admin-policy-management.md` 의 FP-78 안내 섹션이 신규 가이드를 가리키도록 갱신. 코드 변경 없음 — 가이드 문서만 추가/수정.
 - 2026-05-02: FP-81 resolved — 가설 뒤집힘. 실제 원인은 LLM 지연이 아니라 `waitIdle` 함수의 frame 검사 로직 결함. LLM 이 failure 로 응답 시 TUI StatusBar 가 `✗ error` 표시 (status='error'), 이때 frame 에 'idle' 텍스트 없어서 영원히 timeout. 수정: `waitIdle` 이 `● idle` / `✗ error` 둘 다 인식. InputBar.disabled = isWorking 이라 error 도 입력 가능 — production 영향 없음. 회귀: 라이브 시나리오 2회 연속 48/48 passed (이전 매 실행 다른 위치 hang). `PRESENCE_LIVE_TIMING=1` 진단 인프라 보존.
 - 2026-05-02: FP-81 진단 (status open 유지) — `PRESENCE_LIVE_TIMING=1` 환경변수 + sendAndWait timing/state dump 인프라 추가. 2회 실행 측정: 1차 S9-1 idle wait 120s timeout (turn change 후 idle 미도달), 2차 S10-3 frame check 5s timeout (slash 결과 frame 미반영). 단일 원인이 아닌 복합 race conditions — stdin/InputBar / WS broadcast / frame 렌더 / LLM 응답 변동 (5~25초 관찰). 후속 phase 에서 각 race 종류별 분리 재현 + 점진적 해결 예정. 본 phase 는 진단 인프라만 보존.

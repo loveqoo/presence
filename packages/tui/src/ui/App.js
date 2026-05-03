@@ -24,6 +24,7 @@ const App = (props) => {
     llm = null, toolRegistry = null, sessionId = 'user-default',
     onListSessions = null, onCreateSession = null,
     onDeleteSession = null, onSwitchSession = null,
+    onPolicyVersion = null,
     disconnected = null, username = null,
   } = props
   const { exit } = useApp()
@@ -43,7 +44,7 @@ const App = (props) => {
     core: { state, agentState, addTransient, clearTransient, optimisticClearNow, exit },
     context: { config, tools, memory, llm, toolRegistry, onInput, username },
     ui: { messages, currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems },
-    session: { sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession },
+    session: { sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession, onPolicyVersion },
   })
 
   // App-level key handlers (overlay가 열려있지 않을 때만).

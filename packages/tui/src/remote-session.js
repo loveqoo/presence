@@ -168,6 +168,8 @@ class RemoteSession {
       onCreateSession: (id) => this.#client.post('/api/sessions', { id, type: 'user' }),
       onDeleteSession: (id) => this.#client.del(`/api/sessions/${id}`),
       onSwitchSession: this.switchSession.bind(this),
+      // FP-79 — admin role 기반 미들웨어가 서버에서 403 분기. TUI 는 응답 shape 으로만 판단.
+      onPolicyVersion: () => this.#client.getJson('/api/admin/policy/version'),
       disconnected: this.#disconnected,
     }
   }

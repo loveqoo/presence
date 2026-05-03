@@ -9,7 +9,7 @@ import { t } from '@presence/infra/i18n'
 //   core    — state, agentState, addTransient, clearTransient, optimisticClearNow, exit
 //   context — config, tools, memory, llm, toolRegistry, onInput, username
 //   ui      — messages, currentModel, setCurrentModel, setShowPanel, statusItems, setStatusItems
-//   session — sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession
+//   session — sessionId, onListSessions, onCreateSession, onDeleteSession, onSwitchSession, onPolicyVersion
 //
 // 일반 입력: pendingInput 은 서버 beginLifecycle 에서 set → WS push 로 TUI 에 반영되므로
 // 로컬 addMessage 호출 없이 바로 onInput 만 호출.

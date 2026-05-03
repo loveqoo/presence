@@ -20,6 +20,7 @@ import { resolveServerUrl, remainingLabel, SERVER_URL_SOURCE_LABEL } from '@pres
 import { handleStatusline } from '@presence/tui/ui/slash-commands/statusline.js'
 import { handleMemory } from '@presence/tui/ui/slash-commands/memory.js'
 import { handleSessions } from '@presence/tui/ui/slash-commands/sessions.js'
+import { handlePolicy } from '@presence/tui/ui/slash-commands/policy.js'
 import { dispatchSlashCommand } from '@presence/tui/ui/slash-commands.js'
 import { formatStepLabel } from '@presence/tui/ui/components/PlanView.js'
 import { todoStatusIcon } from '@presence/tui/ui/components/SidePanel.js'
@@ -1585,6 +1586,118 @@ await (async () => {
   await new Promise(resolve => setImmediate(resolve))
   assert(msgs.length === 1, `/persona dispatch: 시스템 메시지 1개 (got ${msgs.length})`)
   assert(msgs[0].content.includes('unset'), `/persona dispatch: 서버 응답 표시 (got: ${msgs[0].content})`)
+})()
+
+// --- FP-79: /policy version 슬래시 커맨드 ---
+
+// 81d. /help 출력에 /policy version 행 포함
+{
+  const { t } = await import('@presence/infra/i18n')
+  const help = t('help.commands')
+  assert(help.includes('/policy version'), 'help: /policy version 커맨드 포함 (FP-79)')
+}
+
+// 81e. /policy version — 200 응답 (admin)
+await (async () => {
+  const msgs = []
+  handlePolicy('/policy version', {
+    onPolicyVersion: async () => ({ version: 3, reloadedAt: '2026-04-29T10:00:00.000Z' }),
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs.length === 1, '/policy version: 메시지 1개')
+  const out = msgs[0].content
+  assert(out.includes('정책 버전: 3'), `/policy version: 버전 노출 (got: ${out})`)
+  assert(out.includes('2026-04-29 10:00:00'), `/policy version: 적용 시각 정상화 (got: ${out})`)
+  assert(msgs[0].transient === true, '/policy version: transient 플래그')
+})()
+
+// 81f. /policy version — 403 (non-admin)
+await (async () => {
+  const msgs = []
+  handlePolicy('/policy version', {
+    onPolicyVersion: async () => ({ error: 'admin only' }),
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs.length === 1, '/policy version 403: 메시지 1개')
+  assert(msgs[0].content.includes('관리자 전용'), '/policy version 403: 한국어 안내 (FP-79)')
+  assert(msgs[0].tag === 'error', '/policy version 403: error tag')
+})()
+
+// 81g. /policy version — reloadedAt 이 null 이면 "초기 부팅 후 reload 없음"
+await (async () => {
+  const msgs = []
+  handlePolicy('/policy version', {
+    onPolicyVersion: async () => ({ version: 1, reloadedAt: null }),
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs[0].content.includes('정책 버전: 1'), '/policy version null reload: 버전 표시')
+  assert(msgs[0].content.includes('reload 없음'), '/policy version null reload: 적용 시각 fallback')
+})()
+
+// 81h. /policy version — onPolicyVersion 미주입 (단독 모드)
+{
+  const msgs = []
+  handlePolicy('/policy version', {
+    onPolicyVersion: null,
+    addMessage: (m) => msgs.push(m),
+  })
+  assert(msgs.length === 1, '/policy version standalone: 메시지 1개')
+  assert(msgs[0].content.includes('원격 모드'), '/policy version standalone: 안내')
+}
+
+// 81i. /policy (서브커맨드 없음) → usage
+{
+  const msgs = []
+  handlePolicy('/policy', {
+    onPolicyVersion: async () => ({ version: 1 }),
+    addMessage: (m) => msgs.push(m),
+  })
+  assert(msgs.length === 1, '/policy 빈 서브: 메시지 1개')
+  assert(msgs[0].content.includes('사용법'), '/policy 빈 서브: usage 노출')
+  assert(msgs[0].content.includes('관리자 전용'), '/policy usage: admin 표기')
+}
+
+// 81j. /policy version — 네트워크 오류
+await (async () => {
+  const msgs = []
+  handlePolicy('/policy version', {
+    onPolicyVersion: async () => { throw new Error('network down') },
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs[0].content.includes('오류'), '/policy version 네트워크 오류: "오류" 표기')
+  assert(msgs[0].content.includes('network down'), '/policy version 네트워크 오류: 원본 메시지 포함')
+  assert(msgs[0].tag === 'error', '/policy version 네트워크 오류: error tag')
+})()
+
+// 81k. /policy version — 응답에 version 필드 없음 (서버 호환 깨짐)
+await (async () => {
+  const msgs = []
+  handlePolicy('/policy version', {
+    onPolicyVersion: async () => ({}),
+    addMessage: (m) => msgs.push(m),
+  })
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs[0].content.includes('해석할 수 없습니다'), '/policy version 비정상 응답: 안내')
+  assert(msgs[0].tag === 'error', '/policy version 비정상 응답: error tag')
+})()
+
+// 81l. /policy version — dispatchSlashCommand 통합 (commandMap 등록 검증)
+await (async () => {
+  const msgs = []
+  const ctx = {
+    onPolicyVersion: async () => ({ version: 7, reloadedAt: '2026-05-03T10:30:45.000Z' }),
+    addMessage: (m) => msgs.push(m),
+    addTransient: (m) => msgs.push(m),
+  }
+  const handled = await dispatchSlashCommand('/policy version', ctx)
+  assert(handled === true, '/policy dispatch: handled=true')
+  await new Promise(r => setTimeout(r, 20))
+  assert(msgs.length === 1, '/policy dispatch: 메시지 1개')
+  assert(msgs[0].content.includes('정책 버전: 7'), '/policy dispatch: 버전 7 노출')
 })()
 
 // --- FP-44: /session list 에 name 표시 ---
