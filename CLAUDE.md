@@ -4,6 +4,8 @@
 
 **설계 철학**: [`docs/design-philosophy.md`](docs/design-philosophy.md) — 이 프로젝트의 북극성. 왜 Op ADT 를 도메인 어휘로 정의하는지, 왜 LLM 을 finite 선택 공간에 가두는지, 왜 결정론 대신 수렴 루프를 목표로 하는지. **Op ADT 바깥 계층 (subagent 결과, 자유 텍스트 출력 등) 에서 구조화된 보고를 받으면 hallucination 가능성을 먼저 의심할 것** — 그 계층에는 아직 finite 선택 공간이 없다. 설계 결정이 막힐 때 돌아와 읽는다.
 
+**존재론**: [`docs/ontology.md`](docs/ontology.md) — 설계 철학과 짝을 이루는 문서. presence 를 *tool* 이 아니라 *손과 발* 로 보는 결, 살아있음 = 페르소나 + 사용자 기억, 꿈틀거림 (heartbeat) 의 정의, A2A = 두 자아의 만남, MCP = 신체의 확장. 어떤 결정이 "어느 결의 도구를 만들고 있는가" 와 충돌할 때 돌아와 읽는다.
+
 ## 아키텍처
 
 - 서버 1개 = 유저 N명. 오케스트레이터 없음.
@@ -92,5 +94,6 @@ npm test                                  # 전체 테스트
 ## 참고
 
 - [`docs/design-philosophy.md`](docs/design-philosophy.md) — 설계 철학 / 북극성 (최상단 링크와 동일)
+- [`docs/ontology.md`](docs/ontology.md) — 존재론 / 어떤 결의 도구인가 (최상단 링크와 동일)
 - `docs/architecture.md` — 아키텍처 설계 문서
 - `docs/completed.md` — 완료 이력
