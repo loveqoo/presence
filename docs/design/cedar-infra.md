@@ -1,6 +1,6 @@
 # Cedar 인프라 — 도입의 최소 표면 결정
 
-**Status**: 2026-04-26 v1.2 (Y' 인프라 구현 완료, governance v2.2 의미론 통합과 머지 대기). 이전 v1.1 (2026-04-25): codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록.
+**Status**: 2026-05-03 v1.4 (Cedar 거버넌스 종결 사이클 — KG-30 resolved-as-designed + `policy lint` (인자 없이) 사전 검사 도구 + 디스크 롤백 = git revert 표준 명시). 이전 v1.3 (2026-04-29): KG-28 P5 ship 후속 갱신, KG-29 resolved + KG-30 신규 등록. v1.2 (2026-04-26): Y' 인프라 구현 완료. v1.1 (2026-04-25): codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록.
 
 **Owner**: Presence core.
 
@@ -102,7 +102,7 @@ Entity 모델 출처: `docs/design/a2a-authorization.md` line 82, 100~123 의 Ca
 - **동작**: `rebootCedarSubsystem` 가 새 evaluator 함수만 부팅 (wrapper / auditWriter 미생성, boot 시점 단일 인스턴스 재사용) → wrapper.replace 로 state.current 갱신 → 즉시 모든 호출자에 propagate
 - **단순 single-flight**: `UserContextManager.#reloadPending` 진행 중이면 후속 호출은 같은 promise 결과 공유 (follower). reloadStartedAt 이 leader/follower 동일 — 자동 follow-up 없음 (호출자가 변경 적용 검증하려면 명시적 두 번째 호출 후 reloadStartedAt 변화 관찰)
 - **Fail-safe rollback (메모리)**: 부팅 실패 시 `rebootCedarSubsystem` throw → wrapper.replace 미호출 → 메모리 내 evaluator 미교체. GET `/api/admin/policy/version` 으로 현재 활성 버전 조회. 응답 contract 의 `activeVersion` / `activeReloadedAt` 으로 즉시 식별
-- **Fail-safe rollback (디스크) — 운영자 책임**: 잘못된 50-* 정책 추가 → reload 실패 → 메모리 미교체 → 동일 디스크 파일로 재시도하면 계속 실패. 운영자가 파일을 직접 수정/삭제 후 재시도해야 함. 권장 절차: (1) `npm run user -- policy lint --file <path>` 로 사전 검증, (2) `git` 등으로 정책 디렉토리 버전 관리, (3) reload 실패 응답의 `error` 메시지 + audit JSONL `decision: fail` 로 원인 진단, (4) 디스크 파일 정정 후 재시도. 본 phase 는 자동 디스크 롤백 메커니즘 미제공 (KG-30 신규 등록 — 운영자 가이드 강화 또는 자동화 후속)
+- **Fail-safe rollback (디스크) — 운영자 책임 (KG-30 resolved-as-designed, v1.4)**: 잘못된 50-* 정책 추가 → reload 실패 → 메모리 미교체 → 동일 디스크 파일로 재시도하면 계속 실패. 운영자가 파일을 직접 수정 또는 git revert 로 되돌린 뒤 재시도. 자동 디스크 롤백은 의도적으로 도입하지 않음 — 어느 파일이 원인인지 식별 자체가 어렵고 (Cedar 엔진은 합쳐진 결과만 보고 실패) 자동화가 잘못된 파일을 되돌릴 위험이 있음. 정책 변경 = 코드 PR 워크플로 (§1.2) 가정 하에서 git 이 디스크 변경의 진실 소스. 권장 절차: (1) `npm run user -- policy lint` (인자 없이 — POLICIES_DIR 전체 사전 검사, KG-30 신규 도구) 또는 `policy lint --file <path>` (단일 파일), (2) `git` 으로 정책 디렉토리 버전 관리 — `git revert` / `git checkout HEAD -- packages/.../50-X.cedar` 가 디스크 롤백의 표준, (3) reload 실패 응답의 `error` 메시지 + audit JSONL `decision: fail` 로 원인 진단, (4) 수정 또는 revert 후 다시 lint → reload
 - **응답 단일 metadata**: 응답 `reloadStartedAt` 이 호출자의 변경 적용 여부 판정 단일 신호. 디스크 mtime / 시각 비교는 본 phase 비-범위 (다중 파일 / 원자적 rename / 동일 초 케이스 불안정)
 - **호출 단위 atomicity**: evaluator 한 번의 호출 = 한 정책 버전 사용 (보장). 한 요청 흐름 (예: chat 핸들러의 access_agent + set_persona 두 번 호출) 은 다른 정책 버전 가능 — 각 호출은 self-consistent (fail-closed 의미론 보존). 자세한 invariant: `agent-identity.md` I-CEDAR-RELOAD-CALL-LINEARIZABLE / FAIL-SAFE / EDGE-TRIGGER / I-CEDAR-AUDIT-VERSION
 
@@ -318,6 +318,7 @@ const evaluator = createEvaluator({ cedarInstance, auditWriter })
 
 ## Changelog
 
+- **v1.4 (2026-05-03)**: Cedar 거버넌스 종결 사이클 (`feature/kg-30-policy-lint-all`). §1.7 갱신 — KG-30 resolved-as-designed 명시 + `policy lint` (인자 없이 — POLICIES_DIR 전체 사전 검사) 신규 도구 명시 + 디스크 롤백 = git revert 표준 절차 명시. 자동 디스크 롤백을 도입하지 않는 이유 (식별 문제 + 잘못 짚을 위험) 명시. 회귀: `cedar-lint-all.test.js` (LA1~LA7, 20 단언) + `cedar-policy-cli.test.js` CLI-X18~X20 (전체 lint 통합). FP-78 ship 후속 회귀 (FP-82 resolved) 도 같은 사이클 — 가이드 정책 파일 경로 정정 (사용자 홈 → 코드 패키지 in-source). governance-cedar v2.15 동시 갱신.
 - **v1.3 (2026-04-29)**: KG-28 P5 (Cedar policy hot reload) ship 후속 갱신. §1.7 stale 수정 — "hot reload 없음" 표현 폐기. callable wrapper (`createEvaluatorRef`) + `rebootCedarSubsystem` + REST/CLI 트리거 + fail-safe rollback (메모리/디스크 분리) + audit policyVersion 단일 진실 소스 명시. 잘못된 정책 파일 디스크 롤백 절차 (lint 사전 검증 + git 버전 관리 + 운영자 수동 정정) 명시 — KG-30 신규 등록. KG-29 (cedar-infra hot reload stale) resolved (본 갱신).
 - **v1.2 (2026-04-26)**: Y' 인프라 구현 완료. `feature/cedar-governance-v2` 브랜치 5 커밋 (270a38c~52ef096). evaluator (Reader.asks) + boot (3중 parse fail-closed) + audit (JSONL 0600) + paths.js + bootCedarSubsystem + PresenceServer/UserContext invariant 주입. CI-Y1/Y2 (CE1~CE3), CI-Y3 (SC-Y1a + CB1), CI-Y4 (CA1), CI-Y5 (CB2/CB3), CI-Y6 (CB4 — KG-24 호출 정합성은 governance phase 의 GV-Y1~Y4 가 담당), CI-Y7 (CE4) 자동화 완료. Pre-1 wasm 가용성 PASS (`@cedar-policy/cedar-wasm@4.10.0`, AWS 공식, sync API). 87 신규 assertions.
 - **v1.1 (2026-04-25)**: codex single-round 리뷰 결함 7 건 (a) 흡수 + 1 건 (b) KG-23 등록.

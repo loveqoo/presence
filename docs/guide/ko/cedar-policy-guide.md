@@ -15,7 +15,7 @@ presence 는 "누가 무엇을 할 수 있는가"를 규칙 파일로 관리합�
 - 특정 에이전트를 다른 사람이 열지 못하게 잠그고 싶을 때
 - 기본보다 더 엄격한 제한을 걸고 싶을 때
 
-이럴 때 `50-*.cedar` 파일을 만들어 `~/.presence/cedar/policies/` 폴더에 넣으면 됩니다.
+이럴 때 `50-*.cedar` 파일을 만들어 정책 파일 폴더에 넣으면 됩니다.
 
 **운영자만 이 파일을 다룹니다.** 일반 사용자는 이 폴더에 접근하지 않습니다.
 
@@ -46,11 +46,26 @@ presence 는 "누가 무엇을 할 수 있는가"를 규칙 파일로 관리합�
 
 ### 파일 위치
 
+> **이 가이드의 전제 조건**
+>
+> - 운영자는 presence 서버가 실행되는 호스트에서 패키지 소스 디렉토리에 직접 접근할 수 있어야 합니다 (SSH 또는 직접 파일 시스템 접근).
+> - 본 가이드는 **단일 머신 / 단일 admin 운영자** 환경을 가정합니다. 여러 서버가 동시에 운영되는 환경의 정책 동기화는 이 가이드 범위 밖입니다.
+
 추가 정책 파일은 반드시 다음 위치에 저장합니다:
 
 ```
-~/.presence/cedar/policies/
+packages/infra/src/infra/authz/cedar/policies/
 ```
+
+실제 서버 운영 환경에서는 presence 를 배포한 전체 경로를 포함합니다. 예:
+
+```
+/srv/presence/packages/infra/src/infra/authz/cedar/policies/
+```
+
+**왜 이 위치인가?** presence 는 정책 파일을 코드 패키지 안에 정적으로 탑재합니다. `~/.presence/cedar/` 같은 사용자 홈 디렉토리 경로는 현재 시스템이 읽지 않습니다. 그 경로에 파일을 만들어도 정책이 적용되지 않습니다.
+
+**정책 변경 후 git commit 을 권장합니다.** 변경 이력이 남아 회귀 추적이 쉽고, `git revert` 로 즉시 이전 상태로 되돌릴 수 있습니다.
 
 ### 파일 이름 규칙
 
@@ -194,7 +209,7 @@ Cedar 정책을 쓸 때 presence 시스템에서 쓸 수 있는 항목은 다음
 
 **상황:** `alice` 라는 사용자가 어떤 에이전트도 열지 못하게 막고 싶습니다.
 
-**파일:** `~/.presence/cedar/policies/50-block-user.cedar`
+**파일:** `packages/infra/src/infra/authz/cedar/policies/50-block-user.cedar`
 
 ```cedar
 forbid (
@@ -211,7 +226,7 @@ forbid (
 
 **저장 후 검사:**
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-block-user.cedar
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-block-user.cedar
 ```
 
 **즉시 반영:**
@@ -225,7 +240,7 @@ npm run user -- policy reload
 
 **상황:** `bob` 의 `secret` 이라는 에이전트를 bob 본인만 열 수 있게 하고, 다른 사람은 차단하고 싶습니다.
 
-**파일:** `~/.presence/cedar/policies/50-restrict-agent.cedar`
+**파일:** `packages/infra/src/infra/authz/cedar/policies/50-restrict-agent.cedar`
 
 ```cedar
 forbid (
@@ -243,7 +258,7 @@ forbid (
 
 **저장 후 검사:**
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-restrict-agent.cedar
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-restrict-agent.cedar
 ```
 
 **즉시 반영:**
@@ -257,7 +272,7 @@ npm run user -- policy reload
 
 **상황:** 기본 정책은 보관된 에이전트라도 "대화 이어가기" 목적은 허용합니다. 이를 더 엄격하게 적용해서, 보관된 에이전트는 어떤 목적으로도 열지 못하게 막고 싶습니다.
 
-**파일:** `~/.presence/cedar/policies/50-archived-strict.cedar`
+**파일:** `packages/infra/src/infra/authz/cedar/policies/50-archived-strict.cedar`
 
 ```cedar
 forbid (
@@ -275,7 +290,7 @@ forbid (
 
 **저장 후 검사:**
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-archived-strict.cedar
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-archived-strict.cedar
 ```
 
 **즉시 반영:**
@@ -289,7 +304,7 @@ npm run user -- policy reload
 
 **상황:** 기본 설정의 `maxAgents` 값과 무관하게, 일반 사용자는 에이전트를 최대 5개까지만 만들 수 있게 제한하고 싶습니다. admin 은 제한 없이 만들 수 있어야 합니다.
 
-**파일:** `~/.presence/cedar/policies/50-tighter-quota.cedar`
+**파일:** `packages/infra/src/infra/authz/cedar/policies/50-tighter-quota.cedar`
 
 ```cedar
 forbid (
@@ -307,7 +322,7 @@ forbid (
 
 **저장 후 검사:**
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-tighter-quota.cedar
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-tighter-quota.cedar
 ```
 
 **즉시 반영:**
@@ -362,16 +377,37 @@ principal == LocalUser::"alice"
 
 ### 1단계 — 문법 검사 (lint)
 
+lint 에는 두 가지 모드가 있습니다.
+
+**전체 검사 — reload 직전에 권장합니다:**
+
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-my-policy.cedar
+npm run user -- policy lint
+```
+
+인자 없이 실행하면 정책 폴더의 모든 파일을 한 번에 검사합니다. 한 파일에서 오류가 나도 멈추지 않고 끝까지 확인하므로, reload 전 전체 상태를 파악하기에 좋습니다.
+
+모두 통과하면:
+```
+✓ 00-base.cedar
+✓ 10-quota.cedar
+✓ 50-my-policy.cedar
+
+검사 결과: 3/3 통과.
+```
+
+**단일 파일 검사 — 작성 중인 파일만 빠르게 확인할 때:**
+
+```bash
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-my-policy.cedar
 ```
 
 오류가 없으면:
 ```
-정책 파일 검사 완료. 문법 오류 없음.
+OK: /srv/presence/packages/infra/src/infra/authz/cedar/policies/50-my-policy.cedar
 ```
 
-오류가 있으면 어느 줄이 문제인지 표시됩니다. 수정 후 다시 실행합니다.
+오류가 있으면 어느 줄이 문제인지 표시됩니다. 수정 후 다시 실행합니다. 파일을 다 고쳤으면 **전체 검사** 로 다른 파일도 이상 없는지 최종 확인하세요.
 
 ### 2단계 — 즉시 반영 (reload)
 
@@ -416,10 +452,24 @@ reload 후 버전 번호가 1 올라갔는지 확인합니다.
 
 reload 가 실패해도 **이전 정책은 그대로 유지됩니다.** 서버가 잘못된 정책을 적용하는 일은 없습니다.
 
-실패 메시지가 나오면:
-1. `policy lint` 로 파일을 다시 검사합니다 (lint 는 통과했지만 reload 실패 시 서버 로그 확인 필요)
-2. 파일 위치가 `~/.presence/cedar/policies/50-*.cedar` 인지 확인합니다
-3. admin 로그인 상태인지 확인합니다 (`npm run user -- admin whoami`)
+실패 메시지가 나오면 아래 순서로 복구합니다:
+
+1. `policy lint` (전체) 로 어느 파일이 문제인지 한 번에 확인합니다:
+   ```bash
+   npm run user -- policy lint
+   ```
+   `✗` 표시가 있는 파일이 원인입니다.
+
+2. 해당 파일을 직접 수정하거나, git 으로 직전 정상 상태로 되돌립니다:
+   ```bash
+   git checkout HEAD -- packages/infra/src/infra/authz/cedar/policies/50-문제파일.cedar
+   ```
+
+3. 다시 `policy lint` 로 전체 통과 여부를 확인합니다.
+
+4. `policy reload` 를 재시도합니다.
+
+lint 는 통과했지만 reload 가 계속 실패한다면 파일 위치(`packages/infra/src/infra/authz/cedar/policies/50-*.cedar`)와 admin 로그인 상태(`npm run user -- admin whoami`)를 함께 확인합니다.
 
 ### 정책을 적용했는데 효과가 없어 보입니다
 
@@ -430,9 +480,23 @@ reload 가 실패해도 **이전 정책은 그대로 유지됩니다.** 서버�
 3. **버전이 올라갔는가?** `policy version` 으로 번호 변화를 확인합니다.
 4. **조건이 맞는가?** `when` / `unless` 조건을 다시 검토합니다. 예: `context.currentCount >= 5` 에서 실제 에이전트 수가 5 미만이면 차단되지 않습니다.
 
+> **자주 묻는 질문 — "파일을 만들었는데 왜 적용이 안 되나요?"**
+>
+> `~/.presence/cedar/policies/` 같은 사용자 홈 디렉토리에 파일을 만든 것은 아닌가요? presence 는 그 경로를 읽지 않습니다. 정책 파일은 반드시 `packages/infra/src/infra/authz/cedar/policies/` 안에 있어야 합니다 (섹션 3 파일 위치 참고). 위치가 맞더라도 `policy reload` 를 실행해야 서버에 반영됩니다.
+
 ### 이전 정책으로 되돌리고 싶습니다
 
-파일을 수정 전 내용으로 되돌린 뒤 `policy reload` 를 다시 실행하면 됩니다. 파일을 아예 삭제한 경우 `git` 이나 백업에서 복원한 뒤 reload 하세요.
+파일을 수정 전 내용으로 되돌린 뒤 `policy reload` 를 다시 실행하면 됩니다. 가장 빠른 방법은 git 을 이용하는 것입니다:
+
+```bash
+# 특정 파일만 직전 커밋 상태로 되돌리기
+git checkout HEAD -- packages/infra/src/infra/authz/cedar/policies/50-문제파일.cedar
+
+# 정책 디렉토리 전체를 직전 커밋 상태로 되돌리기
+git checkout HEAD -- packages/infra/src/infra/authz/cedar/policies/
+```
+
+되돌린 후 `policy lint` 로 통과 확인 → `policy reload` 로 적용합니다.
 
 ---
 

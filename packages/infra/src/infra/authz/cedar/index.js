@@ -150,11 +150,28 @@ const readSchemaText = (schemaPath = SCHEMA_PATH) => {
   return readFileSync(schemaPath, 'utf-8')
 }
 
+// KG-30 — admin CLI `policy lint` (인자 없이 호출). POLICIES_DIR 의 모든 .cedar 를
+// 순회하면서 각 파일을 독립적으로 lint. 결과 배열 반환 — caller (cli-policy.js) 가 출력 책임.
+// 첫 실패에서 멈추지 않고 모든 파일 검사 완료 — reload 전 한 번에 전체 상태 파악.
+const lintAllPolicies = async (policiesDir = POLICIES_DIR, schemaPath = SCHEMA_PATH) => {
+  const files = listPolicyFiles(policiesDir)
+  const schemaText = readSchemaText(schemaPath)
+  const results = []
+  for (const file of files) {
+    const fullPath = join(policiesDir, file.filename)
+    const text = readFileSync(fullPath, 'utf-8')
+    const result = await lintPolicyText({ text, schemaText })
+    results.push({ ...file, fullPath, ...result })
+  }
+  return results
+}
+
 export {
   bootCedarSubsystem, bootCedarSubsystemR,
   rebootCedarSubsystem,
   createSubsystemAuditWriter, createSubsystemAuditWriterR,
   getSubsystemAuditStatus, getSubsystemAuditStatusR,
-  lintPolicyText, listPolicyFiles, readSchemaText,
+  lintPolicyText, lintAllPolicies, listPolicyFiles, readSchemaText,
+  POLICIES_DIR,
   AUDIT_LOG_FILENAME,
 }
