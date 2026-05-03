@@ -4,6 +4,7 @@ import { STATE_PATH } from '@presence/core/core/policies.js'
 import { formatStatusR } from '@presence/core/core/format-status.js'
 import { t } from '@presence/infra/i18n'
 import { handleMemory } from './slash-commands/memory.js'
+import { handlePolicy } from './slash-commands/policy.js'
 import { handleSessions } from './slash-commands/sessions.js'
 import { handleStatusline } from './slash-commands/statusline.js'
 
@@ -211,6 +212,7 @@ const commandMap = new Map([
   ['/tool',       handleToolList],
   ['/memory',     handleMemory],
   ['/models',     handleModels],
+  ['/policy',     handlePolicy],
   ['/todo',       handleTodoList],
   ['/session',    handleSessions],
   ['/statusline', handleStatusline],

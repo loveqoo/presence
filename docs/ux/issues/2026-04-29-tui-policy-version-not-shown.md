@@ -2,7 +2,7 @@
 
 **영역**: tui
 **심각도**: low
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/tui/src/ui/`, `packages/server/src/server/admin-router.js:90-93`
 
 ## 시나리오
@@ -51,3 +51,37 @@ WS 이벤트로 reload 발생 시 자동 갱신하면 운영자가 별도 확인
 ## 근거
 
 심각도가 low 인 이유: FP-74 (`policy version` CLI wrapper) 가 해소되면 CLI 에서 확인 경로가 생긴다. TUI 표시는 그 이후 단계의 개선이다. 그러나 TUI 가 운영자의 주 화면이라면, 정책 버전이 보이지 않는 것은 상태 가시성 원칙에서 벗어난다. 후속 phase 에서 WS 이벤트 구조가 확장될 때 함께 구현하면 비용이 낮다.
+
+## 해소 (2026-05-03)
+
+**해소 방식**: TUI 슬래시 커맨드 `/policy version` 신규 추가 (옵션 A — MVP)
+
+**동작**:
+- 입력 시 RemoteSession 이 GET `/api/admin/policy/version` 호출
+- 200 → `정책 버전: N (적용: YYYY-MM-DD HH:MM:SS)` 표시
+- 403 → "이 명령은 관리자 전용입니다." 안내
+- 네트워크 오류 → 원본 메시지 노출
+- `reloadedAt` 이 null 이면 "초기 부팅 후 reload 없음" fallback 표시
+
+**변경/신규 파일**:
+- 신규: `packages/tui/src/ui/slash-commands/policy.js` (`handlePolicy` 핸들러)
+- 변경: `packages/tui/src/ui/slash-commands.js` (`commandMap` 등록)
+- 변경: `packages/tui/src/ui/App.js` (`onPolicyVersion` prop 추가)
+- 변경: `packages/tui/src/remote-session.js` (closure 주입)
+- 변경: `packages/tui/src/ui/hooks/useSlashCommands.js` (docstring 갱신)
+
+**i18n**:
+- ko/en `policy_cmd` namespace 신설
+- 6 키 (version / never_reloaded / usage / admin_only / unexpected_response / not_available) × 2 locale = 12 키
+- `help.commands` 에 `/policy version` 라인 추가
+- KO/EN parity 232 = 232
+
+**테스트**: `app.test.js` 81d ~ 81l — 9 케이스 23 단언
+- help 노출 / 200 admin / 403 / null reloadedAt / 단독 모드 / usage / 네트워크 오류 / 비정상 응답 / dispatch 통합
+
+**후속 phase 후보 (본 phase 범위 밖)**:
+- 옵션 B: StatusBar 에 `정책: vN` 세그먼트 상시 표시
+- 옵션 C: 서버 reload 시 WS broadcast → TUI 실시간 갱신
+- 본 MVP 는 명시적 사용자 호출 시에만 버전 정보를 노출함
+
+**작업 브랜치**: `feature/fp-79-tui-policy-version`
