@@ -103,6 +103,7 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 | FP-79  | open     | low      | tui  | TUI 에서 정책 버전 확인 단일 경로 부재 — CLI/REST 별도 호출 필요              | docs/ux/issues/2026-04-29-tui-policy-version-not-shown.md |
 | FP-80  | resolved | low      | tui  | cancel 직후 다음 입력이 새 turn 시작 못하는 stall (라이브 시나리오 S19→S20)         | docs/ux/issues/2026-05-01-tui-scenario-post-cancel-stall.md |
 | FP-81  | resolved | low      | tui  | 라이브 시나리오 테스트가 누적 LLM 컨텍스트로 비결정적 timeout (매 실행 다른 위치)         | docs/ux/issues/2026-05-02-tui-scenario-llm-delay-flake.md |
+| FP-82  | resolved | high     | ux   | cedar-policy-guide / admin-policy-management 정책 파일 경로 회귀 — 사용자 홈 디렉토리 안내 vs 코드 in-source 만 읽음 (FP-78 ship 후 발견) | docs/ux/issues/2026-05-03-cedar-policy-guide-path-regression.md |
 
 ## Known Gaps (KG)
 
@@ -137,16 +138,18 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 | KG-27  | resolved | medium | infra  | Cedar 운영자 custom policy 슬롯 (50-*) boot 차단 — staticPolicies 맵 입력 + classifyDeny priority 분류 + admin CLI lint/list 로 P4 unblock | docs/design/governance-cedar.md#KG-27 |
 | KG-28  | resolved | medium | infra  | Cedar policy hot reload — callable wrapper (`createEvaluatorRef`) + 단순 single-flight + reloadStartedAt authoritative + audit getPolicyVersion closure + POST /api/admin/policy/reload, governance-cedar v2.13 | docs/design/governance-cedar.md#KG-28 |
 | KG-29  | resolved | high   | infra  | `cedar-infra.md §1.7` "hot reload 없음" stale — KG-28 P5 ship 후 hot reload 구현됨에도 §1.7 미갱신, 운영자가 서버 재시작 시도 위험 (cedar-infra v1.3 갱신으로 해소) | docs/design/cedar-infra.md#KG-29 |
-| KG-30  | open     | medium | infra  | Hot reload 부팅 실패 시 디스크 정책 파일 자동 롤백 부재 — 메모리 fail-safe 만 보장. 운영자 수동 정정 필수 (lint 사전 검증 + git 버전 관리 권장). 자동화 또는 운영자 가이드 강화 후속 | docs/design/cedar-infra.md#KG-30 |
+| KG-30  | resolved | medium | infra  | Hot reload 부팅 실패 시 디스크 정책 파일 자동 롤백 부재 — `policy lint` (전체) 사전 검사 도구 + git revert 표준 절차로 갈음 (resolved-as-designed) | docs/design/cedar-infra.md#KG-30 |
 
 ## 통계
 
-- FP 총 **81개** — open **1**, resolved **80**
-- KG 총 **30개** — open **1**, resolved **29**
-- Severity 분포 (open만): medium 1 (KG-30), low 1 (FP-79)
+- FP 총 **82개** — open **1**, resolved **81**
+- KG 총 **30개** — open **0**, resolved **30**
+- Severity 분포 (open만): low 1 (FP-79)
 
 ## 변경 이력
 
+- 2026-05-03: KG-30 resolved-as-designed — Cedar 거버넌스 종결 사이클 (`feature/kg-30-policy-lint-all`). 자동 디스크 롤백은 의도적으로 도입하지 않음 — 어느 파일이 원인인지 식별 자체가 어렵고 (Cedar 엔진은 합쳐진 결과만 보고 실패) 자동화가 잘못된 파일을 되돌릴 위험 존재. 정책 변경 = 코드 PR 워크플로 (`cedar-infra.md §1.2`) 가정 하에서 git 이 디스크 진실 소스 → `git revert` / `git checkout HEAD -- <path>` 가 디스크 롤백 표준. 대신 사전 예방 도구 추가: `npm run user -- policy lint` (인자 없이) → `POLICIES_DIR` 전체 .cedar 한 번에 검사 + ✓/✗ 요약 + 실패 파일 식별. 첫 실패에서 멈추지 않고 전체 진행 — reload 직전 한 번에 안전 확인. 신규 헬퍼 `lintAllPolicies` (cedar/index.js export). cli.js usage 갱신 + cli-policy.js reload 실패 안내 갱신 (`policy lint` 전체 검사 권장). 회귀: `cedar-lint-all.test.js` LA1~LA7 (20 단언 — 빈 디렉토리 / 통과 / 일부 실패 / schema mismatch / .cedar 외 무시 / 번들 회귀 가드 / schema 부재) + `cedar-policy-cli.test.js` CLI-X18~X20 (전체 통과 + usage + reload 안내 회귀). 가이드 갱신 — `admin-policy-management.md` (운영 권장 흐름 + 4단계 회복 + "왜 자동 롤백이 없는가" 박스) + `cedar-policy-guide.md` §8 §9 (전체/단일 lint 분리 + git checkout 회복 안내). 4890 → 4908 passed (+18). 같은 사이클 ship: FP-82 (가이드 경로 회귀 핫픽스), `cedar-infra.md v1.4`, `governance-cedar.md v2.15`.
+- 2026-05-03: FP-82 추가 + 즉시 resolved — Cedar 거버넌스 종결 사이클 (`feature/kg-30-policy-lint-all`) 진행 중 FP-78 (가이드 ship) 후속 회귀 발견. 두 가이드 (`cedar-policy-guide.md`, `admin-policy-management.md`) 가 정책 파일 위치를 `~/.presence/cedar/policies/` 라고 안내했으나 실제 코드 (`paths.js:10`) 는 패키지 in-source `packages/infra/src/infra/authz/cedar/policies/` 만 스캔. 스펙 §1.2 의 "in-source / 정책 변경 = 코드 PR" 워크플로와 모순. 결과: 운영자가 가이드 따라가도 정책이 절대 적용 안 됨 (lint OK / reload OK 인데 동작 무효). user-guide-writer 즉시 정정 — 두 파일 약 +40줄 순증, 경로 정정 + 운영자 가정 박스 (단일 머신 / git commit 권장 / 정책 변경 = 코드 변경) + 운영 환경 풀 경로 예시 + "왜 홈 디렉토리는 안 되는지" 설명 추가. cedar-policy-guide.md §9 문제 해결에 자주 묻는 질문 추가. 후속 회귀 방지: guide writer agent 가 코드/스펙 cross-check 의무화 검토 (별도 phase).
 - 2026-05-03: FP-78 resolved — `feature/fp-78-cedar-policy-guide` 후속. 신규 `docs/guide/ko/cedar-policy-guide.md` (9 섹션 — 개요 / 사용 시기 / 시작 전 / Cedar 문법 입문 (permit·forbid / principal·action·resource / when·unless / context / 특정 사람·에이전트 지정) / presence 스키마 매핑 (Entity 3종 LocalUser·User·Agent + Action 4종 create_agent·access_agent·archive_agent·set_persona + 행동별 context 필드 표) / 실전 예시 4종 (50-block-user 특정 사용자 차단 / 50-restrict-agent 소유자 외 차단 / 50-archived-strict 보관 에이전트 접속 완전 차단 / 50-tighter-quota admin 면제 + 5개 한도) / 흔한 함정 (permit 추가 무효 / 사용자명 정확 일치 / context 행동별 차이 / 50- 외 번호 금지) / 검증 절차 (lint → reload → version) / 문제 해결). `admin-policy-management.md` 의 FP-78 안내 섹션이 신규 가이드를 가리키도록 갱신. 코드 변경 없음 — 가이드 문서만 추가/수정.
 - 2026-05-02: FP-81 resolved — 가설 뒤집힘. 실제 원인은 LLM 지연이 아니라 `waitIdle` 함수의 frame 검사 로직 결함. LLM 이 failure 로 응답 시 TUI StatusBar 가 `✗ error` 표시 (status='error'), 이때 frame 에 'idle' 텍스트 없어서 영원히 timeout. 수정: `waitIdle` 이 `● idle` / `✗ error` 둘 다 인식. InputBar.disabled = isWorking 이라 error 도 입력 가능 — production 영향 없음. 회귀: 라이브 시나리오 2회 연속 48/48 passed (이전 매 실행 다른 위치 hang). `PRESENCE_LIVE_TIMING=1` 진단 인프라 보존.
 - 2026-05-02: FP-81 진단 (status open 유지) — `PRESENCE_LIVE_TIMING=1` 환경변수 + sendAndWait timing/state dump 인프라 추가. 2회 실행 측정: 1차 S9-1 idle wait 120s timeout (turn change 후 idle 미도달), 2차 S10-3 frame check 5s timeout (slash 결과 frame 미반영). 단일 원인이 아닌 복합 race conditions — stdin/InputBar / WS broadcast / frame 렌더 / LLM 응답 변동 (5~25초 관찰). 후속 phase 에서 각 race 종류별 분리 재현 + 점진적 해결 예정. 본 phase 는 진단 인프라만 보존.

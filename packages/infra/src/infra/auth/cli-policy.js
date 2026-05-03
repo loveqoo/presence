@@ -3,7 +3,7 @@
 // FP-73: AdminTokenManager 가 admin-session.json 파일 fallback + 자동 refresh + 401 retry.
 
 import { readFileSync } from 'node:fs'
-import { lintPolicyText, listPolicyFiles, readSchemaText } from '../authz/cedar/index.js'
+import { lintPolicyText, lintAllPolicies, listPolicyFiles, readSchemaText } from '../authz/cedar/index.js'
 import {
   requireFlag, httpJson, mapHttpFetchError, resolveBaseUrl,
   CliError, dispatchWithCliErrorHandling,
@@ -190,7 +190,28 @@ const handleAuthError = (response) => {
   }
 }
 
-async function cmdPolicyLint({ file }) {
+// 한 lint 결과의 에러 라인 묶음 — 단일/전체 모드에서 공유.
+// 호출자가 throw 또는 누적 출력 결정.
+const formatLintErrors = (label, result) => {
+  if (result.parseErrors.length > 0) {
+    const lines = [`Parse error: ${label}`]
+    for (const error of result.parseErrors) {
+      lines.push(`  ${error.message ?? JSON.stringify(error)}`)
+    }
+    return lines
+  }
+  if (result.schemaErrors.length > 0) {
+    const lines = [`Schema mismatch: ${label}`]
+    for (const error of result.schemaErrors) {
+      const msg = error?.error?.message ?? error?.message ?? JSON.stringify(error)
+      lines.push(`  ${msg}`)
+    }
+    return lines
+  }
+  return []
+}
+
+async function cmdPolicyLintFile({ file }) {
   const text = readFileSync(file, 'utf-8')
   const schemaText = readSchemaText()
   const result = await lintPolicyText({ text, schemaText })
@@ -198,20 +219,34 @@ async function cmdPolicyLint({ file }) {
     console.log(`OK: ${file}`)
     return
   }
-  if (result.parseErrors.length > 0) {
-    const lines = [`Parse error: ${file}`]
-    for (const error of result.parseErrors) {
-      lines.push(`  ${error.message ?? JSON.stringify(error)}`)
-    }
-    throw new CliPolicyError(lines.join('\n'))
+  throw new CliPolicyError(formatLintErrors(file, result).join('\n'))
+}
+
+// KG-30 — `policy lint` (인자 없이) → POLICIES_DIR 의 모든 .cedar 를 한 번에 검사.
+// reload 전 사전 예방 도구. 첫 실패에서 멈추지 않고 전체 상태를 한 번에 보여줌.
+// 어느 파일이 깨졌는지 운영자가 lint --file 로 일일이 추적할 필요 없음.
+async function cmdPolicyLintAll() {
+  const results = await lintAllPolicies()
+  if (results.length === 0) {
+    console.log('(검사할 .cedar 파일이 없습니다)')
+    return
   }
-  if (result.schemaErrors.length > 0) {
-    const lines = [`Schema mismatch: ${file}`]
-    for (const error of result.schemaErrors) {
-      const msg = error?.error?.message ?? error?.message ?? JSON.stringify(error)
-      lines.push(`  ${msg}`)
+  const failed = []
+  for (const r of results) {
+    if (r.ok) {
+      console.log(`✓ ${r.filename}`)
+      continue
     }
-    throw new CliPolicyError(lines.join('\n'))
+    console.log(`✗ ${r.filename}`)
+    for (const line of formatLintErrors(r.filename, r).slice(1)) {
+      console.log(`  ${line.trimStart()}`)
+    }
+    failed.push(r.filename)
+  }
+  console.log('')
+  console.log(`검사 결과: ${results.length - failed.length}/${results.length} 통과.`)
+  if (failed.length > 0) {
+    throw new CliPolicyError(`${failed.length}개 파일에 오류가 있습니다. 위 메시지를 참고하여 수정한 후 'policy reload' 를 실행하세요.`)
   }
 }
 
@@ -256,9 +291,9 @@ async function cmdPolicyReload() {
   }
   lines.push('디스크의 정책 파일은 변경되지 않았습니다.', '')
   lines.push('복구 방법:')
-  lines.push('  1. 문제가 되는 .cedar 파일을 수정하거나 제거하세요')
-  lines.push('  2. lint 로 검증하세요 — npm run user -- policy lint --file <파일>')
-  lines.push('  3. 다시 reload 하세요   — npm run user -- policy reload')
+  lines.push('  1. policy lint 로 어느 파일이 문제인지 확인 — npm run user -- policy lint')
+  lines.push('  2. 해당 .cedar 파일을 수정하거나 git revert 로 되돌리세요')
+  lines.push('  3. 다시 lint 로 통과 확인 후 reload — npm run user -- policy reload')
   throw new CliPolicyError(lines.join('\n'))
 }
 
@@ -277,7 +312,9 @@ export { AdminTokenManager }
 
 export const dispatchPolicy = (action, flags) => dispatchWithCliErrorHandling(async () => {
   switch (action) {
-    case 'lint':    return await cmdPolicyLint({ file: requireFlag(flags, 'file') })
+    case 'lint':    return flags.file
+      ? await cmdPolicyLintFile({ file: flags.file })
+      : await cmdPolicyLintAll()
     case 'list':    return cmdPolicyList()
     case 'reload':  return await cmdPolicyReload()
     case 'version': return await cmdPolicyVersion()

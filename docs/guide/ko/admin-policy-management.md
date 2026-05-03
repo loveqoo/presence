@@ -17,7 +17,8 @@
 
 | 명령 | 하는 일 |
 |------|---------|
-| `policy lint --file <파일>` | 정책 파일 문법 검사 |
+| `policy lint` | 정책 파일 전체 문법 검사 (reload 전 권장) |
+| `policy lint --file <파일>` | 단일 파일 문법 검사 |
 | `policy list` | 현재 로드된 정책 파일 목록 확인 |
 | `policy reload` | 서버 재시작 없이 정책 즉시 적용 |
 | `policy version` | 현재 활성 정책 버전 확인 |
@@ -159,11 +160,25 @@ npm run user -- passwd --username admin
 
 ## 정책 파일 작성 위치
 
+> **운영 환경 전제 조건**
+>
+> - 운영자는 presence 서버가 실행되는 호스트에서 패키지 소스 디렉토리에 직접 접근할 수 있어야 합니다 (SSH 또는 직접 파일 시스템 접근).
+> - 본 가이드는 **단일 머신 / 단일 admin 운영자** 환경을 가정합니다. 여러 서버가 동시에 운영되는 환경의 정책 동기화는 이 가이드 범위 밖입니다.
+> - **정책 변경 = 코드 변경입니다.** 파일을 추가/수정한 뒤 git commit 을 권장합니다. 다음 배포 시 일관성을 유지하고, `git revert` 로 즉시 이전 정책으로 돌아갈 수 있습니다.
+
 운영자가 직접 추가하는 정책 파일은 아래 폴더에 저장합니다:
 
 ```
-~/.presence/cedar/policies/
+packages/infra/src/infra/authz/cedar/policies/
 ```
+
+실제 서버 운영 환경에서는 presence 를 배포한 전체 경로를 포함합니다. 예:
+
+```
+/srv/presence/packages/infra/src/infra/authz/cedar/policies/
+```
+
+**왜 이 위치인가?** presence 는 정책 파일을 코드 패키지 안에 정적으로 탑재합니다. `~/.presence/cedar/` 같은 사용자 홈 디렉토리 경로는 현재 시스템이 읽지 않습니다. 그 경로에 파일을 만들어도 정책이 적용되지 않습니다.
 
 파일 이름은 반드시 `50-` 으로 시작해야 합니다. 예:
 
@@ -180,24 +195,73 @@ npm run user -- passwd --username admin
 
 정책 파일을 서버에 적용하기 **전에** 반드시 문법과 형식을 검사하세요. 오류가 있는 파일을 리로드하면 전체 리로드가 실패하고 기존 정책이 그대로 유지됩니다.
 
+### 전체 검사 (reload 전 권장)
+
+인자 없이 실행하면 정책 폴더의 모든 `.cedar` 파일을 한 번에 검사합니다. reload 전에는 이 방법을 사용하세요.
+
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-block-user.cedar
+npm run user -- policy lint
 ```
 
-**검사 통과 시 화면:**
+**모두 통과 시 화면:**
 
 ```
-OK: /home/admin/.presence/cedar/policies/50-block-user.cedar
+✓ 00-base.cedar
+✓ 10-quota.cedar
+✓ 11-admin-limit.cedar
+✓ 20-archived.cedar
+✓ 30-protect-admin.cedar
+✓ 31-protect-persona.cedar
+✓ 50-block-user.cedar
+
+검사 결과: 7/7 통과.
+```
+
+**일부 실패 시 화면:**
+
+```
+✓ 00-base.cedar
+✓ 10-quota.cedar
+✗ 50-bad-action.cedar
+  Schema mismatch:
+    unknown action: non_existent_action
+
+검사 결과: 6/7 통과.
+```
+
+첫 번째 실패에서 멈추지 않고 모든 파일을 끝까지 검사합니다. 한 번에 전체 상태를 파악할 수 있습니다. 실패한 파일이 하나라도 있으면 명령이 오류 코드로 종료됩니다.
+
+### 단일 파일 검사
+
+특정 파일만 빠르게 확인할 때는 `--file` 옵션을 씁니다:
+
+```bash
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-block-user.cedar
+```
+
+**통과 시 화면:**
+
+```
+OK: /srv/presence/packages/infra/src/infra/authz/cedar/policies/50-block-user.cedar
 ```
 
 **오류 발견 시 화면 (예시):**
 
 ```
-Parse error: /home/admin/.presence/cedar/policies/50-block-user.cedar
+Parse error: /srv/presence/packages/infra/src/infra/authz/cedar/policies/50-block-user.cedar
   unexpected token at line 3
 ```
 
 오류 메시지를 보고 파일을 수정한 뒤 다시 lint 를 실행합니다. OK 가 나올 때까지 반복합니다.
+
+### 운영 권장 흐름
+
+> **정책 파일 추가/수정 → `policy lint` (전체) → OK 면 `policy reload` → `policy version` 으로 적용 확인 → git commit**
+>
+> - `lint` — 디스크의 파일이 올바른지 사전 확인 (안전망)
+> - `reload` — 검증된 파일을 서버에 즉시 적용
+> - `version` — reload 가 실제로 반영됐는지 사후 확인
+> - `git commit` — 변경 이력 보존 + 문제 발생 시 `git revert` 로 즉시 복구
 
 ---
 
@@ -277,7 +341,39 @@ OK: 정책이 적용되었습니다.
   3. 다시 reload 하세요   — npm run user -- policy reload
 ```
 
-실패해도 **기존 정책이 그대로 유지됩니다.** 당황하지 말고 오류 내용을 확인한 뒤 정책 파일을 수정하고 lint 를 통과시킨 다음 다시 시도합니다.
+실패해도 **기존 정책이 그대로 유지됩니다.** 당황하지 말고 아래 순서로 복구합니다.
+
+**reload 실패 시 단계별 복구:**
+
+1. `policy lint` (전체) 로 어느 파일이 깨졌는지 확인합니다:
+   ```bash
+   npm run user -- policy lint
+   ```
+   `✗` 표시가 있는 파일이 원인입니다.
+
+2. 해당 파일을 직접 수정하거나, git 으로 직전 정상 상태로 되돌립니다:
+   ```bash
+   git checkout HEAD -- packages/infra/src/infra/authz/cedar/policies/50-문제파일.cedar
+   ```
+
+3. 다시 `policy lint` 로 전체 통과 여부를 확인합니다:
+   ```bash
+   npm run user -- policy lint
+   ```
+   "검사 결과: N/N 통과." 가 나와야 합니다.
+
+4. `policy reload` 를 재시도합니다:
+   ```bash
+   npm run user -- policy reload
+   ```
+
+> **왜 자동 롤백이 없는가?**
+>
+> presence 의 정책 변경은 코드 PR 워크플로를 가정합니다. 디스크 파일의 변경 이력은 git 이 관리하며, `git revert` 가 표준 롤백 도구입니다.
+>
+> 자동 백업/복원 방식은 여러 파일 중 어느 것이 원인인지 정확히 판별하기 어렵고 잘못 짚을 위험이 있어 도입하지 않습니다.
+>
+> 서버 메모리 내 정책은 reload 실패 시 자동으로 이전 버전이 유지되므로, 실패해도 **서비스 중단은 없습니다.**
 
 ---
 
@@ -310,16 +406,24 @@ npm run user -- policy version
 **1. 정책 파일 작성**
 
 ```bash
-nano ~/.presence/cedar/policies/50-block-testuser.cedar
+nano packages/infra/src/infra/authz/cedar/policies/50-block-testuser.cedar
 ```
 
 **2. 문법 검사**
 
+새로 작성한 파일을 단독으로 먼저 검사합니다:
+
 ```bash
-npm run user -- policy lint --file ~/.presence/cedar/policies/50-block-testuser.cedar
+npm run user -- policy lint --file packages/infra/src/infra/authz/cedar/policies/50-block-testuser.cedar
 ```
 
-OK 가 나올 때까지 수정합니다.
+OK 가 나오면 전체 검사로 다른 파일도 이상 없는지 확인합니다:
+
+```bash
+npm run user -- policy lint
+```
+
+"검사 결과: N/N 통과." 가 나와야 다음 단계로 넘어갑니다.
 
 **3. 현재 정책 목록 확인** (선택사항)
 
@@ -385,10 +489,32 @@ npm run user -- policy version
 - 설정 파일에서 해당 계정에 `role: admin` 이 부여되어 있는지 확인합니다.
 - admin 권한이 있는 계정으로 다시 `admin login` 합니다.
 
+### reload 가 실패했습니다
+
+reload 실패 시 서버 메모리의 정책은 이전 버전이 자동으로 유지되므로 **서비스 중단은 없습니다.** 아래 순서로 복구합니다:
+
+1. `policy lint` (전체) 로 어느 파일이 깨졌는지 먼저 확인합니다:
+   ```bash
+   npm run user -- policy lint
+   ```
+   `✗` 표시가 있는 파일이 원인입니다.
+
+2. 해당 파일을 수정하거나 git 으로 직전 상태로 되돌립니다:
+   ```bash
+   git checkout HEAD -- packages/infra/src/infra/authz/cedar/policies/50-문제파일.cedar
+   ```
+
+3. 다시 `policy lint` 로 전체 통과 여부를 확인합니다:
+   ```bash
+   npm run user -- policy lint
+   ```
+
+4. `policy reload` 를 재시도합니다.
+
 ### reload 에 성공했는데 정책이 적용 안 된 것 같습니다
 
 - `npm run user -- policy version` 으로 버전 번호를 확인합니다. reload 전후로 번호가 올라갔다면 반영된 것입니다.
-- 정책 파일이 올바른 위치 (`~/.presence/cedar/policies/50-*.cedar`) 에 있는지 확인합니다.
+- 정책 파일이 올바른 위치 (`packages/infra/src/infra/authz/cedar/policies/50-*.cedar`) 에 있는지 확인합니다.
 - `policy list` 로 해당 파일이 목록에 나타나는지 확인합니다.
 
 ### 어떤 결정이 내려졌는지 기록을 보고 싶습니다

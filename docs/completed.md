@@ -865,3 +865,38 @@ REST endpoint `/api/sessions/...` 는 HTTP 규약 유지. backward alias 없음 
 
 - locale=en 사용자가 동적 prefix 호출 (`a2a.error.${code}`, `op_label.*`, `sessions_cmd.*` 등) 에서 영어 응답을 받음.
 - 새 KO 키 추가 시 EN 미갱신 회귀가 INV-I18N-PARITY 로 즉시 catch.
+
+## Phase R: Cedar 거버넌스 종결 (2026-05-03)
+
+`feature/kg-30-policy-lint-all` 브랜치. Cedar 인프라/정책 운영 도구 phase 의 마무리. KG-30 (자동 디스크 롤백) resolved-as-designed + FP-78 ship 후 발견된 가이드 경로 회귀 (FP-82) 핫픽스 + 4 문서 (admin-policy-management / cedar-policy-guide / cedar-infra / governance-cedar) 정합화 + 사전 예방 도구 (`policy lint` 전체 검사) 도입. KG-30 resolved 로 Cedar 영역 KG 전부 closed (30/30) — 다음 phase (A2A 멀티 인스턴스) 로 전환 가능 신호.
+
+### 변경
+
+- `packages/infra/src/infra/authz/cedar/index.js` — 신규 `lintAllPolicies(policiesDir, schemaPath)` export. POLICIES_DIR 의 모든 `.cedar` 를 `[{filename, fullPath, ok, parseErrors, schemaErrors, ...}]` 로 일괄 검사. 첫 실패에서 멈추지 않음. `POLICIES_DIR` 도 함께 export.
+- `packages/infra/src/infra/auth/cli-policy.js` — `cmdPolicyLint` 분기 분리 → `cmdPolicyLintFile` (단일) + `cmdPolicyLintAll` (전체). 공통 에러 포맷터 `formatLintErrors` 추출. dispatch 가 `flags.file` 유무로 모드 선택. reload 실패 안내가 "policy lint" (전체) 를 가리킴.
+- `packages/infra/src/infra/auth/cli.js` — usage 갱신 (전체 lint + 단일 파일 lint 양쪽 노출 + reload 전 권장 안내).
+- `packages/infra/test/cedar-lint-all.test.js` 신규 — LA1~LA7 (20 단언). 빈 디렉토리 / 통과 / 일부 실패 / schema mismatch / .cedar 외 무시 / 번들 자산 회귀 가드 / schema 부재.
+- `packages/infra/test/cedar-policy-cli.test.js` — CLI-X18~X20 추가 (전체 통과 통합 / usage 노출 / reload 안내 회귀 placeholder).
+- `docs/guide/ko/admin-policy-management.md` — (a) FP-82 회귀 정정: 정책 파일 위치를 `~/.presence/cedar/policies/` → `packages/infra/src/infra/authz/cedar/policies/` 로 정정 + 운영자 가정 박스 (단일 머신 / git commit 권장 / 정책 변경 = 코드 변경) + 운영 환경 풀 경로 예시 + "왜 홈 디렉토리는 안 되는지" 설명. (b) KG-30 보강: "전체 검사 / 단일 파일 검사 / 운영 권장 흐름" 3개 하위 섹션 + 4단계 회복 절차 + "왜 자동 롤백이 없는가" 박스 + "reload 가 실패했습니다" 항목.
+- `docs/guide/ko/cedar-policy-guide.md` — (a) FP-82 회귀 정정: 4 예시 모두 path 갱신 + §1 §3 §9 본문 정정 + §3 전제 조건 박스 + §9 자주 묻는 질문 추가. (b) KG-30 보강: §8 lint 두 모드 분리 + §9 "reload 실패" 4단계 + "이전 정책으로 되돌리고 싶습니다" git checkout 명령.
+- `docs/design/cedar-infra.md` — v1.4. Status 헤더 + §1.7 + Changelog 갱신. KG-30 resolved-as-designed + `policy lint` 전체 검사 + git revert 표준 절차.
+- `docs/design/governance-cedar.md` — v2.15. §3.1 placeholder ("v3 에서 fix") 정리. Changelog 항목 추가.
+- `docs/ux/issues/2026-05-03-cedar-policy-guide-path-regression.md` 신규 — FP-82 ticket.
+- `docs/tickets/REGISTRY.md` — FP-82 추가 + 즉시 resolved, KG-30 resolved-as-designed, 통계 (FP 81→82 / KG open 1→0 / KG resolved 29→30), 변경 이력 항목.
+
+### 미적용 / 의도적 비-범위
+
+- 자동 디스크 롤백 백업/복원 메커니즘 — 식별 문제 (Cedar 엔진은 합쳐진 결과만 보고 실패) + 잘못 짚을 위험. git revert 가 표준 도구로 충분. 자동화 도입 시 비용 > 이익.
+- 사용자 홈 디렉토리 (`~/.presence/cedar/`) 정책 디렉토리 지원 — 멀티 머신 토폴로지에서 "어느 머신의 user-dir 이 진실인가" 질문 발생. 본 phase 에선 in-source / 코드 PR 워크플로 (스펙 §1.2) 일관 유지.
+- guide writer agent 의 코드/스펙 cross-check 의무화 — FP-82 같은 회귀 방지. 별도 phase.
+
+### 핵심 효과
+
+- KG-30 resolved 로 Cedar 영역 KG 30/30 closed — Cedar 거버넌스 phase 마무리.
+- `policy lint` (인자 없이) 사전 검사 도구로 reload 전 한 번에 전체 안전 확인. 운영자가 lint --file 로 일일이 추적할 필요 없음.
+- 4 문서 (가이드 2 + 스펙 2) 의 정책 파일 위치 / 운영 모델 일관성 회복. FP-82 같은 침묵 실패 가이드 회귀 차단.
+- 다음 phase (A2A 멀티 인스턴스 — peer key registry / mTLS / instance topology / 원격 라우팅) 로 전환 신호. Cedar 영역에서 더 이상의 곁가지 정리 불필요.
+
+### 회귀 결과
+
+4890 → 4908 passed (+18). LA1~LA7 + CLI-X18~X20 + i18n parity 232=232 유지.

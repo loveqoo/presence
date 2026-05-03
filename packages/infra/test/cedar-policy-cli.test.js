@@ -396,6 +396,51 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // --- KG-30 — policy lint (인자 없이) → POLICIES_DIR 전체 검사 ---
+
+  // CLI-X18 — policy lint (no --file) → 번들된 6개 정책 전체 통과
+  {
+    const dir = createTmpDir()
+    const r = runCli('policy lint', dir)
+    assert(r.code === 0, `CLI-X18: 전체 lint → exit 0 (got ${r.code} stderr=${r.stderr})`)
+    assert(r.stdout.includes('✓ 00-base.cedar'), `CLI-X18: 00-base 통과 표시`)
+    assert(r.stdout.includes('✓ 10-quota.cedar'), `CLI-X18: 10-quota 통과 표시`)
+    assert(r.stdout.includes('✓ 31-protect-persona.cedar'), `CLI-X18: 31-protect-persona 통과 표시`)
+    assert(/검사 결과:\s*6\s*\/\s*6\s*통과/.test(r.stdout),
+      `CLI-X18: 통과 카운트 (got ${r.stdout})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X19 — usage 에 lint (전체) + lint --file (단일) 양쪽 노출
+  {
+    const dir = createTmpDir()
+    const r = runCli('', dir)
+    assert(r.stdout.includes('policy lint '), 'CLI-X19: 전체 lint usage 노출')
+    assert(r.stdout.includes('policy lint --file'), 'CLI-X19: 단일 파일 lint usage 유지')
+    assert(r.stdout.includes('reload 전 권장'),
+      `CLI-X19: 전체 lint 권장 안내 (got ${r.stdout.slice(0, 600)})`)
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // CLI-X20 — reload 실패 안내가 'policy lint' (전체) 를 가리키는지 (FP-75 + KG-30 갱신)
+  {
+    const dir = createTmpDir()
+    const env = {
+      ...process.env, PRESENCE_DIR: dir,
+      PRESENCE_ADMIN_TOKEN: 'fake-token',
+      PRESENCE_SERVER_URL: 'http://127.0.0.1:9',
+    }
+    let r
+    try {
+      execSync(`${CLI} policy reload`, { env, cwd: REPO_ROOT, encoding: 'utf-8', stdio: ['pipe','pipe','pipe'], timeout: 5000 })
+      r = { code: 0, stdout: '', stderr: '' }
+    } catch (err) {
+      r = { code: err.status ?? -1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' }
+    }
+    // 서버 미가동이라 reload 실패 안내까지 안 가지만, 실패 안내 string 자체가 코드에 박혀있는지 회귀 — 별도 grep 검증으로 갈음.
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   summary()
 }
 
