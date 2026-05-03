@@ -413,15 +413,10 @@ npm run user -- policy version
 
 현재 이 가이드와 TUI 가 아직 제공하지 못하는 부분입니다. 불편하더라도 아래 우회 방법을 참고하세요.
 
-### Cedar 정책 문법 예시 부재 (FP-78)
+### Cedar 정책 문법 예시 부재 (해소됨, FP-78)
 
-`50-*.cedar` 파일을 처음 작성할 때 어떤 문법을 써야 하는지, presence 스키마의 어떤 항목을 쓸 수 있는지 안내가 없습니다.
-
-**현재 우회 방법:**
-- `policy lint` 로 문법 오류를 먼저 잡습니다.
-- Cedar 공식 문서(https://docs.cedarpolicy.com)를 참고해 기본 문법을 익힙니다.
-
-**향후 계획:** 별도 Cedar 정책 작성 가이드(문법 입문, presence 스키마 매핑, `block-user` / `restrict-archive` / `quota-override` 등 실전 예시 4~5개 포함)를 추가할 예정입니다.
+`50-*.cedar` 파일 작성 가이드는 [Cedar 정책 작성 가이드](./cedar-policy-guide.md) 를 참고하세요.
+Cedar 문법 입문, presence 스키마 매핑, 실전 예시 4개를 포함합니다.
 
 ### TUI 에서 정책 버전 확인 불가 (FP-79)
 

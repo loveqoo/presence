@@ -2,7 +2,7 @@
 
 **영역**: infra (admin CLI), guide
 **심각도**: medium
-**상태**: open
+**상태**: resolved
 **관련 코드**: `packages/infra/src/infra/auth/cli-policy.js`
 
 ## 시나리오
@@ -44,3 +44,45 @@
 ## 근거
 
 lint/reload 기능은 운영자가 정책 파일을 직접 작성할 수 있다는 전제 위에 있다. 그 전제가 충족되지 않으면 두 명령 모두 진입 불가 상태가 된다. 가이드 부재는 기능 발견 이후 두 번째 장벽이며, 이 장벽이 있는 한 hot reload 기능의 실제 활용률은 매우 낮을 것이다.
+
+## 해소 (2026-05-03)
+
+별도 가이드 문서 `docs/guide/ko/cedar-policy-guide.md` 를 신규 작성하여 해소.
+
+**가이드 구성 (9 섹션)**
+
+1. 개요 — 이 문서의 목적과 대상 독자
+2. 사용 시기 — 어떤 상황에서 정책 파일을 직접 작성해야 하는지
+3. 시작 전 — 파일 위치·명명 규칙·디렉토리 구조
+4. Cedar 문법 입문 — permit/forbid, when, unless 기본 구조
+5. presence 스키마 매핑 — Entity / Action / context 필드 대응표
+6. 실전 예시 4종
+7. 흔한 함정 — 작성 시 자주 발생하는 오류 패턴
+8. 검증 절차 — `policy lint` 를 사용한 로컬 검증 방법
+9. 문제 해결 — lint 오류 메시지 해석과 대응
+
+**실전 예시 4종 (섹션 6)**
+
+| 파일명 | 설명 |
+|--------|------|
+| `50-block-user.cedar` | 특정 사용자 차단 |
+| `50-restrict-agent.cedar` | 소유자 외 에이전트 접근 차단 |
+| `50-archived-strict.cedar` | 보관 에이전트 접속 완전 차단 |
+| `50-tighter-quota.cedar` | admin 면제 + 5개 한도 적용 |
+
+**presence 스키마 매핑 (섹션 5)**
+
+Entity 타입:
+- `LocalUser` — 로컬 인증 사용자
+- `User` — 공통 사용자 추상
+- `Agent` — 에이전트 리소스
+
+Action 목록: `create_agent` / `access_agent` / `archive_agent` / `set_persona`
+
+행동별 context 필드는 가이드 내 표 참조.
+
+**연계 갱신**
+
+`docs/guide/ko/admin-policy-management.md` 의 FP-78 안내 섹션이 신규 가이드(`cedar-policy-guide.md`)를 가리키도록 갱신됨.
+
+본 작업은 `feature/fp-78-cedar-policy-guide` 브랜치에서 진행.
