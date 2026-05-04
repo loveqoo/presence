@@ -23,6 +23,7 @@
 | [agent-identity.md](agent-identity.md) | 에이전트 정체성 | AgentId canonical form, canAccessAgent, governance quota, soft-delete, A2A 비활성 기본 |
 | [transcript.md](transcript.md) | Transcript 오버레이 | 5탭 계약, iterationHistory 구독, 멀티턴 중간 응답 가시성 |
 | [llm-client.md](llm-client.md) | LLM 클라이언트 | max_tokens 전달, finish_reason 구분, budget 상수 단일 출처 |
+| [agent-session.md](agent-session.md) | Agent 간 세션 (A2A) | 만남 의미론, lifecycle, 개입 6결, 위임 영역 분류, wire 결 |
 
 ## 스펙 문서 구조
 
@@ -46,3 +47,4 @@
 - 2026-04-11: approve.md 추가 — FP-02/FP-03 반영
 - 2026-04-12: agent-identity.md, transcript.md, llm-client.md 추가 (인덱스 누락 보정)
 - 2026-04-25: 인덱스 최신화 — 3개 파일 README 등재, server-ws.md E4 single-flight 해소, config.md a2a.recoverOnStart 추가
+- 2026-05-03: agent-session.md 추가 — A2A 멀티 인스턴스 phase 진입 전 1차 의미론 spec
