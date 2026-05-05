@@ -99,8 +99,18 @@ agent ↔ agent 한 번의 만남 = 한 **A2A 세션**. 세션 ID = 만남의 �
 
 ### 사후 검토 게이트
 
-risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 준용).
-위험 영역 정의 기준은 후속 phase 에서 확정 — KG-33 등록됨.
+risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 삽입된다 (approve gate 준용).
+
+**사용자 부재 시 처리 (hybrid 정책)**:
+- **기본 (c)**: 사용자가 TUI 미진입 상태면 흡수를 보류하고 미검토 큐에 적재. 다음 TUI 진입 시 "지난 N 일간 미검토 risky 세션 M 건" 안내 + 일괄/개별 결정.
+- **안전망 (b)**: 큐 적재 후 운영자 설정 기간 (예: 7 일) 경과 시 자동으로 만료 처리 — 만료 동작은 운영자 설정으로 `discard` (폐기, audit 만 기록) 또는 `absorb` (자동 흡수 + audit 에 "검토 없이 자동 흡수" 명시) 중 선택.
+- **자동 처리 절대 금지 분기 없음**: 운영자가 자기 책임 하에 `absorb` 를 선택할 수 있다 — 자율성 양도 정도는 운영 결정.
+
+**운영자 설정 키 (자리 마련)**:
+- `agentSession.reviewGate.expiryDays`: number — 만료 기간 (기본값 후속 phase 확정).
+- `agentSession.reviewGate.expiryAction`: `'discard' | 'absorb'` — 만료 시 동작.
+
+위 설정 키 구체값/기본값/검증 규칙은 KG-33 후속 phase. config.md schema 반영도 후속.
 
 ---
 
@@ -217,6 +227,8 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 
 - **E8. 활성 세션 한도 초과 요청** → `STATUS.PENDING` 또는 즉시 거부. Cedar quota 정책 결과에 따름. 정책 미정의 상태에서는 거부(fail-closed).
 
+- **E9. 사후 검토 게이트 만료** → 운영자 설정 기간 경과 후 미검토 상태이면 `expiryAction` 에 따라 처리. `discard` 면 메모리 미흡수 + audit `outcome=expired-discarded`. `absorb` 면 흡수 진행 + audit `outcome=expired-absorbed` (`reviewed=false` 명시). 만료 처리 자체는 lifecycle 이벤트로 audit 에 기록 (I-AS-AUDIT 적용).
+
 ---
 
 ## 테스트 커버리지
@@ -255,11 +267,15 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 - 범위: 별도 phase.
 - 위치: 본 문서 "정보 흐름 정책(IFC)" 섹션.
 
-### KG-33 (메모리 흡수 전 검토 게이트의 위험 영역 정의 미정)
+### KG-33 (메모리 흡수 전 검토 게이트의 위험 영역 정의 + 만료 정책 구체값 미정)
 
-- 내용: 사후 검토 게이트(세션 종료 후 메모리 흡수 전 사용자 검토) 의 구체 트리거 조건 미정. "risky 영역" 기준이 현재 추상적.
+- 내용:
+  - "risky 영역" 트리거 조건 미정 (현재 추상적).
+  - hybrid 정책의 만료 기간 (`expiryDays`) 기본값 미정.
+  - 만료 동작 (`expiryAction`) 기본값 미정 (`discard` 권장 vs `absorb` 권장 결정 필요).
+  - config.md schema 반영 미완.
 - 범위: 별도 phase.
-- 위치: 본 문서 "메모리 흡수" 섹션.
+- 위치: 본 문서 "메모리 흡수" §사후 검토 게이트 + "경계 조건" E9.
 
 ### KG-34 (세션 lifecycle event audit JSONL 형식 미정)
 
@@ -312,3 +328,4 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 - 2026-05-03: KG-31~KG-36 정식 ID 부여 (REGISTRY 등록 완료).
 - 2026-05-05: I-AS-AUTH Cedar action 확정 — start_a2a_session 신규 도입 (옵션 B). 일반 access_agent 와 분리해 운영자가 A2A 정책을 별도 표현 가능.
 - 2026-05-05: I-AS-MUTUAL-RECORD 양방향 흡수 실패 정책 확정 — partial + audit (옵션 c). 종료 지연(a)/롤백(b) 모두 기각. 비대칭 발생 가시화 의무 명시.
+- 2026-05-05: 사후 검토 게이트 UX 확정 — (c) 기본 + (b) 만료 안전망 hybrid. 만료 동작 (discard/absorb) 과 기간 (expiryDays) 은 운영자 설정으로 위임. 구체값/기본값은 KG-33 후속.
