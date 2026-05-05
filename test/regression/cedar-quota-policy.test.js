@@ -894,4 +894,109 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// =============================================================================
+// INV-A2A-PHASE4-PEER-IDENT — Phase 4 (KG-37-PEER, self-A2A scope).
+// JWT agentId claim + caller wiring + a2a-router 검증 5단 + Phase 3 closed-row
+// 안전망. cross-machine A2A 도입 시 V4 가 깨지므로 별도 phase.
+// =============================================================================
+{
+  // (a) signA2aToken 가 agentId 옵션 받음
+  const tokenText = read('packages/infra/src/infra/auth/token.js')
+  assert(
+    /signA2aToken\s*=\s*\(sub,\s*\{\s*agentId\s*\}\s*=\s*\{\}\)/.test(tokenText),
+    'INV-A2A-PHASE4-PEER-IDENT: signA2aToken 시그니처 (sub, { agentId } = {})',
+  )
+  assert(
+    /if\s*\(agentId\)\s*payload\.agentId\s*=\s*agentId/.test(tokenText),
+    'INV-A2A-PHASE4-PEER-IDENT: agentId truthy 시에만 payload 첨부',
+  )
+
+  // (b) delegate.js 가 a2aSigner(currentUserId, { agentId: currentAgentId }) 호출 + fail-fast
+  const delegateText = read('packages/infra/src/interpreter/delegate.js')
+  assert(
+    /currentAgentId/.test(delegateText) && /a2aSigner\s*\(currentUserId,\s*\{\s*agentId:\s*currentAgentId\s*\}\)/.test(delegateText),
+    'INV-A2A-PHASE4-PEER-IDENT: delegate.js 의 runRemote 가 currentAgentId 를 agentId 옵션으로 전달',
+  )
+  // codex round 1 #9 + round 2 #2 — silent failure 회피: currentAgentId 누락 시
+  // throw (Delegation.failed 평탄화 회피).
+  assert(
+    /a2aSigner\s*&&\s*currentUserId\s*&&\s*!currentAgentId/.test(delegateText) &&
+      /throw new Error\([^)]*currentAgentId required/.test(delegateText),
+    'INV-A2A-PHASE4-PEER-IDENT: delegate.js 가 currentAgentId 누락 시 throw fail-fast (silent failure 회피)',
+  )
+
+  // (c) prod.js 가 currentAgentId 를 delegate env 에 전달
+  const prodText = read('packages/infra/src/interpreter/prod.js')
+  assert(
+    /delegateInterpreterR\.run\(\{[^}]*currentAgentId/.test(prodText),
+    'INV-A2A-PHASE4-PEER-IDENT: prod.js 가 delegateInterpreterR 에 currentAgentId 전달',
+  )
+
+  // (d) a2aSigner 호출 사이트 (server/index.js, user-context-manager.js) 가 opts 전달
+  const indexText = read('packages/server/src/server/index.js')
+  const ucmText = read('packages/server/src/server/user-context-manager.js')
+  assert(
+    /a2aSigner:\s*\(sub,\s*opts\)\s*=>\s*auth\.tokenService\.signA2aToken\(sub,\s*opts\)/.test(indexText),
+    'INV-A2A-PHASE4-PEER-IDENT: server/index.js a2aSigner 가 opts 전달',
+  )
+  assert(
+    /a2aSigner:[^?]*\?\s*\(sub,\s*opts\)\s*=>\s*this\.#tokenService\.signA2aToken\(sub,\s*opts\)/.test(ucmText),
+    'INV-A2A-PHASE4-PEER-IDENT: user-context-manager.js a2aSigner 가 opts 전달',
+  )
+
+  // (e) a2a-router 가 verifiedPayload + assertValidAgentId + 5단 검증 + closed-row 안전망
+  const routerText = read('packages/server/src/server/a2a-router.js')
+  assert(
+    /import\s*\{\s*assertValidAgentId\s*\}/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: a2a-router 가 assertValidAgentId import',
+  )
+  assert(
+    /verifiedPayload\.agentId/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: a2a-router 가 verifiedPayload.agentId 추출',
+  )
+  // V1 — agentId claim 필수
+  assert(
+    /missing agentId claim/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: V1 — agentId claim 누락 401',
+  )
+  // V2 (caller) + V2-CALLEE — assertValidAgentId 두 번 호출
+  const assertCalls = (routerText.match(/assertValidAgentId\(/g) || []).length
+  assert(
+    assertCalls >= 2,
+    `INV-A2A-PHASE4-PEER-IDENT: V2 + V2-CALLEE — assertValidAgentId 호출 ≥2 (got ${assertCalls})`,
+  )
+  // V3 — sub/agentId user mismatch
+  assert(
+    /agentId user mismatch/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: V3 — sub/agentId user mismatch 401',
+  )
+  // V4 — registry 등록 검증
+  assert(
+    /agentId not registered/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: V4 — caller agentId not registered 401',
+  )
+  // V5 — self-call 금지
+  assert(
+    /self-call denied/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: V5 — self-call denied 400',
+  )
+  // peerAgentId: callerAgentId — composite PK 의미 회복
+  assert(
+    /peerAgentId:\s*callerAgentId/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: peerAgentId 가 callerAgentId 사용 (agent-level)',
+  )
+  // Phase 3 closed-row 안전망 — userLevelClosed 변수 + logger.warn (codex round 1 #5)
+  assert(
+    /userLevelClosed/.test(routerText) && /user-level closed row Phase 3 legacy/.test(routerText),
+    'INV-A2A-PHASE4-PEER-IDENT: Phase 3 user-level closed row 안전망 + logger.warn (응답에는 generic deny)',
+  )
+  // closed-row 안전망이 upsertOnFirstMeeting 보다 먼저
+  const safetyNetIdx = routerText.indexOf('userLevelClosed')
+  const upsertCallIdx = routerText.search(/a2aRelationshipStore\.upsertOnFirstMeeting\s*\(/)
+  assert(
+    safetyNetIdx > 0 && upsertCallIdx > safetyNetIdx,
+    `INV-A2A-PHASE4-PEER-IDENT: closed-row 안전망 (${safetyNetIdx}) 이 upsertOnFirstMeeting 호출 (${upsertCallIdx}) 보다 먼저`,
+  )
+}
+
 summary()
