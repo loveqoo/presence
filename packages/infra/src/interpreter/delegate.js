@@ -12,7 +12,7 @@ const { Task, Maybe, Reader, Either } = fp
 // f.target → resolveDelegateTarget(currentUserId) → canAccessAgent(DELEGATE) → registry.get
 // docs/design/agent-identity-model.md §9.4 진입점 #5.
 
-const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId, a2aSigner, evaluator }) => {
+const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetchFn, currentUserId, currentAgentId, a2aSigner, evaluator }) => {
   const a2a = new A2AClient({ fetchFn })
   return new Interpreter(['Delegate'], (f) => {
     const resolved = resolveDelegateTarget(f.target, { currentUserId })
@@ -46,9 +46,23 @@ const delegateInterpreterR = Reader.asks(({ ST, agentRegistry, delegateUi, fetch
 
     // KG-17: a2aSigner 가 있으면 currentUserId 로 짧은 만료 token sign 후 첨부.
     // self-A2A scope — 같은 머신의 receiver 가 같은 secret 으로 verifyA2aToken.
+    // KG-37-PEER (Phase 4): production 발급 경로에서는 currentAgentId 가 반드시
+    // 있어야 함. signer + currentUserId 가 주입됐는데 currentAgentId 만 누락된
+    // legacy 케이스는 silent 401 으로 surface 되지 않도록 fail-fast — codex
+    // round 1 #9. a2aSigner 자체가 없는 환경 (test interpreter 등) 은 그대로
+    // callerToken=null 로 통과 (callee 측이 401 missing).
     const runRemote = (entry) =>
       ST.lift(Task.fromPromise(async () => {
-        const callerToken = (a2aSigner && currentUserId) ? a2aSigner(currentUserId) : null
+        if (a2aSigner && currentUserId && !currentAgentId) {
+          // codex round 2 #2 — Delegation.failed 평탄화 회피. throw 로 인터프리터
+          // fail surface. 운영 환경에서 wiring 결함이 silent 401 또는 normal
+          // delegate failure 로 흡수되지 않음. test interpreter (signer 없음) 는
+          // 위 조건에 안 들어와 통과.
+          throw new Error('A2A delegation wiring error: currentAgentId required (KG-37-PEER Phase 4)')
+        }
+        const callerToken = (a2aSigner && currentUserId)
+          ? a2aSigner(currentUserId, { agentId: currentAgentId })
+          : null
         const result = await a2a.sendTask(f.target, entry.endpoint, f.task, { callerToken })
         if (result.isPending()) {
           delegateUi.addPending({

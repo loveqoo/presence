@@ -91,7 +91,7 @@ class UserContextManager {
       memory: this.#memory,
       evaluator: this.#evaluator,
       // KG-17 — Op.Delegate remote 경로가 caller token 첨부 시 사용.
-      a2aSigner: this.#tokenService ? (sub) => this.#tokenService.signA2aToken(sub) : null,
+      a2aSigner: this.#tokenService ? (sub, opts) => this.#tokenService.signA2aToken(sub, opts) : null,
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },

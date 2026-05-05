@@ -5,6 +5,7 @@ import { buildSelfCard, buildSelfCardsFromRegistry } from '@presence/infra/infra
 import { canAccessAgent, canStartA2aSession, INTENT, REASON } from '@presence/infra/infra/authz/agent-access.js'
 import { Method, TaskState, JsonRpcErrorCode } from '@presence/infra/infra/agents/a2a-protocol.js'
 import { DelegationMode } from '@presence/infra/infra/agents/delegation.js'
+import { assertValidAgentId } from '@presence/core/core/agent-id.js'
 
 const { Reader, Either } = fp
 
@@ -161,11 +162,19 @@ const dispatchRpcMethod = async (entry, body, id, res) => {
 
 const mountInvokeRoute = (router, userContext, tokenService, evaluator) => {
   // POST /a2a/:userId/:agentName — JSON-RPC 2.0 entry point
-  // Bearer JWT 검증 → canAccessAgent (DELEGATE) → dispatch
+  // Bearer JWT 검증 → V1~V5 (Phase 4) → canAccessAgent (DELEGATE) → session gate → dispatch
   router.post('/:userId/:agentName', express.json(), async (req, res) => {
     const id = req.body?.id ?? null
     const agentId = agentIdFromParams(req)
     if (!agentId) return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS, 'invalid agent path'))
+
+    // V2-CALLEE (Phase 4) — URL path 에서 추출한 callee agentId 도 형식 검증.
+    // V5 의 raw `===` 비교가 caller/callee 모두 canonical form 인 전제 위에 작동.
+    try { assertValidAgentId(agentId) }
+    catch (err) {
+      return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS,
+        `invalid agent path: ${err.message}`))
+    }
 
     const token = parseBearerToken(req)
     if (!token) {
@@ -179,14 +188,53 @@ const mountInvokeRoute = (router, userContext, tokenService, evaluator) => {
       return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
         `A2A token invalid: ${reason}`))
     }
-    const caller = Either.fold(() => null, p => p.sub, verified)
-    if (!caller) {
+    const verifiedPayload = Either.fold(() => null, p => p, verified)
+    const callerSub = verifiedPayload?.sub
+    if (!callerSub) {
       return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
         'A2A token missing sub claim'))
     }
 
+    // ----- A2A Phase 4 (KG-37-PEER) — 검증 5단 + Phase 3 closed-row 안전망 -----
+    //
+    // V1 — agentId claim 필수 (strict, fallback 없음).
+    // V2 — assertValidAgentId 형식 검증.
+    // V3 — sub/agentId user prefix 일치 (defense-in-depth sanity check).
+    //      self-A2A 신뢰 모델 (같은 secret) 에서 강한 보안 경계 아님 — 운영 오류
+    //      surface 용. 실질 보안은 V4 + canAccessAgent ownership.
+    // V4 — caller agentId 가 registry 등록 (self-A2A scope 한정 해법).
+    // V5 — self-call 금지 (callerAgentId === callee agentId → 400).
+    //
+    // 모두 통과 후 peerAgentId 로 callerAgentId 사용 → composite PK 의미 회복.
+    const callerAgentId = verifiedPayload.agentId
+    if (!callerAgentId) {
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
+        'A2A token missing agentId claim (Phase 4+)'))
+    }
+    try { assertValidAgentId(callerAgentId) }
+    catch (err) {
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
+        `A2A token agentId invalid: ${err.message}`))
+    }
+    if (callerAgentId.split('/')[0] !== callerSub) {
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
+        `A2A token agentId user mismatch: sub=${callerSub} agentId=${callerAgentId}`))
+    }
+    const callerEntry = userContext.agentRegistry.get(callerAgentId)
+    if (!callerEntry || !callerEntry.isJust || !callerEntry.isJust()) {
+      // codex round 2 #4 — registry inventory leak 방지. 응답에는 generic 메시지.
+      // 상세 (어떤 agentId 가 미등록인지) 는 logger 에만.
+      userContext.logger?.warn?.('[a2a-router] caller agentId not registered', { callerAgentId })
+      return res.status(401).json(jsonRpcError(id, JsonRpcErrorCode.AUTH_INVALID,
+        'A2A token agentId not registered'))
+    }
+    if (callerAgentId === agentId) {
+      return res.status(400).json(jsonRpcError(id, JsonRpcErrorCode.INVALID_PARAMS,
+        'A2A self-call denied (caller agentId === callee agentId)'))
+    }
+
     const access = canAccessAgent({
-      jwtSub: caller, agentId, intent: INTENT.DELEGATE, registry: userContext.agentRegistry,
+      jwtSub: callerSub, agentId, intent: INTENT.DELEGATE, registry: userContext.agentRegistry,
       evaluator,
     })
     if (!access.allow) {
@@ -195,24 +243,17 @@ const mountInvokeRoute = (router, userContext, tokenService, evaluator) => {
 
     // A2A Phase 3 (KG-37) — 카드 교환 게이트. canStartA2aSession 통과 시에만
     // store.upsertOnFirstMeeting → recordMeeting. closed 관계는 throw.
-    //
-    // Phase 3 한계 (peerAgentId = JWT caller):
-    //   self-A2A scope (같은 머신 = 같은 secret) 에서 caller 의 JWT sub 를
-    //   peerAgentId 로 사용. 실제로 호출하는 측의 agent 는 caller user 의 agent
-    //   중 어느 것이든 될 수 있으나, 현 phase 는 peer card 메타데이터 fetch 가
-    //   미구현이므로 user-level 식별자 (JWT sub) 를 임시 peerAgentId 로 채택.
-    //   Phase 4 에서 a2a-protocol.md 의 peer card exchange 가 도입되면
-    //   peer 의 agentId (예: 'bob/echo') 로 교체. 본 한계는 agent-session.md
-    //   §peer-identification 에 명시.
+    // Phase 4 (KG-37-PEER resolved, self-A2A scope) — peerAgentId = JWT agentId
+    // claim. cross-machine A2A 도입 시 V4 가 깨지므로 별도 phase 에서 재설계.
     const sessionGate = canStartA2aSession({
-      jwtSub: caller, agentId, peerAgentId: caller,
+      jwtSub: callerSub, agentId, peerAgentId: callerAgentId,
       registry: userContext.agentRegistry, evaluator,
     })
     if (!sessionGate.allow) {
       // 명시적 매핑 — 알려진 reason 만 처리하고 알 수 없는 reason 은 fail-closed
       // 로 403/ACCESS_DENIED 에 흡수 + userContext.logger 로 warn (운영 가시성).
       const { status, code } = mapSessionDenyReason(sessionGate.reason, {
-        logger: userContext.logger, agentId, caller,
+        logger: userContext.logger, agentId, caller: callerAgentId,
       })
       return res.status(status).json(jsonRpcError(id, code,
         `a2a session denied: ${sessionGate.reason}`))
@@ -237,12 +278,33 @@ const mountInvokeRoute = (router, userContext, tokenService, evaluator) => {
     if (!userContext.a2aRelationshipStore) {
       throw new Error('a2a-router: userContext.a2aRelationshipStore missing (UserContext boot regression)')
     }
+
+    // Phase 3 user-level closed row 우회 차단 (best-effort fallback safety net).
+    // §1.1 release gate 가 deploy 전 closed row 부재를 SQL 로 확인했지만, 운영
+    // 잔존 가능성에 대한 추가 방어 — caller user (sub) 를 peerAgentId 로 갖는
+    // closed row 가 있으면 호출 거부. SELECT+upsert atomic 보장 아님 (close/invoke
+    // 동시 race 미닫힘) — 강한 의미론 보장은 Phase 5 closeRelationship CLI 도입
+    // 시 transactional close-and-block 별도 설계.
+    // codex round 1 #5 — IFC: caller 응답에는 generic deny 만 노출. legacy 사유는
+    // logger 에만 (운영 진단 용).
+    const userLevelClosed = userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: agentId, peerAgentId: callerSub,
+    })
+    if (userLevelClosed && userLevelClosed.status === 'closed') {
+      // codex round 2 #1 — logger payload 도 generic 으로. user 식별자를 운영자
+      // 사이드에 노출하지 않음 (IFC). 상관 키가 필요하면 별도 audit pipeline 으로
+      // (Phase 5 IFC 작업).
+      userContext.logger?.warn?.('[a2a-router] user-level closed row Phase 3 legacy block detected')
+      return res.status(403).json(jsonRpcError(id, JsonRpcErrorCode.ACCESS_DENIED,
+        `a2a session denied: ${REASON.A2A_DENIED}`))
+    }
+
     userContext.a2aRelationshipStore.upsertOnFirstMeeting({
-      localAgentId: agentId, peerAgentId: caller,
+      localAgentId: agentId, peerAgentId: callerAgentId,
     })
     try {
       userContext.a2aRelationshipStore.recordMeeting({
-        localAgentId: agentId, peerAgentId: caller,
+        localAgentId: agentId, peerAgentId: callerAgentId,
       })
     } catch (err) {
       // closed 관계 — caller 가 먼저 close 후 다시 호출. 403 으로 surface.

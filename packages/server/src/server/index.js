@@ -162,7 +162,7 @@ class PresenceServer {
       username: this.#username,
       memory: this.#memory,
       evaluator: this.#evaluator,
-      a2aSigner: (sub) => auth.tokenService.signA2aToken(sub),
+      a2aSigner: (sub, opts) => auth.tokenService.signA2aToken(sub, opts),
       onSessionCreated: ({ id, type, session }) => {
         if (type !== SESSION_TYPE.SCHEDULED) this.#bridge.watchSession(id, session)
       },
