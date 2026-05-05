@@ -172,7 +172,7 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - `packages/infra/src/infra/agents/agent-registry.js` — createAgentRegistry
 - `packages/infra/src/infra/sessions/session.js` — Session 생성자 (agentId 필수 검증)
 - `packages/server/src/server/session-api.js` — 진입점 #1 (NEW_SESSION/CONTINUE_SESSION), agents/{agentName}/sessions/{sid}/ 경로 생성
-- `packages/server/src/server/a2a-router.js` — 진입점 #2 (DELEGATE, Bearer JWT 검증)
+- `packages/server/src/server/a2a-router.js` — 진입점 #2 (DELEGATE, Bearer JWT 검증). A2A 세션 시작 시 `start_a2a_session` Cedar action 추가 경유 필요 (`agent-session.md I-AS-AUTH` 참조)
 - `packages/infra/src/infra/auth/token.js` — `createTokenService`: `signA2aToken` / `verifyA2aToken` (type='a2a' 분리)
 - `packages/infra/src/infra/auth/policy.js` — `AUTH.A2A_TOKEN_EXPIRY_S` (현재 60s)
 - `packages/infra/src/infra/agents/a2a-protocol.js` — `JsonRpcErrorCode.AUTH_INVALID = -32002`
@@ -224,3 +224,4 @@ presence 의 에이전트 정체성 모델을 정의한다. AgentId canonical fo
 - 2026-04-29: KG-28 resolved + I-CEDAR-RELOAD-CALL-LINEARIZABLE / I-CEDAR-RELOAD-FAIL-SAFE / I-CEDAR-RELOAD-EDGE-TRIGGER / I-CEDAR-AUDIT-VERSION 신규 — governance-cedar v2.13 §X6. I-CEDAR-RELOAD-CALL-LINEARIZABLE 에 chat 경로 다중 호출 구체화 (attachSessionMiddleware canAccessAgent + handleSlashCommand set_persona). I-CEDAR-AUDIT-VERSION 에 단일 인스턴스 주입 경로 명시 (bootCedarSubsystem → innerEvaluator closure 경유). KG-28 Known Gaps 섹션에 resolved 항목 추가. spec-guardian 교차 점검 반영 (2026-04-29). callable wrapper (`createEvaluatorRef`) 로 hot reload 경로 완성. rebootCedarSubsystem throw → wrapper.replace 미호출 (fail-safe). single-flight reloadPending 으로 follower 가 leader reloadStartedAt 공유 (edge-trigger). audit getPolicyVersion closure 로 모든 server-side entry policyVersion 자동 첨부 (단일 진실 소스). CLI manual_approve 는 policyVersion=null 명시적 예외. 관련 코드에 evaluator-ref.js / admin-router.js / audit.js 추가. 테스트 커버리지 RL1~RL9 / AR1~AR7 / INV-CEDAR-RELOAD-* / INV-CEDAR-AUDIT-VERSION 매핑 추가. 4646 passed.
 - 2026-04-30: I-CORE-AGENTS 불변식 신규 — `CORE_AGENT_NAMES` 정책 상수 격상 반영. 시스템 제공 agent 이름 집합의 단일 진실 소스를 policies.js로 명문화. 관련 코드에 cli.js 추가. 테스트 커버리지 I-CORE-AGENTS 미커버 ⚠️ 등록.
 - 2026-04-30: I-CORE-AGENTS 미커버 ⚠️ 해소 — `test/regression/cedar-quota-policy.test.js` INV-CORE-AGENTS-USAGE 정적 회귀 7 항목 추가 (policies.js 단일 정의, cli.js import + 로컬 재정의 부재, cmdRemove Set 합집합, removeUserCompletely 전달).
+- 2026-05-05: start_a2a_session Cedar action cross-reference 추가 — `agent-session.md I-AS-AUTH` 확정(2026-05-05)에 따른 정합성 갱신. A2A 세션 시작 경로(`a2a-router.js`)에서 `start_a2a_session` Cedar action 추가 경유 필요 사항을 관련 코드 섹션에 명시. Cedar action enum 전체 목록은 `agent-session.md §위임 영역 분류` 참조.

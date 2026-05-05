@@ -12,7 +12,7 @@ SESSION_TYPE 상수(`packages/infra/src/infra/constants.js`)를 기준으로 3�
 |----------------|------|-------------|------------|
 | `user` | 클라이언트 연결 기반 대화 세션 | 있음 (디스크) | `UserSession` |
 | `scheduled` | 스케줄러가 잡 실행 시 생성, 완료 시 destroy | 없음 | `EphemeralSession` |
-| `agent` | 다른 에이전트로의 위임 처리 | 없음 | `EphemeralSession` |
+| `agent` | A2A 두 에이전트 쌍의 영속 관계 컨테이너. 만남(request/response 페어) 의 실행 컨텍스트를 담당 — 영속 세션 의미론은 `agent-session.md` 참조 | 없음 (만남 실행 컨텍스트는 휘발) | `EphemeralSession` |
 
 > `EphemeralSession`은 `scheduled`와 `agent` 두 유형 모두에 사용되는 공통 구현 클래스다. `Session.create()` 팩토리가 `type` 파라미터 기준으로 `UserSession` 또는 `EphemeralSession`을 선택한다.
 
@@ -131,3 +131,4 @@ SESSION_TYPE 상수(`packages/infra/src/infra/constants.js`)를 기준으로 3�
 - 2026-04-24: A2A Phase 1 S2 구현 반영 — I16 확장: findSenderSession 계약(USER+AGENT 양쪽, AGENT 우선, USER fallback), turnLifecycle 전파 불변식(SessionActors→EventActor 주입, appendSystemEntrySync, 미주입 fallback). I2 UserContext.shutdown() 순서 갱신(A2A expire tick clearInterval/await 선행 추가, a2aQueueStore.close 추가). 테스트 커버리지 I16 미커버 시나리오 확장.
 - 2026-04-25: A2A 네이밍 범용화 반영 (v8) — I16 재작성: findAgentSession/findSenderSession 설명에서 'SendTodo' 참조 제거 → 'Op.SendA2aMessage'. turnLifecycle 전파에서 'todo_response' → 'a2a_response'. A2A event type 범용성 불변식 추가(EVENT_TYPE.A2A_REQUEST/A2A_RESPONSE 프리미티브, category 특정 이름 도입 금지). 관련 코드에서 send-todo.js → send-a2a-message.js 갱신.
 - 2026-04-25: A2A Phase 1 S4 구현 반영 — I16 보강: recoverA2aQueue 메서드 계약(feature flag / 두 부트 경로 / row별 처리 정책 / recovery 완료 불변식 / bounded batch / i18n humanize), UserContextManager single-flight 불변식 추가.
+- 2026-05-05: SESSION_TYPE.agent 의미 갱신 — A2A 의미론 재정의(`agent-session.md` 2026-05-05)에 따른 정합성 갱신. SESSION_TYPE.agent 설명을 "두 에이전트 쌍의 영속 관계 컨테이너" 로 갱신. A2A 세션의 컨텍스트 관리는 사용자 세션 결 재사용 (I-AS-CONTEXT-REUSE — `agent-session.md` 참조). EphemeralSession 은 만남 실행 컨텍스트 역할로 의미 유지.

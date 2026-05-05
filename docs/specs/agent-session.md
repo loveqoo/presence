@@ -7,21 +7,33 @@
 이 스펙이 보장하는 핵심 명제: **agent ↔ agent 만남은 함수 호출이 아니라 관계 이력의 누적이다.**
 
 presence 의 기존 사용자 ↔ presence 세션 모델(`docs/specs/session.md`) 을 A2A 로 확장한다.
-세션 ID 가 만남의 식별자이며, 세션 생명주기가 만남의 생명주기다.
+**세션 = 두 에이전트 쌍의 영속 관계 컨테이너(1:1 고정)**. 만남이 누적되는 장소이며, 새 세션이 누적되지 않는다.
 
 ---
 
 ## 의미론
 
-### 만남 단위
+### 만남 단위 (재정의 — 2026-05-05)
 
-agent ↔ agent 한 번의 만남 = 한 **A2A 세션**. 세션 ID = 만남의 식별자.
-`EphemeralSession(type='agent')` 이 만남의 런타임 컨텍스트를 담당한다 (`session.md` SESSION_TYPE.agent 참조).
+- **만남 = request/response 한 쌍**. 메시지가 한 번 왕복 = 한 번 만남.
+- **세션 = 두 에이전트 쌍의 영속 관계 컨테이너 (1:1 고정)**. 세션 ID = 두 에이전트 쌍의 관계 식별자.
+- 같은 두 자아 사이엔 만남이 누적되지 새 세션이 누적되지 않는다 (ontology §A2A "관계의 누적" 결).
+- 세션은 EphemeralSession(휘발성) 이 아닌 **영속 세션**. SESSION_TYPE.agent 의 의미가 영속 관계 컨테이너임 (`session.md` SESSION_TYPE.agent 참조).
+
+### 공유 컨텍스트 결 (결정 2026-05-05)
+
+A2A 세션의 공유 컨텍스트는 사용자 ↔ 에이전트 세션 모델(`session.md`) 의 컨텍스트 관리 결을 재사용한다.
+상대 에이전트를 자기 유저로 취급 — 동일한 히스토리 trim / max_tokens / 요약 메커니즘이 적용된다.
+ontology §A2A "공유 컨텍스트 크기" 의 두 극단(통합 자아 / 메시지 교환) 사이 균형은
+기존 사용자 세션 결의 안정 영역으로 흡수된다.
+
+**I-AS-CONTEXT-REUSE**: A2A 세션의 컨텍스트 관리는 사용자 ↔ 에이전트 세션 모델과 동일 결을 사용한다.
+A2A 전용 별도 컨텍스트 정책은 도입하지 않는다.
 
 ### 관계의 누적
 
-세션 종료 시 양쪽 에이전트의 메모리에 만남이 영속화된다(양방향 기록).
-다음 세션은 이 메모리를 컨텍스트로 읽어 "백 번째 만남을 다르게 해석" 한다.
+세션(영속 관계 컨테이너)에 만남이 기록될 때 양쪽 에이전트의 메모리에도 영속화된다(양방향 기록).
+다음 만남은 이 메모리를 컨텍스트로 읽어 "백 번째 만남을 다르게 해석" 한다.
 이것이 도구 호출과 자아 간 만남의 결정적 차이다(`ontology.md §A2A` 인용).
 
 **흡수 데이터 단위**: request/response 페어, 만남 시점(timestamp), 결과(outcome), 세션 ID.
@@ -35,34 +47,127 @@ agent ↔ agent 한 번의 만남 = 한 **A2A 세션**. 세션 ID = 만남의 �
 
 ---
 
-## 세션 라이프사이클
+## 세션 라이프사이클 (영속 세션)
 
 ```
-사전 인가(Cedar) → 사전 승인(approve gate) → 세션 시작
+세션 생성 (첫 만남 시 lazy)
+    ↓
+관계 영속 — 만남이 누적됨
+    ↓
+명시적 폐기 / 비우기 / 요약 (사용자 선택)
+
+[스트리밍 wire 만] inactivity timeout → 만남만 종료, 세션 유지
+```
+
+세션(영속 관계 컨테이너) 과 만남(request/response 페어) 은 라이프사이클이 다르다.
+
+## A2A 운영 흐름 (카드 교환 → 큐 적재 → heartbeat 디스패치 → 응답)
+
+외부 에이전트 B 가 presence 내부 에이전트 A 와 연결할 때의 운영 흐름.
+
+### 단계 1 — 카드 교환 (한 번)
+
+B 가 자기 카드 (agent ID + 페르소나 메타 + 능력 목록) 를 보내고 A 의 카드를 받는다.
+presence 가 Cedar 정책 평가 (`start_a2a_session`, action 정의는 §위임 영역 분류 참조) 를 통과하면 세션을 lazy create. 이미 세션이 있으면 기존 세션 재사용 — 세션 ID 재사용이 곧 "같은 관계의 연속".
+
+- **카드 교환은 한 번**: 세션이 살아있는 한 재교환 불필요. 라우팅 정보 (B 의 endpoint) 는 세션 메타로 보존된다.
+- **I-AS-AUTH cross-reference**: Cedar 평가가 이 단계에서 일어난다. 거부 시 세션 생성 및 카드 교환 모두 차단.
+
+### 단계 2 — 메시지 적재 (B → 큐)
+
+B 의 메시지는 presence 의 큐 (`A2aQueueStore`) 에 먼저 적재된다. **외부 에이전트는 내부 에이전트를 직접 호출하지 못한다.**
+→ I-AS-WIRE-PROTECTION 불변식이 이 경로를 명시적으로 차단한다.
+
+### 단계 3 — heartbeat 디스패치 (큐 → A)
+
+presence heartbeat 가 큐를 폴링해 A 에게 메시지를 전달한다.
+heartbeat + 큐 조합이 내부 에이전트의 보호막 역할을 한다:
+
+- **rate-limit**: heartbeat 주기 이상으로 메시지가 밀려들어도 내부 에이전트는 heartbeat 단위로만 받는다.
+- **인가 재검증**: 디스패치 시점에 세션/A2A 인가를 재확인할 수 있다.
+- **backpressure 자연 도입**: 큐가 꽉 차면 새 enqueue 가 실패 — 외부 에이전트가 자연스럽게 흐름 제어를 경험한다.
+
+### 단계 4 — A 응답 (A → B 직접)
+
+A 가 B 에게 직접 전송한다. 카드 교환 시 얻은 라우팅 정보(B 의 endpoint) 를 사용하므로 큐를 경유하지 않는다. **응답은 큐 미경유** — 단방향 흐름: 수신만 큐 경유, 발신은 직접.
+
+### 단계 5 — 반복 (같은 세션 재사용)
+
+B 가 다음 메시지를 보내면 단계 2 (큐 적재) → 단계 3 (heartbeat 디스패치) → 단계 4 (A 응답) 를 같은 세션 ID 로 반복한다. 세션 ID 가 두 자아 쌍의 관계 식별자이므로 새 세션 생성 없음 (`§만남 단위 재정의` 참조).
+
+---
+
+## 응답 모드 (4 결)
+
+A2A 세션 내에서 A 가 B 에게 응답하는 방식은 4 가지다. **모드 전환은 사용자 명시 행위에서만 발생한다.**
+
+| 모드 | 응답자 | B 가 보는 발신자 | A 의 역할 | wire |
+|------|-------|----------------|----------|------|
+| **agent-default** | A 자율 | A | 자율 자아 | A↔B 메인 |
+| **user-takeover** | 사용자 | 사용자 | 비활성 | 사용자↔B 메인 |
+| **user-via-agent** | A 가 1회 응답 | A | 단발 도구 | A→B 메인 (사용자 명시 호출 후) |
+| **user-with-whisper** | 사용자 | 사용자 | 비공개 자문 | 두 채널: 사용자↔A 비공개 + 사용자→B 메인 |
+
+이 4 결은 `ontology.md §손과 발` 의 4 양태 (자율 / 비활성 / 도구 / 자문) 를 A2A 세션 응답 맥락에서 직접 표현한다.
+
+**응답 출처 audit 레이블**:
+
+| 모드 | audit 출처 레이블 |
+|------|-----------------|
+| agent-default | `agent-autonomous` |
+| user-takeover | `user-autonomous` |
+| user-via-agent | `user-via-agent` (발화자는 A 지만 책임 주체는 사용자) |
+| user-with-whisper (사용자 발화) | `user-autonomous` |
+
+→ I-AS-RESPONSE-MODE 불변식 참조.
+
+---
+
+## 만남 라이프사이클
+
+```
+사전 인가(Cedar) → 사전 승인(approve gate) → 만남 시작 (세션 없으면 lazy 생성)
         ↓
   진행 중: 실시간 관찰 + 사용자 개입 가능
         ↓
-세션 종료 → 메모리 흡수 → 사후 검토(risky 영역) → 사후 피드백
+만남 종료 → 메모리 흡수 → 사후 검토(risky 영역) → 사후 피드백
 ```
 
 ### 시작 단계
 
-1. **사전 인가**: Cedar 정책 평가 (`Op.CheckAccess`, action=`start_a2a_session`). 거부 시 세션 생성 차단.
+1. **사전 인가**: Cedar 정책 평가 (`Op.CheckAccess`, action=`start_a2a_session`). 거부 시 만남(세션 생성 포함) 차단.
 2. **사전 승인**: risky 영역으로 분류된 만남에 한해 사용자 approve gate 요청 (`approve.md` 계약 준용).
-3. **세션 등록**: `SessionManager` 에 AGENT 타입 세션 등록. `findAgentSession` API 로 조회 가능(`session.md I16`).
+3. **세션 lazy 생성**: 두 에이전트 쌍 사이 영속 세션이 없으면 첫 만남 시 생성. 이미 있으면 재사용.
+4. **만남 등록**: `SessionManager` 에 AGENT 타입으로 현재 만남의 실행 컨텍스트 등록. `findAgentSession` API 로 조회 가능(`session.md I16`).
 
 ### 진행 단계
 
 - 비동기 메시지 큐(wire) 위에서 실행. 동기 의미론이 필요한 호출자는 큐 위 await 으로 표현.
-- 사용자는 언제든 세션 abort 또는 메시지 끼워넣기(inject) 가능. 비동기 wire 가 이를 자연스럽게 허용.
-- TUI 에 활성 세션 목록 노출.
+- 사용자는 언제든 만남 abort 또는 메시지 끼워넣기(inject) 가능. 비동기 wire 가 이를 자연스럽게 허용.
+- TUI 에 활성 세션(관계) 목록 노출.
 
 ### 종료 단계
 
-1. **세션 종료 이벤트**: lifecycle audit 기록.
+**만남 종료**:
+1. **만남 종료 이벤트**: lifecycle audit 기록.
 2. **메모리 흡수**: 양쪽 에이전트 메모리에 만남 기록 영속화 (I-AS-MUTUAL-RECORD).
 3. **사후 검토** (risky 영역): 사용자가 메모리 흡수 전 만남 내용 검토 가능. 구체 UX 는 후속 phase.
 4. **사후 피드백**: 정책/페르소나 갱신 신호 생성 가능 (신뢰 누적 루프 — 후속 phase).
+
+**세션(관계 컨테이너) 종료 — 자동 종료 없음**:
+
+A2A 세션은 자동 종료되지 않는다. 두 자아의 관계는 영속이며,
+사용자가 명시적으로 다음 셋 중 하나를 선택할 수 있다:
+
+1. **세션 폐기** (close): 관계 자체를 끊는다. 메모리 흡수 이력은 audit 에 보존되나 활성 세션 목록에서 제거.
+   권장하지 않음 — 관계 단절은 ontology 결에서 무거운 결정.
+2. **내용 비우기** (clear): 세션은 유지하되 누적된 메시지 history 를 비운다. 메모리 흡수 이력은 보존.
+   일상적 정리 권장 옵션.
+3. **요약** (summarize): 누적 history 를 LLM 요약으로 압축. 컨텍스트 부담 완화. 비우기보다 점진적.
+
+자동 종료가 적용되는 단 하나의 예외: **스트리밍 wire** (long-running connection — websocket 등).
+이 경우 inactivity timeout (운영자 설정) 적용. 단, 세션(관계 컨테이너) 자체는 유지 — 만남만 종료.
+비동기 큐 wire(`A2aQueueStore`) 는 자연 timeout 불필요.
 
 ---
 
@@ -101,8 +206,8 @@ agent ↔ agent 한 번의 만남 = 한 **A2A 세션**. 세션 ID = 만남의 �
 
 risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 삽입된다 (approve gate 준용).
 
-**사용자 부재 시 처리 (hybrid 정책)**:
-- **기본 (c)**: 사용자가 TUI 미진입 상태면 흡수를 보류하고 미검토 큐에 적재. 다음 TUI 진입 시 "지난 N 일간 미검토 risky 세션 M 건" 안내 + 일괄/개별 결정.
+**사용자 부재 시 처리 (hybrid 정책)**: 세션 안 미검토 만남 큐 누적 모델.
+- **기본 (c)**: 사용자가 TUI 미진입 상태면 흡수를 보류하고 **세션 내 미검토 만남 큐** 에 적재. 다음 TUI 진입 시 "지난 N 일간 미검토 risky 만남 M 건" 안내 + 일괄/개별 결정. 만남(request/response 페어) 단위로 누적되므로 세션이 살아있는 한 큐는 이어진다.
 - **안전망 (b)**: 큐 적재 후 운영자 설정 기간 (예: 7 일) 경과 시 자동으로 만료 처리 — 만료 동작은 운영자 설정으로 `discard` (폐기, audit 만 기록) 또는 `absorb` (자동 흡수 + audit 에 "검토 없이 자동 흡수" 명시) 중 선택.
 - **자동 처리 절대 금지 분기 없음**: 운영자가 자기 책임 하에 `absorb` 를 선택할 수 있다 — 자율성 양도 정도는 운영 결정.
 
@@ -122,7 +227,7 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 | 사전 승인 | 세션 시작 전 | approve gate (risky 영역) | - | 있음 |
 | 실시간 관찰 | 진행 중 | TUI 활성 세션 목록 | - | 없음 |
 | 실시간 개입 | 진행 중 | abort / inject (큐 wire 자연 지원) | - | 없음 |
-| 사후 검토 | 종료 직후 | 메모리 흡수 전 검토 (risky 영역) | - | 있음 (risky) |
+| 사후 검토 | 만남 종료 직후 | 미검토 큐 + 만료 안전망 (c+b hybrid, expiryAction 운영자 설정) | - | 있음 (risky) |
 | 사후 피드백 | 검토 완료 후 | 정책/페르소나 갱신 신호 | - | 없음 |
 
 ---
@@ -149,14 +254,21 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 
 ---
 
-## 활성 세션 한도
+## 활성 세션 한도 + 동시 만남 한도
 
-한 에이전트가 동시에 가질 수 있는 활성 A2A 세션 수에 상한이 있다.
+세션이 1:1 고정 영속이므로 "활성 세션 수" 의 의미는 **관계 맺은 상대 에이전트 수** 다.
+
+### 활성 세션(관계) 한도
 
 - 이유: `ontology.md §A2A "공유 컨텍스트 크기 제한"` + 부하 보호.
 - 상한 값: Cedar quota 정책으로 표현 (`A2A.SESSION_QUOTA` 상수 — `policies.js`, 현재 미정의).
 - 상한 초과 시: `STATUS.PENDING` 또는 즉시 거부 (정책 설정에 따름).
 - **상한 값 및 quota 정책 구체 정의는 후속 phase** — KG-36 등록됨.
+
+### 동시 만남(request/response 페어) 한도
+
+- 동시에 진행 중인 만남 수(request 페어 동시성) 에 별도 quota 가 필요한지는 후속 phase 에서 결정.
+- **KG-36 본문에 두 결 모두 포함** (활성 세션 한도 + 동시 만남 한도).
 
 ---
 
@@ -168,6 +280,20 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 - 이유: presence 개인 영역과 외부 에이전트 회사 영역의 부분 겹침. 완전 통합 금지(`ontology.md §A2A` 참조).
 
 **IFC 구체 정책 언어 미정의** — 본 1차 spec 에서는 의미론 자리만 마련. 후속 phase 에서 정책 DSL 과 함께 정의 — KG-32 등록됨.
+
+### 귓속말 채널 (whisper) — IFC 첫 구체 사례
+
+**귓속말은 A2A IFC 의 첫 구체 사례다.** `user-with-whisper` 응답 모드의 비공개 자문 채널이 이에 해당한다.
+
+- **채널 정의**: 사용자 ↔ A 비공개 자문 채널. B 에게 미노출.
+- **IFC 등급**: `P→A 가능 / A→B 불가 / 휘발 (저장 안 함)`
+- **진정한 휘발성**: audit 미기록 + A 메모리 미누적. 시스템 어느 곳에도 자문 흔적이 남지 않는다.
+  - 사람이 친구에게 귀띔받고 본인 의사로 답하는 결과와 동일한 의미론.
+- **책임 추적 약화**: presence 외부 audit (관리자 감사) 관점에서 귓속말 내용은 추적 불가. 귓속말 기반 판단의 책임은 전적으로 사용자 본인에게 귀속된다.
+- **ontology 결**: `ontology.md §손과 발` 4 양태 중 "자문" 양태의 극단적 표현 — 자문이 어떤 흔적도 남기지 않을 때 사용자 자율성이 가장 강하게 보장된다.
+
+KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
+> 첫 구체 사례: 귓속말 채널 (whisper) — `P→A 가능 / A→B 불가 / 휘발`. 정책 언어 설계 시 본 사례를 표현 가능해야 함.
 
 ---
 
@@ -187,7 +313,11 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 
   **결정 근거**: 일반 `access_agent` (사용자→에이전트) 와 분리해 운영자가 A2A 만 별도 정책으로 제어 가능. ontology §A2A "도구 호출이 아니라 두 자아의 만남" 결을 정책 라벨에서도 유지.
 
-- **I-AS-MUTUAL-RECORD**. 세션이 정상 종료될 때 발신 에이전트와 수신 에이전트 양쪽 메모리에 만남이 기록된다. 한쪽 기록 실패 시 처리 정책은 **partial + audit (옵션 c)**: 성공한 쪽 기록은 유지하고, audit 에 `outcome=partial` 과 실패한 쪽 식별자 / 실패 사유를 남긴다. 비대칭 자체는 ontology 위반이지만 발생을 감추지 않고 드러내는 것을 우선한다.
+  **§A2A 운영 흐름 연결**: 카드 교환(단계 1) 시 이 평가가 실행된다. 평가 통과 후 세션 lazy create 또는 기존 세션 재사용이 결정된다.
+
+- **I-AS-MUTUAL-RECORD**. **만남 단위** 양방향 흡수 불변식. 만남(request/response 페어) 종료 시 발신 에이전트와 수신 에이전트 양쪽 메모리에 해당 만남이 기록된다. 한쪽 기록 실패 시 처리 정책은 **partial + audit (옵션 c)**: 성공한 쪽 기록은 유지하고, audit 에 `outcome=partial` 과 실패한 쪽 식별자 / 실패 사유를 남긴다. 비대칭 자체는 ontology 위반이지만 발생을 감추지 않고 드러내는 것을 우선한다.
+
+  **만남 단위 의미**: 한 만남에서 partial 흡수가 발생해도 세션(영속 관계 컨테이너) 은 살아있다. 다음 만남에서 이전 partial 사실을 컨텍스트로 받아 보강 기회가 열린다 (보강 schema 는 KG-35 후속).
 
   **결정 근거**: 종료 지연(옵션 a)은 한쪽 영구 다운 시 세션이 못 끝나는 비현실적 비용. 롤백(옵션 b)은 "이미 일어난 만남을 지우는" 더 큰 ontology 위반 — 분산 트랜잭션 비용도 큼. (c) 는 비대칭을 audit 으로 surface 하여 운영자/사용자 사후 인지를 보장.
 
@@ -202,6 +332,21 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 - **I-AS-AUDIT**. 세션 lifecycle 의 모든 이벤트(시작/종료/abort/inject/메모리 흡수 성공·실패)는 audit 기록에 남는다. audit 기록 없이 lifecycle 이벤트가 완료되는 경로는 존재하지 않는다. audit 형식은 JSONL (`data-persistence.md` Cedar audit 패턴 준용).
 
 - **I-AS-WIRE-ASYNC**. 모든 A2A 통신은 비동기 큐 위에서 이루어진다. 동기 의미론이 필요한 경우 비동기 위 await 으로 표현한다. 동기 직접 호출(함수 호출) 로 다른 에이전트의 에이전트 로직을 직접 실행하는 경로는 존재하지 않는다.
+
+- **I-AS-WIRE-PROTECTION**. 외부 에이전트의 메시지는 presence 큐(`A2aQueueStore`) 에 적재되어 heartbeat 가 내부 에이전트로 전달한다. 외부 에이전트가 내부 에이전트의 인터프리터/메시지 핸들러를 직접 호출하는 경로는 존재하지 않는다. 큐 + heartbeat 가 rate-limit / 인가 재검증 / backpressure 의 인프라 보호막이다.
+
+  이 불변식은 I-AS-WIRE-ASYNC 의 보호 목적을 명시적으로 확장한다. I-AS-WIRE-ASYNC 가 "동기 직접 호출 금지" 를 선언한다면, I-AS-WIRE-PROTECTION 은 "외부 → 내부 경로는 반드시 큐 경유" 라는 운영 보호 구조를 선언한다 (§A2A 운영 흐름 단계 2/3 참조).
+
+- **I-AS-RESPONSE-MODE**. A2A 세션 응답 모드는 agent-default / user-takeover / user-via-agent / user-with-whisper 4 가지. 모드 전환은 사용자 명시 행위에서만 발생한다 — 에이전트가 자체적으로 takeover 를 풀거나 사용자 응답을 가로채지 않는다.
+
+  ontology `§손과 발` 의 4 양태 (자율 / 비활성 / 도구 / 자문) 를 A2A 세션 응답 맥락에서 직접 표현한다.
+
+  **응답 출처 audit 레이블 (I-AS-AUDIT 준수)**:
+  - `agent-autonomous`: agent-default 모드.
+  - `user-autonomous`: user-takeover 모드. user-with-whisper 의 사용자 발화도 동일 레이블.
+  - `user-via-agent`: user-via-agent 모드. 발화자는 A 이지만 책임 주체가 사용자임을 명시.
+
+  **귓속말 (whisper) audit 예외**: user-with-whisper 의 비공개 자문 채널 (사용자 ↔ A) 은 audit 미기록 + A 메모리 미누적 — 진정한 휘발성. 사용자 자율성 최강 결. 책임 추적은 §IFC 귓속말 채널 섹션 참조.
 
 - **I-AS-SESSION-QUOTA**. 한 에이전트가 동시에 가질 수 있는 활성 A2A 세션 수는 Cedar quota 정책으로 상한이 정해진다. 상한 초과 요청은 `STATUS.PENDING` 또는 즉시 거부로 처리된다. 상한 없는 무제한 세션 생성은 금지된다.
 
@@ -243,6 +388,8 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 | I-AS-INTERVENTION | (미커버) ⚠️ abort/inject wire 전달 단위 테스트 필요 |
 | I-AS-AUDIT | (미커버) ⚠️ lifecycle 이벤트 audit JSONL 기록 검증 필요 |
 | I-AS-WIRE-ASYNC | (미커버) ⚠️ 동기 직접 호출 경로 부재 정적 회귀 필요 |
+| I-AS-WIRE-PROTECTION | (미커버) ⚠️ 외부→내부 직접 호출 경로 부재 정적 회귀 필요 |
+| I-AS-RESPONSE-MODE | (미커버) ⚠️ 모드 전환 사용자 명시 행위 강제 + whisper audit 미기록 검증 필요 |
 | I-AS-SESSION-QUOTA | (미커버) ⚠️ quota 상한 Cedar 평가 검증 필요 |
 | I-AS-CLASSIFICATION | (미커버) ⚠️ fail-closed(분류 없음 → blocked) 경로 검증 필요 |
 | E1 (evaluator 오류) | (미커버) ⚠️ |
@@ -289,20 +436,23 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 - 범위: 별도 phase.
 - 위치: 본 문서 "메모리 흡수" 섹션.
 
-### KG-36 (활성 세션 한도 + Cedar quota 정책 구체 값 미정의)
+### KG-36 (활성 세션 한도 + 동시 만남 한도 미정의)
 
-- 내용: `A2A.SESSION_QUOTA` 상수 값 미정의. Cedar quota 정책 파일(`10-a2a-quota.cedar` 등) 미작성. 초과 시 PENDING vs 즉시 거부 정책 미결정.
+- 내용:
+  - **활성 세션(관계) 한도**: `A2A.SESSION_QUOTA` 상수 값 미정의. Cedar quota 정책 파일(`10-a2a-quota.cedar` 등) 미작성. 초과 시 PENDING vs 즉시 거부 정책 미결정.
+    - 활성 세션 수 = 관계 맺은 상대 에이전트 수 (세션이 1:1 고정 영속이므로).
+  - **동시 만남(request/response 페어) 한도**: 별도 quota 필요 여부 미결정. 한 세션 내에서 동시에 진행 가능한 만남 수 상한이 필요한지 후속 phase 에서 결정.
 - 범위: 별도 phase.
-- 위치: 본 문서 "활성 세션 한도" 섹션.
+- 위치: 본 문서 "활성 세션 한도 + 동시 만남 한도" 섹션.
 
 ---
 
 ## 관련 코드
 
-- `packages/infra/src/infra/sessions/ephemeral-session.js` — A2A 만남 런타임 컨텍스트 (SESSION_TYPE.agent)
-- `packages/infra/src/infra/sessions/session-manager.js` — findAgentSession / findSenderSession (I16)
-- `packages/infra/src/infra/a2a-queue-store.js` — 비동기 큐 backend (wire 결)
-- `packages/infra/src/infra/a2a-response-dispatcher.js` — response 전달 + drain
+- `packages/infra/src/infra/sessions/ephemeral-session.js` — A2A 만남 런타임 컨텍스트 (SESSION_TYPE.agent). 영속 세션(관계 컨테이너) 저장은 별도 테이블 필요 (data-persistence.md I8 갭 참조)
+- `packages/infra/src/infra/sessions/session-manager.js` — findAgentSession / findSenderSession (`session.md I16`)
+- `packages/infra/src/infra/a2a/a2a-queue-store.js` — 비동기 큐 backend. 만남 단위 메시지 큐 (`data-persistence.md I13`)
+- `packages/infra/src/infra/a2a/a2a-response-dispatcher.js` — response 전달 + drain
 - `packages/infra/src/interpreter/send-a2a-message.js` — SendA2aMessage Op 인터프리터
 - `packages/infra/src/infra/authz/cedar/` — Cedar 정책 파일 디렉토리
 - `packages/infra/src/infra/authz/agent-governance.js` — canAccessAgent, submitUserAgent
@@ -329,3 +479,5 @@ risky 영역 세션 종료 시 메모리 흡수 전 사용자 검토 단계가 �
 - 2026-05-05: I-AS-AUTH Cedar action 확정 — start_a2a_session 신규 도입 (옵션 B). 일반 access_agent 와 분리해 운영자가 A2A 정책을 별도 표현 가능.
 - 2026-05-05: I-AS-MUTUAL-RECORD 양방향 흡수 실패 정책 확정 — partial + audit (옵션 c). 종료 지연(a)/롤백(b) 모두 기각. 비대칭 발생 가시화 의무 명시.
 - 2026-05-05: 사후 검토 게이트 UX 확정 — (c) 기본 + (b) 만료 안전망 hybrid. 만료 동작 (discard/absorb) 과 기간 (expiryDays) 은 운영자 설정으로 위임. 구체값/기본값은 KG-33 후속.
+- 2026-05-05: A2A 의미론 핵심 재정의 — 세션 = 두 에이전트 쌍의 영속 관계 컨테이너 (1:1 고정), 만남 = request/response 페어. 세션 라이프사이클 / 만남 라이프사이클 두 결로 분리. 종료 정책 (close/clear/summarize + 스트리밍 inactivity), 공유 컨텍스트 = 사용자 세션 결 재사용 (I-AS-CONTEXT-REUSE) 확정. KG-36 활성 세션 한도 + 동시 만남 한도 두 결로 확장. 개입 6결 매트릭스 사후 검토 행 표기 갱신 (c+b hybrid 명시). agent-identity / data-persistence / session 정합성 점검 동반.
+- 2026-05-05: A2A 운영 흐름 (카드 교환 → 큐 적재 → heartbeat 디스패치 → 응답) narrative 추가. 응답 모드 4 결 (agent-default / user-takeover / user-via-agent / user-with-whisper) + I-AS-RESPONSE-MODE 신규. 귓속말 wire = IFC 첫 구체 사례 (휘발성 — audit/memory 미기록). I-AS-WIRE-PROTECTION 신규 (heartbeat+큐 보호막). 어제 결정 3 건 모델 B 위 정합 재표현: I-AS-AUTH §A2A 운영 흐름 단계 1 cross-reference, I-AS-MUTUAL-RECORD "만남 단위" 흡수 및 세션 연속성 명시, 사후 검토 게이트 "세션 내 미검토 만남 큐 누적" 모델로 재표현.
