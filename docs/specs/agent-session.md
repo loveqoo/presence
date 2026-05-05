@@ -47,7 +47,7 @@ agent ↔ agent 한 번의 만남 = 한 **A2A 세션**. 세션 ID = 만남의 �
 
 ### 시작 단계
 
-1. **사전 인가**: Cedar 정책 평가 (`Op.CheckAccess`, action=`access_agent` 또는 A2A 전용 action). 거부 시 세션 생성 차단.
+1. **사전 인가**: Cedar 정책 평가 (`Op.CheckAccess`, action=`start_a2a_session`). 거부 시 세션 생성 차단.
 2. **사전 승인**: risky 영역으로 분류된 만남에 한해 사용자 approve gate 요청 (`approve.md` 계약 준용).
 3. **세션 등록**: `SessionManager` 에 AGENT 타입 세션 등록. `findAgentSession` API 로 조회 가능(`session.md I16`).
 
@@ -108,7 +108,7 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 
 | 결 | 시점 | 메커니즘 | Cedar action | approve gate |
 |----|------|----------|-------------|-------------|
-| 사전 인가 | 세션 시작 전 | Cedar 정책 평가 | `access_agent` (또는 A2A 전용 action — 후속 phase) | 없음 (자동) |
+| 사전 인가 | 세션 시작 전 | Cedar 정책 평가 | `start_a2a_session` | 없음 (자동) |
 | 사전 승인 | 세션 시작 전 | approve gate (risky 영역) | - | 있음 |
 | 실시간 관찰 | 진행 중 | TUI 활성 세션 목록 | - | 없음 |
 | 실시간 개입 | 진행 중 | abort / inject (큐 wire 자연 지원) | - | 없음 |
@@ -135,8 +135,7 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 - risky: 운영자 custom policy (`50-*.cedar`) 가 `PENDING` 으로 분류 또는 quota 초과
 - blocked: 운영자 custom policy `50-*.cedar` 가 forbid — terminal DENIED
 
-**A2A 전용 Cedar action 슬롯** (후속 phase): `10-a2a-quota.cedar`, `50-*-agent-session.cedar` 등의 신규 정책 파일.
-본 1차 spec 에서는 기존 `access_agent` action 을 임시 사용; 전용 action 정의는 후속 phase.
+**A2A 전용 Cedar action**: 본 spec 에서 `start_a2a_session` 으로 확정. Cedar 스키마(`schema.cedarschema`) 와 `00-base.cedar` permit 추가는 인프라 phase 에서 구현. 정책 슬롯 예시: `10-a2a-quota.cedar` (활성 세션 한도), `50-*-agent-session.cedar` (운영자 custom A2A 정책).
 
 ---
 
@@ -174,7 +173,9 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 
 ## 불변식 (Invariants)
 
-- **I-AS-AUTH**. 모든 A2A 세션 시작은 Cedar 정책 평가 통과 후에만 허용된다. Cedar 평가 없이 세션이 생성되는 경로는 존재하지 않는다. 거부 결과(DENIED/blocked)이면 세션 생성이 즉시 차단된다.
+- **I-AS-AUTH**. 모든 A2A 세션 시작은 Cedar 정책 평가(`Op.CheckAccess`, action=`start_a2a_session`) 통과 후에만 허용된다. Cedar 평가 없이 세션이 생성되는 경로는 존재하지 않는다. 거부 결과(DENIED/blocked)이면 세션 생성이 즉시 차단된다.
+
+  **결정 근거**: 일반 `access_agent` (사용자→에이전트) 와 분리해 운영자가 A2A 만 별도 정책으로 제어 가능. ontology §A2A "도구 호출이 아니라 두 자아의 만남" 결을 정책 라벨에서도 유지.
 
 - **I-AS-MUTUAL-RECORD**. 세션이 정상 종료될 때 발신 에이전트와 수신 에이전트 양쪽 메모리에 만남이 기록된다. 어느 한쪽 기록 실패도 관계 이력 비대칭을 만든다 — 허용되지 않는다. 흡수 실패 시 세션 종료를 지연하거나 오류를 보고해야 한다.
 
@@ -303,3 +304,4 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 
 - 2026-05-03: 초기 작성 — A2A 멀티 인스턴스 phase 진입 전 1차 의미론 못 박기. ontology §A2A 세 결정(공유 컨텍스트/IFC/만남의 누적) 코드 계약 변환. 6 Known Gap 자리 마련 (KG-AS-TRUST / IFC / REVIEW-GATE / AUDIT-FORMAT / MEMORY-SCHEMA / QUOTA).
 - 2026-05-03: KG-31~KG-36 정식 ID 부여 (REGISTRY 등록 완료).
+- 2026-05-05: I-AS-AUTH Cedar action 확정 — start_a2a_session 신규 도입 (옵션 B). 일반 access_agent 와 분리해 운영자가 A2A 정책을 별도 표현 가능.
