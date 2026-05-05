@@ -205,6 +205,50 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
+  // --- A2A Phase 4 (KG-37-PEER) — agentId claim 옵션 ---
+
+  // TS-Y1. signA2aToken(sub) — agentId omitted (Phase 3 호환 형태)
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const token = service.signA2aToken('alice')
+    const payload = getRight(service.verifyA2aToken(token))
+    assert(payload, 'TS-Y1: verify Right')
+    assert(payload.sub === 'alice', 'TS-Y1: sub 보존')
+    assert(payload.type === 'a2a', 'TS-Y1: type=a2a')
+    // agentId claim 미존재 (key 자체 없음)
+    assert(!('agentId' in payload), 'TS-Y1: agentId claim 미포함 — Phase 3 호환')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // TS-Y2. signA2aToken(sub, { agentId }) — claim 포함 + verify 후 payload.agentId 보존
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const token = service.signA2aToken('alice', { agentId: 'alice/sender' })
+    const payload = getRight(service.verifyA2aToken(token))
+    assert(payload, 'TS-Y2: verify Right')
+    assert(payload.sub === 'alice', 'TS-Y2: sub 보존')
+    assert(payload.agentId === 'alice/sender', 'TS-Y2: agentId claim 보존')
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  // TS-Y3. opts.agentId 가 falsy 면 claim 미포함 (옵션 객체는 받았지만 truthy 검사)
+  {
+    const dir = createTmpDir()
+    const service = createTokenService({ basePath: dir })
+    const tokenEmpty = service.signA2aToken('bob', { agentId: '' })
+    const tokenNull = service.signA2aToken('bob', { agentId: null })
+    const tokenUndef = service.signA2aToken('bob', { agentId: undefined })
+    const tokenNoOpts = service.signA2aToken('bob')
+    for (const t of [tokenEmpty, tokenNull, tokenUndef, tokenNoOpts]) {
+      const payload = getRight(service.verifyA2aToken(t))
+      assert(payload && !('agentId' in payload),
+        `TS-Y3: falsy agentId 옵션 → claim 미포함 (got ${JSON.stringify(payload)})`)
+    }
+    rmSync(dir, { recursive: true, force: true })
+  }
+
   // --- decodeJwtPayload (admin-session client + 향후 A2A RS256 공용) ---
 
   // DJP1. 정상 access token → payload 반환 + sub/exp/type 보존

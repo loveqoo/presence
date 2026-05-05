@@ -199,16 +199,20 @@ const createTokenService = ({ basePath } = {}) => {
   // KG-17 — A2A 호출용 짧은 만료 토큰. self-A2A scope (같은 머신, 같은 secret).
   // type='a2a' 로 access/refresh 와 명확히 분리 — access token 을 A2A 경로로
   // 우회 사용하거나 그 반대를 차단.
-  const signA2aToken = (sub) => {
+  // KG-37-PEER (Phase 4) — opts.agentId 가 truthy 면 payload 에 agentId claim
+  // 첨부. router 측 verifyA2aToken 결과에서 peerAgentId 로 사용.
+  const signA2aToken = (sub, { agentId } = {}) => {
     const now = Math.floor(Date.now() / 1000)
-    return sign({
+    const payload = {
       sub,
       type: 'a2a',
       iss: AUTH.ISSUER,
       aud: audience,
       iat: now,
       exp: now + AUTH.A2A_TOKEN_EXPIRY_S,
-    }, secret)
+    }
+    if (agentId) payload.agentId = agentId
+    return sign(payload, secret)
   }
 
   // Either.Right(payload) | Either.Left(error)
