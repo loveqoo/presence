@@ -177,7 +177,13 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 
   **결정 근거**: 일반 `access_agent` (사용자→에이전트) 와 분리해 운영자가 A2A 만 별도 정책으로 제어 가능. ontology §A2A "도구 호출이 아니라 두 자아의 만남" 결을 정책 라벨에서도 유지.
 
-- **I-AS-MUTUAL-RECORD**. 세션이 정상 종료될 때 발신 에이전트와 수신 에이전트 양쪽 메모리에 만남이 기록된다. 어느 한쪽 기록 실패도 관계 이력 비대칭을 만든다 — 허용되지 않는다. 흡수 실패 시 세션 종료를 지연하거나 오류를 보고해야 한다.
+- **I-AS-MUTUAL-RECORD**. 세션이 정상 종료될 때 발신 에이전트와 수신 에이전트 양쪽 메모리에 만남이 기록된다. 한쪽 기록 실패 시 처리 정책은 **partial + audit (옵션 c)**: 성공한 쪽 기록은 유지하고, audit 에 `outcome=partial` 과 실패한 쪽 식별자 / 실패 사유를 남긴다. 비대칭 자체는 ontology 위반이지만 발생을 감추지 않고 드러내는 것을 우선한다.
+
+  **결정 근거**: 종료 지연(옵션 a)은 한쪽 영구 다운 시 세션이 못 끝나는 비현실적 비용. 롤백(옵션 b)은 "이미 일어난 만남을 지우는" 더 큰 ontology 위반 — 분산 트랜잭션 비용도 큼. (c) 는 비대칭을 audit 으로 surface 하여 운영자/사용자 사후 인지를 보장.
+
+  **보강 의무**:
+  - audit 비대칭 발생 시 운영자에게 가시화 (TUI 알람 또는 audit log warning — 구체 UX 는 KG-34 / KG-33 후속).
+  - 다음 세션 컨텍스트 로딩 시 "지난 만남이 비대칭이었다" 를 양쪽에 노출 → 자기 교정 기회 (구체 schema 는 KG-35 후속).
 
 - **I-AS-USER-VISIBLE**. TUI 에서 사용자는 자신의 에이전트가 참여 중인 모든 활성 A2A 세션 목록을 볼 수 있어야 한다. 세션이 시작되면 TUI 에 즉시 반영되고, 종료되면 목록에서 제거된다.
 
@@ -197,9 +203,9 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 
 - **E1. Cedar 평가 실패 (evaluator 오류)** → fail-closed. 세션 생성 차단. `REASON.MISSING_EVALUATOR` 또는 `DENIED(evaluator-error)` 반환.
 
-- **E2. 세션 시작 직후 호출자 에이전트 종료** → 수신 에이전트는 세션을 orphan 상태로 인식. `markFailed('sender-shutdown')` 처리. 메모리 흡수는 수신 에이전트 단독 기록 (비대칭 허용 — 단, audit 에 비대칭 사실 기록).
+- **E2. 세션 시작 직후 호출자 에이전트 종료** → 수신 에이전트는 세션을 orphan 상태로 인식. `markFailed('sender-shutdown')` 처리. 메모리 흡수는 수신 에이전트 단독 기록 + I-AS-MUTUAL-RECORD partial + audit 정책 적용 (`outcome=partial`, 실패 측 = sender).
 
-- **E3. 메모리 흡수 중 수신 에이전트 종료** → I-AS-MUTUAL-RECORD 위반 위험. 재시작 회복(`session.md I16 재시작 회복 S4 패턴`) 준용. 흡수 미완료 세션은 audit 에 `outcome=partial` 기록.
+- **E3. 메모리 흡수 중 수신 에이전트 종료** → I-AS-MUTUAL-RECORD 의 partial + audit 정책 적용. 발신 에이전트 단독 기록 유지 + audit `outcome=partial` + 실패 측 식별자 기록. 재시작 회복(`session.md I16 재시작 회복 S4 패턴`) 시도하되, 회복 불가 시 partial 상태가 영속된다 (시간 경과 후 자동 재시도 정책은 KG-35 후속).
 
 - **E4. risky 세션의 사전 승인 대기 중 timeout** → 사용자 무응답 시 정책에 따라 자동 거부 또는 대기 유지. 자동 거부 시 세션 생성 차단 + audit 기록. 구체 timeout 값은 후속 phase.
 
@@ -305,3 +311,4 @@ risky 영역 세션: 메모리 흡수 전 사용자 검토 가능 (approve gate 
 - 2026-05-03: 초기 작성 — A2A 멀티 인스턴스 phase 진입 전 1차 의미론 못 박기. ontology §A2A 세 결정(공유 컨텍스트/IFC/만남의 누적) 코드 계약 변환. 6 Known Gap 자리 마련 (KG-AS-TRUST / IFC / REVIEW-GATE / AUDIT-FORMAT / MEMORY-SCHEMA / QUOTA).
 - 2026-05-03: KG-31~KG-36 정식 ID 부여 (REGISTRY 등록 완료).
 - 2026-05-05: I-AS-AUTH Cedar action 확정 — start_a2a_session 신규 도입 (옵션 B). 일반 access_agent 와 분리해 운영자가 A2A 정책을 별도 표현 가능.
+- 2026-05-05: I-AS-MUTUAL-RECORD 양방향 흡수 실패 정책 확정 — partial + audit (옵션 c). 종료 지연(a)/롤백(b) 모두 기각. 비대칭 발생 가시화 의무 명시.
