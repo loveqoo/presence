@@ -436,12 +436,29 @@ KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
 - 범위: 별도 phase.
 - 위치: 본 문서 "메모리 흡수" 섹션.
 
-### KG-37-PEER (Phase 3 peer 식별 한계) {#peer-identification}
+### KG-37-PEER (Phase 3 peer 식별 한계) (resolved) {#peer-identification}
 
 - 내용: A2A Phase 3 의 a2a-router 는 peer card exchange 가 미구현이므로 `peerAgentId = JWT sub (caller)` 를 임시 채택한다. JWT sub 는 user-level 식별자이므로, 실제 호출하는 측의 에이전트(예: `bob/echo`)가 caller user 의 에이전트 중 어느 것인지 router 단계에서 구분할 수 없다.
 - Phase 4 에서 `a2a-protocol.md` 의 peer card exchange 가 도입되면 peer 의 agentId 로 교체.
 - 범위: A2A Phase 4 (peer card exchange 구현 시점).
 - 위치: `packages/server/src/server/a2a-router.js` `mountInvokeRoute` — Phase 3 한계 주석 참조.
+
+#### Phase 4 closing note (self-A2A scope 한정)
+
+Phase 4 (commits 8d69036, 7d0332a 등) 가 JWT agentId claim 도입 + a2a-router 검증 5단 + Phase 3 closed-row 안전망으로 router 측 peer 식별 한계를 해소했다.
+
+검증 5단 요약:
+- V1: agentId claim 필수 (strict)
+- V2: assertValidAgentId 형식 검증 (caller)
+- V3: JWT sub / agentId user prefix 일치 (defense-in-depth sanity check)
+- V4: caller agentId 가 agentRegistry 등록 확인
+- V5: self-call 금지 (callerAgentId === callee → 400)
+- Phase 3 user-level closed-row 우회 차단 (best-effort fallback safety net)
+- V2-CALLEE: URL path callee agentId 도 assertValidAgentId 검증 (V5 raw === 정확성 근거)
+
+그 결과 `peerAgentId` 가 user-level 식별자(`alice`)에서 실제 caller agent 식별자(`alice/echo`)로 교체되었다.
+
+**단, 본 resolution 은 self-A2A scope 한정이다.** caller/callee 가 같은 머신, 같은 secret 의 agentRegistry 를 공유하는 환경에서만 V4 (registry 등록 검증) 가 성립한다. cross-machine A2A 도입 시 V4 가 깨지므로, 그 시점에 peer key registry 또는 caller self-card endpoint fetch 등 별도 설계가 필요하다. 해당 설계는 본 KG-37-PEER 의 범위 밖이며 신규 KG 로 다루지 않고 cross-machine A2A phase 의 선결 조건으로 인식한다.
 
 ### KG-36 (활성 세션 한도 + 동시 만남 한도 미정의)
 
@@ -461,7 +478,7 @@ KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
 - `packages/infra/src/infra/a2a/a2a-queue-store.js` — 비동기 큐 backend. 만남 단위 메시지 큐 (`data-persistence.md I13`)
 - `packages/infra/src/infra/a2a/a2a-relationship-store.js` — 영속 관계 컨테이너 메타 store (KG-37 resolved). composite PK (local_agent_id, peer_agent_id) 1:1 고정. upsertOnFirstMeeting / recordMeeting / closeRelationship / refreshCards.
 - `packages/infra/src/infra/a2a/a2a-response-dispatcher.js` — response 전달 + drain
-- `packages/server/src/server/a2a-router.js` — A2A JSON-RPC 라우터. POST `/a2a/:userId/:agentName` 의 카드 교환 게이트: A2A Phase 3 — canStartA2aSession allow → upsertOnFirstMeeting → recordMeeting 순서로 관계 컨테이너 wiring. Phase 3 peer 식별 한계(peerAgentId = JWT caller) 는 `§KG-37-PEER` 참조.
+- `packages/server/src/server/a2a-router.js` — A2A JSON-RPC 라우터. POST `/a2a/:userId/:agentName` 의 카드 교환 게이트: A2A Phase 3 — canStartA2aSession allow → upsertOnFirstMeeting → recordMeeting 순서로 관계 컨테이너 wiring. Phase 3 한계는 Phase 4 commits (8d69036, 7d0332a 등) 에서 해소 (self-A2A scope 한정) — `§KG-37-PEER` closing note 참조.
 - `packages/infra/src/interpreter/send-a2a-message.js` — SendA2aMessage Op 인터프리터
 - `packages/infra/src/infra/authz/cedar/` — Cedar 정책 파일 디렉토리
 - `packages/infra/src/infra/authz/agent-governance.js` — canAccessAgent, submitUserAgent
@@ -483,6 +500,7 @@ KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
 
 ## 변경 이력
 
+- 2026-05-05: KG-37-PEER resolved (self-A2A scope 한정) — Phase 4 (JWT agentId claim + V1~V5 검증 + Phase 3 closed-row 안전망). §peer-identification closing note 추가. a2a-router.js 항목 cross-link 갱신.
 - 2026-05-03: 초기 작성 — A2A 멀티 인스턴스 phase 진입 전 1차 의미론 못 박기. ontology §A2A 세 결정(공유 컨텍스트/IFC/만남의 누적) 코드 계약 변환. 6 Known Gap 자리 마련 (KG-AS-TRUST / IFC / REVIEW-GATE / AUDIT-FORMAT / MEMORY-SCHEMA / QUOTA).
 - 2026-05-05: KG-37-PEER 섹션 추가 (§peer-identification) — a2a-router.js 코드 코멘트의 cross-link drift 해소. Phase 3 peerAgentId = JWT caller 임시 채택 한계 명시.
 - 2026-05-03: KG-31~KG-36 정식 ID 부여 (REGISTRY 등록 완료).
