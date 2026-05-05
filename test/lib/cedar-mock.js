@@ -57,13 +57,22 @@ const decideSetPersona = (ctx) => {
   return allowAll()
 }
 
+// agent-session.md I-AS-AUTH — 21-archived-a2a.cedar 가 archived agent 새 A2A 세션 차단.
+// 단일 statement 키 안정성 위해 20-archived 와 별 파일로 분리됨 (boot.js 다중 statement
+// suffix `-N` 회피). 운영자 50-* 의 peer-specific deny 는 실 cedar-evaluator 테스트에서.
+const decideStartA2aSession = (ctx) => {
+  if (ctx.archived === true) return denyMatch('21-archived-a2a')
+  return allowAll()
+}
+
 const defaultDecision = (input) => {
   const ctx = input?.context
   if (!ctx) return allowAll()
-  if (input?.action === 'create_agent')  return decideCreateAgent(ctx)
-  if (input?.action === 'access_agent')  return decideAccessAgent(ctx)
-  if (input?.action === 'archive_agent') return decideArchiveAgent(ctx)
-  if (input?.action === 'set_persona')   return decideSetPersona(ctx)
+  if (input?.action === 'create_agent')      return decideCreateAgent(ctx)
+  if (input?.action === 'access_agent')      return decideAccessAgent(ctx)
+  if (input?.action === 'archive_agent')     return decideArchiveAgent(ctx)
+  if (input?.action === 'set_persona')       return decideSetPersona(ctx)
+  if (input?.action === 'start_a2a_session') return decideStartA2aSession(ctx)
   return allowAll()
 }
 

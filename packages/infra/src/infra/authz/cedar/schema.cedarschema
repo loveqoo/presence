@@ -35,3 +35,12 @@ action set_persona appliesTo {
     reservedOwner:  Bool,
   }
 };
+action start_a2a_session appliesTo {
+  principal: [LocalUser],
+  resource:  [Agent],
+  context: {
+    peerAgentId: String,
+    archived:    Bool,
+    isAdmin:     Bool,
+  }
+};

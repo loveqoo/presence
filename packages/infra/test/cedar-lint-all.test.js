@@ -100,10 +100,11 @@ async function run() {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // LA6 — 번들된 실 자산 (POLICIES_DIR) 6개 모두 통과 (회귀 가드)
+  // LA6 — 번들된 실 자산 (POLICIES_DIR) 모두 통과 (회귀 가드)
+  // 카운트는 자산 추가에 따라 변동 (Phase 1: 21-archived-a2a 추가로 6 → 7).
   {
     const results = await lintAllPolicies()
-    assert(results.length === 6, `LA6: 번들된 정책 6개 (got ${results.length})`)
+    assert(results.length >= 6, `LA6: 번들된 정책 ≥ 6 개 (got ${results.length})`)
     const fails = results.filter(r => !r.ok)
     assert(fails.length === 0,
       `LA6: 번들 자산 회귀 — 모두 통과 기대 (실패: ${fails.map(r => r.filename).join(', ')})`)

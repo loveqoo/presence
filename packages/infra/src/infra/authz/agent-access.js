@@ -1,6 +1,7 @@
 import { isReservedUsername } from '@presence/core/core/agent-id.js'
 import { CheckAccess } from '@presence/core/core/op.js'
 import { AUDIT_ACTION } from '@presence/core/core/policies.js'
+import { ADMIN_USERNAME } from '../admin-bootstrap.js'
 import { runCheckAccess } from './cedar/op-runner.js'
 
 // =============================================================================
@@ -44,9 +45,13 @@ const REASON = Object.freeze({
   ARCHIVED: 'archived',
   MISSING_PRINCIPAL: 'missing-principal',
   MISSING_EVALUATOR: 'missing-evaluator',
+  MISSING_REGISTRY: 'missing-registry',
+  AGENT_NOT_REGISTERED: 'agent-not-registered',
   INVALID_AGENT_ID: 'invalid-agent-id',
   INVALID_INTENT: 'invalid-intent',
   ADMIN_SINGLETON: 'admin-singleton',
+  INVALID_PEER_AGENT_ID: 'invalid-peer-agent-id',
+  A2A_DENIED: 'a2a-denied',
 })
 
 const VALID_INTENTS = new Set(Object.values(INTENT))
@@ -121,4 +126,77 @@ function canAccessAgent(input) {
   return allow()
 }
 
-export { canAccessAgent, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations }
+// =============================================================================
+// canStartA2aSession — agent-session.md I-AS-AUTH
+//
+// 외부 에이전트 B 가 presence 의 내부 에이전트 A 와 새 A2A 세션을 시작할 때
+// 호출되는 인가 게이트. 카드 교환 단계 (agent-session.md §A2A 운영 흐름 1단계)
+// 의 첫 결정 지점.
+//
+// 시그니처: canStartA2aSession(input) → { allow, reason? }
+//
+//   input: { jwtSub, agentId, peerAgentId, evaluator, registry }
+//     jwtSub      — 내부 에이전트 A 의 owner username (= agentId 의 owner part).
+//                   외부 에이전트 카드 교환은 server 측 라우터가 인증 후 호출.
+//     agentId     — 내부 에이전트 A 의 qualified ID ('{user}/{name}')
+//     peerAgentId — 외부 에이전트 B 의 카드 식별자. 공백 only 거부.
+//     evaluator   — Cedar evaluator (필수 — A2A 는 Cedar 평가 없이 시작 금지)
+//     registry    — AgentRegistry (필수 — archived 판정 정확성을 위해 fail-closed).
+//                   드라이브 다운/stale 시 우회 위험 차단. 호출처가 user-context 의
+//                   registry 를 주입한다.
+//
+// 정책 (코드 순서 = 우선순위):
+//   1. peerAgentId 형식 검증 (raw string, trim 후 비어있지 않음)
+//   2. evaluator/registry 부재 → fail-closed (각각 MISSING_EVALUATOR / MISSING_REGISTRY)
+//   3. ownership: agentId owner === jwtSub (외부 에이전트가 내 에이전트로 도착)
+//   4. registry 등록 부재 → AGENT_NOT_REGISTERED (registry 가 정상이어도 entry 없으면
+//      archived 판정 불가 → fail-closed). agent-session.md I-AS-AUTH (Cedar 평가 통과
+//      후만 세션 시작 허용) 의 결.
+//   5. archived 분기: 21-archived-a2a.cedar 가 archived agent 새 A2A 세션 차단
+//   6. Cedar 평가 (action=start_a2a_session) — 운영자 custom 50-*.cedar 가 peer 차단 가능
+//
+// canAccessAgent 와 분리 이유: 카드 교환은 별도 wire (외부→큐→heartbeat) 이고,
+// principal/resource/context 결이 다름. INTENT enum 으로 통합하면 호출처 분기가
+// 호출자 책임이 됨 — 별 helper 가 분기를 캡슐화.
+// =============================================================================
+function canStartA2aSession(input) {
+  const params = input || {}
+  const { jwtSub, agentId, peerAgentId, evaluator, registry } = params
+
+  if (!jwtSub || typeof jwtSub !== 'string') return deny(REASON.MISSING_PRINCIPAL)
+  if (!agentId || typeof agentId !== 'string' || !agentId.includes('/')) return deny(REASON.INVALID_AGENT_ID)
+  if (typeof peerAgentId !== 'string') return deny(REASON.INVALID_PEER_AGENT_ID)
+  // 공백 패딩 정규화 — Cedar context 에도 normalized 값을 넘겨야 50-* peer-exact-match
+  // deny 가 ' banned/peer ' 같은 패딩으로 우회되지 않음 (codex round 2).
+  const normalizedPeerAgentId = peerAgentId.trim()
+  if (normalizedPeerAgentId === '') return deny(REASON.INVALID_PEER_AGENT_ID)
+  if (typeof evaluator !== 'function') return deny(REASON.MISSING_EVALUATOR)
+  if (!registry || typeof registry.get !== 'function') return deny(REASON.MISSING_REGISTRY)
+
+  const ownerPart = agentId.split('/')[0]
+  if (isReservedUsername(ownerPart)) {
+    if (jwtSub !== ownerPart) return deny(REASON.ADMIN_ONLY)
+  } else if (ownerPart !== jwtSub) {
+    return deny(REASON.NOT_OWNER)
+  }
+
+  const maybeEntry = registry.get(agentId)
+  const entry = maybeEntry && maybeEntry.isJust && maybeEntry.isJust() ? maybeEntry.value : null
+  if (!entry) return deny(REASON.AGENT_NOT_REGISTERED)
+  const archived = !!entry.archived
+
+  const isAdmin = jwtSub === ADMIN_USERNAME
+  const op = CheckAccess({
+    principal: { type: 'LocalUser', id: jwtSub },
+    action:    AUDIT_ACTION.START_A2A_SESSION,
+    resource:  { type: 'Agent', id: agentId },
+    context:   { peerAgentId: normalizedPeerAgentId, archived, isAdmin },
+  })
+  const decision = runCheckAccess(evaluator, op)
+  if (decision.decision !== 'allow') {
+    return deny(archived ? REASON.ARCHIVED : REASON.A2A_DENIED)
+  }
+  return allow()
+}
+
+export { canAccessAgent, canStartA2aSession, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations }

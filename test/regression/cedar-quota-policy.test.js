@@ -622,4 +622,115 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// =============================================================================
+// INV-CEDAR-A2A-ACTION — Phase 1 (agent-session.md I-AS-AUTH).
+// `start_a2a_session` action 이 schema / 00-base / 21-archived-a2a / cedar/index.js
+// (POLICY_CATEGORIES) / policies.js / agent-access.js / test/lib/cedar-mock.js 7
+// 사이트에 모두 동기화되어 있는지 정적 검증. mock evaluator 의 matchedPolicies key
+// drift (예: 21-archived-a2a 분리 후에도 mock 이 stale '20-archived' 반환) 방지.
+// =============================================================================
+{
+  // (a) schema.cedarschema 에 action 선언
+  const schemaText = read('packages/infra/src/infra/authz/cedar/schema.cedarschema')
+  assert(
+    /action\s+start_a2a_session\s+appliesTo\s*\{/.test(schemaText),
+    'INV-CEDAR-A2A-ACTION: schema 에 action start_a2a_session 선언',
+  )
+  assert(
+    /peerAgentId:\s*String/.test(schemaText) &&
+    /archived:\s*Bool/.test(schemaText) &&
+    /isAdmin:\s*Bool/.test(schemaText),
+    'INV-CEDAR-A2A-ACTION: schema context = { peerAgentId, archived, isAdmin }',
+  )
+
+  // (b) 00-base.cedar permit
+  const baseText = read('packages/infra/src/infra/authz/cedar/policies/00-base.cedar')
+  assert(
+    /permit\s*\(\s*[\s\S]*?action\s*==\s*Action::"start_a2a_session"[\s\S]*?\)/.test(baseText),
+    'INV-CEDAR-A2A-ACTION: 00-base.cedar 에 permit',
+  )
+
+  // (c) 21-archived-a2a.cedar 가 start_a2a_session archived forbid (별 파일 — boot.js 의
+  //     단일 statement key 안정성 유지. 다중 statement 면 key suffix `-N` 가 붙어 회귀 깨짐).
+  const archivedA2aPath = 'packages/infra/src/infra/authz/cedar/policies/21-archived-a2a.cedar'
+  assert(existsSync(join(REPO_ROOT, archivedA2aPath)), `INV-CEDAR-A2A-ACTION: ${archivedA2aPath} 존재`)
+  const archivedA2aText = read(archivedA2aPath)
+  assert(
+    /forbid\s*\(\s*[\s\S]*?action\s*==\s*Action::"start_a2a_session"[\s\S]*?\)\s*when\s*\{\s*context\.archived\s*\}/.test(archivedA2aText),
+    'INV-CEDAR-A2A-ACTION: 21-archived-a2a.cedar 가 start_a2a_session 의 archived forbid',
+  )
+
+  // (c-2) cedar/index.js POLICY_CATEGORIES 에 21- 매핑 (archived 카테고리 공유)
+  const cedarIndexText = read('packages/infra/src/infra/authz/cedar/index.js')
+  assert(
+    /\{\s*prefix:\s*'21-',\s*category:\s*'archived'/.test(cedarIndexText),
+    "INV-CEDAR-A2A-ACTION: cedar/index.js POLICY_CATEGORIES 에 21- → archived 매핑",
+  )
+
+  // (d) policies.js AUDIT_ACTION enum 에 START_A2A_SESSION
+  const policiesText = read('packages/core/src/core/policies.js')
+  assert(
+    /START_A2A_SESSION:\s*'start_a2a_session'/.test(policiesText),
+    'INV-CEDAR-A2A-ACTION: policies.js AUDIT_ACTION.START_A2A_SESSION',
+  )
+
+  // (e) agent-access.js canStartA2aSession helper + AUDIT_ACTION.START_A2A_SESSION 사용
+  const accessText = read('packages/infra/src/infra/authz/agent-access.js')
+  assert(
+    /function\s+canStartA2aSession\s*\(/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: agent-access.js canStartA2aSession 정의',
+  )
+  assert(
+    /AUDIT_ACTION\.START_A2A_SESSION/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: canStartA2aSession 가 AUDIT_ACTION.START_A2A_SESSION 사용',
+  )
+  assert(
+    /export\s*\{[^}]*\bcanStartA2aSession\b[^}]*\}/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: agent-access.js 가 canStartA2aSession export',
+  )
+  // fail-closed: evaluator 미전달 시 MISSING_EVALUATOR
+  assert(
+    /typeof\s+evaluator\s*!==\s*['"]function['"][\s\S]{0,200}MISSING_EVALUATOR/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: canStartA2aSession 가 evaluator 부재 시 MISSING_EVALUATOR fail-closed',
+  )
+  // peerAgentId 검증
+  assert(
+    /INVALID_PEER_AGENT_ID/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: REASON.INVALID_PEER_AGENT_ID 존재',
+  )
+  assert(
+    /A2A_DENIED/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: REASON.A2A_DENIED 존재',
+  )
+  // codex round 1 보강 — registry/peerAgentId fail-closed
+  assert(
+    /MISSING_REGISTRY/.test(accessText) && /AGENT_NOT_REGISTERED/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: REASON.MISSING_REGISTRY + AGENT_NOT_REGISTERED 존재 (registry fail-closed)',
+  )
+  assert(
+    /normalizedPeerAgentId\s*=\s*peerAgentId\.trim\(\)/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: peerAgentId trim → normalizedPeerAgentId (공백 패딩 정규화)',
+  )
+  assert(
+    /context:\s*\{\s*peerAgentId:\s*normalizedPeerAgentId/.test(accessText),
+    'INV-CEDAR-A2A-ACTION: Cedar context 에 normalizedPeerAgentId 전달 (50-* exact-match 우회 방지)',
+  )
+
+  // (f) test/lib/cedar-mock.js — start_a2a_session 의 matchedPolicies key 가
+  //     실 자산 파일명 (21-archived-a2a) 과 정합. drift 방지.
+  const mockText = read('test/lib/cedar-mock.js')
+  assert(
+    /decideStartA2aSession/.test(mockText),
+    'INV-CEDAR-A2A-ACTION: cedar-mock.js decideStartA2aSession 정의',
+  )
+  assert(
+    /input\?\.action\s*===\s*['"]start_a2a_session['"]/.test(mockText),
+    'INV-CEDAR-A2A-ACTION: cedar-mock.js defaultDecision 분기에 start_a2a_session',
+  )
+  assert(
+    /denyMatch\(['"]21-archived-a2a['"]\)/.test(mockText),
+    'INV-CEDAR-A2A-ACTION: cedar-mock.js 가 21-archived-a2a 키로 deny (실 자산 파일명 일치)',
+  )
+}
+
 summary()

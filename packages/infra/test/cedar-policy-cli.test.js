@@ -398,7 +398,8 @@ async function run() {
 
   // --- KG-30 — policy lint (인자 없이) → POLICIES_DIR 전체 검사 ---
 
-  // CLI-X18 — policy lint (no --file) → 번들된 6개 정책 전체 통과
+  // CLI-X18 — policy lint (no --file) → 번들된 정책 전체 통과
+  // 카운트 N/N 형식만 검증 — 자산 추가 (Phase 1: 21-archived-a2a) 에 따라 N 변동.
   {
     const dir = createTmpDir()
     const r = runCli('policy lint', dir)
@@ -406,8 +407,9 @@ async function run() {
     assert(r.stdout.includes('✓ 00-base.cedar'), `CLI-X18: 00-base 통과 표시`)
     assert(r.stdout.includes('✓ 10-quota.cedar'), `CLI-X18: 10-quota 통과 표시`)
     assert(r.stdout.includes('✓ 31-protect-persona.cedar'), `CLI-X18: 31-protect-persona 통과 표시`)
-    assert(/검사 결과:\s*6\s*\/\s*6\s*통과/.test(r.stdout),
-      `CLI-X18: 통과 카운트 (got ${r.stdout})`)
+    const countMatch = r.stdout.match(/검사 결과:\s*(\d+)\s*\/\s*(\d+)\s*통과/)
+    assert(countMatch && countMatch[1] === countMatch[2] && Number(countMatch[1]) >= 6,
+      `CLI-X18: 통과 카운트 N/N (N≥6) (got ${r.stdout})`)
     rmSync(dir, { recursive: true, force: true })
   }
 

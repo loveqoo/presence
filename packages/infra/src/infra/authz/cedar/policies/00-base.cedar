@@ -24,3 +24,9 @@ permit (
   action == Action::"set_persona",
   resource is Agent
 );
+
+permit (
+  principal is LocalUser,
+  action == Action::"start_a2a_session",
+  resource is Agent
+);

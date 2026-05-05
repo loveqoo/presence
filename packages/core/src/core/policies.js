@@ -215,15 +215,16 @@ export const ADMIN_API_PATHS = Object.freeze({
 export const CORE_AGENT_NAMES = Object.freeze(['default', 'summarizer'])
 
 // authz audit JSONL 의 action 필드. Cedar action ID (create_agent / access_agent / set_persona /
-// archive_agent) 와 non-Cedar admin event (manual_approve / policy_reload) 를 포함.
+// archive_agent / start_a2a_session) 와 non-Cedar admin event (manual_approve / policy_reload) 를 포함.
 // 정의와 사용이 한 enum 을 참조해야 wire 포맷 회귀를 막을 수 있다.
 export const AUDIT_ACTION = Object.freeze({
-  CREATE_AGENT:   'create_agent',
-  ACCESS_AGENT:   'access_agent',
-  SET_PERSONA:    'set_persona',
-  ARCHIVE_AGENT:  'archive_agent',
-  MANUAL_APPROVE: 'manual_approve',
-  POLICY_RELOAD:  'policy_reload',
+  CREATE_AGENT:      'create_agent',
+  ACCESS_AGENT:      'access_agent',
+  SET_PERSONA:       'set_persona',
+  ARCHIVE_AGENT:     'archive_agent',
+  START_A2A_SESSION: 'start_a2a_session',
+  MANUAL_APPROVE:    'manual_approve',
+  POLICY_RELOAD:     'policy_reload',
 })
 
 // audit JSONL 의 resource 필드 — non-Cedar admin event 용 단일 자원 식별자.

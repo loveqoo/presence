@@ -1,4 +1,4 @@
-import { canAccessAgent, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
+import { canAccessAgent, canStartA2aSession, INTENT, REASON, inspectAccessInvocations, resetAccessInvocations } from '@presence/infra/infra/authz/agent-access.js'
 import { createAgentRegistry } from '@presence/infra/infra/agents/agent-registry.js'
 import { assert, summary } from '../../../test/lib/assert.js'
 import { createMockEvaluator } from '../../../test/lib/cedar-mock.js'
@@ -245,6 +245,200 @@ console.log('canAccessAgent tests')
   })
   assert(r.allow === true, 'AA-X6: registry 없으면 archived skip → allow')
   assert(called === false, 'AA-X6: evaluator 미호출 (registry 부재)')
+}
+
+// =============================================================================
+// A2A1~A2A14 — agent-session.md I-AS-AUTH (canStartA2aSession)
+// =============================================================================
+
+// 공용 — registry + non-archived agent
+const buildRegistry = ({ agentId = 'anthony/default', archived = false } = {}) => {
+  const reg = createAgentRegistry()
+  reg.register({ agentId, type: 'local', archived })
+  return reg
+}
+
+// A2A1. 본인 agent + valid peer + evaluator + registered agent → allow
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: 'remote.example/bot', evaluator, registry,
+  })
+  assert(r.allow === true, 'A2A1: 본인 agent + peer + evaluator + registry → allow')
+}
+
+// A2A2. ownership mismatch → not-owner
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry({ agentId: 'bob/daily' })
+  const r = canStartA2aSession({
+    jwtSub: 'alice', agentId: 'bob/daily', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A2: cross-user → deny')
+  assert(r.reason === REASON.NOT_OWNER, `A2A2: reason=not-owner (got ${r.reason})`)
+}
+
+// A2A3. archived agent + Cedar deny → REASON.ARCHIVED
+{
+  const registry = buildRegistry({ agentId: 'anthony/old', archived: true })
+  const evaluator = createMockEvaluator()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/old', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A3: archived agent → deny')
+  assert(r.reason === REASON.ARCHIVED, `A2A3: reason=archived (got ${r.reason})`)
+}
+
+// A2A4. peerAgentId 누락 → INVALID_PEER_AGENT_ID
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A4: peerAgentId 누락 → deny')
+  assert(r.reason === REASON.INVALID_PEER_AGENT_ID, `A2A4: reason=invalid-peer-agent-id (got ${r.reason})`)
+}
+
+// A2A4b. peerAgentId 공백 only → INVALID_PEER_AGENT_ID (codex round 1 보강)
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: '   ', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A4b: peerAgentId 공백 only → deny')
+  assert(r.reason === REASON.INVALID_PEER_AGENT_ID, `A2A4b: reason=invalid-peer-agent-id (got ${r.reason})`)
+}
+
+// A2A5. evaluator 누락 → MISSING_EVALUATOR (A2A 는 Cedar 평가 필수 — fail-closed)
+{
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: 'remote/bot', registry,
+  })
+  assert(r.allow === false, 'A2A5: evaluator 누락 → deny')
+  assert(r.reason === REASON.MISSING_EVALUATOR, `A2A5: reason=missing-evaluator (got ${r.reason})`)
+}
+
+// A2A5b. registry 누락 → MISSING_REGISTRY (codex round 1 — archived 우회 차단)
+{
+  const evaluator = createMockEvaluator()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: 'remote/bot', evaluator,
+  })
+  assert(r.allow === false, 'A2A5b: registry 누락 → deny')
+  assert(r.reason === REASON.MISSING_REGISTRY, `A2A5b: reason=missing-registry (got ${r.reason})`)
+}
+
+// A2A5c. registry 등록 부재 (entry 없음) → AGENT_NOT_REGISTERED
+{
+  const evaluator = createMockEvaluator()
+  const registry = createAgentRegistry()  // 빈 registry — 등록 안 함
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A5c: registry entry 부재 → deny')
+  assert(r.reason === REASON.AGENT_NOT_REGISTERED, `A2A5c: reason=agent-not-registered (got ${r.reason})`)
+}
+
+// A2A6. agentId 형식 오류 (slash 없음) → INVALID_AGENT_ID
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'default', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A6: agentId slash 없음 → deny')
+  assert(r.reason === REASON.INVALID_AGENT_ID, `A2A6: reason=invalid-agent-id (got ${r.reason})`)
+}
+
+// A2A7. jwtSub 누락 → MISSING_PRINCIPAL
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    agentId: 'anthony/default', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A7: jwtSub 누락 → deny')
+  assert(r.reason === REASON.MISSING_PRINCIPAL, `A2A7: reason=missing-principal (got ${r.reason})`)
+}
+
+// A2A8. admin → admin/manager (reserved owner) → allow
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry({ agentId: 'admin/manager' })
+  const r = canStartA2aSession({
+    jwtSub: 'admin', agentId: 'admin/manager', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === true, 'A2A8: admin → admin/manager allow')
+}
+
+// A2A9. non-admin → admin/manager (reserved owner) → ADMIN_ONLY
+{
+  const evaluator = createMockEvaluator()
+  const registry = buildRegistry({ agentId: 'admin/manager' })
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'admin/manager', peerAgentId: 'remote/bot', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A9: non-admin → admin/manager deny')
+  assert(r.reason === REASON.ADMIN_ONLY, `A2A9: reason=admin-only (got ${r.reason})`)
+}
+
+// A2A10. evaluator context shape 검증 — action=start_a2a_session, context={peerAgentId,archived,isAdmin}
+{
+  const registry = buildRegistry()
+  let captured = null
+  const evaluator = (input) => { captured = input; return { decision: 'allow', matchedPolicies: ['00-base'], errors: [] } }
+  canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: 'remote.example/bot', evaluator, registry,
+  })
+  assert(captured && captured.action === 'start_a2a_session', `A2A10: action=start_a2a_session (got ${captured?.action})`)
+  assert(captured.principal.type === 'LocalUser' && captured.principal.id === 'anthony', 'A2A10: principal=LocalUser/anthony')
+  assert(captured.resource.type === 'Agent' && captured.resource.id === 'anthony/default', 'A2A10: resource=Agent/anthony/default')
+  assert(captured.context.peerAgentId === 'remote.example/bot', `A2A10: context.peerAgentId=remote.example/bot (got ${captured.context.peerAgentId})`)
+  assert(captured.context.archived === false, 'A2A10: context.archived=false')
+  assert(captured.context.isAdmin === false, 'A2A10: context.isAdmin=false')
+}
+
+// A2A11. 운영자 custom Cedar deny (peer-specific 50-*) → A2A_DENIED
+{
+  const evaluator = () => ({ decision: 'deny', matchedPolicies: ['50-block-peer'], errors: [] })
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: 'banned/peer', evaluator, registry,
+  })
+  assert(r.allow === false, 'A2A11: peer-specific deny → deny')
+  assert(r.reason === REASON.A2A_DENIED, `A2A11: reason=a2a-denied (got ${r.reason})`)
+}
+
+// A2A12. peerAgentId 공백 패딩 → Cedar context 에 normalized 값 전달 (codex round 2)
+//        ' banned/peer ' 가 'banned/peer' 와 동일한 정책 결정을 받아야 함.
+{
+  const blockBanned = (input) => {
+    const peer = input?.context?.peerAgentId
+    if (peer === 'banned/peer') return { decision: 'deny', matchedPolicies: ['50-block-peer'], errors: [] }
+    return { decision: 'allow', matchedPolicies: ['00-base'], errors: [] }
+  }
+  const registry = buildRegistry()
+  const r = canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: '  banned/peer  ', evaluator: blockBanned, registry,
+  })
+  assert(r.allow === false, 'A2A12: 공백 패딩 peer 도 정책 deny 도달')
+  assert(r.reason === REASON.A2A_DENIED, `A2A12: reason=a2a-denied (got ${r.reason})`)
+}
+
+// A2A12b. peerAgentId 공백 패딩 capture — Cedar context 에 trim 된 값
+{
+  const registry = buildRegistry()
+  let captured = null
+  const evaluator = (input) => { captured = input; return { decision: 'allow', matchedPolicies: ['00-base'], errors: [] } }
+  canStartA2aSession({
+    jwtSub: 'anthony', agentId: 'anthony/default', peerAgentId: '\t remote/bot \n', evaluator, registry,
+  })
+  assert(captured?.context?.peerAgentId === 'remote/bot',
+    `A2A12b: context.peerAgentId trim (got ${JSON.stringify(captured?.context?.peerAgentId)})`)
 }
 
 summary()

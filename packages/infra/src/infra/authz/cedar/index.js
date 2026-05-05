@@ -121,6 +121,7 @@ const POLICY_CATEGORIES = Object.freeze([
   { prefix: '10-', category: 'quota' },
   { prefix: '11-', category: 'admin-limit' },
   { prefix: '20-', category: 'archived' },
+  { prefix: '21-', category: 'archived' },
   { prefix: '30-', category: 'protect' },
   { prefix: '31-', category: 'protect' },
   { prefix: '50-', category: 'operator' },
