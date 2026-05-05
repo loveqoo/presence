@@ -733,4 +733,90 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// =============================================================================
+// INV-A2A-RELATIONSHIP-STORE — Phase 2 (KG-37). 영속 관계 컨테이너 store 의
+// schema/메서드 export 동기화. 호출처 wiring 은 Phase 3.
+// =============================================================================
+{
+  const storePath = 'packages/infra/src/infra/a2a/a2a-relationship-store.js'
+  assert(existsSync(join(REPO_ROOT, storePath)), `INV-A2A-RELATIONSHIP-STORE: ${storePath} 존재`)
+  const storeText = read(storePath)
+
+  // (a) PRIMARY KEY composite (local_agent_id, peer_agent_id) — 1:1 고정 (모델 B)
+  assert(
+    /PRIMARY\s+KEY\s*\(\s*local_agent_id\s*,\s*peer_agent_id\s*\)/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: PRIMARY KEY (local_agent_id, peer_agent_id) — 1:1 고정',
+  )
+
+  // (b) 핵심 컬럼: peer_card / local_card / history_events / meeting_count / status / closed_at
+  for (const col of ['peer_card', 'local_card', 'history_events', 'meeting_count', 'status', 'closed_at', 'last_meeting_at']) {
+    assert(new RegExp(`\\b${col}\\b`).test(storeText), `INV-A2A-RELATIONSHIP-STORE: 컬럼 ${col} 정의`)
+  }
+
+  // (c) RELATIONSHIP_STATUS / HISTORY_EVENT_TYPE enum + Object.freeze
+  assert(
+    /const\s+RELATIONSHIP_STATUS\s*=\s*Object\.freeze\(\{/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: RELATIONSHIP_STATUS Object.freeze',
+  )
+  assert(
+    /const\s+HISTORY_EVENT_TYPE\s*=\s*Object\.freeze\(\{/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: HISTORY_EVENT_TYPE Object.freeze',
+  )
+
+  // (d) 6 핵심 메서드
+  for (const method of [
+    'upsertOnFirstMeeting', 'getRelationship', 'listForLocal',
+    'recordMeeting', 'recordHistoryEvent', 'closeRelationship', 'refreshCards',
+  ]) {
+    assert(
+      new RegExp(`\\b${method}\\s*\\(`).test(storeText),
+      `INV-A2A-RELATIONSHIP-STORE: 메서드 ${method} 정의`,
+    )
+  }
+
+  // (e) export — class + factory + Reader + path helper + enum
+  assert(
+    /export\s*\{[\s\S]*?A2aRelationshipStore[\s\S]*?createA2aRelationshipStoreR[\s\S]*?createA2aRelationshipStore[\s\S]*?defaultA2aRelationshipDbPath[\s\S]*?RELATIONSHIP_STATUS[\s\S]*?HISTORY_EVENT_TYPE[\s\S]*?\}/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: 6 심볼 export (class/factory/factoryR/path/2 enum)',
+  )
+
+  // (f) PRAGMA user_version migration (idempotent boot)
+  assert(
+    /pragma\(['"]user_version['"]/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: PRAGMA user_version migration',
+  )
+
+  // (g) codex round 1 보강 — assertAgentIds 공통 검증 + closed 관계 fail-fast
+  assert(
+    /const\s+assertAgentIds\s*=/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: assertAgentIds 공통 검증 helper',
+  )
+  assert(
+    /assertAgentIds\(['"]upsertOnFirstMeeting['"]/.test(storeText) &&
+    /assertAgentIds\(['"]recordMeeting['"]/.test(storeText) &&
+    /assertAgentIds\(['"]recordHistoryEvent['"]/.test(storeText) &&
+    /assertAgentIds\(['"]closeRelationship['"]/.test(storeText) &&
+    /assertAgentIds\(['"]refreshCards['"]/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: 5 mutator 모두 assertAgentIds 호출 (whitespace/non-string 차단)',
+  )
+  assert(
+    /code\s*=\s*['"]RELATIONSHIP_CLOSED['"]/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: recordMeeting 가 closed 관계에 RELATIONSHIP_CLOSED throw (closed vs missing 분리)',
+  )
+  assert(
+    /VALID_STATUSES\.has\(status\)/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: listForLocal invalid status throw',
+  )
+  // 보조 정렬 키 — sleep 의존 없는 결정적 순서
+  assert(
+    /ORDER\s+BY\s+created_at\s+ASC,\s*peer_agent_id\s+ASC/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: listForLocal 보조 정렬 키 peer_agent_id (같은 ms INSERT 결정성)',
+  )
+  // 호출 계약 명시 — Phase 3 wiring 시 Cedar allow 후 호출
+  assert(
+    /canStartA2aSession[\s\S]{0,200}allow:\s*true/.test(storeText),
+    'INV-A2A-RELATIONSHIP-STORE: 주석에 Cedar allow 후 호출 계약 명시 (Phase 3)',
+  )
+}
+
 summary()
