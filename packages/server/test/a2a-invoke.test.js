@@ -280,6 +280,139 @@ async function run() {
     await ctx.cleanup()
   }
 
+  // ---------------------------------------------------------------------------
+  // AI12~AI14 — A2A Phase 3 (KG-37) 카드 교환 게이트 + 관계 컨테이너 통합
+  // ---------------------------------------------------------------------------
+
+  // AI12. 첫 message/send → upsertOnFirstMeeting + recordMeeting + meeting_count=1
+  {
+    const ctx = await bootServer()
+    const res = await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'hi' }] } }),
+      bearer(ctx.a2aToken('alice')))
+    assert(res.status === 200, `AI12: 200 OK (got ${res.status})`)
+    const rel = ctx.userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: 'alice/echo', peerAgentId: 'alice',
+    })
+    assert(rel !== null, 'AI12: 관계 row 생성됨')
+    assert(rel.status === 'active', `AI12: status=active (got ${rel.status})`)
+    assert(rel.meetingCount === 1, `AI12: meetingCount=1 (got ${rel.meetingCount})`)
+    assert(typeof rel.lastMeetingAt === 'number' && rel.lastMeetingAt > 0, 'AI12: lastMeetingAt 기록')
+    await ctx.cleanup()
+  }
+
+  // AI13. 두 번째 호출 → 같은 row 재사용, meetingCount=2
+  {
+    const ctx = await bootServer()
+    await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: '1' }] } }, 'r1'),
+      bearer(ctx.a2aToken('alice')))
+    const res2 = await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: '2' }] } }, 'r2'),
+      bearer(ctx.a2aToken('alice')))
+    assert(res2.status === 200, `AI13: 200 OK (got ${res2.status})`)
+    const rel = ctx.userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: 'alice/echo', peerAgentId: 'alice',
+    })
+    assert(rel.meetingCount === 2, `AI13: 2 만남 (got ${rel.meetingCount})`)
+    // 1:1 고정 — 다른 관계 row 생성 안 됨
+    const list = ctx.userContext.a2aRelationshipStore.listForLocal({ localAgentId: 'alice/echo' })
+    assert(list.length === 1, `AI13: 1 row (1:1 고정, got ${list.length})`)
+    await ctx.cleanup()
+  }
+
+  // AI13b. 서로 다른 (localAgent, caller) → 별도 row — 1:1 composite PK 라우터 검증
+  // codex round 1 #6: 다른 caller 가 정말 다른 row 를 만드는지 확인. Phase 3 한계
+  // (peerAgentId = JWT caller) 위에서 재현 가능한 가장 직접적 케이스 = admin 자기
+  // 자신의 agent 를 등록 + alice 자기 자신의 agent 를 등록 → 두 caller 가 각자
+  // owner 로서 호출. 같은 store 안에서 row 가 분리되는지 검증.
+  {
+    const ctx = await bootServer()
+    // admin 도 자기 agent 등록 (alice/echo 는 boot 단계에 이미 등록됨)
+    ctx.userContext.agentRegistry.register({
+      agentId: 'admin/echo',
+      type: DelegationMode.LOCAL,
+      run: async (task) => `admin-echo: ${task}`,
+    })
+    await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'a' }] } }, 'r1'),
+      bearer(ctx.a2aToken('alice')))
+    await postJson(ctx.port, '/a2a/admin/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'b' }] } }, 'r2'),
+      bearer(ctx.a2aToken('admin')))
+
+    const aliceRel = ctx.userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: 'alice/echo', peerAgentId: 'alice',
+    })
+    const adminRel = ctx.userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: 'admin/echo', peerAgentId: 'admin',
+    })
+    assert(aliceRel !== null && aliceRel.meetingCount === 1, 'AI13b: alice row 생성 + count=1')
+    assert(adminRel !== null && adminRel.meetingCount === 1, 'AI13b: admin row 생성 + count=1')
+
+    // listForLocal 별 1 row 씩 — 다른 localAgent 의 row 가 섞이지 않음
+    const aliceList = ctx.userContext.a2aRelationshipStore.listForLocal({ localAgentId: 'alice/echo' })
+    const adminList = ctx.userContext.a2aRelationshipStore.listForLocal({ localAgentId: 'admin/echo' })
+    assert(aliceList.length === 1, `AI13b: alice/echo 1 row (got ${aliceList.length})`)
+    assert(adminList.length === 1, `AI13b: admin/echo 1 row (got ${adminList.length})`)
+    assert(aliceList[0].peerAgentId === 'alice', 'AI13b: alice row 의 peerAgentId=alice')
+    assert(adminList[0].peerAgentId === 'admin', 'AI13b: admin row 의 peerAgentId=admin')
+    await ctx.cleanup()
+  }
+
+  // AI13c. dispatch validation 실패 (non-runnable agent) → meeting 미기록.
+  // codex round 1 Additional: meetingCount 가 dispatch 검증 앞에서 증가하면
+  // 실패 호출도 만남으로 카운트되어 "meeting = request/response pair" 의미론
+  // 위반. fix 후: entry 검증/isLocalRunnable 통과 후에만 recordMeeting.
+  {
+    const ctx = await bootServer()
+    // REMOTE 타입 agent 등록 — canAccessAgent / canStartA2aSession 는 통과하지만
+    // isLocalRunnable === false → 400 dispatch validation 실패
+    ctx.userContext.agentRegistry.register({
+      agentId: 'alice/remote',
+      type: DelegationMode.REMOTE,
+      description: 'remote agent (non-runnable)',
+      // run 함수 없음
+    })
+    const res = await postJson(ctx.port, '/a2a/alice/remote',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'x' }] } }),
+      bearer(ctx.a2aToken('alice')))
+    assert(res.status === 400, `AI13c: 400 not invokable (got ${res.status})`)
+    assert(/not invokable/.test(res.body.error?.message || ''), 'AI13c: not invokable 메시지')
+
+    const rel = ctx.userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: 'alice/remote', peerAgentId: 'alice',
+    })
+    assert(rel === null, `AI13c: 실패 dispatch 는 만남으로 기록되지 않음 (got ${rel ? JSON.stringify(rel) : 'null'})`)
+    await ctx.cleanup()
+  }
+
+  // AI14. closeRelationship 후 호출 → 403 ACCESS_DENIED + 'relationship closed'
+  {
+    const ctx = await bootServer()
+    // 첫 호출로 관계 생성
+    await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'first' }] } }, 'r1'),
+      bearer(ctx.a2aToken('alice')))
+    // 사용자가 관계 폐기
+    ctx.userContext.a2aRelationshipStore.closeRelationship({
+      localAgentId: 'alice/echo', peerAgentId: 'alice',
+    })
+    // 두 번째 호출 — closed 관계 → 403
+    const res = await postJson(ctx.port, '/a2a/alice/echo',
+      rpcRequest('message/send', { message: { parts: [{ kind: 'text', text: 'after-close' }] } }, 'r2'),
+      bearer(ctx.a2aToken('alice')))
+    assert(res.status === 403, `AI14: 403 (got ${res.status})`)
+    assert(/relationship closed/.test(res.body.error?.message || ''),
+      `AI14: relationship closed 메시지 (got ${res.body.error?.message})`)
+    // meetingCount 가 close 후 호출에서 안 늘어났는지 확인 (recordMeeting throw 후 트랜잭션 롤백)
+    const rel = ctx.userContext.a2aRelationshipStore.getRelationship({
+      localAgentId: 'alice/echo', peerAgentId: 'alice',
+    })
+    assert(rel.meetingCount === 1, `AI14: closed 후 meetingCount 불변 (got ${rel.meetingCount})`)
+    await ctx.cleanup()
+  }
+
   summary()
 }
 

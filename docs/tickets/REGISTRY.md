@@ -145,15 +145,16 @@ presence 프로젝트의 작업 항목(UX 마찰점 · 스펙 Known Gap)을 전�
 | KG-34  | open     | medium | spec   | A2A 세션 lifecycle event audit JSONL 형식 미정 — 필수 필드/이벤트 enum 미결정 (I-AS-AUDIT 후속) | docs/specs/agent-session.md#KG-34 |
 | KG-35  | open     | medium | spec   | A2A 메모리 흡수 데이터 schema 미정 — requestSummary/responseSummary 형식 + 요약 vs 전체 저장 정책 미결정 | docs/specs/agent-session.md#KG-35 |
 | KG-36  | open     | medium | spec   | A2A 활성 세션 한도(`A2A.SESSION_QUOTA`) 값 미정의 + Cedar quota 정책 파일 미작성 — PENDING vs 즉시 거부 미결정 | docs/specs/agent-session.md#KG-36 |
-| KG-37  | open     | medium | spec   | A2A 영속 관계 컨테이너 저장 테이블 부재 — 세션 = 영속 1:1 관계 모델 (모델 B) 채택 후 에이전트 쌍 메타 + clear/summarize 이력 저장 계층 미구현 | docs/specs/data-persistence.md#KG-37 |
+| KG-37  | resolved | medium | spec   | A2A 영속 관계 컨테이너 저장 테이블 부재 — 세션 = 영속 1:1 관계 모델 (모델 B) 채택 후 에이전트 쌍 메타 + clear/summarize 이력 저장 계층 미구현 | docs/specs/data-persistence.md#KG-37 |
 
 ## 통계
 
 - FP 총 **82개** — open **0**, resolved **82**
-- KG 총 **37개** — open **7**, resolved **30**
+- KG 총 **37개** — open **6**, resolved **31**
 
 ## 변경 이력
 
+- 2026-05-05: KG-37 resolved — A2A Phase 2 (저장 계층) + Phase 3 (UserContext 부팅 + a2a-router 카드 교환 게이트) 누적으로 해소. 모델 B 의 영속 관계 컨테이너 = `a2a_relationships` 테이블 (composite PK local_agent_id + peer_agent_id, 1:1 고정). UserContext 가 `a2aRelationshipStore` 자동 부팅 + shutdown close. POST `/a2a/:userId/:agentName` 카드 교환 게이트 = `canStartA2aSession` allow → `upsertOnFirstMeeting` (lazy, peerAgentId=JWT caller) → `recordMeeting`. `closeRelationship` 후 호출 시 403 ACCESS_DENIED. 카드 메타 fetch / refreshCards / close TUI/CLI / 응답 모드 / 귓속말 wire 는 후속 phase. INV-A2A-RELATIONSHIP-STORE + INV-A2A-PHASE3-WIRING 정적 회귀 (canStartA2aSession 호출 위치가 upsertOnFirstMeeting 보다 *먼저* — 정책 위반 흔적 영속 차단). AI12~AI14 통합 테스트.
 - 2026-05-05: KG-37 추가 (open) — A2A 영속 관계 컨테이너 저장 갭. 모델 B (세션 = 두 에이전트 쌍의 영속 1:1 관계 컨테이너) 채택 후 `data-persistence.md I8` 의 EphemeralSession no-op 가정과 충돌 — 관계 메타 (에이전트 쌍 식별자, 카드 교환 이력, 히스토리 clear/summarize 이력) 저장 테이블이 별도 필요. close/clear/summarize 세 종료 옵션이 실 구현될 때 필수 저장 계층.
 - 2026-05-05: A2A spec 의미론 확정 사이클 — 사용자 결정 4 건 spec 흡수. (1) Cedar action `start_a2a_session` 신규 도입 (옵션 B) — `access_agent` 와 분리. (2) 양방향 흡수 실패 정책 = partial + audit (옵션 c) — 비대칭 발생 가시화 의무. (3) 사후 검토 게이트 = (c) 미검토 큐 + (b) 만료 안전망 hybrid — `expiryAction` (`discard|absorb`) 운영자 설정. (4) 의미론 핵심 재정의 = 모델 B (세션 = 영속 관계 1:1 컨테이너, 만남 = request/response 페어) — 응답 모드 4 결 (agent-default / user-takeover / user-via-agent / user-with-whisper) + I-AS-RESPONSE-MODE / I-AS-WIRE-PROTECTION 신규. 귓속말 wire = IFC 첫 구체 사례 (audit/메모리 휘발). agent-identity / data-persistence / session 정합성 점검 동반.
 - 2026-05-03: KG-31~KG-36 추가 (open) — A2A 멀티 인스턴스 phase 진입 전 1차 의미론 spec (`docs/specs/agent-session.md`) 작성 후 자리만 마련된 후속 항목 6 건 정식 등록. ontology.md §A2A "두 자아의 만남" 의 세 결정(공유 컨텍스트 / IFC / 만남의 누적) 을 코드 계약으로 변환하면서 의미론 자리만 확정한 항목들. KG-31 신뢰 영역 자동 갱신 (사후 학습 루프), KG-32 IFC 정책 언어, KG-33 사후 검토 게이트의 risky 트리거 정의, KG-34 audit JSONL 형식, KG-35 메모리 흡수 schema, KG-36 활성 세션 한도 + Cedar quota. spec-guardian 1차 초안에서 자리 마련 (각 항목 본문은 spec 의 동명 섹션). 본 1차 spec 의 8 불변식 (I-AS-AUTH/MUTUAL-RECORD/USER-VISIBLE/INTERVENTION/AUDIT/WIRE-ASYNC/SESSION-QUOTA/CLASSIFICATION) 은 의미론 자리 확정 — KG 는 그 안의 미결정 영역만 추적.

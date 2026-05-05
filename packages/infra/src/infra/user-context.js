@@ -12,6 +12,7 @@ import { createListAgentsTool } from './agents/agent-tools.js'
 import { createEmbedder } from './embedding/embedder.js'
 import { createJobStore, defaultJobDbPath } from './jobs/job-store.js'
 import { createA2aQueueStore, defaultA2aQueueDbPath } from './a2a/a2a-queue-store.js'
+import { createA2aRelationshipStore, defaultA2aRelationshipDbPath } from './a2a/a2a-relationship-store.js'
 import { dispatchResponse } from './a2a/a2a-response-dispatcher.js'
 import { A2A, EVENT_TYPE } from '@presence/core/core/policies.js'
 import { UserDataStore, defaultUserDataDbPath } from './user-data-store.js'
@@ -120,10 +121,13 @@ class UserContext {
     // config.agents 가 추가되어도 handler 호출 시점에 agentRegistry.list() 가 최신 값 반환.
     userContext.toolRegistry.register(createListAgentsTool(userContext.agentRegistry))
 
-    // --- Job Store + User Data Store + A2A Queue Store ---
+    // --- Job Store + User Data Store + A2A Queue Store + A2A Relationship Store ---
     userContext.jobStore = createJobStore(defaultJobDbPath(userContext.userDataPath))
     userContext.userDataStore = new UserDataStore(defaultUserDataDbPath(userContext.userDataPath))
     userContext.a2aQueueStore = createA2aQueueStore(defaultA2aQueueDbPath(userContext.userDataPath))
+    // A2A Phase 3 (KG-37 resolve) — 영속 관계 컨테이너 (모델 B). 카드 교환 시
+    // upsertOnFirstMeeting / 만남마다 recordMeeting / close 명령 (Phase 4+).
+    userContext.a2aRelationshipStore = createA2aRelationshipStore(defaultA2aRelationshipDbPath(userContext.userDataPath))
 
     // --- Sessions (userContext 자기 참조) ---
     userContext.sessions = createSessionManager(userContext, { onSessionCreated })
@@ -293,6 +297,7 @@ class UserContext {
     this.jobStore.close()
     this.userDataStore.close()
     this.a2aQueueStore.close()
+    this.a2aRelationshipStore.close()
     for (const conn of this.mcpConnections) {
       try { await conn.close() } catch (_) {}
     }

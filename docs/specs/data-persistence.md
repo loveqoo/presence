@@ -20,6 +20,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
         ├── user-data.db                ← UserDataStore (SQLite, category/status 구조)
         ├── jobs.db                     ← JobStore (SQLite, cron 스케줄, schema v1: owner_user_id + owner_agent_id)
         ├── a2a-queue.db                ← A2aQueueStore (SQLite, A2A 메시지 큐, schema v2: a2a_messages + category)
+        ├── a2a-relationships.db        ← A2aRelationshipStore (SQLite, 영속 관계 컨테이너 메타, KG-37 resolved)
         ├── agents/
         │   └── {agentName}/
         │       └── sessions/
@@ -42,7 +43,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - I5. **PersistenceActor 경유 저장**: 세션 상태의 디스크 저장은 PersistenceActor를 통해서만. debounce `PERSISTENCE.DEBOUNCE_MS`(현재 500ms, `packages/core/src/core/policies.js` 정의) 적용. Actor 내부에서 `this.#store.set(PERSISTENCE.STORE_KEY, stripTransient(snapshot))` 실행 (`persistence-actor.js:49`, `PERSISTENCE`는 `@presence/core/core/policies.js` 상수 객체).
 - I6. **restore → fresh start on error**: `persistence.restore()` 중 오류 발생 시 로거 warn 후 fresh state로 시작. 저장된 상태가 손상된 경우 자동 복구 불가능하지만 서버는 계속 동작.
 - I7. **legacy id 마이그레이션**: `conversationHistory` 항목 중 `id`가 없는 레거시 항목에 자동으로 id 부여. `migrateHistoryIds()` 사용.
-- I8. **EphemeralSession은 no-op persistence (만남 실행 컨텍스트)**: `scheduled`, `agent` 세션의 `flushPersistence()`, `clearPersistence()`는 no-op. 디스크 I/O 없음. 단, A2A 의미론 재정의(`agent-session.md` 2026-05-05)에서 SESSION_TYPE.agent 는 영속 관계 컨테이너로 의미가 확장되었다 — **관계 컨테이너(에이전트 쌍 메타데이터, 히스토리 clear/summarize 이력)의 별도 영속 저장 테이블 부재는 Known Gap** (REGISTRY: KG-37).
+- I8. **EphemeralSession은 no-op persistence (만남 실행 컨텍스트)**: `scheduled`, `agent` 세션의 `flushPersistence()`, `clearPersistence()`는 no-op. 디스크 I/O 없음. SESSION_TYPE.agent 자체는 여전히 휘발성 (만남 단위 컨텍스트). 영속 관계 컨테이너 메타는 `a2a_relationships` 테이블 (`a2a-relationship-store.js`) 가 분담 — 모델 B 의 두 결 (만남 = 휘발 / 관계 = 영속) 을 두 저장 계층으로 명확히 분리. KG-37 resolved (Phase 3).
 - I9. **UserDataStore**: 유저별 SQLite 파일 (`user-data.db`). category/status 기반 단일 테이블. WAL 모드, foreign keys ON.
 - I10. **JobStore**: 유저별 SQLite 파일 (`jobs.db`). cron 기반 잡 스케줄 관리. 잡 실행 이력은 잡당 최대 50건 / 90일 TTL로 보존 (`JOB.HISTORY_MAX_PER_JOB = 50`, `JOB.HISTORY_TTL_DAYS = 90` — 단일 진원: `packages/core/src/core/policies.js`의 `JOB` 상수 객체. `job-store.js`는 이를 import하여 사용).
   - **Agent tool 경로 소유권 필터링**: `listJobs` / `getJob` / `updateJob` / `deleteJob` / `getRunHistory` 는 `{ ownerAgentId }` 옵션 지원. `JobToolFactory` 가 ownerAgentId 를 고정 전달하므로 agent tool 은 자기 소유 job 만 관리 가능. 소유권 위반(미존재 포함)은 tool UX 에서 "오류: Job을 찾을 수 없음" 로 마스킹. `updateJob` 의 null 반환은 "미존재·소유권 위반·race" 통합 계약. `getRunHistory` 소유권 검증은 job 기준 best-effort (job 조회와 run SELECT 사이 race 시 빈 배열 반환 가능). Legacy owner-null row 는 tool 경로에서 조회 불가.
@@ -107,6 +108,7 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - `packages/infra/src/infra/user-data-store.js` — UserDataStore (SQLite)
 - `packages/infra/src/infra/jobs/job-store.js` — JobStore (SQLite)
 - `packages/infra/src/infra/a2a/a2a-queue-store.js` — A2aQueueStore (SQLite, schema v2)
+- `packages/infra/src/infra/a2a/a2a-relationship-store.js` — A2aRelationshipStore (SQLite, 영속 관계 컨테이너 메타, KG-37 resolved). composite PK (local_agent_id, peer_agent_id) 1:1 고정. upsertOnFirstMeeting / recordMeeting / closeRelationship / refreshCards.
 - `packages/infra/src/infra/a2a/a2a-response-dispatcher.js` — dispatchResponse (response row 생성 + sender eventActor enqueue)
 - `packages/infra/src/infra/config.js` — Config.presenceDir(), Config.userDataPath(), Config.resolveDir()
 - `packages/infra/src/infra/user-context.js` — userDataPath 결정 (line 82, Config.userDataPath() 호출)
@@ -138,3 +140,4 @@ presence의 유저별 데이터 저장 경로, 세션 상태 영속화 규칙, t
 - 2026-05-05: I8 갱신 + 영속 세션 저장 갭 식별 — A2A 의미론 재정의(`agent-session.md` 2026-05-05)로 SESSION_TYPE.agent 가 영속 관계 컨테이너 의미로 확장. EphemeralSession 의 no-op persistence 는 만남 실행 컨텍스트로는 맞지만, 관계 컨테이너(에이전트 쌍 메타데이터 / 히스토리 clear·summarize 이력) 저장을 담당하는 별도 테이블(예: `a2a_sessions`)이 현재 없음 — I8 에 갭 주석 추가. A2aQueueStore(`a2a_messages`)는 만남 단위 메시지 큐 역할이며 관계 컨테이너와 별개임을 재확인. 영속 세션 저장 갭은 KG 등록 후보로 메인에게 보고.
 - 2026-05-05: I8 KG 자리 마련 — 갭 주석의 "KG 등록 후보" 를 "(REGISTRY: KG-37)" 형태로 갱신. 메인이 `scripts/tickets.sh next-id kg` 실행 후 실제 번호로 교체 예정.
 - 2026-05-05: I8 KG-37 부여 — 관계 컨테이너 영속 저장 테이블 부재가 정식 Known Gap 으로 등록.
+- 2026-05-05: KG-37 resolved — A2aRelationshipStore 도입 + UserContext 부팅 + a2a-router 카드 교환 게이트 통합. 모델 B 의 만남/관계 두 lifecycle 이 분리된 저장 계층으로 표현됨. 파일 경로 트리에 a2a-relationships.db 추가. 관련 코드에 a2a-relationship-store.js 추가.

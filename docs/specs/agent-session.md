@@ -436,6 +436,13 @@ KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
 - 범위: 별도 phase.
 - 위치: 본 문서 "메모리 흡수" 섹션.
 
+### KG-37-PEER (Phase 3 peer 식별 한계) {#peer-identification}
+
+- 내용: A2A Phase 3 의 a2a-router 는 peer card exchange 가 미구현이므로 `peerAgentId = JWT sub (caller)` 를 임시 채택한다. JWT sub 는 user-level 식별자이므로, 실제 호출하는 측의 에이전트(예: `bob/echo`)가 caller user 의 에이전트 중 어느 것인지 router 단계에서 구분할 수 없다.
+- Phase 4 에서 `a2a-protocol.md` 의 peer card exchange 가 도입되면 peer 의 agentId 로 교체.
+- 범위: A2A Phase 4 (peer card exchange 구현 시점).
+- 위치: `packages/server/src/server/a2a-router.js` `mountInvokeRoute` — Phase 3 한계 주석 참조.
+
 ### KG-36 (활성 세션 한도 + 동시 만남 한도 미정의)
 
 - 내용:
@@ -449,10 +456,12 @@ KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
 
 ## 관련 코드
 
-- `packages/infra/src/infra/sessions/ephemeral-session.js` — A2A 만남 런타임 컨텍스트 (SESSION_TYPE.agent). 영속 세션(관계 컨테이너) 저장은 별도 테이블 필요 (data-persistence.md I8 갭 참조)
+- `packages/infra/src/infra/sessions/ephemeral-session.js` — A2A 만남 런타임 컨텍스트 (SESSION_TYPE.agent). 만남 단위 휘발성 컨텍스트 — 영속 관계 컨테이너는 A2aRelationshipStore 가 분담 (`data-persistence.md I8`)
 - `packages/infra/src/infra/sessions/session-manager.js` — findAgentSession / findSenderSession (`session.md I16`)
 - `packages/infra/src/infra/a2a/a2a-queue-store.js` — 비동기 큐 backend. 만남 단위 메시지 큐 (`data-persistence.md I13`)
+- `packages/infra/src/infra/a2a/a2a-relationship-store.js` — 영속 관계 컨테이너 메타 store (KG-37 resolved). composite PK (local_agent_id, peer_agent_id) 1:1 고정. upsertOnFirstMeeting / recordMeeting / closeRelationship / refreshCards.
 - `packages/infra/src/infra/a2a/a2a-response-dispatcher.js` — response 전달 + drain
+- `packages/server/src/server/a2a-router.js` — A2A JSON-RPC 라우터. POST `/a2a/:userId/:agentName` 의 카드 교환 게이트: A2A Phase 3 — canStartA2aSession allow → upsertOnFirstMeeting → recordMeeting 순서로 관계 컨테이너 wiring. Phase 3 peer 식별 한계(peerAgentId = JWT caller) 는 `§KG-37-PEER` 참조.
 - `packages/infra/src/interpreter/send-a2a-message.js` — SendA2aMessage Op 인터프리터
 - `packages/infra/src/infra/authz/cedar/` — Cedar 정책 파일 디렉토리
 - `packages/infra/src/infra/authz/agent-governance.js` — canAccessAgent, submitUserAgent
@@ -475,9 +484,11 @@ KG-32 (IFC 정책 언어) 설계 시 본 사례를 표현 가능해야 한다:
 ## 변경 이력
 
 - 2026-05-03: 초기 작성 — A2A 멀티 인스턴스 phase 진입 전 1차 의미론 못 박기. ontology §A2A 세 결정(공유 컨텍스트/IFC/만남의 누적) 코드 계약 변환. 6 Known Gap 자리 마련 (KG-AS-TRUST / IFC / REVIEW-GATE / AUDIT-FORMAT / MEMORY-SCHEMA / QUOTA).
+- 2026-05-05: KG-37-PEER 섹션 추가 (§peer-identification) — a2a-router.js 코드 코멘트의 cross-link drift 해소. Phase 3 peerAgentId = JWT caller 임시 채택 한계 명시.
 - 2026-05-03: KG-31~KG-36 정식 ID 부여 (REGISTRY 등록 완료).
 - 2026-05-05: I-AS-AUTH Cedar action 확정 — start_a2a_session 신규 도입 (옵션 B). 일반 access_agent 와 분리해 운영자가 A2A 정책을 별도 표현 가능.
 - 2026-05-05: I-AS-MUTUAL-RECORD 양방향 흡수 실패 정책 확정 — partial + audit (옵션 c). 종료 지연(a)/롤백(b) 모두 기각. 비대칭 발생 가시화 의무 명시.
 - 2026-05-05: 사후 검토 게이트 UX 확정 — (c) 기본 + (b) 만료 안전망 hybrid. 만료 동작 (discard/absorb) 과 기간 (expiryDays) 은 운영자 설정으로 위임. 구체값/기본값은 KG-33 후속.
 - 2026-05-05: A2A 의미론 핵심 재정의 — 세션 = 두 에이전트 쌍의 영속 관계 컨테이너 (1:1 고정), 만남 = request/response 페어. 세션 라이프사이클 / 만남 라이프사이클 두 결로 분리. 종료 정책 (close/clear/summarize + 스트리밍 inactivity), 공유 컨텍스트 = 사용자 세션 결 재사용 (I-AS-CONTEXT-REUSE) 확정. KG-36 활성 세션 한도 + 동시 만남 한도 두 결로 확장. 개입 6결 매트릭스 사후 검토 행 표기 갱신 (c+b hybrid 명시). agent-identity / data-persistence / session 정합성 점검 동반.
 - 2026-05-05: A2A 운영 흐름 (카드 교환 → 큐 적재 → heartbeat 디스패치 → 응답) narrative 추가. 응답 모드 4 결 (agent-default / user-takeover / user-via-agent / user-with-whisper) + I-AS-RESPONSE-MODE 신규. 귓속말 wire = IFC 첫 구체 사례 (휘발성 — audit/memory 미기록). I-AS-WIRE-PROTECTION 신규 (heartbeat+큐 보호막). 어제 결정 3 건 모델 B 위 정합 재표현: I-AS-AUTH §A2A 운영 흐름 단계 1 cross-reference, I-AS-MUTUAL-RECORD "만남 단위" 흡수 및 세션 연속성 명시, 사후 검토 게이트 "세션 내 미검토 만남 큐 누적" 모델로 재표현.
+- 2026-05-05: KG-37 resolved 반영 — A2aRelationshipStore (Phase 2) + a2a-router 카드 교환 게이트 (Phase 3) 통합. 만남 단위 lifecycle (A2aQueueStore) 와 관계 단위 lifecycle (A2aRelationshipStore) 의 두 저장 계층 분리. §관련 코드에 a2a-relationship-store.js 신규 + a2a-router.js Phase 3 카드 교환 게이트 cross-reference + ephemeral-session.js 갭 표기 갱신.

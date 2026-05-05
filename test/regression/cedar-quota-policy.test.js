@@ -819,4 +819,79 @@ console.log('INV-CEDAR-QUOTA-POLICY static checks')
   )
 }
 
+// =============================================================================
+// INV-A2A-PHASE3-WIRING — Phase 3 (KG-37). UserContext 부팅 + a2a-router
+// 카드 교환 게이트 정적 강제. canStartA2aSession allow 후에만 store.upsertOnFirstMeeting
+// 호출 (정책 위반 흔적 영속 차단).
+// =============================================================================
+{
+  // (a) UserContext 가 a2aRelationshipStore 부팅 + shutdown 시 close
+  const userContextText = read('packages/infra/src/infra/user-context.js')
+  assert(
+    /createA2aRelationshipStore.*defaultA2aRelationshipDbPath/.test(userContextText),
+    'INV-A2A-PHASE3-WIRING: user-context.js 가 createA2aRelationshipStore + defaultA2aRelationshipDbPath import',
+  )
+  assert(
+    /a2aRelationshipStore\s*=\s*createA2aRelationshipStore/.test(userContextText),
+    'INV-A2A-PHASE3-WIRING: user-context.js 가 a2aRelationshipStore 부팅',
+  )
+  assert(
+    /this\.a2aRelationshipStore\.close\(\)/.test(userContextText),
+    'INV-A2A-PHASE3-WIRING: shutdown 시 a2aRelationshipStore.close()',
+  )
+
+  // (b) a2a-router 가 canStartA2aSession 호출 후에만 upsertOnFirstMeeting 호출
+  const routerText = read('packages/server/src/server/a2a-router.js')
+  assert(
+    /canStartA2aSession\b/.test(routerText),
+    'INV-A2A-PHASE3-WIRING: a2a-router.js 가 canStartA2aSession 호출',
+  )
+  // 정책 평가가 upsertOnFirstMeeting 보다 *먼저* 등장 (같은 함수 안). 라인 순서 정적 강제.
+  const sessionGateIdx = routerText.indexOf('canStartA2aSession')
+  const upsertIdx = routerText.indexOf('upsertOnFirstMeeting')
+  assert(
+    sessionGateIdx > 0 && upsertIdx > sessionGateIdx,
+    `INV-A2A-PHASE3-WIRING: canStartA2aSession (${sessionGateIdx}) 이 upsertOnFirstMeeting (${upsertIdx}) 보다 먼저 (정책 위반 흔적 영속 차단)`,
+  )
+  // recordMeeting 의 RELATIONSHIP_CLOSED 처리
+  assert(
+    /RELATIONSHIP_CLOSED/.test(routerText),
+    'INV-A2A-PHASE3-WIRING: a2a-router.js 가 RELATIONSHIP_CLOSED 처리 (closed 관계 → 403)',
+  )
+  // exhaustive mapping table — AGENT_NOT_REGISTERED → 404, 그 외는 명시적 entry 보유
+  assert(
+    /SESSION_DENY_STATUS_BY_REASON/.test(routerText),
+    'INV-A2A-PHASE3-WIRING: 명시적 deny reason → status 매핑 테이블 존재',
+  )
+  assert(
+    /\[REASON\.AGENT_NOT_REGISTERED\]:\s*\{\s*status:\s*404/.test(routerText),
+    'INV-A2A-PHASE3-WIRING: AGENT_NOT_REGISTERED 가 404 로 명시 매핑',
+  )
+  // dispatch validation (entry lookup + isLocalRunnable) 가 recordMeeting 호출보다
+  // 먼저 — codex Additional finding: 실패 dispatch 가 만남으로 기록되면 spec 위반.
+  // call site 만 매칭 (코멘트 단어 노이즈 회피).
+  const isLocalRunnableIdx = routerText.indexOf('isLocalRunnable(entry)')
+  const recordMeetingCallIdx = routerText.search(/a2aRelationshipStore\.recordMeeting\s*\(/)
+  assert(
+    isLocalRunnableIdx > 0 && recordMeetingCallIdx > isLocalRunnableIdx,
+    `INV-A2A-PHASE3-WIRING: isLocalRunnable 검증 (${isLocalRunnableIdx}) 이 recordMeeting 호출 (${recordMeetingCallIdx}) 보다 먼저 — 실패 dispatch 는 만남 미기록`,
+  )
+  // a2aRelationshipStore 는 optional 이 아니라 필수 (assertion 흐름)
+  // 옛 `if (userContext.a2aRelationshipStore) { ... }` 패턴이 다시 들어오면 fail
+  assert(
+    !/if\s*\(\s*userContext\.a2aRelationshipStore\s*\)\s*\{/.test(routerText),
+    'INV-A2A-PHASE3-WIRING: a2aRelationshipStore 를 optional 분기로 감싸지 않음 (silent bypass 차단)',
+  )
+  assert(
+    /a2aRelationshipStore missing/.test(routerText),
+    'INV-A2A-PHASE3-WIRING: a2aRelationshipStore 누락 시 hard fail (UserContext 부팅 회귀 노출)',
+  )
+  // 알 수 없는 deny reason 은 fail-closed 흡수 + logger.warn (silent failure 차단)
+  assert(
+    /unknown sessionGate deny reason/.test(routerText) &&
+      /logger\?\.warn\?\./.test(routerText),
+    'INV-A2A-PHASE3-WIRING: unknown reason 시 logger.warn (운영 가시성, codex round 2 #7)',
+  )
+}
+
 summary()
